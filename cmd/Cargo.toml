@@ -1,0 +1,32 @@
+[package]
+name = "syncthing"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "syncthing"
+path = "src/main.rs"
+
+[dependencies]
+syncthing-core = { path = "../../crates/syncthing-core" }
+syncthing-net = { path = "../../crates/syncthing-net" }
+syncthing-sync = { path = "../../crates/syncthing-sync" }
+bep-protocol = { path = "../../crates/bep-protocol" }
+
+tokio = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+clap = { version = "4.5", features = ["derive"] }
+dirs = "5.0"
+anyhow = "1.0"
+bytes = { workspace = true }
+async-trait = { workspace = true }
+serde = { workspace = true }
+serde_json = "1.0"
+sha2 = { workspace = true }
+rand = { workspace = true }
+ratatui = "0.29"
+crossterm = "0.28"
+dashmap = { workspace = true }
+walkdir = "2"
+hex = { workspace = true }

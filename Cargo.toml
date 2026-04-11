@@ -1,0 +1,66 @@
+[workspace]
+name = "syncthing-rust"
+version = "0.1.0"
+edition = "2021"
+resolver = "2"
+
+members = [
+    "crates/syncthing-core",
+    "crates/syncthing-net",
+    "crates/syncthing-sync",
+    "crates/syncthing-fs",
+    "crates/syncthing-db",
+    "crates/syncthing-api",
+    "crates/bep-protocol",
+    "cmd/syncthing",
+    "acceptance-tests",
+]
+
+[workspace.dependencies]
+# 异步运行时
+tokio = { version = "1.35", features = ["full"] }
+tokio-rustls = "0.25"
+async-trait = "0.1"
+futures = "0.3"
+
+# TLS / 安全
+rustls = "0.23"
+rustls-pemfile = "2.0"
+ring = "0.17"
+ed25519-dalek = "2.1"
+
+# 序列化
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+prost = "0.12"
+prost-build = "0.12"
+
+# 错误处理
+thiserror = "1.0"
+anyhow = "1.0"
+
+# 加密 / 哈希
+sha2 = "0.10"
+rand = "0.8"
+hex = "0.4"
+base64 = "0.21"
+
+# 工具
+tracing = "0.1"
+tracing-subscriber = "0.3"
+uuid = { version = "1.6", features = ["v4"] }
+chrono = { version = "0.4", features = ["serde"] }
+bytes = "1.5"
+dashmap = "5.5"
+parking_lot = "0.12"
+
+[profile.release]
+lto = true
+codegen-units = 1
+opt-level = 3
+
+[patch.crates-io]
+portmapper = { git = "https://github.com/n0-computer/net-tools", branch = "main" }
+noq = { git = "https://github.com/n0-computer/noq", branch = "main" }
+noq-udp = { git = "https://github.com/n0-computer/noq", branch = "main" }
+noq-proto = { git = "https://github.com/n0-computer/noq", branch = "main" }
