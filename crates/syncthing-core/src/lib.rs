@@ -5,6 +5,7 @@
 pub mod error;
 pub mod device_id;
 pub mod types;
+pub mod traits;
 
 pub use error::{SyncthingError, Result};
 pub use device_id::DeviceId;

@@ -351,9 +351,10 @@ impl MetadataStore {
         for file in files {
             if !file.is_deleted() {
                 stats.file_count += 1;
-                stats.total_bytes += file.size;
+                stats.total_bytes += file.size as u64;
                 for block in &file.blocks {
-                    unique_blocks.insert(block.hash, ());
+                    let hash_bytes: [u8; 32] = block.hash.as_slice().try_into().unwrap_or([0u8; 32]);
+                    unique_blocks.insert(BlockHash::from_bytes(hash_bytes), ());
                 }
             }
         }
@@ -481,15 +482,17 @@ mod tests {
     fn create_test_file_info(name: &str, size: u64) -> FileInfo {
         FileInfo {
             name: name.to_string(),
-            size,
-            modified: SystemTime::UNIX_EPOCH,
-            version: syncthing_core::VersionVector::new(),
-            blocks: vec![],
+            file_type: syncthing_core::FileType::File,
+            size: size as i64,
             permissions: 0o644,
-            is_directory: false,
-            is_symlink: false,
-            symlink_target: None,
+            modified_s: 0,
+            modified_ns: 0,
+            version: syncthing_core::Vector::new(),
             sequence: 0,
+            block_size: 0,
+            blocks: vec![],
+            symlink_target: None,
+            deleted: Some(false),
         }
     }
 

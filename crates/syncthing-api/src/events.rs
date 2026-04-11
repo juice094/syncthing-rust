@@ -212,7 +212,7 @@ impl FilteredSubscriber {
                     // Event doesn't match filter, continue waiting
                 }
                 Err(e) => {
-                    return Err(SyncthingError::Internal(format!(
+                    return Err(SyncthingError::internal(format!(
                         "Event receiver error: {}",
                         e
                     )));
@@ -233,7 +233,7 @@ impl FilteredSubscriber {
                 }
                 Err(broadcast::error::TryRecvError::Empty) => return Ok(None),
                 Err(broadcast::error::TryRecvError::Closed) => {
-                    return Err(SyncthingError::Internal(
+                    return Err(SyncthingError::internal(
                         "Event channel closed".to_string(),
                     ))
                 }
@@ -439,7 +439,7 @@ mod tests {
 
         // Publish event
         bus.publish(Event::DeviceConnected {
-            device: syncthing_core::types::DeviceId::from_bytes([0u8; 32]),
+            device: syncthing_core::DeviceId::from_bytes(&[0u8; 32]).unwrap(),
             addr: "127.0.0.1:22000".to_string(),
         });
 

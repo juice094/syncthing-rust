@@ -26,10 +26,8 @@ use tower_http::trace::TraceLayer;
 use tracing::{error, info};
 
 use syncthing_core::traits::{ConfigStore, SyncModel};
-use syncthing_core::types::{
-    Compression, Config, DeviceConfig, DeviceId, FolderConfig, FolderId, FolderSummary,
-};
-use syncthing_core::{Result, SyncthingError};
+use syncthing_core::types::{Config, FolderId, FolderSummary, VersioningConfig};
+use syncthing_core::{DeviceId, Result, SyncthingError};
 use sha2::{Digest, Sha256};
 
 use crate::events::EventBus;
@@ -352,25 +350,25 @@ async fn create_folder(
         ));
     }
 
-    let folder = FolderConfig {
-        id: FolderId::new(request.id),
-        label: request.label.unwrap_or_default(),
-        path: request.path.into(),
+    let folder = syncthing_core::types::Folder {
+        id: request.id,
+        path: request.path,
+        label: Some(request.label.unwrap_or_default()),
+        folder_type: syncthing_core::types::FolderType::SendReceive,
+        paused: false,
+        rescan_interval_secs: request.rescan_interval_secs.unwrap_or(3600) as i32,
         devices: request
             .devices
             .into_iter()
-            .map(|d| DeviceId::from_bytes(d.try_into().unwrap_or([0u8; 32])))
+            .map(|d| DeviceId::from_bytes_array(d.try_into().unwrap_or([0u8; 32])))
             .collect(),
-        rescan_interval_secs: request.rescan_interval_secs.unwrap_or(3600),
-        versioning: request.versioning.map_or(
-            syncthing_core::types::VersioningConfig::None,
-            |v| match v.type_.as_str() {
-                "simple" => syncthing_core::types::VersioningConfig::Simple {
-                    keep: v.params.get("keep").and_then(|v| v.parse().ok()).unwrap_or(5),
-                },
-                _ => syncthing_core::types::VersioningConfig::None,
-            },
-        ),
+        ignore_patterns: Vec::new(),
+        versioning: request.versioning.map(|v| match v.type_.as_str() {
+            "simple" => VersioningConfig::Simple { params: v.params },
+            "staggered" => VersioningConfig::Staggered { params: v.params },
+            "external" => VersioningConfig::External { params: v.params },
+            _ => VersioningConfig::None,
+        }),
     };
 
     config.folders.push(folder);
@@ -407,13 +405,13 @@ async fn update_folder(
 
     // Update fields
     if let Some(label) = request.label {
-        config.folders[folder_idx].label = label;
+        config.folders[folder_idx].label = Some(label);
     }
     if let Some(path) = request.path {
-        config.folders[folder_idx].path = path.into();
+        config.folders[folder_idx].path = path;
     }
     if let Some(interval) = request.rescan_interval_secs {
-        config.folders[folder_idx].rescan_interval_secs = interval;
+        config.folders[folder_idx].rescan_interval_secs = interval as i32;
     }
 
     match state.config_store.save(&config).await {
@@ -501,18 +499,20 @@ async fn add_device(
         ));
     }
 
-    let device = DeviceConfig {
+    let device = syncthing_core::types::Device {
         id: device_id,
-        name: request.name.unwrap_or_default(),
-        addresses: request.addresses.unwrap_or_else(|| vec!["dynamic".to_string()]),
+        name: request.name,
+        addresses: request
+            .addresses
+            .unwrap_or_else(|| vec!["dynamic".to_string()])
+            .into_iter()
+            .map(|a| match a.as_str() {
+                "dynamic" => syncthing_core::types::AddressType::Dynamic,
+                _ => syncthing_core::types::AddressType::Tcp(a),
+            })
+            .collect(),
+        paused: false,
         introducer: request.introducer.unwrap_or(false),
-        compression: request.compression.map_or(Compression::Metadata, |c| {
-            match c.as_str() {
-                "never" => Compression::Never,
-                "always" => Compression::Always,
-                _ => Compression::Metadata,
-            }
-        }),
     };
 
     config.devices.push(device);
@@ -724,7 +724,7 @@ async fn trigger_scan(
             match state.config_store.load().await {
                 Ok(config) => {
                     for folder in &config.folders {
-                        if let Err(e) = sync_model.scan_folder(&folder.id).await {
+                        if let Err(e) = sync_model.scan_folder(&FolderId::new(folder.id.clone())).await {
                             return (
                                 StatusCode::INTERNAL_SERVER_ERROR,
                                 Json(ErrorResponse {
@@ -788,7 +788,7 @@ async fn pause_all(State(state): State<ApiState>) -> impl IntoResponse {
         match state.config_store.load().await {
             Ok(config) => {
                 for folder in &config.folders {
-                    if let Err(e) = sync_model.stop_folder(folder.id.clone()).await {
+                    if let Err(e) = sync_model.stop_folder(FolderId::new(folder.id.clone())).await {
                         return (
                             StatusCode::INTERNAL_SERVER_ERROR,
                             Json(ErrorResponse {
@@ -851,7 +851,7 @@ async fn resume_all(State(state): State<ApiState>) -> impl IntoResponse {
         match state.config_store.load().await {
             Ok(config) => {
                 for folder in &config.folders {
-                    if let Err(e) = sync_model.start_folder(folder.id.clone()).await {
+                    if let Err(e) = sync_model.start_folder(FolderId::new(folder.id.clone())).await {
                         return (
                             StatusCode::INTERNAL_SERVER_ERROR,
                             Json(ErrorResponse {
@@ -927,7 +927,7 @@ async fn update_config(
     };
 
     // Update version
-    config.version = request.version;
+    config.version = request.version as i32;
 
     // Note: Full config update would merge folders and devices
     // This is a simplified implementation
@@ -944,7 +944,7 @@ fn parse_device_id(id: &str) -> DeviceId {
     let hash = Sha256::digest(id.as_bytes());
     let mut bytes = [0u8; 32];
     bytes.copy_from_slice(&hash);
-    DeviceId::from_bytes(bytes)
+    DeviceId::from_bytes_array(bytes)
 }
 
 // Request/Response types
@@ -1016,14 +1016,14 @@ pub struct FolderResponse {
     pub rescan_interval_secs: u32,
 }
 
-impl From<FolderConfig> for FolderResponse {
-    fn from(folder: FolderConfig) -> Self {
+impl From<syncthing_core::types::Folder> for FolderResponse {
+    fn from(folder: syncthing_core::types::Folder) -> Self {
         Self {
-            id: folder.id.as_str().to_string(),
-            label: folder.label,
-            path: folder.path.to_string_lossy().to_string(),
-            devices: folder.devices.iter().map(|d| d.short_id()).collect(),
-            rescan_interval_secs: folder.rescan_interval_secs,
+            id: folder.id,
+            label: folder.label.unwrap_or_default(),
+            path: folder.path,
+            devices: folder.devices.iter().map(|d: &DeviceId| d.short_id()).collect(),
+            rescan_interval_secs: folder.rescan_interval_secs as u32,
         }
     }
 }
@@ -1043,14 +1043,14 @@ pub struct DeviceResponse {
     pub compression: String,
 }
 
-impl From<DeviceConfig> for DeviceResponse {
-    fn from(device: DeviceConfig) -> Self {
+impl From<syncthing_core::types::Device> for DeviceResponse {
+    fn from(device: syncthing_core::types::Device) -> Self {
         Self {
             id: device.id.to_string(),
-            name: device.name,
-            addresses: device.addresses,
+            name: device.name.unwrap_or_default(),
+            addresses: device.addresses.iter().map(|a| a.as_str().to_string()).collect(),
             introducer: device.introducer,
-            compression: format!("{:?}", device.compression).to_lowercase(),
+            compression: "metadata".to_string(),
         }
     }
 }
@@ -1096,7 +1096,7 @@ impl ConfigResponse {
     /// Create a config response from a configuration object
     pub fn from_config(config: Config) -> Self {
         Self {
-            version: config.version,
+            version: config.version as u32,
             folders: config.folders.into_iter().map(FolderResponse::from).collect(),
             devices: config.devices.into_iter().map(DeviceResponse::from).collect(),
         }

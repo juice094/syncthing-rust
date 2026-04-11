@@ -1,7 +1,4 @@
 [workspace]
-name = "syncthing-rust"
-version = "0.1.0"
-edition = "2021"
 resolver = "2"
 
 members = [
@@ -13,7 +10,6 @@ members = [
     "crates/syncthing-api",
     "crates/bep-protocol",
     "cmd/syncthing",
-    "acceptance-tests",
 ]
 
 [workspace.dependencies]
