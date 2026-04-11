@@ -3,6 +3,7 @@
 use chrono::{DateTime, Utc};
 use rand::Rng;
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::fmt;
 
@@ -385,9 +386,32 @@ pub struct FileInfo {
 }
 
 impl FileInfo {
+    /// 创建新的 FileInfo（仅设置文件名，其余为默认值）
+    pub fn new(name: impl Into<String>) -> Self {
+        Self {
+            name: name.into(),
+            file_type: FileType::File,
+            size: 0,
+            permissions: 0,
+            modified_s: 0,
+            modified_ns: 0,
+            version: Vector::new(),
+            sequence: 0,
+            block_size: 0,
+            blocks: Vec::new(),
+            symlink_target: None,
+            deleted: Some(false),
+        }
+    }
+
     /// 检查文件是否被删除
     pub fn is_deleted(&self) -> bool {
         self.deleted.unwrap_or(false)
+    }
+
+    /// 标记文件为已删除
+    pub fn mark_deleted(&mut self) {
+        self.deleted = Some(true);
     }
 }
 
@@ -442,6 +466,69 @@ pub enum FolderStatus {
     Error,
 }
 
+/// 压缩模式
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub enum Compression {
+    #[default]
+    Metadata,
+    Always,
+    Never,
+}
+
+/// API 设备配置
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct DeviceConfig {
+    pub id: String,
+    pub name: String,
+    pub addresses: Vec<String>,
+    pub paused: bool,
+    pub introducer: bool,
+}
+
+/// API 文件夹配置
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct FolderConfig {
+    pub id: String,
+    pub label: String,
+    pub path: String,
+    pub devices: Vec<String>,
+    pub rescan_interval_secs: u32,
+    pub versioning: VersioningConfig,
+}
+
+/// GUI 配置
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct GuiConfig {
+    pub enabled: bool,
+    pub address: String,
+    pub api_key: String,
+}
+
+/// 选项配置
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct Options {
+    pub listen_addresses: Vec<String>,
+    pub global_announce_enabled: bool,
+    pub local_announce_enabled: bool,
+    pub relays_enabled: bool,
+}
+
+/// 版本控制配置
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "type")]
+pub enum VersioningConfig {
+    None,
+    Simple { params: HashMap<String, String> },
+    Staggered { params: HashMap<String, String> },
+    External { params: HashMap<String, String> },
+}
+
+impl Default for VersioningConfig {
+    fn default() -> Self {
+        Self::None
+    }
+}
+
 /// 文件夹配置
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Folder {
@@ -482,15 +569,6 @@ impl Folder {
     }
 }
 
-/// 版本控制配置
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct VersioningConfig {
-    /// 版本控制类型
-    pub r#type: String,
-    /// 参数
-    pub params: HashMap<String, String>,
-}
-
 /// 设备配置
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Device {
@@ -523,6 +601,12 @@ pub struct Config {
     pub devices: Vec<Device>,
     /// 本地设备ID
     pub local_device_id: Option<crate::DeviceId>,
+    /// GUI 配置
+    #[serde(default)]
+    pub gui: GuiConfig,
+    /// 选项配置
+    #[serde(default)]
+    pub options: Options,
 }
 
 fn default_listen() -> String { "0.0.0.0:22000".to_string() }
@@ -538,6 +622,8 @@ impl Config {
             folders: Vec::new(),
             devices: Vec::new(),
             local_device_id: None,
+            gui: GuiConfig::default(),
+            options: Options::default(),
         }
     }
 }
@@ -564,4 +650,162 @@ pub struct IndexUpdate {
     pub folder: String,
     /// 更新的文件列表
     pub files: Vec<FileInfo>,
+}
+
+/// Folder identifier
+#[derive(Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct FolderId(String);
+
+impl FolderId {
+    /// Create from string
+    pub fn new<S: Into<String>>(id: S) -> Self {
+        Self(id.into())
+    }
+
+    /// Get as string slice
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl fmt::Debug for FolderId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "FolderId({})", self.0)
+    }
+}
+
+impl fmt::Display for FolderId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+/// Block hash (SHA-256)
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct BlockHash([u8; 32]);
+
+impl BlockHash {
+    /// Create from raw bytes
+    pub fn from_bytes(bytes: [u8; 32]) -> Self {
+        Self(bytes)
+    }
+
+    /// Get raw bytes
+    pub fn as_bytes(&self) -> &[u8; 32] {
+        &self.0
+    }
+
+    /// Calculate hash from data
+    pub fn from_data(data: &[u8]) -> Self {
+        let hash = Sha256::digest(data);
+        let mut bytes = [0u8; 32];
+        bytes.copy_from_slice(&hash);
+        Self(bytes)
+    }
+
+    /// Convert to Vec<u8>
+    pub fn to_vec(&self) -> Vec<u8> {
+        self.0.to_vec()
+    }
+}
+
+impl fmt::Debug for BlockHash {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "BlockHash({})", hex::encode(&self.0[..8]))
+    }
+}
+
+impl fmt::Display for BlockHash {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", hex::encode(self.0))
+    }
+}
+
+/// Folder sync summary
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct FolderSummary {
+    /// Total files
+    pub files: u64,
+    /// Total directories
+    pub directories: u64,
+    /// Total symlinks
+    pub symlinks: u64,
+    /// Total bytes
+    pub bytes: u64,
+    /// Files needing sync
+    pub need_files: u64,
+    /// Directories needing sync
+    pub need_directories: u64,
+    /// Bytes needing sync
+    pub need_bytes: u64,
+    /// Pull errors
+    pub pull_errors: u32,
+}
+
+impl FolderSummary {
+    /// Check if folder is in sync
+    pub fn is_synced(&self) -> bool {
+        self.need_files == 0 && self.need_directories == 0 && self.need_bytes == 0
+    }
+
+    /// Calculate sync percentage
+    pub fn sync_percent(&self) -> f64 {
+        if self.bytes == 0 {
+            return 100.0;
+        }
+        let synced = self.bytes - self.need_bytes;
+        (synced as f64 / self.bytes as f64) * 100.0
+    }
+}
+
+/// Event types for the event system
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "type")]
+pub enum Event {
+    /// Folder state changed
+    FolderSummary {
+        /// Folder ID
+        folder: FolderId,
+        /// Summary data
+        summary: FolderSummary,
+    },
+    /// File was downloaded
+    ItemFinished {
+        /// Folder ID
+        folder: FolderId,
+        /// Item name
+        item: String,
+        /// Error message if any
+        error: Option<String>,
+    },
+    /// Device connected
+    DeviceConnected {
+        /// Device ID
+        device: crate::DeviceId,
+        /// Connection address
+        addr: String,
+    },
+    /// Device disconnected
+    DeviceDisconnected {
+        /// Device ID
+        device: crate::DeviceId,
+        /// Error message if any
+        error: Option<String>,
+    },
+    /// Local index updated
+    LocalIndexUpdated {
+        /// Folder ID
+        folder: FolderId,
+        /// Updated items
+        items: Vec<String>,
+    },
+    /// Remote index received
+    RemoteIndexUpdated {
+        /// Device ID
+        device: crate::DeviceId,
+        /// Folder ID
+        folder: FolderId,
+        /// Number of items
+        items_count: usize,
+    },
 }

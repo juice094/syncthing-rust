@@ -10,7 +10,7 @@
 use std::path::Path;
 use std::time::SystemTime;
 
-use syncthing_core::{BlockHash, BlockInfo, FileInfo, Result, SyncthingError};
+use syncthing_core::{BlockHash, BlockInfo, FileInfo, FileType, Result, SyncthingError};
 use tokio::fs::File;
 use tokio::io::AsyncReadExt;
 
@@ -54,7 +54,7 @@ pub async fn scan_file(path: &Path, block_size: usize) -> Result<FileInfo> {
     let block_size = block_size.clamp(MIN_BLOCK_SIZE, MAX_BLOCK_SIZE);
 
     // Get file metadata
-    let metadata = tokio::fs::metadata(path).await.map_err(SyncthingError::io)?;
+    let metadata = tokio::fs::metadata(path).await.map_err(|e| SyncthingError::Io(e))?;
 
     if !metadata.is_file() {
         return Err(SyncthingError::io(format!(
@@ -69,12 +69,15 @@ pub async fn scan_file(path: &Path, block_size: usize) -> Result<FileInfo> {
         .unwrap_or_default();
 
     let mut info = FileInfo::new(&file_name);
-    info.size = metadata.len();
-    info.modified = metadata
+    info.size = metadata.len() as i64;
+    let duration = metadata
         .modified()
-        .unwrap_or_else(|_| SystemTime::UNIX_EPOCH);
-    info.is_directory = false;
-    info.is_symlink = false;
+        .unwrap_or_else(|_| SystemTime::UNIX_EPOCH)
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .unwrap_or_default();
+    info.modified_s = duration.as_secs() as i64;
+    info.modified_ns = duration.subsec_nanos() as i32;
+    info.file_type = FileType::File;
 
     // Compute block hashes
     info.blocks = compute_block_hashes(path, block_size).await?;
@@ -86,8 +89,8 @@ pub async fn scan_file(path: &Path, block_size: usize) -> Result<FileInfo> {
 ///
 /// Reads the file in chunks and computes SHA-256 hashes for each block.
 async fn compute_block_hashes(path: &Path, block_size: usize) -> Result<Vec<BlockInfo>> {
-    let mut file = File::open(path).await.map_err(SyncthingError::io)?;
-    let metadata = file.metadata().await.map_err(SyncthingError::io)?;
+    let mut file = File::open(path).await.map_err(|e| SyncthingError::Io(e))?;
+    let metadata = file.metadata().await.map_err(|e| SyncthingError::Io(e))?;
     let file_size = metadata.len();
 
     let mut blocks = Vec::new();
@@ -95,16 +98,16 @@ async fn compute_block_hashes(path: &Path, block_size: usize) -> Result<Vec<Bloc
     let mut buffer = vec![0u8; block_size];
 
     while offset < file_size {
-        let bytes_read = file.read(&mut buffer).await.map_err(SyncthingError::io)?;
+        let bytes_read = file.read(&mut buffer).await.map_err(|e| SyncthingError::Io(e))?;
         if bytes_read == 0 {
             break;
         }
 
         let hash = hash_block(&buffer[..bytes_read]);
         blocks.push(BlockInfo {
-            hash,
-            offset,
-            size: bytes_read,
+            hash: hash.to_vec(),
+            offset: offset as i64,
+            size: bytes_read as i32,
         });
 
         offset += bytes_read as u64;
@@ -163,7 +166,7 @@ pub fn optimal_block_size(file_size: u64) -> usize {
 /// This is faster for detecting file changes when comparing
 /// modification times and sizes is sufficient.
 pub async fn quick_scan(path: &Path) -> Result<FileInfo> {
-    let metadata = tokio::fs::metadata(path).await.map_err(SyncthingError::io)?;
+    let metadata = tokio::fs::metadata(path).await.map_err(|e| SyncthingError::Io(e))?;
 
     let file_name = path
         .file_name()
@@ -171,12 +174,22 @@ pub async fn quick_scan(path: &Path) -> Result<FileInfo> {
         .unwrap_or_default();
 
     let mut info = FileInfo::new(&file_name);
-    info.size = metadata.len();
-    info.modified = metadata
+    info.size = metadata.len() as i64;
+    let duration = metadata
         .modified()
-        .unwrap_or_else(|_| SystemTime::UNIX_EPOCH);
-    info.is_directory = metadata.is_dir();
-    info.is_symlink = metadata.file_type().is_symlink();
+        .unwrap_or_else(|_| SystemTime::UNIX_EPOCH)
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .unwrap_or_default();
+    info.modified_s = duration.as_secs() as i64;
+    info.modified_ns = duration.subsec_nanos() as i32;
+
+    if metadata.file_type().is_symlink() {
+        info.file_type = FileType::Symlink;
+    } else if metadata.is_dir() {
+        info.file_type = FileType::Directory;
+    } else {
+        info.file_type = FileType::File;
+    }
 
     // Don't compute block hashes for quick scan
     info.blocks = Vec::new();
@@ -201,7 +214,7 @@ pub async fn scan_directory(
 
     // Collect entries in a blocking task to avoid blocking the async runtime
     let entries = tokio::task::spawn_blocking(move || {
-        let metadata = std::fs::metadata(&path).map_err(SyncthingError::io)?;
+        let metadata = std::fs::metadata(&path).map_err(|e| SyncthingError::Io(e))?;
 
         if !metadata.is_dir() {
             return Err(SyncthingError::io(format!(
@@ -305,10 +318,10 @@ pub async fn verify_file(
 ) -> Result<()> {
     let info = scan_file(path, block_size).await?;
 
-    let actual_hashes: Vec<_> = info.blocks.iter().map(|b| b.hash).collect();
+    let actual_hashes: Vec<_> = info.blocks.iter().map(|b| b.hash.clone()).collect();
 
     if actual_hashes.len() != expected_hashes.len() {
-        return Err(SyncthingError::Conflict(format!(
+        return Err(SyncthingError::protocol(format!(
             "Block count mismatch: expected {}, got {}",
             expected_hashes.len(),
             actual_hashes.len()
@@ -316,8 +329,8 @@ pub async fn verify_file(
     }
 
     for (i, (expected, actual)) in expected_hashes.iter().zip(actual_hashes.iter()).enumerate() {
-        if expected != actual {
-            return Err(SyncthingError::Conflict(format!(
+        if expected.to_vec() != *actual {
+            return Err(SyncthingError::protocol(format!(
                 "Block {} hash mismatch",
                 i
             )));
@@ -344,15 +357,16 @@ mod tests {
         let info = scan_file(&file_path, DEFAULT_BLOCK_SIZE).await.unwrap();
 
         assert_eq!(info.name, "test.txt");
-        assert_eq!(info.size, content.len() as u64);
-        assert!(!info.is_directory);
+        assert_eq!(info.size, content.len() as i64);
+        assert_eq!(info.file_type, FileType::File);
         assert_eq!(info.blocks.len(), 1);
 
         // Verify the hash
         let expected_hash = hash_block(content);
-        assert_eq!(info.blocks[0].hash, expected_hash);
+        let actual_hash_bytes: [u8; 32] = info.blocks[0].hash.as_slice().try_into().unwrap();
+        assert_eq!(BlockHash::from_bytes(actual_hash_bytes), expected_hash);
         assert_eq!(info.blocks[0].offset, 0);
-        assert_eq!(info.blocks[0].size, content.len());
+        assert_eq!(info.blocks[0].size, content.len() as i32);
     }
 
     #[tokio::test]
@@ -369,9 +383,9 @@ mod tests {
         let info = scan_file(&file_path, block_size).await.unwrap();
 
         assert_eq!(info.blocks.len(), 4); // 3 full + 1 partial
-        assert_eq!(info.blocks[0].size, block_size);
-        assert_eq!(info.blocks[1].size, block_size);
-        assert_eq!(info.blocks[2].size, block_size);
+        assert_eq!(info.blocks[0].size, block_size as i32);
+        assert_eq!(info.blocks[1].size, block_size as i32);
+        assert_eq!(info.blocks[2].size, block_size as i32);
         assert_eq!(info.blocks[3].size, 100);
     }
 
@@ -500,7 +514,10 @@ mod tests {
         fs::write(&file_path, content).await.unwrap();
 
         let info = scan_file(&file_path, DEFAULT_BLOCK_SIZE).await.unwrap();
-        let hashes: Vec<_> = info.blocks.iter().map(|b| b.hash).collect();
+        let hashes: Vec<_> = info.blocks.iter().map(|b| {
+            let bytes: [u8; 32] = b.hash.as_slice().try_into().unwrap();
+            BlockHash::from_bytes(bytes)
+        }).collect();
 
         // Should succeed
         verify_file(&file_path, &hashes, DEFAULT_BLOCK_SIZE)
@@ -515,7 +532,10 @@ mod tests {
 
         fs::write(&file_path, b"original content").await.unwrap();
         let info = scan_file(&file_path, DEFAULT_BLOCK_SIZE).await.unwrap();
-        let hashes: Vec<_> = info.blocks.iter().map(|b| b.hash).collect();
+        let hashes: Vec<_> = info.blocks.iter().map(|b| {
+            let bytes: [u8; 32] = b.hash.as_slice().try_into().unwrap();
+            BlockHash::from_bytes(bytes)
+        }).collect();
 
         // Modify the file
         fs::write(&file_path, b"modified content").await.unwrap();

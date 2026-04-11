@@ -267,7 +267,7 @@ impl BlockStore for CachedBlockStore {
         // Verify hash matches data
         let computed_hash = BlockHash::from_data(data);
         if computed_hash != hash {
-            return Err(SyncthingError::Protocol(format!(
+            return Err(SyncthingError::protocol(format!(
                 "Hash mismatch: expected {}, computed {}",
                 hash, computed_hash
             )));

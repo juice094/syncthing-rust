@@ -112,7 +112,7 @@ impl IgnorePatterns {
     pub async fn from_file(path: &Path) -> Result<Self> {
         let content = tokio::fs::read_to_string(path)
             .await
-            .map_err(SyncthingError::io)?;
+            .map_err(|e| SyncthingError::Io(e))?;
 
         let base_dir = path.parent().unwrap_or(Path::new(""));
         let mut loaded = HashSet::new();
@@ -148,7 +148,7 @@ impl IgnorePatterns {
 
         let content = tokio::fs::read_to_string(&path)
             .await
-            .map_err(SyncthingError::io)?;
+            .map_err(|e| SyncthingError::Io(e))?;
 
         let base_dir = path.parent().unwrap_or(Path::new("")).to_path_buf();
         let included = Self::from_str(&content);
@@ -377,7 +377,7 @@ impl Pattern {
         }
 
         if line.is_empty() {
-            return Err(SyncthingError::Config("missing pattern".to_string()));
+            return Err(SyncthingError::config("missing pattern".to_string()));
         }
 
         let mut chars = line.chars().peekable();
@@ -482,7 +482,7 @@ impl Pattern {
         regex_str.push('$');
 
         regex::Regex::new(&regex_str).map_err(|e| {
-            SyncthingError::Config(format!("Invalid pattern '{}': {}", pattern, e))
+            SyncthingError::config(format!("Invalid pattern '{}': {}", pattern, e))
         })
     }
 

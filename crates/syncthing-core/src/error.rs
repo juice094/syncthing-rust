@@ -59,6 +59,18 @@ pub enum SyncthingError {
     #[error("Connection closed")]
     ConnectionClosed,
     
+    /// 存储错误
+    #[error("Storage error: {0}")]
+    Storage(String),
+    
+    /// 内部错误
+    #[error("Internal error: {0}")]
+    Internal(String),
+    
+    /// 网络错误
+    #[error("Network error: {0}")]
+    Network(String),
+    
     /// 其他错误
     #[error("{0}")]
     Other(String),
@@ -88,6 +100,26 @@ impl SyncthingError {
     /// 创建设备ID错误
     pub fn device_id<S: Into<String>>(message: S) -> Self {
         Self::DeviceId { message: message.into() }
+    }
+    
+    /// 创建 I/O 错误（从字符串描述）
+    pub fn io<S: Into<String>>(message: S) -> Self {
+        Self::Io(io::Error::new(io::ErrorKind::Other, message.into()))
+    }
+    
+    /// 创建存储错误
+    pub fn storage<S: Into<String>>(message: S) -> Self {
+        Self::Storage(message.into())
+    }
+    
+    /// 创建内部错误
+    pub fn internal<S: Into<String>>(message: S) -> Self {
+        Self::Internal(message.into())
+    }
+    
+    /// 创建网络错误
+    pub fn network<S: Into<String>>(message: S) -> Self {
+        Self::Network(message.into())
     }
     
     /// 创建超时错误

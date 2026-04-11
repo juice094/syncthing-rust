@@ -185,7 +185,7 @@ impl BlockStore for BlockStoreImpl {
         // Verify hash integrity
         let computed_hash = BlockHash::from_data(data);
         if computed_hash != hash {
-            return Err(SyncthingError::Protocol(format!(
+            return Err(SyncthingError::protocol(format!(
                 "Hash mismatch: expected {}, computed {}",
                 hash, computed_hash
             )));
@@ -332,7 +332,7 @@ impl BlockStoreImplBuilder {
         } else if let Some(path) = self.path {
             BlockStoreImpl::open_with_cache(path, self.cache_capacity)
         } else {
-            Err(SyncthingError::Config(
+            Err(SyncthingError::config(
                 "Either path or in_memory must be specified".to_string()
             ))
         }

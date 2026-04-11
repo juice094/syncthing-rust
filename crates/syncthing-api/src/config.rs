@@ -58,19 +58,20 @@ impl FileConfigStore {
     fn default_config() -> Config {
         Config {
             version: 1,
+            listen_addr: "0.0.0.0:22000".to_string(),
+            device_name: "syncthing-rust".to_string(),
             folders: Vec::new(),
             devices: Vec::new(),
+            local_device_id: None,
             gui: syncthing_core::types::GuiConfig {
                 enabled: true,
                 address: "127.0.0.1:8384".to_string(),
-                api_key: None,
-                use_tls: false,
+                api_key: String::new(),
             },
             options: syncthing_core::types::Options {
                 listen_addresses: vec!["default".to_string()],
-                global_discovery: true,
-                local_discovery: true,
-                nat_traversal: true,
+                global_announce_enabled: true,
+                local_announce_enabled: true,
                 relays_enabled: true,
             },
         }
@@ -81,7 +82,7 @@ impl FileConfigStore {
         if let Some(parent) = self.path.parent() {
             tokio::fs::create_dir_all(parent)
                 .await
-                .map_err(SyncthingError::io)?;
+                .map_err(|e| SyncthingError::Io(e))?;
         }
         Ok(())
     }
@@ -114,10 +115,10 @@ impl ConfigStore for FileConfigStore {
         // Read and parse file
         let content = tokio::fs::read_to_string(&self.path)
             .await
-            .map_err(SyncthingError::io)?;
+            .map_err(|e| SyncthingError::Io(e))?;
 
         let config: Config = toml::from_str(&content).map_err(|e| {
-            SyncthingError::Config(format!("Failed to parse TOML: {}", e))
+            SyncthingError::config(format!("Failed to parse TOML: {}", e))
         })?;
 
         // Update cache
@@ -133,12 +134,12 @@ impl ConfigStore for FileConfigStore {
         self.ensure_dir().await?;
 
         let content = toml::to_string_pretty(config).map_err(|e| {
-            SyncthingError::Config(format!("Failed to serialize TOML: {}", e))
+            SyncthingError::config(format!("Failed to serialize TOML: {}", e))
         })?;
 
         tokio::fs::write(&self.path, content)
             .await
-            .map_err(SyncthingError::io)?;
+            .map_err(|e| SyncthingError::Io(e))?;
 
         // Update cache
         let mut cache = self.cache.write().await;
@@ -173,12 +174,12 @@ impl ConfigStore for FileConfigStore {
             },
             NotifyConfig::default(),
         )
-        .map_err(|e| SyncthingError::Config(format!("Failed to create watcher: {}", e)))?;
+        .map_err(|e| SyncthingError::config(format!("Failed to create watcher: {}", e)))?;
 
         // Watch the config file
         watcher
             .watch(&self.path, RecursiveMode::NonRecursive)
-            .map_err(|e| SyncthingError::Config(format!("Failed to watch file: {}", e)))?;
+            .map_err(|e| SyncthingError::config(format!("Failed to watch file: {}", e)))?;
 
         // Keep watcher alive
         tokio::spawn(async move {
@@ -212,16 +213,16 @@ impl ConfigStream for FileConfigStream {
         self.receiver
             .recv()
             .await
-            .ok_or_else(|| SyncthingError::Config("Watch channel closed".to_string()))?;
+            .ok_or_else(|| SyncthingError::config("Watch channel closed".to_string()))?;
 
         // Reload configuration
         if self.path.exists() {
             let content = tokio::fs::read_to_string(&self.path)
                 .await
-                .map_err(SyncthingError::io)?;
+                .map_err(|e| SyncthingError::Io(e))?;
 
             let config: Config = toml::from_str(&content).map_err(|e| {
-                SyncthingError::Config(format!("Failed to parse updated TOML: {}", e))
+                SyncthingError::config(format!("Failed to parse updated TOML: {}", e))
             })?;
 
             let mut cache = self.cache.write().await;
@@ -298,7 +299,7 @@ impl ConfigStream for MemoryConfigStream {
         self.receiver
             .recv()
             .await
-            .map_err(|e| SyncthingError::Config(format!("Broadcast channel error: {}", e)))
+            .map_err(|e| SyncthingError::config(format!("Broadcast channel error: {}", e)))
     }
 }
 

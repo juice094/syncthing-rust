@@ -94,17 +94,17 @@ mod integration_tests {
 
         // 2. Create and store file metadata
         let mut file = FileInfo::new("test.txt");
-        file.size = (block1_data.len() + block2_data.len()) as u64;
+        file.size = (block1_data.len() + block2_data.len()) as i64;
         file.blocks = vec![
             syncthing_core::BlockInfo {
-                hash: block1_hash,
+                hash: block1_hash.as_bytes().to_vec(),
                 offset: 0,
-                size: block1_data.len(),
+                size: block1_data.len() as i32,
             },
             syncthing_core::BlockInfo {
-                hash: block2_hash,
-                offset: block1_data.len() as u64,
-                size: block2_data.len(),
+                hash: block2_hash.as_bytes().to_vec(),
+                offset: block1_data.len() as i64,
+                size: block2_data.len() as i32,
             },
         ];
 
@@ -125,7 +125,7 @@ mod integration_tests {
         // 5. Check folder stats
         let stats = block_store.folder_stats(&folder).await.unwrap();
         assert_eq!(stats.file_count, 1);
-        assert_eq!(stats.total_bytes, file.size);
+        assert_eq!(stats.total_bytes, file.size as u64);
     }
 
     #[tokio::test]
