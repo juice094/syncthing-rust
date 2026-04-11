@@ -1,0 +1,34 @@
+[package]
+name = "syncthing-fs"
+version = "0.1.0"
+edition = "2021"
+authors = ["Agent-B <UNVERIFIED>"]
+description = "Filesystem abstraction and monitoring - UNVERIFIED DELIVERY"
+license = "MPL-2.0"
+publish = false
+
+[dependencies]
+syncthing-core = { path = "../syncthing-core" }
+
+# 异步
+tokio = { workspace = true }
+async-trait = { workspace = true }
+
+# 错误处理
+thiserror = { workspace = true }
+
+# 文件监控
+notify = "6.1"
+
+# 工具
+tracing = { workspace = true }
+walkdir = "2.4"
+regex = "1.10"
+
+# 哈希计算
+sha2 = { workspace = true }
+hex = "0.4"
+
+[dev-dependencies]
+tokio-test = "0.4"
+tempfile = "3.9"

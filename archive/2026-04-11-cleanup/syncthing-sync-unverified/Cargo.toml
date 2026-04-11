@@ -1,0 +1,31 @@
+[package]
+name = "syncthing-sync"
+version = "0.1.0"
+edition = "2021"
+authors = ["Agent-C <UNVERIFIED>"]
+description = "Synchronization engine - UNVERIFIED DELIVERY"
+license = "MPL-2.0"
+publish = false
+
+[dependencies]
+syncthing-core = { path = "../syncthing-core" }
+syncthing-fs = { path = "../syncthing-fs" }
+syncthing-db = { path = "../syncthing-db" }
+syncthing-api = { path = "../syncthing-api" }
+syncthing-net = { path = "../syncthing-net" }
+
+# 异步
+tokio = { workspace = true }
+async-trait = { workspace = true }
+futures = "0.3"
+
+# 错误处理
+thiserror = { workspace = true }
+
+# 工具
+tracing = { workspace = true }
+chrono = { workspace = true }
+
+[dev-dependencies]
+tokio-test = "0.4"
+tempfile = "3"

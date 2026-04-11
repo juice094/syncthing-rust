@@ -1,0 +1,21 @@
+[package]
+name = "acceptance-tests"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+syncthing-core = { path = "../crates/syncthing-core" }
+syncthing-net = { path = "../crates/syncthing-net" }
+syncthing-sync = { path = "../crates/syncthing-sync" }
+syncthing-fs = { path = "../crates/syncthing-fs" }
+syncthing-db = { path = "../crates/syncthing-db" }
+syncthing-api = { path = "../crates/syncthing-api" }
+tokio = { version = "1", features = ["full"] }
+tempfile = "3"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["fmt"] }
+
+[[test]]
+name = "net_acceptance"
+path = "net_acceptance.rs"

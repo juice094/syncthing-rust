@@ -1,0 +1,36 @@
+[package]
+name = "syncthing-db"
+version = "0.1.0"
+edition = "2021"
+authors = ["Agent-E <UNVERIFIED>"]
+description = "Block and metadata storage - UNVERIFIED DELIVERY"
+license = "MPL-2.0"
+publish = false
+
+[dependencies]
+syncthing-core = { path = "../syncthing-core" }
+
+# 异步
+tokio = { workspace = true }
+async-trait = { workspace = true }
+
+# 错误处理
+thiserror = { workspace = true }
+
+# Storage
+sled = "0.34"
+
+# LRU cache
+lru = "0.12"
+
+# 序列化
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
+# 工具
+tracing = { workspace = true }
+
+[dev-dependencies]
+tokio-test = "0.4"
+tempfile = "3.9"
+futures = "0.3"

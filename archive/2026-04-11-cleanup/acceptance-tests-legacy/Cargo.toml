@@ -1,0 +1,15 @@
+[package]
+name = "acceptance-tests"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+syncthing-core = { path = "../crates/syncthing-core" }
+syncthing-net = { path = "../crates/syncthing-net" }
+
+tokio = { version = "1", features = ["full"] }
+
+[[test]]
+name = "net_acceptance"
+path = "net_acceptance.rs"

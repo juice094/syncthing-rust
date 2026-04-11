@@ -1,0 +1,21 @@
+[package]
+name = "bep-protocol"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+syncthing-core = { path = "../syncthing-core" }
+
+tokio = { workspace = true }
+bytes = { workspace = true }
+prost = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+serde = { workspace = true }
+chrono = { workspace = true }
+uuid = { workspace = true }
+parking_lot = { workspace = true }
+
+[dev-dependencies]
+tokio-test = "0.4"
+tracing-subscriber = { workspace = true }
