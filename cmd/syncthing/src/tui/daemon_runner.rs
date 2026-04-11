@@ -59,8 +59,8 @@ pub async fn start_daemon(
 
     // 互操作测试自动配置（仅开发阶段）
     if config.devices.is_empty() && config.folders.is_empty() {
-        let go_cert_path = std::path::PathBuf::from(r"C:\Users\22414\AppData\Local\Temp\syncthing_test_go\cert.pem");
-        let go_key_path = std::path::PathBuf::from(r"C:\Users\22414\AppData\Local\Temp\syncthing_test_go\key.pem");
+        let go_cert_path = std::path::PathBuf::from(r"C:\Users\22414\dev\third_party\syncthing\test_go_home\cert.pem");
+        let go_key_path = std::path::PathBuf::from(r"C:\Users\22414\dev\third_party\syncthing\test_go_home\key.pem");
         if go_cert_path.exists() && go_key_path.exists() {
             let cert = tokio::fs::read(&go_cert_path).await.unwrap_or_default();
             let key = tokio::fs::read(&go_key_path).await.unwrap_or_default();
@@ -73,7 +73,7 @@ pub async fn start_daemon(
                     paused: false,
                     introducer: false,
                 });
-                let test_folder_path = std::env::temp_dir().join("syncthing_test_rust_folder");
+                let test_folder_path = std::path::PathBuf::from(r"C:\Users\22414\dev\third_party\syncthing-rust\test_rust_folder");
                 std::fs::create_dir_all(&test_folder_path).ok();
                 let mut test_folder = syncthing_core::types::Folder::new("test-folder", test_folder_path.to_string_lossy());
                 test_folder.devices.push(device_id);
