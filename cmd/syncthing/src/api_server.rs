@@ -75,6 +75,7 @@ pub async fn start_api_server(
     config_dir: &Path,
     sync_service: Arc<syncthing_sync::SyncService>,
     my_id: DeviceId,
+    connection_handle: Option<syncthing_net::manager::ConnectionManagerHandle>,
 ) -> Result<tokio::task::JoinHandle<()>> {
     let config_path = config_dir.join("config.json");
     let config_store = Arc::new(JsonConfigStore::new(&config_path));
@@ -102,6 +103,7 @@ pub async fn start_api_server(
     );
     state.my_id = Some(my_id);
     state.api_key = Some(api_key.to_string());
+    state.connection_manager = connection_handle;
 
     let router = syncthing_api::rest::RestApi::build_router(state);
 

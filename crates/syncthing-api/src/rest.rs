@@ -48,6 +48,10 @@ pub struct ApiState {
     pub my_id: Option<DeviceId>,
     /// Optional API key for authentication
     pub api_key: Option<String>,
+    /// Server start time for uptime calculation
+    pub start_time: std::time::Instant,
+    /// Optional connection manager for connection enumeration
+    pub connection_manager: Option<syncthing_net::manager::ConnectionManagerHandle>,
 }
 
 impl ApiState {
@@ -63,6 +67,8 @@ impl ApiState {
             sync_model,
             my_id: None,
             api_key: None,
+            start_time: std::time::Instant::now(),
+            connection_manager: None,
         }
     }
 }
@@ -633,7 +639,7 @@ async fn get_system_status(State(state): State<ApiState>) -> impl IntoResponse {
 
             let status = SystemStatus {
                 my_id,
-                uptime: 0, // TODO: 跟踪实际运行时间
+                uptime: state.start_time.elapsed().as_secs(),
                 folder_count: config.folders.len(),
                 device_count: config.devices.len(),
                 version: env!("CARGO_PKG_VERSION").to_string(),
@@ -695,13 +701,31 @@ async fn get_db_status(State(state): State<ApiState>) -> impl IntoResponse {
     }
 }
 
-async fn get_connections(State(_state): State<ApiState>) -> Json<ConnectionStatus> {
-    // Note: SyncModel does not currently expose connection enumeration.
-    // Return structured empty data for compatibility.
-    Json(ConnectionStatus {
-        total: 0,
-        connections: vec![],
-    })
+async fn get_connections(State(state): State<ApiState>) -> Json<ConnectionStatus> {
+    if let Some(ref cm) = state.connection_manager {
+        let devices = cm.connected_devices();
+        let connections: Vec<DeviceConnection> = devices
+            .into_iter()
+            .filter_map(|device_id| {
+                let conn = cm.get_connection(&device_id)?;
+                Some(DeviceConnection {
+                    id: device_id.to_string(),
+                    address: conn.remote_addr().to_string(),
+                    conn_type: "tcp-server".to_string(),
+                    connected_since: 0,
+                })
+            })
+            .collect();
+        Json(ConnectionStatus {
+            total: connections.len(),
+            connections,
+        })
+    } else {
+        Json(ConnectionStatus {
+            total: 0,
+            connections: vec![],
+        })
+    }
 }
 
 async fn get_folder_status(

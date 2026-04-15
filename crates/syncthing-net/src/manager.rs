@@ -161,6 +161,11 @@ impl ConnectionManagerHandle {
     pub async fn connect_to(&self, device_id: DeviceId, addresses: Vec<SocketAddr>) -> syncthing_core::Result<()> {
         self.inner.connect_to(device_id, addresses).await
     }
+
+    /// 获取统计信息
+    pub fn stats(&self) -> ManagerStats {
+        self.inner.stats()
+    }
 }
 
 impl ConnectionManager {
