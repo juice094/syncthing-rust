@@ -32,3 +32,6 @@ long_running_monitor.log
 # Config backups
 *.bak
 config.json.bak*
+
+# External vendored dependencies
+dev/third_party/iroh/
