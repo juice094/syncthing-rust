@@ -193,7 +193,7 @@ async fn main() -> Result<()> {
             match tui::daemon_runner::start_daemon(config_dir.clone(), listen, device_name, test_mode).await {
                 Ok(startup) => {
                     // 启动 REST API 服务器
-                    let api_handle = match api_server::start_api_server(&config_dir, startup.sync_service.clone(), startup.device_id).await {
+                    let api_handle = match api_server::start_api_server(&config_dir, startup.sync_service.clone(), startup.device_id, Some(startup.connection_handle.clone())).await {
                         Ok(h) => h,
                         Err(e) => {
                             warn!("Failed to start REST API server: {}", e);
