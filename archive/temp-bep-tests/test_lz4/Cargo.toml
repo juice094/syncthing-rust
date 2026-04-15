@@ -1,0 +1,7 @@
+[package]
+name = "test-lz4"
+version = "0.1.0"
+edition = "2021"
+[workspace]
+[dependencies]
+lz4 = "1"
