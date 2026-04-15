@@ -13,7 +13,7 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 
 use axum::{
-    extract::{Path, State},
+    extract::{connect_info::ConnectInfo, Path, State},
     http::StatusCode,
     middleware::Next,
     response::IntoResponse,
@@ -76,14 +76,39 @@ async fn api_key_middleware(
     if req.uri().path() == "/rest/health" {
         return Ok(next.run(req).await);
     }
+    // Allow loopback access without API key for local debugging
+    let is_loopback = req
+        .extensions()
+        .get::<ConnectInfo<SocketAddr>>()
+        .map(|ci| ci.0.ip().is_loopback())
+        .unwrap_or(false);
+    if is_loopback {
+        return Ok(next.run(req).await);
+    }
     if let Some(ref key) = state.api_key {
+        if key.is_empty() {
+            return Ok(next.run(req).await);
+        }
         let header = req
             .headers()
             .get("x-api-key")
             .and_then(|v| v.to_str().ok());
-        match header {
-            Some(h) if h == key => Ok(next.run(req).await),
-            _ => Err(axum::http::StatusCode::UNAUTHORIZED),
+        let query = req.uri().query().and_then(|q| {
+            q.split('&').find_map(|pair| {
+                let mut it = pair.splitn(2, '=');
+                let k = it.next()?;
+                let v = it.next()?;
+                if k.eq_ignore_ascii_case("X-API-Key") {
+                    Some(v)
+                } else {
+                    None
+                }
+            })
+        });
+        if header == Some(key) || query == Some(key) {
+            Ok(next.run(req).await)
+        } else {
+            Err(axum::http::StatusCode::UNAUTHORIZED)
         }
     } else {
         Ok(next.run(req).await)
