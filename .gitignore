@@ -20,3 +20,15 @@ Thumbs.db
 # Test outputs
 *.log
 test_output.*
+
+# Runtime test data
+test_rust_folder/
+
+# Runtime logs (explicit names not covered by *.log)
+rust_node_*.txt
+rust_node_*.log
+long_running_monitor.log
+
+# Config backups
+*.bak
+config.json.bak*
