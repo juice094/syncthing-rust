@@ -21,7 +21,7 @@ thiserror = { workspace = true }
 sled = "0.34"
 
 # LRU cache
-lru = "0.12"
+lru = "0.16.3"
 
 # 序列化
 serde = { version = "1.0", features = ["derive"] }

@@ -28,14 +28,17 @@ base64 = { workspace = true }
 prost = { workspace = true }
 igd = { version = "0.12", features = ["aio", "tokio"] }
 rcgen = { version = "0.13", features = ["pem"] }
-iroh = { path = "../../dev/third_party/iroh/iroh", default-features = false, features = ["tls-ring"], optional = true }
+# iroh transport is optional and requires a local clone:
+#   git clone https://github.com/n0-computer/iroh.git dev/third_party/iroh
+# Then uncomment the line below and build with --features iroh.
+# iroh = { path = "../../dev/third_party/iroh/iroh", default-features = false, features = ["tls-ring"], optional = true }
 bep-protocol = { path = "../bep-protocol" }
 netdev = "0.41"
 lz4 = "1"
 
 [features]
 default = []
-iroh = ["dep:iroh"]
+# iroh = ["dep:iroh"]
 
 [dev-dependencies]
 tokio-test = "0.4"
