@@ -299,12 +299,18 @@ fn draw_add_folder_popup(f: &mut Frame, app: &App) {
             let checked = app.folder_device_selection.get(i).copied().unwrap_or(false);
             let marker = if checked { "[x]" } else { "[ ]" };
             let name = d.name.as_deref().unwrap_or("Unnamed");
-            ListItem::new(format!("{} {} - {}", marker, name, d.id.to_string()))
+            let is_highlighted = app.folder_form.focus == app.folder_form.fields.len() && app.folder_device_selected == i;
+            let style = if is_highlighted {
+                Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)
+            } else {
+                Style::default()
+            };
+            ListItem::new(format!("{} {} - {}", marker, name, d.id.to_string())).style(style)
         })
         .collect();
 
     let list = List::new(items)
-        .block(Block::default().borders(Borders::ALL).title("Shared with devices (Space: toggle)"));
+        .block(Block::default().borders(Borders::ALL).title("Shared with devices (↑↓: move, Space: toggle)"));
     f.render_widget(list, chunks[2]);
 
     f.render_widget(block, area);

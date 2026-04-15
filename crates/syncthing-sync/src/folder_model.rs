@@ -9,6 +9,7 @@ use crate::index_handler::IndexHandler;
 use crate::model::FolderState;
 use crate::puller::{Puller, BlockSource};
 use crate::scanner::Scanner;
+use crate::watcher::FolderWatcher;
 use syncthing_core::DeviceId;
 use syncthing_core::types::{FileInfo, Folder, FolderStatus};
 use std::sync::Arc;
@@ -25,6 +26,7 @@ pub struct FolderModel {
     scanner: Scanner,
     puller: Puller,
     index_handler: IndexHandler,
+    watcher: RwLock<Option<notify::RecommendedWatcher>>,
 }
 
 impl FolderModel {
@@ -49,6 +51,7 @@ impl FolderModel {
             scanner,
             puller,
             index_handler,
+            watcher: RwLock::new(None),
         }
     }
 
@@ -93,6 +96,53 @@ impl FolderModel {
                 _ = shutdown.changed() => {
                     if *shutdown.borrow() {
                         info!(folder_id = %self.folder.id, "Scan loop shutting down");
+                        break;
+                    }
+                }
+            }
+        }
+    }
+
+    /// 启动文件系统监视循环
+    pub async fn start_watcher_loop(&self, mut shutdown: tokio::sync::watch::Receiver<bool>) {
+        let folder_id = self.folder.id.clone();
+        let path = self.folder.path.clone();
+
+        let mut rx = match FolderWatcher::watch(&folder_id, &path) {
+            Ok((w, rx)) => {
+                *self.watcher.write().await = Some(w);
+                rx
+            }
+            Err(e) => {
+                error!(folder_id = %folder_id, error = %e, "Failed to start folder watcher");
+                return;
+            }
+        };
+
+        let mut debounce_timer: Option<std::pin::Pin<Box<tokio::time::Sleep>>> = None;
+
+        loop {
+            tokio::select! {
+                Some(event) = rx.recv() => {
+                    debug!(folder_id = %folder_id, event = ?event, "Watcher event received");
+                    debounce_timer = Some(Box::pin(tokio::time::sleep(std::time::Duration::from_secs(1))));
+                }
+                _ = async {
+                    if let Some(ref mut timer) = debounce_timer {
+                        timer.as_mut().await;
+                    } else {
+                        std::future::pending::<()>().await;
+                    }
+                }, if debounce_timer.is_some() => {
+                    debounce_timer = None;
+                    info!(folder_id = %folder_id, "Debounced watcher scan triggered");
+                    if let Err(e) = self.scan().await {
+                        error!(folder_id = %folder_id, error = %e, "Watcher-triggered scan failed");
+                    }
+                }
+                _ = shutdown.changed() => {
+                    if *shutdown.borrow() {
+                        info!(folder_id = %folder_id, "Folder watcher loop shutting down");
                         break;
                     }
                 }

@@ -15,7 +15,7 @@ use syncthing_core::{ConnectionState, DeviceId};
 use syncthing_net::{ConnectionManager, ConnectionManagerConfig, ConnectionManagerHandle, SyncthingTlsConfig};
 use syncthing_net::protocol::MessageType;
 use syncthing_net::metrics;
-use syncthing_sync::{database::MemoryDatabase, SyncService, SyncModel, BlockSource};
+use syncthing_sync::{database::MemoryDatabase, SyncService, SyncModel, BlockSource, events::SyncEvent};
 
 use crate::{ManagerBlockSource, load_config, save_config, CONFIG_FILE_NAME};
 
@@ -25,6 +25,7 @@ pub struct DaemonStartup {
     pub connection_handle: ConnectionManagerHandle,
     pub sync_service: Arc<SyncService>,
     pub session_handles: Arc<DashMap<DeviceId, JoinHandle<()>>>,
+    pub device_id: DeviceId,
 }
 
 /// 启动 daemon，返回 future 和句柄
@@ -32,6 +33,7 @@ pub async fn start_daemon(
     config_dir: PathBuf,
     listen: String,
     device_name: String,
+    test_mode: bool,
 ) -> Result<DaemonStartup> {
     info!("Starting Syncthing Rust daemon from TUI...");
 
@@ -57,33 +59,102 @@ pub async fn start_daemon(
     };
     config.local_device_id = Some(device_id);
 
-    // 互操作测试自动配置（仅开发阶段）
-    if config.devices.is_empty() && config.folders.is_empty() {
+    // 自动迁移旧冲突端口到新默认端口
+    if config.listen_addr == "0.0.0.0:22000" {
+        warn!("Migrating listen_addr from 0.0.0.0:22000 to 0.0.0.0:22001 to avoid conflict with local Go Syncthing");
+        config.listen_addr = "0.0.0.0:22001".to_string();
+    }
+    if config.gui.address == "0.0.0.0:8384" || config.gui.address == "127.0.0.1:8384" {
+        warn!("Migrating gui.address from {} to 0.0.0.0:8385 to avoid conflict with local Go Syncthing", config.gui.address);
+        config.gui.address = "0.0.0.0:8385".to_string();
+    }
+
+    // 永久配置：云端格雷节点（Tailscale）
+    let gray_device_id: syncthing_core::DeviceId = "IKOL33P-FLMQFYA-4U4PZXY-3GUEXTV-XFMPM5E-3TIBH7C-AKXFRZC-2SULFAA".parse().unwrap();
+    let mut config_modified = false;
+    if !config.devices.iter().any(|d| d.id == gray_device_id) {
+        config.devices.push(syncthing_core::types::Device {
+            id: gray_device_id,
+            name: Some("gray-cloud".to_string()),
+            addresses: vec![syncthing_core::types::AddressType::Tcp("100.99.240.98:22000".to_string())],
+            paused: false,
+            introducer: false,
+        });
+        config_modified = true;
+    }
+
+    // 永久配置：test-folder 共享区域
+    let test_folder_path = std::path::PathBuf::from(r"C:\Users\22414\dev\third_party\syncthing-rust\test_rust_folder");
+    std::fs::create_dir_all(&test_folder_path).ok();
+    if let Some(idx) = config.folders.iter().position(|f| f.id == "test-folder") {
+        if !config.folders[idx].devices.contains(&device_id) {
+            config.folders[idx].devices.push(device_id);
+            config_modified = true;
+        }
+        if !config.folders[idx].devices.contains(&gray_device_id) {
+            config.folders[idx].devices.push(gray_device_id);
+            config_modified = true;
+        }
+    } else {
+        let mut test_folder = syncthing_core::types::Folder::new("test-folder", test_folder_path.to_string_lossy());
+        test_folder.devices.push(device_id);
+        test_folder.devices.push(gray_device_id);
+        config.folders.push(test_folder);
+        config_modified = true;
+    }
+
+    if test_mode {
+        // 互操作测试自动配置（仅开发阶段）：本地 Go 节点（127.0.0.1:22001）
         let go_cert_path = std::path::PathBuf::from(r"C:\Users\22414\dev\third_party\syncthing\test_go_home\cert.pem");
         let go_key_path = std::path::PathBuf::from(r"C:\Users\22414\dev\third_party\syncthing\test_go_home\key.pem");
+        let mut go_device_id = None;
         if go_cert_path.exists() && go_key_path.exists() {
             let cert = tokio::fs::read(&go_cert_path).await.unwrap_or_default();
             let key = tokio::fs::read(&go_key_path).await.unwrap_or_default();
             if let Ok(cfg) = SyncthingTlsConfig::from_pem(&cert, &key) {
-                let go_device_id = cfg.device_id();
-                config.devices.push(syncthing_core::types::Device {
-                    id: go_device_id,
-                    name: Some("go-syncthing".to_string()),
-                    addresses: vec![syncthing_core::types::AddressType::Tcp("127.0.0.1:22001".to_string())],
-                    paused: false,
-                    introducer: false,
-                });
-                let test_folder_path = std::path::PathBuf::from(r"C:\Users\22414\dev\third_party\syncthing-rust\test_rust_folder");
-                std::fs::create_dir_all(&test_folder_path).ok();
-                let mut test_folder = syncthing_core::types::Folder::new("test-folder", test_folder_path.to_string_lossy());
-                test_folder.devices.push(device_id);
-                test_folder.devices.push(go_device_id);
-                config.folders.push(test_folder);
-                if let Err(e) = save_config(&config_path, &config) {
-                    warn!("Failed to save auto-generated interop config: {}", e);
+                let id = cfg.device_id();
+                if !config.devices.iter().any(|d| d.id == id) {
+                    config.devices.push(syncthing_core::types::Device {
+                        id,
+                        name: Some("go-syncthing-local".to_string()),
+                        addresses: vec![syncthing_core::types::AddressType::Tcp("127.0.0.1:22001".to_string())],
+                        paused: false,
+                        introducer: false,
+                    });
+                    config_modified = true;
+                }
+                go_device_id = Some(id);
+            }
+        }
+        if let Some(idx) = config.folders.iter().position(|f| f.id == "test-folder") {
+            if let Some(gid) = go_device_id {
+                if !config.folders[idx].devices.contains(&gid) {
+                    config.folders[idx].devices.push(gid);
+                    config_modified = true;
                 }
             }
         }
+    }
+
+    if config_modified {
+        if let Err(e) = save_config(&config_path, &config) {
+            warn!("Failed to save config: {}", e);
+        }
+    }
+
+    // 自动生成 API key（若为空）
+    if config.gui.api_key.is_empty() {
+        let api_key: String = (0..32)
+            .map(|_| rand::random::<u8>() % 36)
+            .map(|i| if i < 10 { (b'0' + i) as char } else { (b'a' + i - 10) as char })
+            .collect();
+        config.gui.api_key = api_key.clone();
+        info!("Generated API key for REST API: {}", api_key);
+        if let Err(e) = save_config(&config_path, &config) {
+            warn!("Failed to save config with API key: {}", e);
+        }
+    } else {
+        info!("REST API enabled at {} with existing API key", config.gui.address);
     }
 
     if let Err(e) = save_config(&config_path, &config) {
@@ -159,6 +230,41 @@ pub async fn start_daemon(
         .context("failed to start sync service")?;
     info!("Sync service started");
 
+    // 启动事件监听任务：当本地索引更新时，向所有已连接设备发送 IndexUpdate
+    let event_sync_service = sync_service.clone();
+    let event_handle = handle.clone();
+    tokio::spawn(async move {
+        let mut subscriber = event_sync_service.events().subscribe();
+        while let Some(event) = subscriber.recv().await {
+            if let SyncEvent::LocalIndexUpdated { folder, files } = event {
+                if files.is_empty() {
+                    continue;
+                }
+                let update = syncthing_core::types::IndexUpdate {
+                    folder: folder.clone(),
+                    files: files.clone(),
+                };
+                let wire_update: bep_protocol::messages::IndexUpdate = update.into();
+                match bep_protocol::messages::encode_message(&wire_update) {
+                    Ok(payload) => {
+                        for device_id in event_handle.connected_devices() {
+                            if let Some(conn) = event_handle.get_connection(&device_id) {
+                                if let Err(e) = conn.send_message(MessageType::IndexUpdate, payload.clone()).await {
+                                    warn!("Failed to send IndexUpdate to {} for {}: {}", device_id, folder, e);
+                                } else {
+                                    info!("Sent IndexUpdate for {} to {} ({} files)", folder, device_id, files.len());
+                                }
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        warn!("Failed to encode IndexUpdate for {}: {}", folder, e);
+                    }
+                }
+            }
+        }
+    });
+
     let actual_addr = manager
         .start()
         .await
@@ -210,6 +316,7 @@ pub async fn start_daemon(
         connection_handle,
         sync_service,
         session_handles,
+        device_id,
     })
 }
 
@@ -242,6 +349,10 @@ async fn run_bep_session(
                     compression: bep_protocol::messages::Compression::Metadata as i32,
                     cert_name: String::new(),
                     max_sequence: 0,
+                    introducer: false,
+                    index_id: 0,
+                    skip_introduction_removals: false,
+                    encryption_password_token: Vec::new(),
                 }
             }).collect();
             bep_protocol::messages::WireFolder {
@@ -254,7 +365,7 @@ async fn run_bep_session(
         })
         .collect();
 
-    let cc = bep_protocol::messages::ClusterConfig { folders };
+    let cc = bep_protocol::messages::ClusterConfig { folders, secondary: false };
     if let Err(e) = conn.send_cluster_config(&cc).await {
         warn!("Failed to send ClusterConfig to {}: {}", device_id, e);
         return;
@@ -276,7 +387,7 @@ async fn run_bep_session(
                                 break;
                             }
                             Err(e) => {
-                                warn!("Failed to decode ClusterConfig from {}: {}", device_id, e);
+                                warn!("Failed to decode ClusterConfig from {}: {} (payload hex: {})", device_id, e, hex::encode(&payload));
                             }
                         }
                     }
@@ -377,8 +488,33 @@ async fn run_bep_session(
                             MessageType::Request => {
                                 match bep_protocol::messages::decode_message::<bep_protocol::messages::Request>(&payload) {
                                     Ok(req) => {
-                                        if let Err(e) = handle_request(&conn, &sync_service, req).await {
-                                            warn!("Failed to handle Request from {}: {}", device_id, e);
+                                        match sync_service.handle_block_request(&req).await {
+                                            Ok(data) => {
+                                                let resp = bep_protocol::messages::Response {
+                                                    id: req.id,
+                                                    data,
+                                                    code: bep_protocol::messages::ErrorCode::NoError as i32,
+                                                };
+                                                match bep_protocol::messages::encode_message(&resp) {
+                                                    Ok(payload) => {
+                                                        if let Err(e) = conn.send_message(MessageType::Response, payload).await {
+                                                            warn!("Failed to send Response to {}: {}", device_id, e);
+                                                        }
+                                                    }
+                                                    Err(e) => warn!("Failed to encode Response for {}: {}", device_id, e),
+                                                }
+                                            }
+                                            Err(e) => {
+                                                warn!("Block request from {} failed: {}", device_id, e);
+                                                let resp = bep_protocol::messages::Response {
+                                                    id: req.id,
+                                                    data: vec![],
+                                                    code: e.error_code() as i32,
+                                                };
+                                                if let Ok(payload) = bep_protocol::messages::encode_message(&resp) {
+                                                    let _ = conn.send_message(MessageType::Response, payload).await;
+                                                }
+                                            }
                                         }
                                     }
                                     Err(e) => warn!("Failed to decode Request from {}: {}", device_id, e),
@@ -422,76 +558,4 @@ async fn run_bep_session(
     let _ = handle.disconnect(&device_id, "bep session ended").await;
 }
 
-async fn handle_request(
-    conn: &syncthing_net::connection::BepConnection,
-    sync_service: &SyncService,
-    req: bep_protocol::messages::Request,
-) -> anyhow::Result<()> {
-    let config = sync_service.get_config().await.unwrap_or_default();
-    let folder = config.folders.into_iter().find(|f| f.id == req.folder);
-    let folder_path = match folder {
-        Some(f) => f.path,
-        None => {
-            let resp = bep_protocol::messages::Response {
-                id: req.id,
-                data: vec![],
-                error: "folder not found".to_string(),
-            };
-            let payload = bep_protocol::messages::encode_message(&resp)?;
-            conn.send_message(MessageType::Response, payload).await?;
-            return Ok(());
-        }
-    };
 
-    let file_path = std::path::PathBuf::from(&folder_path).join(&req.name);
-    let mut file = match tokio::fs::File::open(&file_path).await {
-        Ok(f) => f,
-        Err(e) => {
-            let resp = bep_protocol::messages::Response {
-                id: req.id,
-                data: vec![],
-                error: format!("open failed: {}", e),
-            };
-            let payload = bep_protocol::messages::encode_message(&resp)?;
-            conn.send_message(MessageType::Response, payload).await?;
-            return Ok(());
-        }
-    };
-
-    if let Err(e) = file.seek(std::io::SeekFrom::Start(req.offset as u64)).await {
-        let resp = bep_protocol::messages::Response {
-            id: req.id,
-            data: vec![],
-            error: format!("seek failed: {}", e),
-        };
-        let payload = bep_protocol::messages::encode_message(&resp)?;
-        conn.send_message(MessageType::Response, payload).await?;
-        return Ok(());
-    }
-
-    let size = req.size.max(0) as usize;
-    let mut buf = vec![0u8; size];
-    let n = match file.read(&mut buf).await {
-        Ok(n) => n,
-        Err(e) => {
-            let resp = bep_protocol::messages::Response {
-                id: req.id,
-                data: vec![],
-                error: format!("read failed: {}", e),
-            };
-            let payload = bep_protocol::messages::encode_message(&resp)?;
-            conn.send_message(MessageType::Response, payload).await?;
-            return Ok(());
-        }
-    };
-    buf.truncate(n);
-
-    let resp = bep_protocol::messages::Response {
-        id: req.id,
-        data: buf,
-        error: String::new(),
-    };
-    let payload = bep_protocol::messages::encode_message(&resp)?;
-    conn.send_message(MessageType::Response, payload).await?;
-    Ok(())
-}

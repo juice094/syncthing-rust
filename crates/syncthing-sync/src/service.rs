@@ -2,6 +2,7 @@
 //! 
 //! 主服务实现，管理所有文件夹模型和同步循环
 
+use crate::block_server;
 use crate::database::LocalDatabase;
 use crate::error::{Result, SyncError};
 use crate::events::{EventPublisher, EventSubscriber, SyncEvent};
@@ -152,8 +153,10 @@ impl SyncService {
             
             let scan_shutdown = shutdown_rx.clone();
             let pull_shutdown = shutdown_rx.clone();
+            let watcher_shutdown = shutdown_rx.clone();
             let scan_folder_model = folder_model.clone();
             let pull_folder_model = folder_model.clone();
+            let watcher_folder_model = folder_model.clone();
 
             supervisor.add_task(SupervisedTask {
                 name: format!("{}-scan", folder_id),
@@ -182,6 +185,23 @@ impl SyncService {
                         let shutdown = shutdown.clone();
                         Box::pin(async move {
                             model.start_pull_loop(shutdown).await;
+                            Ok(())
+                        })
+                    }
+                }),
+                config: RestartConfig::default(),
+            });
+
+            supervisor.add_task(SupervisedTask {
+                name: format!("{}-watcher", folder_id),
+                future_factory: Box::new({
+                    let model = watcher_folder_model;
+                    let shutdown = watcher_shutdown;
+                    move || {
+                        let model = model.clone();
+                        let shutdown = shutdown.clone();
+                        Box::pin(async move {
+                            model.start_watcher_loop(shutdown).await;
                             Ok(())
                         })
                     }
@@ -388,6 +408,21 @@ impl SyncService {
         Ok(needed)
     }
 
+    /// 处理远程块请求（供网络层调用）
+    pub async fn handle_block_request(
+        &self,
+        req: &bep_protocol::messages::Request,
+    ) -> std::result::Result<Vec<u8>, block_server::BlockRequestError> {
+        let config = self.config.read().await;
+        let folder = config.folders.iter().find(|f| f.id == req.folder);
+        let folder_path = match folder {
+            Some(f) => std::path::PathBuf::from(&f.path),
+            None => return Err(block_server::BlockRequestError::FolderNotFound),
+        };
+        drop(config);
+        block_server::serve_block_request(&folder_path, req).await
+    }
+
     /// 生成索引更新（供网络层调用）
     pub async fn generate_index_update(&self, folder_id: &str, since_sequence: u64) -> Result<Vec<FileInfo>> {
         self.index_handler.generate_index_update(folder_id, since_sequence).await
@@ -401,6 +436,76 @@ impl SyncService {
     /// 获取文件夹模型
     pub fn get_folder(&self, folder_id: &str) -> Option<Arc<FolderModel>> {
         self.folders.get(folder_id).map(|f| f.clone())
+    }
+}
+
+#[async_trait::async_trait]
+impl syncthing_core::traits::SyncModel for SyncService {
+    async fn start_folder(&self, _folder: syncthing_core::FolderId) -> syncthing_core::Result<()> {
+        // TODO: 实现单个 folder 的启动/恢复
+        Ok(())
+    }
+
+    async fn stop_folder(&self, _folder: syncthing_core::FolderId) -> syncthing_core::Result<()> {
+        // TODO: 实现单个 folder 的停止/暂停
+        Ok(())
+    }
+
+    async fn scan_folder(&self, folder: &syncthing_core::FolderId) -> syncthing_core::Result<()> {
+        crate::model::SyncModel::scan_folder(self, folder.as_str()).await
+            .map_err(|e| syncthing_core::SyncthingError::internal(e.to_string()))
+    }
+
+    async fn pull(&self, folder: &syncthing_core::FolderId) -> syncthing_core::Result<syncthing_core::traits::SyncResult> {
+        crate::model::SyncModel::pull_folder(self, folder.as_str()).await
+            .map_err(|e| syncthing_core::SyncthingError::internal(e.to_string()))?;
+        Ok(syncthing_core::traits::SyncResult {
+            files_processed: 0,
+            bytes_transferred: 0,
+            errors: vec![],
+        })
+    }
+
+    async fn folder_status(&self, folder: &syncthing_core::FolderId) -> syncthing_core::Result<syncthing_core::traits::FolderStatus> {
+        match self.get_folder(folder.as_str()) {
+            Some(folder_model) => {
+                let state = folder_model.state().await;
+                let status = match state.status {
+                    syncthing_core::types::FolderStatus::Idle
+                    | syncthing_core::types::FolderStatus::ScanWaiting
+                    | syncthing_core::types::FolderStatus::SyncWaiting
+                    | syncthing_core::types::FolderStatus::Synced => {
+                        syncthing_core::traits::FolderStatus::Idle
+                    }
+                    syncthing_core::types::FolderStatus::Scanning => {
+                        syncthing_core::traits::FolderStatus::Scanning
+                    }
+                    syncthing_core::types::FolderStatus::Pulling
+                    | syncthing_core::types::FolderStatus::Pushing => {
+                        syncthing_core::traits::FolderStatus::Syncing { progress: 0.0 }
+                    }
+                    syncthing_core::types::FolderStatus::Paused => {
+                        syncthing_core::traits::FolderStatus::Paused
+                    }
+                    syncthing_core::types::FolderStatus::Error => {
+                        syncthing_core::traits::FolderStatus::Error {
+                            message: "folder error".to_string(),
+                        }
+                    }
+                };
+                Ok(status)
+            }
+            None => Err(syncthing_core::SyncthingError::internal(format!(
+                "folder not found: {}",
+                folder
+            ))),
+        }
+    }
+
+    async fn handle_connection(&self, _conn: Box<dyn syncthing_core::traits::BepConnection>) -> syncthing_core::Result<()> {
+        Err(syncthing_core::SyncthingError::internal(
+            "handle_connection not available via REST API",
+        ))
     }
 }
 

@@ -15,6 +15,7 @@ use std::sync::Arc;
 use axum::{
     extract::{Path, State},
     http::StatusCode,
+    middleware::Next,
     response::IntoResponse,
     routing::{get, post},
     Json, Router,
@@ -45,6 +46,8 @@ pub struct ApiState {
     pub sync_model: Option<Arc<dyn SyncModel>>,
     /// Local device ID
     pub my_id: Option<DeviceId>,
+    /// Optional API key for authentication
+    pub api_key: Option<String>,
 }
 
 impl ApiState {
@@ -59,7 +62,31 @@ impl ApiState {
             event_bus,
             sync_model,
             my_id: None,
+            api_key: None,
         }
+    }
+}
+
+/// API Key 认证中间件
+async fn api_key_middleware(
+    State(state): State<ApiState>,
+    req: axum::extract::Request,
+    next: Next,
+) -> std::result::Result<axum::response::Response, axum::http::StatusCode> {
+    if req.uri().path() == "/rest/health" {
+        return Ok(next.run(req).await);
+    }
+    if let Some(ref key) = state.api_key {
+        let header = req
+            .headers()
+            .get("x-api-key")
+            .and_then(|v| v.to_str().ok());
+        match header {
+            Some(h) if h == key => Ok(next.run(req).await),
+            _ => Err(axum::http::StatusCode::UNAUTHORIZED),
+        }
+    } else {
+        Ok(next.run(req).await)
     }
 }
 
@@ -98,7 +125,8 @@ impl RestApi {
     }
 
     /// Build the API router with all routes
-    fn build_router(state: ApiState) -> Router {
+    pub fn build_router(state: ApiState) -> Router {
+        let auth_layer = axum::middleware::from_fn_with_state(state.clone(), api_key_middleware);
         Router::new()
             // Folder management
             .route("/rest/folders", get(list_folders).post(create_folder))
@@ -131,6 +159,7 @@ impl RestApi {
             // WebSocket events
             .route("/rest/events", get(handlers::websocket_handler))
             // Middleware
+            .layer(auth_layer)
             .layer(CorsLayer::permissive())
             .layer(TraceLayer::new_for_http())
             .with_state(state)
