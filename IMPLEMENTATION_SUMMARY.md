@@ -3,7 +3,7 @@
 > **项目说明**：基于 Rust 的 Syncthing 兼容实现，采用多 crate 工作区结构。目标是通过直接参照 Go Syncthing 源码，构建一个功能完整的去中心化文件同步 daemon。
 >
 > **仓库位置**：`C:\Users\22414`  
-> **最新更新**：2026-04-09
+> **最新更新**：2026-04-15（新增文件系统 watcher、BEP 连接稳定性修复、REST API 基础实现，默认端口迁移至 22001/8385）
 
 ---
 
@@ -72,14 +72,15 @@
 | 任务队列/执行器 | ✅ | 优先级队列 + 并发限制 |
 | 数据库抽象 | ✅ | `MemoryDatabase` 和 `FileSystemDatabase` (JSON) |
 | **Puller 块拉取** | ✅ | `BlockSource` trait 已对接，`Puller` 可通过 BEP Request/Response 拉取真实块 |
-| 推送 (Push) | ❌ | 未实现，只有拉取 (Pull) 方向 |
+| 文件系统 watcher | ✅ | `FolderModel` 集成 `notify` watcher，支持秒级触发 scan + IndexUpdate |
+| 推送 (Push) | ❌ | 未实现主动推送逻辑，但 IndexUpdate 可由 watcher/scan 触发自动广播 |
 
 ### 5. `cmd/syncthing` — ✅ 已成为真实 daemon
 | 子命令 | 状态 |
 |--------|------|
 | `generate-cert` | ✅ 可用 |
 | `show-id` | ✅ 可用 |
-| `run` | ✅ 可用 | 启动 `SyncService` + `ConnectionManager`，共享 TLS 证书，已注入 `ManagerBlockSource`，具备块拉取能力 |
+| `run` | ✅ 可用 | 启动 `SyncService` + `ConnectionManager`，共享 TLS 证书，已注入 `ManagerBlockSource`，具备块拉取能力；默认端口 22001/8385，自动回退避免与本地 Go 节点冲突 |
 
 ---
 
@@ -97,6 +98,19 @@
 - **BEP 标准帧格式**: 从自定义格式切换为标准 BEP `[header_len][Header][msg_len][Message]` 帧
 - **ClusterConfig 完整性**: 在每个 `WireFolder` 的 `devices` 列表中填入本地设备信息
 - **测试结果**: Rust 与 Go 成功交换双向 `ClusterConfig`，发送 `Index`，进入**稳定 steady-state BEP 循环**，连接持续保持（30s+ 测试通过）
+
+### 2026-04-11：跨网络 BEP 互通与文件同步验证 ✅
+- **网络环境**: Rust 节点通过 Tailscale 连接云端 Go 节点 (`100.99.240.98:22000`)
+- **关键修复**: LZ4 解压、Protobuf tag 对齐、读写死锁消除
+- **验证结果**: 成功完成 TLS → Hello → ClusterConfig → Index → Request/Response 全链路，`gray_test.txt` 完整下载并校验内容一致
+- **连接保活修复**: 解决 `manager.rs` stale 误判问题，修复自动重连退避逻辑
+- **详细报告**: [VERIFICATION_REPORT_BEP_2026-04-11.md](./VERIFICATION_REPORT_BEP_2026-04-11.md)
+
+### 2026-04-15：文件系统 watcher 与双节点共存验证 ✅
+- **fs watcher**: 基于 `notify` v7.0.0 为每个 folder 启动 `RecommendedWatcher`，1s debounce 后触发 scan，文件变更在 **2 秒内** 触发 `IndexUpdate` 并推送到云端 Go 节点
+- **端口共存**: 默认 BEP 端口永久迁移至 `22001`，REST API 迁移至 `8385`，绑定失败时自动回退随机端口，实现与本地 Go 节点（`:22000/:8384`）长期并行运行
+- **重连修复**: 修复 `schedule_reconnect` 因 `pending_connections` 竞态导致二次拨号被拦截的 bug
+- **TUI 修复**: `Add Folder` 弹窗中 `Space` 键可正常切换设备 checkbox，Tab/BackTab 焦点能正确进入设备选择区
 
 ---
 
@@ -144,10 +158,11 @@ cargo run --release -p syncthing -- run -l 127.0.0.1:22000 -c %TEMP%\syncthing_t
 9. ✅ BEP Index/ClusterConfig 自动交换 → 已打通
 
 ### 待完成工作
-1. **端到端文件同步验证**：配置真实测试文件，验证 Pull 方向能否完整下载
+1. ✅ **端到端文件同步验证（Pull）**：2026-04-11 已通过跨网络测试验证完整下载
 2. **推送 (Push) 方向**：实现块的上传响应能力
 3. **配置持久化**：将 `run` 命令的硬编码配置迁移到 TOML/JSON 配置文件
 4. **Web UI / REST API**：当前尚未实现 Web GUI 或 REST API
+5. **acceptance-tests crate**：因 `BepMessage` API 变更暂被排除，修复成本/收益待评估
 
 ---
 
@@ -171,3 +186,24 @@ cmd/
 - Go Syncthing: `lib/connections/`, `lib/protocol/`
 - Tailscale: 网络监听与端口映射策略
 - iroh: QUIC 传输与 TLS 证书处理
+
+---
+
+## 七、未来发展路线（初步设想，非承诺）
+
+> ⚠️ **以下内容为方向性思考，尚未进入实施排期，具体优先级可能随项目进展调整。**  
+> 请勿将其视为已确定或已完成的交付物。
+
+### Phase 1 — 核心对等节点能力（当前重点）
+- 推送（Push）方向：实现块的上传响应能力，使 Rust 节点成为真正的双向对等节点
+- 配置持久化：将 `run` 命令的硬编码配置迁移到 TOML/JSON 配置文件
+- REST API：提供与官方 Syncthing 兼容的基础 REST 接口
+- Web GUI 托管：内置轻量 HTTP 服务器，可托管官方 Web GUI 静态资源
+
+### Phase 2 — 网络可达性体验优化
+- 完善 STUN、relay、local discovery，降低对特定网络环境的依赖
+- 可选的地址解析插件：允许从 Tailscale API / Headscale API 等外部来源动态获取 peer 地址（仅做轻量 API 调用，不引入 Tailscale 内核）
+
+### Phase 3 — 可选的深度网络集成（远期评估）
+- 若到那时有明确需求且收益大于成本，可评估将 Tailscale（`tsnet` / `magicsock`）或 iroh 作为可选 Cargo feature 引入传输层
+- 该阶段需以 Phase 1 的协议完整性和稳定 ABI 为前提

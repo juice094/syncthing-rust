@@ -1,7 +1,9 @@
 //! BEP 连接实现
 //!
-//! 实现Syncthing BEP协议的连接层
+//! 实现 Syncthing BEP 协议的连接层，支持 TLS 握手、Hello 交换、标准 BEP 帧编解码、
+//! LZ4 解压以及独立的读写半流（tokio::io::split）。
 //! 参考: syncthing/lib/connections/*.go
+//! 2026-04-11 已验证与 Go BEP 实现跨网络互通（参见 VERIFICATION_REPORT_BEP_2026-04-11.md）。
 
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -142,8 +144,10 @@ impl tokio::io::AsyncWrite for TcpBiStream {
 pub struct BepConnection {
     /// 内部状态
     inner: Arc<ConnectionInner>,
-    /// 底层TCP流
-    stream: Arc<Mutex<TcpBiStream>>,
+    /// 读取端
+    read_half: Arc<Mutex<Option<tokio::io::ReadHalf<TcpBiStream>>>>,
+    /// 写入端
+    write_half: Arc<Mutex<Option<tokio::io::WriteHalf<TcpBiStream>>>>,
     /// 消息发送通道
     message_tx: mpsc::UnboundedSender<Message>,
     /// 事件发送器
@@ -181,6 +185,8 @@ impl BepConnection {
         
         let id = uuid::Uuid::new_v4();
         
+        let (read_half, write_half) = tokio::io::split(stream);
+        
         let conn = Arc::new(Self {
             inner: Arc::new(ConnectionInner {
                 id,
@@ -196,7 +202,8 @@ impl BepConnection {
                 last_ping: RwLock::new(Instant::now()),
                 last_pong: RwLock::new(Instant::now()),
             }),
-            stream: Arc::new(Mutex::new(stream)),
+            read_half: Arc::new(Mutex::new(Some(read_half))),
+            write_half: Arc::new(Mutex::new(Some(write_half))),
             message_tx,
             event_tx,
             shutdown_tx: RwLock::new(Some(shutdown_tx)),
@@ -264,6 +271,16 @@ impl BepConnection {
     /// 获取统计信息
     pub fn stats(&self) -> ConnectionStats {
         self.inner.stats.read().clone()
+    }
+
+    /// 返回自上次收发消息以来的时长
+    pub fn last_activity_age(&self) -> Option<Duration> {
+        let stats = self.inner.stats.read();
+        stats.last_activity.map(|t| {
+            (chrono::Utc::now() - t)
+                .to_std()
+                .unwrap_or(Duration::from_secs(0))
+        })
     }
     
     /// 更新统计信息
@@ -388,22 +405,20 @@ impl BepConnection {
     
     /// 启动读取任务
     fn spawn_read_task(&self) -> tokio::task::JoinHandle<Result<()>> {
-        let stream = Arc::clone(&self.stream);
+        let read_half = Arc::clone(&self.read_half);
         let event_tx = self.event_tx.clone();
         let incoming_tx = self.incoming_tx.clone();
         let inner = Arc::clone(&self.inner);
 
         tokio::spawn(async move {
+            let mut read_half = read_half.lock().await.take().expect("read_half already taken");
             loop {
-                let mut stream_guard = stream.lock().await;
-
                 // 读取 2 字节 header length
                 let mut hdr_len_buf = [0u8; 2];
-                match timeout(DEFAULT_MESSAGE_TIMEOUT, stream_guard.read_exact(&mut hdr_len_buf)).await {
+                match timeout(DEFAULT_MESSAGE_TIMEOUT, read_half.read_exact(&mut hdr_len_buf)).await {
                     Ok(Ok(_)) => {}
                     Ok(Err(e)) => return Err(SyncthingError::Io(e)),
                     Err(_) => {
-                        drop(stream_guard);
                         continue;
                     }
                 }
@@ -411,7 +426,7 @@ impl BepConnection {
 
                 // 读取 header 字节
                 let mut hdr_buf = vec![0u8; hdr_len];
-                match timeout(DEFAULT_MESSAGE_TIMEOUT, stream_guard.read_exact(&mut hdr_buf)).await {
+                match timeout(DEFAULT_MESSAGE_TIMEOUT, read_half.read_exact(&mut hdr_buf)).await {
                     Ok(Ok(_)) => {}
                     Ok(Err(e)) => return Err(SyncthingError::Io(e)),
                     Err(_) => return Err(SyncthingError::timeout("header read timeout")),
@@ -419,7 +434,7 @@ impl BepConnection {
 
                 // 读取 4 字节 message length
                 let mut msg_len_buf = [0u8; 4];
-                match timeout(DEFAULT_MESSAGE_TIMEOUT, stream_guard.read_exact(&mut msg_len_buf)).await {
+                match timeout(DEFAULT_MESSAGE_TIMEOUT, read_half.read_exact(&mut msg_len_buf)).await {
                     Ok(Ok(_)) => {}
                     Ok(Err(e)) => return Err(SyncthingError::Io(e)),
                     Err(_) => return Err(SyncthingError::timeout("message length read timeout")),
@@ -428,7 +443,7 @@ impl BepConnection {
 
                 // 读取 message 字节
                 let mut msg_buf = vec![0u8; msg_len];
-                match timeout(DEFAULT_MESSAGE_TIMEOUT, stream_guard.read_exact(&mut msg_buf)).await {
+                match timeout(DEFAULT_MESSAGE_TIMEOUT, read_half.read_exact(&mut msg_buf)).await {
                     Ok(Ok(_)) => {}
                     Ok(Err(e)) => return Err(SyncthingError::Io(e)),
                     Err(_) => return Err(SyncthingError::timeout("message read timeout")),
@@ -440,7 +455,6 @@ impl BepConnection {
                 stats.last_activity = Some(chrono::Utc::now());
                 stats.messages_received += 1;
                 drop(stats);
-                drop(stream_guard);
 
                 // 解码 BEP Header
                 let bep_header = match <bep_protocol::messages::Header as prost::Message>::decode(&hdr_buf[..]) {
@@ -451,6 +465,20 @@ impl BepConnection {
                 let header = match MessageHeader::from_bep_header(&bep_header) {
                     Some(h) => h,
                     None => return Err(SyncthingError::protocol(format!("unknown message type: {}", bep_header.r#type))),
+                };
+
+                // 处理 LZ4 压缩
+                let msg_buf = if header.compressed {
+                    if msg_buf.len() < 4 {
+                        return Err(SyncthingError::protocol("compressed message too short".to_string()));
+                    }
+                    let uncompressed_size = u32::from_be_bytes([msg_buf[0], msg_buf[1], msg_buf[2], msg_buf[3]]) as usize;
+                    match lz4::block::decompress(&msg_buf[4..], Some(uncompressed_size as i32)) {
+                        Ok(decompressed) => decompressed,
+                        Err(e) => return Err(SyncthingError::protocol(format!("lz4 decompress failed: {}", e))),
+                    }
+                } else {
+                    msg_buf
                 };
 
                 debug!("Received message: {:?}", header.message_type);
@@ -472,10 +500,11 @@ impl BepConnection {
         &self,
         message_rx: Arc<Mutex<mpsc::UnboundedReceiver<Message>>>,
     ) -> tokio::task::JoinHandle<Result<()>> {
-        let stream = Arc::clone(&self.stream);
+        let write_half = Arc::clone(&self.write_half);
         let inner = Arc::clone(&self.inner);
 
         tokio::spawn(async move {
+            let mut write_half = write_half.lock().await.take().expect("write_half already taken");
             let mut rx = message_rx.lock().await;
 
             while let Some(msg) = rx.recv().await {
@@ -487,30 +516,27 @@ impl BepConnection {
                 let hdr_len = hdr_buf.len();
                 let msg_len = msg.payload.len();
 
-                let mut stream_guard = stream.lock().await;
-
                 // header length (2 bytes)
-                if let Err(e) = stream_guard.write_all(&(hdr_len as u16).to_be_bytes()).await {
+                if let Err(e) = write_half.write_all(&(hdr_len as u16).to_be_bytes()).await {
                     return Err(SyncthingError::Io(e));
                 }
                 // header
-                if let Err(e) = stream_guard.write_all(&hdr_buf).await {
+                if let Err(e) = write_half.write_all(&hdr_buf).await {
                     return Err(SyncthingError::Io(e));
                 }
                 // message length (4 bytes)
-                if let Err(e) = stream_guard.write_all(&(msg_len as u32).to_be_bytes()).await {
+                if let Err(e) = write_half.write_all(&(msg_len as u32).to_be_bytes()).await {
                     return Err(SyncthingError::Io(e));
                 }
                 // payload
                 if !msg.payload.is_empty() {
-                    if let Err(e) = stream_guard.write_all(&msg.payload).await {
+                    if let Err(e) = write_half.write_all(&msg.payload).await {
                         return Err(SyncthingError::Io(e));
                     }
                 }
-                if let Err(e) = stream_guard.flush().await {
+                if let Err(e) = write_half.flush().await {
                     return Err(SyncthingError::Io(e));
                 }
-                drop(stream_guard);
 
                 let mut stats = inner.stats.write();
                 stats.bytes_sent += (2 + hdr_len + 4 + msg_len) as u64;

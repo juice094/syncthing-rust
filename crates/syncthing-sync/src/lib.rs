@@ -19,6 +19,8 @@ pub mod events;
 pub mod database;
 pub mod supervisor;
 pub mod sync_task;
+pub mod block_server;
+pub mod watcher;
 
 pub use supervisor::{Supervisor, RestartConfig, RestartPolicy};
 

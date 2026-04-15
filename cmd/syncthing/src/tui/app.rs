@@ -85,6 +85,7 @@ pub struct App {
     pub device_form: FormState,
     pub folder_form: FormState,
     pub folder_device_selection: Vec<bool>, // 对应 config.devices 的多选
+    pub folder_device_selected: usize,      // 当前高亮的设备列表项
 }
 
 impl App {
@@ -106,6 +107,7 @@ impl App {
             device_form: FormState::new(vec![String::new(), String::new(), String::new()]),
             folder_form: FormState::new(vec![String::new(), String::new()]),
             folder_device_selection: vec![false; device_count],
+            folder_device_selected: 0,
         }
     }
 

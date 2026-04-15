@@ -59,25 +59,23 @@ struct ConnectionEntry {
     conn: Arc<BepConnection>,
     /// 连接建立时间
     connected_at: Instant,
-    /// 最后活动时间
-    last_activity: Instant,
     /// 重试次数
     retry_count: u32,
 }
 
 impl ConnectionEntry {
     fn new(conn: Arc<BepConnection>) -> Self {
-        let now = Instant::now();
         Self {
             conn,
-            connected_at: now,
-            last_activity: now,
+            connected_at: Instant::now(),
             retry_count: 0,
         }
     }
-    
+
     fn is_stale(&self, timeout: Duration) -> bool {
-        self.last_activity.elapsed() > timeout
+        self.conn
+            .last_activity_age()
+            .map_or(true, |age| age > timeout)
     }
 }
 
@@ -238,14 +236,29 @@ impl ConnectionManager {
         
         let mut tcp_transport = TcpTransport::new(
             self.config.listen_addr,
-            handle,
+            handle.clone(),
             self.local_device_id,
             "syncthing-rust".to_string(),
             Arc::clone(&self.tls_config),
         );
         
-        // 启动TCP监听
-        let listen_addr = tcp_transport.start().await?;
+        // 启动TCP监听，失败时回退到随机端口
+        let listen_addr = match tcp_transport.start().await {
+            Ok(addr) => addr,
+            Err(e) if self.config.listen_addr.port() != 0 => {
+                warn!("Failed to bind TCP listener to {}, trying random port: {}", self.config.listen_addr, e);
+                let fallback_addr: SocketAddr = "0.0.0.0:0".parse().unwrap();
+                let mut tcp_transport_fallback = TcpTransport::new(
+                    fallback_addr,
+                    handle,
+                    self.local_device_id,
+                    "syncthing-rust".to_string(),
+                    Arc::clone(&self.tls_config),
+                );
+                tcp_transport_fallback.start().await?
+            }
+            Err(e) => return Err(e),
+        };
         
         *self.running.write() = true;
         
@@ -364,17 +377,22 @@ impl ConnectionManager {
     /// 断开与设备的连接
     async fn disconnect(&self, device_id: &DeviceId, reason: &str) -> syncthing_core::Result<()> {
         info!("Disconnecting device {}: {}", device_id, reason);
-        
+
         if let Some((_, entry)) = self.connections.remove(device_id) {
             entry.conn.close().await?;
             self.conn_id_index.remove(&entry.conn.id());
-            
+
             // 触发回调
             if let Some(callback) = self.on_disconnected.read().as_ref() {
                 callback(*device_id, reason.to_string());
             }
         }
-        
+
+        // 触发重连（如果适用）
+        if self.should_reconnect(device_id, reason) {
+            self.schedule_reconnect(*device_id).await;
+        }
+
         Ok(())
     }
     
@@ -396,7 +414,7 @@ impl ConnectionManager {
             debug!("Device {} is already connected", device_id);
             return Ok(());
         }
-        
+
         // 检查是否已在连接中
         {
             let pending = self.pending_connections.read().await;
@@ -405,10 +423,16 @@ impl ConnectionManager {
                 return Ok(());
             }
         }
-        
+
         // 存储地址
         self.device_addresses.insert(device_id, addresses.clone());
-        
+
+        // 继承已有重试次数（如果存在）
+        let retry_count = {
+            let pending = self.pending_connections.read().await;
+            pending.get(&device_id).map(|p| p.retry_count).unwrap_or(0)
+        };
+
         // 添加到待连接列表
         let (cancel_tx, cancel_rx) = oneshot::channel();
         {
@@ -416,15 +440,15 @@ impl ConnectionManager {
             pending.insert(device_id, PendingConnection {
                 device_id,
                 addresses: addresses.clone(),
-                retry_count: 0,
-                last_attempt: None,
+                retry_count,
+                last_attempt: Some(Instant::now()),
                 _cancel_tx: Some(cancel_tx),
             });
         }
-        
+
         // 启动连接任务
         self.spawn_connect_task(device_id, addresses, cancel_rx);
-        
+
         Ok(())
     }
     
@@ -444,6 +468,9 @@ impl ConnectionManager {
             tokio::select! {
                 _ = &mut cancel_rx => {
                     debug!("Connection task for {} cancelled", device_id);
+                    if let Some(manager) = self_weak.upgrade() {
+                        manager.pending_connections.write().await.remove(&device_id);
+                    }
                 }
                 result = parallel_dialer.dial(
                     device_id,
@@ -456,11 +483,17 @@ impl ConnectionManager {
                             if let Some(manager) = self_weak.upgrade() {
                                 if let Err(e) = manager.register_connection(device_id, conn).await {
                                     warn!("Failed to register connection for {}: {}", device_id, e);
+                                    manager.pending_connections.write().await.remove(&device_id);
+                                    manager.schedule_reconnect(device_id).await;
                                 }
                             }
                         }
                         Err(e) => {
                             warn!("Failed to dial {}: {}", device_id, e);
+                            if let Some(manager) = self_weak.upgrade() {
+                                manager.pending_connections.write().await.remove(&device_id);
+                                manager.schedule_reconnect(device_id).await;
+                            }
                         }
                     }
                 }
@@ -611,31 +644,43 @@ impl ConnectionManager {
             .get(&device_id)
             .map(|e| e.clone())
             .unwrap_or_default();
-        
+
         if addresses.is_empty() {
             warn!("No addresses available for device {}, skipping reconnect", device_id);
             return;
         }
-        
-        // 获取当前重试次数
+
+        // 增加/设置重试次数
         let retry_count = {
-            let pending = self.pending_connections.read().await;
-            pending.get(&device_id)
-                .map(|p| p.retry_count)
-                .unwrap_or(0)
+            let mut pending = self.pending_connections.write().await;
+            if let Some(p) = pending.get_mut(&device_id) {
+                p.retry_count += 1;
+                p.retry_count
+            } else {
+                pending.insert(device_id, PendingConnection {
+                    device_id,
+                    addresses: addresses.clone(),
+                    retry_count: 1,
+                    last_attempt: Some(Instant::now()),
+                    _cancel_tx: None,
+                });
+                1
+            }
         };
-        
+
         // 计算退避时间
         let backoff = self.config.retry_config.backoff_duration(retry_count);
-        
-        info!("Scheduling reconnect to {} in {:?}", device_id, backoff);
-        
+
+        info!("Scheduling reconnect to {} in {:?} (retry_count={})", device_id, backoff, retry_count);
+
         // 延迟后重连
         let weak = self.self_weak.read().clone().unwrap();
         tokio::spawn(async move {
             sleep(backoff).await;
-            
+
             if let Some(manager) = weak.upgrade() {
+                // 清除 pending 状态，否则 connect_to 会因"already pending"而直接返回
+                manager.pending_connections.write().await.remove(&device_id);
                 if let Err(e) = manager.connect_to(device_id, addresses).await {
                     warn!("Scheduled reconnect to {} failed: {}", device_id, e);
                 }

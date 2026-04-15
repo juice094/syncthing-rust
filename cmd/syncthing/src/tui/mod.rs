@@ -155,7 +155,7 @@ async fn toggle_daemon(
         let listen = app.listen.clone();
         let device_name = app.device_name.clone();
 
-        match daemon_runner::start_daemon(config_dir, listen, device_name).await {
+        match daemon_runner::start_daemon(config_dir, listen, device_name, false).await {
             Ok(startup) => {
                 *daemon_handle = Some(startup.connection_handle);
                 let fut = startup.future;

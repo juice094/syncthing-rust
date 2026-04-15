@@ -179,10 +179,10 @@ fn handle_add_folder_key(app: &mut App, key: KeyEvent) -> bool {
     match key.code {
         KeyCode::Esc => app.popup = Popup::None,
         KeyCode::Tab => {
-            app.folder_form.focus = (app.folder_form.focus + 1) % app.folder_form.fields.len().max(1);
+            app.folder_form.focus = (app.folder_form.focus + 1) % (app.folder_form.fields.len() + 1);
         }
         KeyCode::BackTab => {
-            let len = app.folder_form.fields.len().max(1);
+            let len = app.folder_form.fields.len() + 1;
             if app.folder_form.focus == 0 {
                 app.folder_form.focus = len - 1;
             } else {
@@ -212,10 +212,25 @@ fn handle_add_folder_key(app: &mut App, key: KeyEvent) -> bool {
             app.popup = Popup::None;
             save_and_log(app);
         }
+        KeyCode::Down => {
+            if app.folder_form.focus == app.folder_form.fields.len() {
+                if app.folder_device_selected + 1 < app.config.devices.len() {
+                    app.folder_device_selected += 1;
+                }
+            }
+        }
+        KeyCode::Up => {
+            if app.folder_form.focus == app.folder_form.fields.len() {
+                if app.folder_device_selected > 0 {
+                    app.folder_device_selected -= 1;
+                }
+            }
+        }
         KeyCode::Char(' ') => {
-            // toggle device selection only when focus is not on text fields
-            if app.folder_form.focus >= app.folder_form.fields.len() {
-                // This shouldn't happen with current layout, but keep for safety
+            if app.folder_form.focus == app.folder_form.fields.len() {
+                if let Some(selected) = app.folder_device_selection.get_mut(app.folder_device_selected) {
+                    *selected = !*selected;
+                }
             }
         }
         KeyCode::Char(c) => {

@@ -40,18 +40,22 @@ enum Commands {
     /// 运行 Syncthing 守护进程
     Run {
         /// 监听地址
-        #[arg(long, default_value = "0.0.0.0:22000")]
+        #[arg(long, default_value = "0.0.0.0:22001")]
         listen: String,
 
         /// 设备名称
         #[arg(short, long, default_value = "syncthing-rust")]
         device_name: String,
+
+        /// 测试模式（自动注入互操作 peer 和 folder）
+        #[arg(long)]
+        test_mode: bool,
     },
 
     /// 启动 TUI 配置管理器
     Tui {
         /// 监听地址
-        #[arg(long, default_value = "0.0.0.0:22000")]
+        #[arg(long, default_value = "0.0.0.0:22001")]
         listen: String,
 
         /// 设备名称
@@ -130,6 +134,7 @@ fn save_config(path: &PathBuf, config: &Config) -> anyhow::Result<()> {
 mod tui;
 mod logging_buffer;
 mod syncbench;
+mod api_server;
 
 /// Resolve listen/device_name from config file, overridden by CLI args.
 fn resolve_daemon_config(
@@ -148,7 +153,7 @@ fn resolve_daemon_config(
     };
 
     // CLI overrides config
-    let listen = if cli_listen != "0.0.0.0:22000" {
+    let listen = if cli_listen != "0.0.0.0:22001" {
         cli_listen
     } else {
         config.listen_addr.clone()
@@ -181,13 +186,23 @@ async fn main() -> Result<()> {
         .context("invalid log level")?;
 
     match cli.command {
-        Commands::Run { listen, device_name } => {
+        Commands::Run { listen, device_name, test_mode } => {
             let subscriber = FmtSubscriber::builder().with_max_level(log_level).finish();
             tracing::subscriber::set_global_default(subscriber)?;
             let (listen, device_name) = resolve_daemon_config(&config_dir, listen, device_name)?;
-            match tui::daemon_runner::start_daemon(config_dir, listen, device_name).await {
+            match tui::daemon_runner::start_daemon(config_dir.clone(), listen, device_name, test_mode).await {
                 Ok(startup) => {
-                    startup.future.await?;
+                    // 启动 REST API 服务器
+                    let api_handle = match api_server::start_api_server(&config_dir, startup.sync_service.clone(), startup.device_id).await {
+                        Ok(h) => h,
+                        Err(e) => {
+                            warn!("Failed to start REST API server: {}", e);
+                            tokio::spawn(async {})
+                        }
+                    };
+                    let daemon_result = startup.future.await;
+                    let _ = api_handle.await;
+                    daemon_result?;
                 }
                 Err(e) => {
                     eprintln!("Failed to start daemon: {}", e);
@@ -250,8 +265,8 @@ impl BlockSource for ManagerBlockSource {
             offset: block.offset,
             size: block.size,
             hash: block.hash.clone(),
-            flags: 0,
             from_temporary: false,
+            block_no: 0,
         };
 
         let payload = bep_protocol::messages::encode_message(&request)
@@ -301,10 +316,10 @@ impl BlockSource for ManagerBlockSource {
                 "response channel closed".to_string(),
             ))?;
 
-        if !response.error.is_empty() {
+        if response.code != bep_protocol::messages::ErrorCode::NoError as i32 {
             return Err(syncthing_sync::SyncError::pull(
                 file.to_string(),
-                format!("remote error: {}", response.error),
+                format!("remote error code: {}", response.code),
             ));
         }
         Ok(bytes::Bytes::from(response.data))

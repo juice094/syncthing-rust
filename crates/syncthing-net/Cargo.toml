@@ -31,6 +31,7 @@ rcgen = { version = "0.13", features = ["pem"] }
 iroh = { path = "../../dev/third_party/iroh/iroh", default-features = false, features = ["tls-ring"], optional = true }
 bep-protocol = { path = "../bep-protocol" }
 netdev = "0.41"
+lz4 = "1"
 
 [features]
 default = []

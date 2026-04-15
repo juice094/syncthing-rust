@@ -1,6 +1,8 @@
 //! BEP Protocol Messages
 //!
-//! 定义BEP协议的消息结构，使用Protobuf编码
+//! 定义BEP协议的消息结构，使用Protobuf编码。
+//! 所有 `prost::Message` 结构体的字段 tag 均与 Go 端 `internal/gen/bep/bep.pb.go`
+//! 严格对齐（2026-04-11 验证通过，参见 VERIFICATION_REPORT_BEP_2026-04-11.md）。
 
 use bytes::{BufMut, BytesMut};
 
@@ -276,31 +278,112 @@ pub struct WireCounter {
 #[derive(Clone, PartialEq, prost::Message)]
 pub struct WireBlockInfo {
     #[prost(int64, tag = "1")]
-    pub size: i64,
-    #[prost(bytes, tag = "2")]
+    pub offset: i64,
+    #[prost(int32, tag = "2")]
+    pub size: i32,
+    #[prost(bytes, tag = "3")]
     pub hash: Vec<u8>,
-    #[prost(uint32, tag = "3")]
-    pub flags: u32,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug, prost::Enumeration)]
+pub enum FileInfoType {
+    File = 0,
+    Directory = 1,
+    SymlinkFile = 2,
+    SymlinkDirectory = 3,
+    Symlink = 4,
 }
 
 #[derive(Clone, PartialEq, prost::Message)]
 pub struct WireFileInfo {
     #[prost(string, tag = "1")]
     pub name: String,
-    #[prost(int64, tag = "2")]
-    pub size: i64,
+    #[prost(enumeration = "FileInfoType", tag = "2")]
+    pub r#type: i32,
     #[prost(int64, tag = "3")]
+    pub size: i64,
+    #[prost(uint32, tag = "4")]
+    pub permissions: u32,
+    #[prost(int64, tag = "5")]
     pub modified_s: i64,
-    #[prost(message, optional, tag = "4")]
-    pub version: Option<WireVector>,
-    #[prost(message, repeated, tag = "5")]
-    pub blocks: Vec<WireBlockInfo>,
     #[prost(bool, tag = "6")]
     pub deleted: bool,
-    #[prost(uint32, tag = "7")]
-    pub flags: u32,
-    #[prost(int64, tag = "8")]
+    #[prost(bool, tag = "7")]
+    pub invalid: bool,
+    #[prost(bool, tag = "8")]
+    pub no_permissions: bool,
+    #[prost(message, optional, tag = "9")]
+    pub version: Option<WireVector>,
+    #[prost(int64, tag = "10")]
     pub sequence: i64,
+    #[prost(int32, tag = "11")]
+    pub modified_ns: i32,
+    #[prost(uint64, tag = "12")]
+    pub modified_by: u64,
+    #[prost(int32, tag = "13")]
+    pub block_size: i32,
+    #[prost(message, optional, tag = "14")]
+    pub platform: Option<PlatformData>,
+    #[prost(message, repeated, tag = "16")]
+    pub blocks: Vec<WireBlockInfo>,
+    #[prost(bytes, tag = "17")]
+    pub symlink_target: Vec<u8>,
+    #[prost(bytes, tag = "18")]
+    pub blocks_hash: Vec<u8>,
+    #[prost(bytes, tag = "19")]
+    pub encrypted: Vec<u8>,
+    #[prost(bytes, tag = "20")]
+    pub previous_blocks_hash: Vec<u8>,
+}
+
+#[derive(Clone, PartialEq, prost::Message)]
+pub struct PlatformData {
+    #[prost(message, optional, tag = "1")]
+    pub unix: Option<UnixData>,
+    #[prost(message, optional, tag = "2")]
+    pub windows: Option<WindowsData>,
+    #[prost(message, optional, tag = "3")]
+    pub linux: Option<XattrData>,
+    #[prost(message, optional, tag = "4")]
+    pub darwin: Option<XattrData>,
+    #[prost(message, optional, tag = "5")]
+    pub freebsd: Option<XattrData>,
+    #[prost(message, optional, tag = "6")]
+    pub netbsd: Option<XattrData>,
+}
+
+#[derive(Clone, PartialEq, prost::Message)]
+pub struct UnixData {
+    #[prost(string, tag = "1")]
+    pub owner_name: String,
+    #[prost(string, tag = "2")]
+    pub group_name: String,
+    #[prost(int32, tag = "3")]
+    pub uid: i32,
+    #[prost(int32, tag = "4")]
+    pub gid: i32,
+}
+
+#[derive(Clone, PartialEq, prost::Message)]
+pub struct WindowsData {
+    #[prost(string, tag = "1")]
+    pub owner_name: String,
+    #[prost(bool, tag = "2")]
+    pub owner_is_group: bool,
+}
+
+#[derive(Clone, PartialEq, prost::Message)]
+pub struct XattrData {
+    #[prost(message, repeated, tag = "1")]
+    pub xattrs: Vec<Xattr>,
+}
+
+#[derive(Clone, PartialEq, prost::Message)]
+pub struct Xattr {
+    #[prost(string, tag = "1")]
+    pub name: String,
+    #[prost(bytes, tag = "2")]
+    pub value: Vec<u8>,
 }
 
 #[derive(Clone, PartialEq, prost::Message)]
@@ -317,10 +400,18 @@ pub struct Request {
     pub size: i32,
     #[prost(bytes, tag = "6")]
     pub hash: Vec<u8>,
-    #[prost(uint32, tag = "7")]
-    pub flags: u32,
-    #[prost(bool, tag = "8")]
+    #[prost(bool, tag = "7")]
     pub from_temporary: bool,
+    #[prost(int32, tag = "9")]
+    pub block_no: i32,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug, prost::Enumeration)]
+pub enum ErrorCode {
+    NoError = 0,
+    Generic = 1,
+    NoSuchFile = 2,
+    InvalidFile = 3,
 }
 
 #[derive(Clone, PartialEq, prost::Message)]
@@ -329,8 +420,8 @@ pub struct Response {
     pub id: i32,
     #[prost(bytes, tag = "2")]
     pub data: Vec<u8>,
-    #[prost(string, tag = "3")]
-    pub error: String,
+    #[prost(enumeration = "ErrorCode", tag = "3")]
+    pub code: i32,
 }
 
 #[derive(Clone, PartialEq, prost::Message)]
@@ -339,6 +430,8 @@ pub struct Index {
     pub folder: String,
     #[prost(message, repeated, tag = "2")]
     pub files: Vec<WireFileInfo>,
+    #[prost(int64, tag = "3")]
+    pub last_sequence: i64,
 }
 
 #[derive(Clone, PartialEq, prost::Message)]
@@ -347,12 +440,18 @@ pub struct IndexUpdate {
     pub folder: String,
     #[prost(message, repeated, tag = "2")]
     pub files: Vec<WireFileInfo>,
+    #[prost(int64, tag = "3")]
+    pub last_sequence: i64,
+    #[prost(int64, tag = "4")]
+    pub prev_sequence: i64,
 }
 
 #[derive(Clone, PartialEq, prost::Message)]
 pub struct ClusterConfig {
     #[prost(message, repeated, tag = "1")]
     pub folders: Vec<WireFolder>,
+    #[prost(bool, tag = "2")]
+    pub secondary: bool,
 }
 
 #[derive(Clone, PartialEq, prost::Message)]
@@ -369,6 +468,14 @@ pub struct WireDevice {
     pub cert_name: String,
     #[prost(int64, tag = "6")]
     pub max_sequence: i64,
+    #[prost(bool, tag = "7")]
+    pub introducer: bool,
+    #[prost(uint64, tag = "8")]
+    pub index_id: u64,
+    #[prost(bool, tag = "9")]
+    pub skip_introduction_removals: bool,
+    #[prost(bytes, tag = "10")]
+    pub encryption_password_token: Vec<u8>,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug, prost::Enumeration)]
@@ -451,9 +558,9 @@ impl From<WireVector> for syncthing_core::types::Vector {
 impl From<syncthing_core::types::BlockInfo> for WireBlockInfo {
     fn from(b: syncthing_core::types::BlockInfo) -> Self {
         Self {
-            size: b.size as i64,
+            offset: b.offset,
+            size: b.size,
             hash: b.hash,
-            flags: 0,
         }
     }
 }
@@ -461,9 +568,9 @@ impl From<syncthing_core::types::BlockInfo> for WireBlockInfo {
 impl From<WireBlockInfo> for syncthing_core::types::BlockInfo {
     fn from(b: WireBlockInfo) -> Self {
         Self {
-            size: b.size as i32,
+            offset: b.offset,
+            size: b.size,
             hash: b.hash,
-            offset: 0,
         }
     }
 }
@@ -472,13 +579,28 @@ impl From<syncthing_core::types::FileInfo> for WireFileInfo {
     fn from(f: syncthing_core::types::FileInfo) -> Self {
         Self {
             name: f.name,
+            r#type: match f.file_type {
+                syncthing_core::types::FileType::Directory => FileInfoType::Directory as i32,
+                syncthing_core::types::FileType::Symlink => FileInfoType::Symlink as i32,
+                _ => FileInfoType::File as i32,
+            },
             size: f.size,
+            permissions: f.permissions,
             modified_s: f.modified_s,
-            version: Some(f.version.into()),
-            blocks: f.blocks.into_iter().map(Into::into).collect(),
             deleted: f.deleted.unwrap_or(false),
-            flags: f.permissions,
+            invalid: false,
+            no_permissions: false,
+            version: Some(f.version.into()),
             sequence: f.sequence as i64,
+            modified_ns: f.modified_ns,
+            modified_by: 0,
+            block_size: f.block_size,
+            platform: None,
+            blocks: f.blocks.into_iter().map(Into::into).collect(),
+            symlink_target: f.symlink_target.unwrap_or_default().into_bytes(),
+            blocks_hash: Vec::new(),
+            encrypted: Vec::new(),
+            previous_blocks_hash: Vec::new(),
         }
     }
 }
@@ -487,16 +609,24 @@ impl From<WireFileInfo> for syncthing_core::types::FileInfo {
     fn from(f: WireFileInfo) -> Self {
         Self {
             name: f.name,
-            file_type: syncthing_core::types::FileType::File,
+            file_type: match f.r#type {
+                x if x == FileInfoType::Directory as i32 => syncthing_core::types::FileType::Directory,
+                x if x == FileInfoType::Symlink as i32 => syncthing_core::types::FileType::Symlink,
+                _ => syncthing_core::types::FileType::File,
+            },
             size: f.size,
-            permissions: f.flags,
+            permissions: f.permissions,
             modified_s: f.modified_s,
-            modified_ns: 0,
+            modified_ns: f.modified_ns,
             version: f.version.map(Into::into).unwrap_or_default(),
             sequence: f.sequence as u64,
-            block_size: 0,
+            block_size: f.block_size,
             blocks: f.blocks.into_iter().map(Into::into).collect(),
-            symlink_target: None,
+            symlink_target: if f.symlink_target.is_empty() {
+                None
+            } else {
+                Some(String::from_utf8_lossy(&f.symlink_target).to_string())
+            },
             deleted: Some(f.deleted),
         }
     }
@@ -507,6 +637,7 @@ impl From<syncthing_core::types::Index> for Index {
         Self {
             folder: idx.folder,
             files: idx.files.into_iter().map(Into::into).collect(),
+            last_sequence: 0,
         }
     }
 }
@@ -525,6 +656,8 @@ impl From<syncthing_core::types::IndexUpdate> for IndexUpdate {
         Self {
             folder: upd.folder,
             files: upd.files.into_iter().map(Into::into).collect(),
+            last_sequence: 0,
+            prev_sequence: 0,
         }
     }
 }
@@ -616,8 +749,8 @@ mod tests {
             offset: 1024,
             size: 256,
             hash: vec![0xab, 0xcd],
-            flags: 0,
             from_temporary: false,
+            block_no: 0,
         };
         let encoded = encode_message(&req).unwrap();
         let decoded: Request = decode_message(&encoded).unwrap();
@@ -629,7 +762,7 @@ mod tests {
         let resp = Response {
             id: 7,
             data: vec![1, 2, 3, 4],
-            error: String::new(),
+            code: ErrorCode::NoError as i32,
         };
         let encoded = encode_message(&resp).unwrap();
         let decoded: Response = decode_message(&encoded).unwrap();
@@ -642,20 +775,32 @@ mod tests {
             folder: "default".to_string(),
             files: vec![WireFileInfo {
                 name: "foo".to_string(),
+                r#type: FileInfoType::File as i32,
                 size: 100,
+                permissions: 0o644,
                 modified_s: 12345,
+                deleted: false,
+                invalid: false,
+                no_permissions: false,
                 version: Some(WireVector {
                     counters: vec![WireCounter { id: 1, value: 2 }],
                 }),
+                sequence: 1,
+                modified_ns: 0,
+                modified_by: 0,
+                block_size: 0,
+                platform: None,
                 blocks: vec![WireBlockInfo {
+                    offset: 0,
                     size: 10,
                     hash: vec![0xde, 0xad],
-                    flags: 0,
                 }],
-                deleted: false,
-                flags: 0o644,
-                sequence: 1,
+                symlink_target: Vec::new(),
+                blocks_hash: Vec::new(),
+                encrypted: Vec::new(),
+                previous_blocks_hash: Vec::new(),
             }],
+            last_sequence: 0,
         };
         let encoded = encode_message(&idx).unwrap();
         let decoded: Index = decode_message(&encoded).unwrap();

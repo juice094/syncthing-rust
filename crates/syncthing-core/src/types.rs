@@ -497,11 +497,21 @@ pub struct FolderConfig {
 }
 
 /// GUI 配置
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GuiConfig {
     pub enabled: bool,
     pub address: String,
     pub api_key: String,
+}
+
+impl Default for GuiConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            address: "0.0.0.0:8385".to_string(),
+            api_key: String::new(),
+        }
+    }
 }
 
 /// 选项配置
@@ -609,7 +619,7 @@ pub struct Config {
     pub options: Options,
 }
 
-fn default_listen() -> String { "0.0.0.0:22000".to_string() }
+fn default_listen() -> String { "0.0.0.0:22001".to_string() }
 fn default_device_name() -> String { "syncthing-rust".to_string() }
 
 impl Config {

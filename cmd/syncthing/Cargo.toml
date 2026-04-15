@@ -11,6 +11,7 @@ path = "src/main.rs"
 syncthing-core = { path = "../../crates/syncthing-core" }
 syncthing-net = { path = "../../crates/syncthing-net" }
 syncthing-sync = { path = "../../crates/syncthing-sync" }
+syncthing-api = { path = "../../crates/syncthing-api" }
 bep-protocol = { path = "../../crates/bep-protocol" }
 
 tokio = { workspace = true }
@@ -30,3 +31,6 @@ crossterm = "0.28"
 dashmap = { workspace = true }
 walkdir = "2"
 hex = { workspace = true }
+axum = "0.7"
+tower = "0.4"
+tower-http = { version = "0.5", features = ["cors", "trace"] }
