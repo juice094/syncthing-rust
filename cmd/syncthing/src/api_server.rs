@@ -122,7 +122,8 @@ pub async fn start_api_server(
     };
 
     let handle = tokio::spawn(async move {
-        if let Err(e) = axum::serve(listener, router).await {
+        let svc = router.into_make_service_with_connect_info::<SocketAddr>();
+        if let Err(e) = axum::serve(listener, svc).await {
             warn!("REST API server error: {}", e);
         }
     });
