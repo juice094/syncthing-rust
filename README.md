@@ -73,10 +73,14 @@ dev/third_party/iroh/   # Optional iroh QUIC transport (see below)
 
 ## Optional: iroh Transport
 
-`syncthing-net` includes an optional `iroh` Cargo feature for TLS-over-QUIC transport. The feature expects the `iroh` crate at `dev/third_party/iroh/iroh`. Because `iroh` is a large workspace, it is **not tracked as a submodule** in this repository. To enable the feature:
+`syncthing-net` includes an optional `iroh` Cargo feature for TLS-over-QUIC transport. The feature expects the `iroh` crate at `dev/third_party/iroh/iroh`. Because `iroh` is a large workspace and its crates.io releases currently have transitive dependency conflicts with this project, it is **not enabled by default** and the dependency line is commented out in `crates/syncthing-net/Cargo.toml`. To enable the feature:
 
 ```bash
+# 1. Clone iroh locally
 git clone https://github.com/n0-computer/iroh.git dev/third_party/iroh
+
+# 2. Uncomment the iroh dependency and feature in crates/syncthing-net/Cargo.toml
+# 3. Build with the feature
 cargo build -p syncthing --features iroh
 ```
 
