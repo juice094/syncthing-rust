@@ -52,6 +52,8 @@ pub struct ApiState {
     pub start_time: std::time::Instant,
     /// Optional connection manager for connection enumeration
     pub connection_manager: Option<syncthing_net::manager::ConnectionManagerHandle>,
+    /// Optional local database for folder statistics
+    pub db: Option<Arc<dyn syncthing_sync::database::LocalDatabase>>,
 }
 
 impl ApiState {
@@ -69,6 +71,7 @@ impl ApiState {
             api_key: None,
             start_time: std::time::Instant::now(),
             connection_manager: None,
+            db: None,
         }
     }
 }
@@ -663,34 +666,67 @@ async fn get_db_status(State(state): State<ApiState>) -> impl IntoResponse {
     // 返回所有文件夹的状态概览
     match state.config_store.load().await {
         Ok(config) => {
-            let statuses: Vec<DbStatus> = config
-                .folders
-                .iter()
-                .map(|folder| {
-                    // 如果有同步模型，尝试获取实际状态
-                    let summary = FolderSummary::default();
-                    
-                    DbStatus {
-                        folder: folder.id.to_string(),
-                        files: summary.files,
-                        directories: summary.directories,
-                        symlinks: summary.symlinks,
-                        bytes: summary.bytes,
-                        need_files: summary.need_files,
-                        need_directories: summary.need_directories,
-                        need_symlinks: 0,
-                        need_bytes: summary.need_bytes,
-                        pull_errors: summary.pull_errors,
-                        global_bytes: summary.bytes,
-                        local_bytes: summary.bytes.saturating_sub(summary.need_bytes),
-                        state: if summary.is_synced() {
-                            "idle".to_string()
-                        } else {
-                            "syncing".to_string()
-                        },
+            let mut statuses = Vec::with_capacity(config.folders.len());
+            
+            for folder in &config.folders {
+                let mut files_count = 0u64;
+                let mut directories_count = 0u64;
+                let mut symlinks_count = 0u64;
+                let mut bytes_count = 0u64;
+                
+                // 从数据库获取真实文件统计
+                if let Some(ref db) = state.db {
+                    match db.get_folder_files(&folder.id).await {
+                        Ok(file_infos) => {
+                            for info in file_infos {
+                                match info.file_type {
+                                    syncthing_core::types::FileType::File => files_count += 1,
+                                    syncthing_core::types::FileType::Directory => directories_count += 1,
+                                    syncthing_core::types::FileType::Symlink => symlinks_count += 1,
+                                    _ => {}
+                                }
+                                bytes_count += info.size as u64;
+                            }
+                        }
+                        Err(e) => {
+                            error!("Failed to get folder files for {}: {}", folder.id, e);
+                        }
                     }
-                })
-                .collect();
+                }
+                
+                // 从同步模型获取真实状态
+                let folder_state = if let Some(ref sync_model) = state.sync_model {
+                    match sync_model.folder_status(&FolderId::new(folder.id.clone())).await {
+                        Ok(syncthing_core::traits::FolderStatus::Idle) => "idle".to_string(),
+                        Ok(syncthing_core::traits::FolderStatus::Scanning) => "scanning".to_string(),
+                        Ok(syncthing_core::traits::FolderStatus::Syncing { .. }) => "syncing".to_string(),
+                        Ok(syncthing_core::traits::FolderStatus::Error { .. }) => "error".to_string(),
+                        Ok(syncthing_core::traits::FolderStatus::Paused) => "paused".to_string(),
+                        Err(e) => {
+                            error!("Failed to get folder status for {}: {}", folder.id, e);
+                            "unknown".to_string()
+                        }
+                    }
+                } else {
+                    "unknown".to_string()
+                };
+                
+                statuses.push(DbStatus {
+                    folder: folder.id.to_string(),
+                    files: files_count,
+                    directories: directories_count,
+                    symlinks: symlinks_count,
+                    bytes: bytes_count,
+                    need_files: 0,
+                    need_directories: 0,
+                    need_symlinks: 0,
+                    need_bytes: 0,
+                    pull_errors: 0,
+                    global_bytes: bytes_count,
+                    local_bytes: bytes_count,
+                    state: folder_state,
+                });
+            }
             
             Ok(Json(statuses))
         }

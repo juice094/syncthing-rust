@@ -11,6 +11,7 @@ publish = false
 syncthing-core = { path = "../syncthing-core" }
 syncthing-db = { path = "../syncthing-db" }
 syncthing-net = { path = "../syncthing-net" }
+syncthing-sync = { path = "../syncthing-sync" }
 
 # 异步
 tokio = { workspace = true }
