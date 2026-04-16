@@ -27,6 +27,8 @@ test_rust_folder/
 # Runtime logs (explicit names not covered by *.log)
 rust_node_*.txt
 rust_node_*.log
+rust_run_*.txt
+rust_run_*.err
 long_running_monitor.log
 
 # Config backups
