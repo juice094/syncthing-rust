@@ -105,6 +105,7 @@ pub async fn start_daemon(
 
     if test_mode {
         // 互操作测试自动配置（仅开发阶段）：本地 Go 节点（127.0.0.1:22001）
+        // 注意：这些配置仅在内存中生效，不会持久化到 config.json，避免污染正常用户配置
         let go_cert_path = std::path::PathBuf::from(r"C:\Users\22414\dev\third_party\syncthing\test_go_home\cert.pem");
         let go_key_path = std::path::PathBuf::from(r"C:\Users\22414\dev\third_party\syncthing\test_go_home\key.pem");
         let mut go_device_id = None;
@@ -121,7 +122,6 @@ pub async fn start_daemon(
                         paused: false,
                         introducer: false,
                     });
-                    config_modified = true;
                 }
                 go_device_id = Some(id);
             }
@@ -130,7 +130,6 @@ pub async fn start_daemon(
             if let Some(gid) = go_device_id {
                 if !config.folders[idx].devices.contains(&gid) {
                     config.folders[idx].devices.push(gid);
-                    config_modified = true;
                 }
             }
         }
