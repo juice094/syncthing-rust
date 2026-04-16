@@ -59,47 +59,17 @@ pub async fn start_daemon(
     };
     config.local_device_id = Some(device_id);
 
+    let mut config_modified = false;
+
     // 自动迁移旧冲突端口到新默认端口
     if config.listen_addr == "0.0.0.0:22000" {
         warn!("Migrating listen_addr from 0.0.0.0:22000 to 0.0.0.0:22001 to avoid conflict with local Go Syncthing");
         config.listen_addr = "0.0.0.0:22001".to_string();
+        config_modified = true;
     }
     if config.gui.address == "0.0.0.0:8384" || config.gui.address == "127.0.0.1:8384" {
         warn!("Migrating gui.address from {} to 0.0.0.0:8385 to avoid conflict with local Go Syncthing", config.gui.address);
         config.gui.address = "0.0.0.0:8385".to_string();
-    }
-
-    // 永久配置：云端格雷节点（Tailscale）
-    let gray_device_id: syncthing_core::DeviceId = "IKOL33P-FLMQFYA-4U4PZXY-3GUEXTV-XFMPM5E-3TIBH7C-AKXFRZC-2SULFAA".parse().unwrap();
-    let mut config_modified = false;
-    if !config.devices.iter().any(|d| d.id == gray_device_id) {
-        config.devices.push(syncthing_core::types::Device {
-            id: gray_device_id,
-            name: Some("gray-cloud".to_string()),
-            addresses: vec![syncthing_core::types::AddressType::Tcp("100.99.240.98:22000".to_string())],
-            paused: false,
-            introducer: false,
-        });
-        config_modified = true;
-    }
-
-    // 永久配置：test-folder 共享区域
-    let test_folder_path = std::path::PathBuf::from(r"C:\Users\22414\dev\third_party\syncthing-rust\test_rust_folder");
-    std::fs::create_dir_all(&test_folder_path).ok();
-    if let Some(idx) = config.folders.iter().position(|f| f.id == "test-folder") {
-        if !config.folders[idx].devices.contains(&device_id) {
-            config.folders[idx].devices.push(device_id);
-            config_modified = true;
-        }
-        if !config.folders[idx].devices.contains(&gray_device_id) {
-            config.folders[idx].devices.push(gray_device_id);
-            config_modified = true;
-        }
-    } else {
-        let mut test_folder = syncthing_core::types::Folder::new("test-folder", test_folder_path.to_string_lossy());
-        test_folder.devices.push(device_id);
-        test_folder.devices.push(gray_device_id);
-        config.folders.push(test_folder);
         config_modified = true;
     }
 
