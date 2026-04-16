@@ -96,6 +96,7 @@ pub async fn start_api_server(
 
     let api_key = Arc::new(config.gui.api_key);
 
+    let db = Some(sync_service.db());
     let mut state = syncthing_api::rest::ApiState::new(
         config_store,
         syncthing_api::events::EventBus::new(),
@@ -104,6 +105,7 @@ pub async fn start_api_server(
     state.my_id = Some(my_id);
     state.api_key = Some(api_key.to_string());
     state.connection_manager = connection_handle;
+    state.db = db;
 
     let router = syncthing_api::rest::RestApi::build_router(state);
 
