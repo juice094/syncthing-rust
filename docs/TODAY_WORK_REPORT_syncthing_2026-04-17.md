@@ -60,9 +60,30 @@ Specific crate results:
 
 ---
 
-## Next Steps (pending prioritization)
+## Phase 2.6 — Push E2E Confirmation
 
-1. **BepSession decoupling** — Extract the ~300-line BEP message loop from `daemon_runner.rs` into a reusable `BepSession` component.
-2. **Push direction end-to-end confirmation** — Verify that the cloud Go peer can successfully request blocks from the Rust node.
-3. **TUI device deletion** — Add a "Delete Device" flow in the TUI.
-4. **Dependabot security alerts** — Browser-based manual confirmation for GitHub Security tab.
+- Started Rust daemon with `test-folder` shared to cloud Go peer (格雷).
+- Observed successful BEP handshake, ClusterConfig exchange, and Index transmission (9 files) via the new `BepSession`.
+- Cloud Go peer sent its own Index and IndexUpdate to Rust.
+- **No block requests were observed from the cloud peer within the 3-minute test window.** Likely explanation: the cloud node already considers the folder in sync, or its pull scheduler has not yet queued the new file.
+- **Status**: BepSession operates correctly; Push path code (`handle_block_request` → Response) is verified at unit-test level. Full end-to-end confirmation of the cloud peer actively pulling blocks remains pending on the remote node's sync state.
+
+## Phase 2.7 — TUI Device Deletion Verification
+
+- Inspected `cmd/syncthing/src/tui/events.rs:58-69`.
+- `KeyCode::Char('d')` on the Devices tab removes the selected device, updates `app.config.devices`, and calls `save_and_log()` which persists to `config.json`.
+- **Status**: Already implemented. Marked the active issue as stale and closed.
+
+## Phase 2.8 — `syncthing-core::traits::BepConnection` Alignment
+
+- Attempted to implement `syncthing_core::traits::BepConnection` for `Arc<BepConnection>`.
+- **Structural conflict identified**: `request_block` requires a pending-response map and a concurrent `recv_message` loop, which collides with the single-reader `BepSession` steady-state loop.
+- **Resolution**: Marked `BepConnection` trait and `BepMessage` enum as `#[deprecated]` in `syncthing-core`. Removed `SyncModel::handle_connection` and its stub implementation in `SyncService`. The canonical architecture is now `ReliablePipe` + `BepSession`.
+
+---
+
+## Next Steps
+
+1. **72h stress test** — Run long-duration stability test with local Go node.
+2. **Push E2E retry** — Force a file version conflict or pause/resume the cloud peer to trigger an inbound block request.
+3. **Phase 3 planning** — Workspace migration and production folder sync validation.4. **Dependabot security alerts** — Browser-based manual confirmation for GitHub Security tab.

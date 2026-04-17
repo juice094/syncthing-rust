@@ -502,11 +502,6 @@ impl syncthing_core::traits::SyncModel for SyncService {
         }
     }
 
-    async fn handle_connection(&self, _conn: Box<dyn syncthing_core::traits::BepConnection>) -> syncthing_core::Result<()> {
-        Err(syncthing_core::SyncthingError::internal(
-            "handle_connection not available via REST API",
-        ))
-    }
 }
 
 #[cfg(test)]
