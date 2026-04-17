@@ -30,8 +30,8 @@ A Rust implementation of the [Syncthing](https://syncthing.net/) protocol stack,
 |-------|------|--------|
 | **Phase 1** | Core protocol (TLS, BEP Hello, ClusterConfig, Index) | ✅ Complete |
 | **Phase 2** | Network abstraction (ReliablePipe, BepSession), watcher, REST API, dual-node coexistence | ✅ Complete |
-| **Phase 3** | 72h long-connection stress test, workspace migration, real folder sync | 🟡 In Progress |
-| **Phase 4** | Push/pollish, GUI or Web frontend, production packaging | 🔵 Planned |
+| **Phase 3** | BepSession observability, peer sync state events, stress test infra, real folder sync validation | 🟡 In Progress |
+| **Phase 4** | 72h stress test, workspace migration, GUI or Web frontend, production packaging | 🔵 Planned |
 
 ---
 

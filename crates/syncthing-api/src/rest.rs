@@ -13,7 +13,7 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 
 use axum::{
-    extract::{connect_info::ConnectInfo, Path, State},
+    extract::{connect_info::ConnectInfo, Path, Query, State},
     http::StatusCode,
     middleware::Next,
     response::IntoResponse,
@@ -175,6 +175,7 @@ impl RestApi {
             .route("/rest/status", get(get_status))
             .route("/rest/system/status", get(get_system_status))
             .route("/rest/db/status", get(get_db_status))
+            .route("/rest/db/completion", get(get_db_completion))
             .route("/rest/connections", get(get_connections))
             .route("/rest/folder/:id/status", get(get_folder_status))
             // System operations
@@ -657,6 +658,54 @@ async fn get_system_status(State(state): State<ApiState>) -> impl IntoResponse {
         Err(e) => {
             error!("Failed to load config for system status: {}", e);
             Err((StatusCode::INTERNAL_SERVER_ERROR, format!("{}", e)))
+        }
+    }
+}
+
+#[derive(Deserialize)]
+struct CompletionQuery {
+    folder: String,
+    device: String,
+}
+
+/// GET /rest/db/completion - 文件夹相对于某设备的同步完成度
+async fn get_db_completion(
+    State(state): State<ApiState>,
+    Query(params): Query<CompletionQuery>,
+) -> impl IntoResponse {
+    let device_id = match params.device.parse::<DeviceId>() {
+        Ok(id) => id,
+        Err(e) => {
+            return Err((StatusCode::BAD_REQUEST, format!("Invalid device ID: {}", e)));
+        }
+    };
+
+    let folder_id = FolderId::new(params.folder);
+
+    match state.sync_model {
+        Some(ref sync_model) => {
+            match sync_model.folder_completion(&folder_id, device_id).await {
+                Ok(completion) => {
+                    let resp = serde_json::json!({
+                        "completion": completion,
+                        "device": device_id.to_string(),
+                        "folder": folder_id.as_str(),
+                    });
+                    Ok(Json(resp))
+                }
+                Err(e) => {
+                    error!("Failed to get folder completion: {}", e);
+                    Err((StatusCode::INTERNAL_SERVER_ERROR, format!("{}", e)))
+                }
+            }
+        }
+        None => {
+            let resp = serde_json::json!({
+                "completion": 100,
+                "device": device_id.to_string(),
+                "folder": folder_id.as_str(),
+            });
+            Ok(Json(resp))
         }
     }
 }

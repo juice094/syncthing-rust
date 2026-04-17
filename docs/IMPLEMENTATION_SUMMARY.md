@@ -120,7 +120,21 @@
 - **`ConnectionManager` 多路径支持**: 内部连接存储从 `device_id -> ConnectionEntry` 重构为 `device_id -> conn_id -> ConnectionEntry`（嵌套 `DashMap`），支持同一设备维护多条并发路径
 - **`BepSession` 抽取**: 新建 `session.rs`，将 `daemon_runner.rs` 中 ~230 行的 BEP 消息循环（ClusterConfig → Index → steady-state）抽取为独立的 `BepSession` 组件；`daemon_runner.rs` 通过 `DaemonBepHandler` 实现 `BepSessionHandler` 回调，BEP 相关代码量减少 **>60%**
 - **MemoryPipe 验收测试**: 新增 `test_session_ping_pong` 和 `test_session_block_request_response`，在内存管道上验证 BEP 完整会话周期
+- **Trait 清理**: 旧 `syncthing_core::traits::BepConnection` / `BepMessage` 标记 `#[deprecated]`，`SyncModel::handle_connection` 移除；`ReliablePipe` + `BepSession` 成为 canonical 架构
 - **编译与测试**: 全 workspace `cargo test` 通过，0 failed
+
+### 2026-04-17：跨窗口代理集群会议 — syncthing-rust-rearch 发言 ✅
+- 向 devbase 确认 `.devbase/syncdone` 标记的可行性、格式建议与生命周期约束
+- 明确 `.sync-conflict` 的暂停/恢复策略：devbase watcher 驱动，syncthing-rust BEP 层无需特殊处理
+- 坦诚 BEP 协议无全局"同步完成"信号，提供 pragmatic 替代方案（`FolderStatus::Idle` + `needed_files.is_empty()`）与中期增强路径（`on_peer_sync_state` 回调）
+
+### 2026-04-17：Phase 3.1 BepSession Observability ✅
+- **`BepSessionEvent` 枚举**：新增 6 种事件覆盖会话全生命周期 — `ClusterConfigComplete`, `IndexSent`, `IndexReceived`, `IndexUpdateReceived`, `BlockRequested`, `HeartbeatTimeout`, `SessionEnded`
+- **`BepSessionMetrics` 原子计数器**：`messages_sent/recv`, `bytes_sent/recv`, `blocks_requested/served`, `heartbeat_timeouts`, `errors`，全部使用 `AtomicU64` 无锁统计
+- **`emit()` 辅助方法**：事件通过 `mpsc::UnboundedSender` 发射，不阻塞消息循环；未订阅时零开销
+- **`metrics()` getter**：外部可观测面板可通过 `Arc<BepSessionMetrics>` 读取实时计数
+- **心跳超时检测**：270s 无消息自动触发 `HeartbeatTimeout` 事件并终止会话（原 90s 仅发送 ping，无检测逻辑）
+- **编译与测试**：`cargo check` + `cargo test -p syncthing-net --lib` 全绿（46 passed, 0 failed）
 
 ---
 

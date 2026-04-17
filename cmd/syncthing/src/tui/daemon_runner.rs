@@ -11,7 +11,7 @@ use tracing::{info, warn};
 
 use syncthing_core::types::Config;
 use syncthing_core::DeviceId;
-use syncthing_net::{BepSession, BepSessionHandler, ConnectionManager, ConnectionManagerConfig, ConnectionManagerHandle, SyncthingTlsConfig};
+use syncthing_net::{BepSession, BepSessionEvent, BepSessionHandler, ConnectionManager, ConnectionManagerConfig, ConnectionManagerHandle, SyncthingTlsConfig};
 use syncthing_net::protocol::MessageType;
 use syncthing_sync::{database::MemoryDatabase, SyncService, SyncModel, events::SyncEvent};
 
@@ -169,9 +169,42 @@ pub async fn start_daemon(
                 warn!("Failed to connect device {} to sync service: {}", device_id, e);
             }
             let handle2 = tokio::spawn(async move {
+                let (event_tx, mut event_rx) = tokio::sync::mpsc::unbounded_channel::<BepSessionEvent>();
+                let event_device_id = device_id;
+                tokio::spawn(async move {
+                    while let Some(event) = event_rx.recv().await {
+                        match &event {
+                            BepSessionEvent::ClusterConfigComplete { shared_folders, .. } => {
+                                info!("[{}] ClusterConfig complete, shared folders: {:?}", event_device_id, shared_folders);
+                            }
+                            BepSessionEvent::IndexSent { folder, file_count, .. } => {
+                                info!("[{}] Index sent for {} ({} files)", event_device_id, folder, file_count);
+                            }
+                            BepSessionEvent::IndexReceived { folder, file_count, .. } => {
+                                info!("[{}] Index received for {} ({} files)", event_device_id, folder, file_count);
+                            }
+                            BepSessionEvent::IndexUpdateReceived { folder, file_count, .. } => {
+                                info!("[{}] IndexUpdate received for {} ({} files)", event_device_id, folder, file_count);
+                            }
+                            BepSessionEvent::BlockRequested { folder, name, offset, size, .. } => {
+                                info!("[{}] Block requested: {}/{} offset={} size={}", event_device_id, folder, name, offset, size);
+                            }
+                            BepSessionEvent::HeartbeatTimeout { last_recv_age, .. } => {
+                                warn!("[{}] Heartbeat timeout (idle {:?})", event_device_id, last_recv_age);
+                            }
+                            BepSessionEvent::PeerSyncState { folder, .. } => {
+                                info!("[{}] Peer sync state changed for {}", event_device_id, folder);
+                            }
+                            BepSessionEvent::SessionEnded { reason, .. } => {
+                                info!("[{}] Session ended: {}", event_device_id, reason);
+                            }
+                        }
+                    }
+                });
+
                 let handler = DaemonBepHandler { sync_service: Arc::clone(&sync_service) };
                 if let Some(conn) = handle.get_connection(&device_id) {
-                    let session = BepSession::new(device_id, conn, Arc::new(handler), pending);
+                    let session = BepSession::with_events(device_id, conn, Arc::new(handler), pending, event_tx);
                     if let Err(e) = session.run().await {
                         warn!("BEP session for {} ended: {}", device_id, e);
                     }
