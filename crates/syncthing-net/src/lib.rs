@@ -7,6 +7,7 @@ pub mod connection;
 pub mod handshaker;
 pub mod manager;
 pub mod netmon;
+pub mod session;
 pub mod tcp_transport;
 pub mod tls;
 pub mod protocol;
@@ -27,6 +28,7 @@ pub use connection::IrohBepConnection;
 pub use connection::BEP_ALPN;
 #[cfg(feature = "iroh")]
 pub use transport::IrohTransport;
+pub use session::{BepSession, BepSessionHandler};
 pub use protocol::{HelloMessage, MessageType, BEP_MAGIC};
 pub use manager::{ConnectionManager, ConnectionManagerConfig, ConnectionManagerHandle, ManagerStats};
 pub use netmon::{NetMonitor, NetChangeEvent};

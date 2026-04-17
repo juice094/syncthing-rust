@@ -1,21 +1,19 @@
 use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicI32, Ordering};
-use std::time::{Duration, Instant};
+use std::sync::atomic::AtomicI32;
+use std::time::Duration;
 
 use anyhow::{Context, Result};
 use dashmap::DashMap;
-use tokio::io::{AsyncReadExt, AsyncSeekExt};
 use tokio::task::JoinHandle;
-use tracing::{debug, info, warn};
+use tracing::{info, warn};
 
 use syncthing_core::types::Config;
-use syncthing_core::{ConnectionState, DeviceId};
-use syncthing_net::{ConnectionManager, ConnectionManagerConfig, ConnectionManagerHandle, SyncthingTlsConfig};
+use syncthing_core::DeviceId;
+use syncthing_net::{BepSession, BepSessionHandler, ConnectionManager, ConnectionManagerConfig, ConnectionManagerHandle, SyncthingTlsConfig};
 use syncthing_net::protocol::MessageType;
-use syncthing_net::metrics;
-use syncthing_sync::{database::MemoryDatabase, SyncService, SyncModel, BlockSource, events::SyncEvent};
+use syncthing_sync::{database::MemoryDatabase, SyncService, SyncModel, events::SyncEvent};
 
 use crate::{ManagerBlockSource, load_config, save_config, CONFIG_FILE_NAME};
 
@@ -160,7 +158,7 @@ pub async fn start_daemon(
     let pending_responses_clone = Arc::clone(&pending_responses);
     let session_handles_clone = Arc::clone(&session_handles);
     manager.on_connected(move |device_id| {
-        metrics::global().record_reconnect(device_id.to_string());
+        syncthing_net::metrics::global().record_reconnect(device_id.to_string());
         info!("Device connected: {}", device_id);
         let sync_service = Arc::clone(&sync_service_clone);
         let handle = handle_clone.clone();
@@ -170,7 +168,18 @@ pub async fn start_daemon(
             if let Err(e) = sync_service.connect_device(device_id).await {
                 warn!("Failed to connect device {} to sync service: {}", device_id, e);
             }
-            let handle2 = tokio::spawn(run_bep_session(device_id, handle, sync_service, pending));
+            let handle2 = tokio::spawn(async move {
+                let handler = DaemonBepHandler { sync_service: Arc::clone(&sync_service) };
+                if let Some(conn) = handle.get_connection(&device_id) {
+                    let session = BepSession::new(device_id, conn, Arc::new(handler), pending);
+                    if let Err(e) = session.run().await {
+                        warn!("BEP session for {} ended: {}", device_id, e);
+                    }
+                } else {
+                    warn!("No connection for device {} to start BEP session", device_id);
+                }
+                let _ = handle.disconnect(&device_id, "bep session ended").await;
+            });
             sessions.insert(device_id, handle2);
         });
     });
@@ -287,242 +296,102 @@ pub async fn start_daemon(
     })
 }
 
-async fn run_bep_session(
-    device_id: DeviceId,
-    handle: ConnectionManagerHandle,
+struct DaemonBepHandler {
     sync_service: Arc<SyncService>,
-    pending_responses: Arc<DashMap<i32, tokio::sync::oneshot::Sender<bep_protocol::messages::Response>>>,
-) {
-    let conn = match handle.get_connection(&device_id) {
-        Some(c) => c,
-        None => {
-            warn!("No connection for device {} to start BEP session", device_id);
-            return;
-        }
-    };
+}
 
-    // 1. Send ClusterConfig
-    let config = sync_service.get_config().await.unwrap_or_default();
-    let local_device_id = config.local_device_id.unwrap_or(device_id);
-    let folders: Vec<bep_protocol::messages::WireFolder> = config.folders
-        .iter()
-        .filter(|f| f.devices.contains(&device_id))
-        .map(|f| {
-            let devices: Vec<bep_protocol::messages::WireDevice> = f.devices.iter().map(|d| {
-                bep_protocol::messages::WireDevice {
-                    id: d.as_bytes().to_vec(),
-                    name: String::new(),
-                    addresses: vec![],
-                    compression: bep_protocol::messages::Compression::Metadata as i32,
-                    cert_name: String::new(),
-                    max_sequence: 0,
-                    introducer: false,
-                    index_id: 0,
-                    skip_introduction_removals: false,
-                    encryption_password_token: Vec::new(),
+#[async_trait::async_trait]
+impl BepSessionHandler for DaemonBepHandler {
+    async fn generate_cluster_config(
+        &self,
+        device_id: DeviceId,
+    ) -> syncthing_core::Result<bep_protocol::messages::ClusterConfig> {
+        let config = self.sync_service.get_config().await.unwrap_or_default();
+        let folders: Vec<bep_protocol::messages::WireFolder> = config
+            .folders
+            .iter()
+            .filter(|f| f.devices.contains(&device_id))
+            .map(|f| {
+                let devices: Vec<bep_protocol::messages::WireDevice> = f
+                    .devices
+                    .iter()
+                    .map(|d| bep_protocol::messages::WireDevice {
+                        id: d.as_bytes().to_vec(),
+                        name: String::new(),
+                        addresses: vec![],
+                        compression: bep_protocol::messages::Compression::Metadata as i32,
+                        cert_name: String::new(),
+                        max_sequence: 0,
+                        introducer: false,
+                        index_id: 0,
+                        skip_introduction_removals: false,
+                        encryption_password_token: Vec::new(),
+                    })
+                    .collect();
+                bep_protocol::messages::WireFolder {
+                    id: f.id.clone(),
+                    label: vec![f.label.clone().unwrap_or_default()],
+                    r#type: bep_protocol::messages::FolderType::SendReceive as i32,
+                    stop_reason: bep_protocol::messages::FolderStopReason::Running as i32,
+                    devices,
                 }
-            }).collect();
-            bep_protocol::messages::WireFolder {
-                id: f.id.clone(),
-                label: vec![f.label.clone().unwrap_or_default()],
-                r#type: bep_protocol::messages::FolderType::SendReceive as i32,
-                stop_reason: bep_protocol::messages::FolderStopReason::Running as i32,
-                devices,
-            }
+            })
+            .collect();
+
+        Ok(bep_protocol::messages::ClusterConfig {
+            folders,
+            secondary: false,
         })
-        .collect();
-
-    let cc = bep_protocol::messages::ClusterConfig { folders, secondary: false };
-    if let Err(e) = conn.send_cluster_config(&cc).await {
-        warn!("Failed to send ClusterConfig to {}: {}", device_id, e);
-        return;
-    }
-    info!("Sent ClusterConfig to {} ({} folders)", device_id, cc.folders.len());
-
-    // 2. Wait for remote ClusterConfig
-    let mut remote_cc_received = false;
-    loop {
-        match tokio::time::timeout(Duration::from_secs(10), conn.recv_message()).await {
-            Ok(Ok((msg_type, payload))) => {
-                match msg_type {
-                    MessageType::ClusterConfig => {
-                        match bep_protocol::messages::decode_message::<bep_protocol::messages::ClusterConfig>(&payload) {
-                            Ok(remote_cc) => {
-                                info!("Received ClusterConfig from {} ({} folders)", device_id, remote_cc.folders.len());
-                                remote_cc_received = true;
-                                conn.set_state(ConnectionState::ClusterConfigComplete);
-                                break;
-                            }
-                            Err(e) => {
-                                warn!("Failed to decode ClusterConfig from {}: {} (payload hex: {})", device_id, e, hex::encode(&payload));
-                            }
-                        }
-                    }
-                    MessageType::Ping => {
-                        if let Err(e) = conn.send_ping().await {
-                            warn!("Failed to send ping reply to {}: {}", device_id, e);
-                        }
-                    }
-                    _ => {
-                        debug!("Ignoring message {:?} before ClusterConfig complete", msg_type);
-                    }
-                }
-            }
-            Ok(Err(e)) => {
-                warn!("Connection error with {}: {}", device_id, e);
-                return;
-            }
-            Err(_) => {
-                warn!("Timeout waiting for ClusterConfig from {}", device_id);
-                return;
-            }
-        }
     }
 
-    if !remote_cc_received {
-        return;
+    async fn generate_index(
+        &self,
+        folder_id: &str,
+        _device_id: DeviceId,
+    ) -> syncthing_core::Result<syncthing_core::types::Index> {
+        let files = self.sync_service.generate_index_update(folder_id, 0).await.map_err(|e| {
+            syncthing_core::SyncthingError::internal(format!("generate_index_update failed: {}", e))
+        })?;
+        Ok(syncthing_core::types::Index {
+            folder: folder_id.to_string(),
+            files,
+        })
     }
 
-    // 3. Send Index for each shared folder
-    let shared_folder_ids: Vec<String> = cc.folders.into_iter().map(|f| f.id).collect();
-    for folder_id in &shared_folder_ids {
-        match sync_service.generate_index_update(folder_id, 0).await {
-            Ok(files) => {
-                let index = syncthing_core::types::Index {
-                    folder: folder_id.clone(),
-                    files,
-                };
-                if let Err(e) = conn.send_index(&index).await {
-                    warn!("Failed to send Index for {} to {}: {}", folder_id, device_id, e);
-                } else {
-                    info!("Sent Index for {} to {} ({} files)", folder_id, device_id, index.files.len());
-                }
-            }
-            Err(e) => {
-                warn!("Failed to generate index for {}: {}", folder_id, e);
-            }
-        }
+    async fn on_index(
+        &self,
+        device_id: DeviceId,
+        index: syncthing_core::types::Index,
+    ) -> syncthing_core::Result<()> {
+        let folder = index.folder.clone();
+        self.sync_service.handle_index(&folder, device_id, index).await.map_err(|e| {
+            syncthing_core::SyncthingError::internal(format!("handle_index failed: {:?}", e))
+        })?;
+        Ok(())
     }
 
-    // 4. Steady-state message loop
-    info!("Entering steady-state BEP loop for {}", device_id);
-    let mut heartbeat = tokio::time::interval(Duration::from_secs(90));
-    let mut last_recv = Instant::now();
-    loop {
-        tokio::select! {
-            result = conn.recv_message() => {
-                let latency = last_recv.elapsed();
-                match result {
-                    Ok((msg_type, payload)) => {
-                        metrics::global().record_bep_message_recv(
-                            device_id.to_string(),
-                            &format!("{:?}", msg_type),
-                            latency,
-                            payload.len() as u64,
-                        );
-                        last_recv = Instant::now();
-                        match msg_type {
-                            MessageType::Ping => {
-                                if let Err(e) = conn.send_ping().await {
-                                    warn!("Failed to send ping reply to {}: {}", device_id, e);
-                                    break;
-                                }
-                            }
-                            MessageType::Index => {
-                                match bep_protocol::messages::decode_message::<bep_protocol::messages::Index>(&payload) {
-                                    Ok(wire_index) => {
-                                        let index: syncthing_core::types::Index = wire_index.into();
-                                        let folder = index.folder.clone();
-                                        if let Err(e) = sync_service.handle_index(&folder, device_id, index).await {
-                                            warn!("Failed to handle Index from {}: {}", device_id, e);
-                                        }
-                                    }
-                                    Err(e) => warn!("Failed to decode Index from {}: {}", device_id, e),
-                                }
-                            }
-                            MessageType::IndexUpdate => {
-                                match bep_protocol::messages::decode_message::<bep_protocol::messages::IndexUpdate>(&payload) {
-                                    Ok(wire_update) => {
-                                        let update: syncthing_core::types::IndexUpdate = wire_update.into();
-                                        let folder = update.folder.clone();
-                                        if let Err(e) = sync_service.handle_index_update(&folder, device_id, update).await {
-                                            warn!("Failed to handle IndexUpdate from {}: {}", device_id, e);
-                                        }
-                                    }
-                                    Err(e) => warn!("Failed to decode IndexUpdate from {}: {}", device_id, e),
-                                }
-                            }
-                            MessageType::Request => {
-                                match bep_protocol::messages::decode_message::<bep_protocol::messages::Request>(&payload) {
-                                    Ok(req) => {
-                                        match sync_service.handle_block_request(&req).await {
-                                            Ok(data) => {
-                                                let resp = bep_protocol::messages::Response {
-                                                    id: req.id,
-                                                    data,
-                                                    code: bep_protocol::messages::ErrorCode::NoError as i32,
-                                                };
-                                                match bep_protocol::messages::encode_message(&resp) {
-                                                    Ok(payload) => {
-                                                        if let Err(e) = conn.send_message(MessageType::Response, payload).await {
-                                                            warn!("Failed to send Response to {}: {}", device_id, e);
-                                                        }
-                                                    }
-                                                    Err(e) => warn!("Failed to encode Response for {}: {}", device_id, e),
-                                                }
-                                            }
-                                            Err(e) => {
-                                                warn!("Block request from {} failed: {}", device_id, e);
-                                                let resp = bep_protocol::messages::Response {
-                                                    id: req.id,
-                                                    data: vec![],
-                                                    code: e.error_code() as i32,
-                                                };
-                                                if let Ok(payload) = bep_protocol::messages::encode_message(&resp) {
-                                                    let _ = conn.send_message(MessageType::Response, payload).await;
-                                                }
-                                            }
-                                        }
-                                    }
-                                    Err(e) => warn!("Failed to decode Request from {}: {}", device_id, e),
-                                }
-                            }
-                            MessageType::Response => {
-                                match bep_protocol::messages::decode_message::<bep_protocol::messages::Response>(&payload) {
-                                    Ok(resp) => {
-                                        if let Some((_, tx)) = pending_responses.remove(&resp.id) {
-                                            let _ = tx.send(resp);
-                                        } else {
-                                            warn!("Received unmatched Response id={} from {}", resp.id, device_id);
-                                        }
-                                    }
-                                    Err(e) => warn!("Failed to decode Response from {}: {}", device_id, e),
-                                }
-                            }
-                            MessageType::Close => {
-                                info!("Received Close from {}", device_id);
-                                break;
-                            }
-                            _ => {}
-                        }
-                    }
-                    Err(e) => {
-                        warn!("BEP session loop error for {}: {}", device_id, e);
-                        break;
-                    }
-                }
-            }
-            _ = heartbeat.tick() => {
-                if let Err(e) = conn.send_ping().await {
-                    warn!("Failed to send ping to {}: {}", device_id, e);
-                    break;
-                }
-            }
-        }
+    async fn on_index_update(
+        &self,
+        device_id: DeviceId,
+        update: syncthing_core::types::IndexUpdate,
+    ) -> syncthing_core::Result<()> {
+        let folder = update.folder.clone();
+        self.sync_service
+            .handle_index_update(&folder, device_id, update)
+            .await
+            .map_err(|e| {
+                syncthing_core::SyncthingError::internal(format!("handle_index_update failed: {:?}", e))
+            })?;
+        Ok(())
     }
 
-    // Disconnect cleanly
-    let _ = handle.disconnect(&device_id, "bep session ended").await;
+    async fn on_block_request(
+        &self,
+        _device_id: DeviceId,
+        req: bep_protocol::messages::Request,
+    ) -> std::result::Result<Vec<u8>, bep_protocol::messages::ErrorCode> {
+        self.sync_service.handle_block_request(&req).await.map_err(|e| e.error_code())
+    }
 }
 
 
