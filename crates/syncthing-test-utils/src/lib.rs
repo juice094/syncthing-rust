@@ -87,6 +87,20 @@ impl AsyncWrite for MemoryPipe {
     }
 }
 
+impl syncthing_core::traits::ReliablePipe for MemoryPipe {
+    fn local_addr(&self) -> Option<SocketAddr> {
+        Some(self.local_addr)
+    }
+
+    fn peer_addr(&self) -> Option<SocketAddr> {
+        Some(self.peer_addr)
+    }
+
+    fn transport_type(&self) -> syncthing_core::traits::TransportType {
+        syncthing_core::traits::TransportType::Memory
+    }
+}
+
 /// Create a pair of connected [`MemoryPipe`]s.
 ///
 /// `max_buf_size` controls the internal backpressure buffer of the underlying

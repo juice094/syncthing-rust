@@ -95,8 +95,8 @@ pub struct ConnectionManager {
     config: ConnectionManagerConfig,
     /// 本地设备ID
     local_device_id: DeviceId,
-    /// 活跃连接池 (device_id -> connection)
-    connections: DashMap<DeviceId, ConnectionEntry>,
+    /// 活跃连接池 (device_id -> conn_id -> connection)
+    connections: DashMap<DeviceId, DashMap<uuid::Uuid, ConnectionEntry>>,
     /// 按连接ID索引 (conn_id -> device_id)
     conn_id_index: DashMap<uuid::Uuid, DeviceId>,
     /// 待连接设备
@@ -155,6 +155,16 @@ impl ConnectionManagerHandle {
     /// 断开与设备的连接
     pub async fn disconnect(&self, device_id: &DeviceId, reason: &str) -> syncthing_core::Result<()> {
         self.inner.disconnect(device_id, reason).await
+    }
+
+    /// 断开指定连接
+    pub async fn disconnect_connection(&self, conn_id: &uuid::Uuid, reason: &str) -> syncthing_core::Result<()> {
+        self.inner.disconnect_connection(conn_id, reason).await
+    }
+
+    /// 按连接ID获取连接
+    pub fn get_connection_by_id(&self, conn_id: &uuid::Uuid) -> Option<Arc<BepConnection>> {
+        self.inner.get_connection_by_id(conn_id)
     }
     
     /// 连接到设备
@@ -305,23 +315,22 @@ impl ConnectionManager {
     async fn register_connection(&self, device_id: DeviceId, conn: Arc<BepConnection>) -> syncthing_core::Result<()> {
         debug!("Registering connection for device {}", device_id);
         
-        // 检查是否已存在连接
-        if let Some(existing) = self.connections.get(&device_id) {
-            // 比较连接优先级，决定是否替换
-            if self.should_replace_connection(&existing.conn, &conn) {
-                info!("Replacing existing connection for device {}", device_id);
+        let conn_id = conn.id();
+        
+        // 如果同一 conn_id 已存在，先关闭旧连接
+        if let Some(mut nested) = self.connections.get_mut(&device_id) {
+            if let Some((_, existing)) = nested.remove(&conn_id) {
+                info!("Replacing existing connection {} for device {}", conn_id, device_id);
                 existing.conn.close().await.ok();
-            } else {
-                // 关闭新连接
-                conn.close().await.ok();
-                return Err(SyncthingError::connection("existing connection has higher priority"));
             }
+            nested.insert(conn_id, ConnectionEntry::new(Arc::clone(&conn)));
+        } else {
+            let mut nested = DashMap::new();
+            nested.insert(conn_id, ConnectionEntry::new(Arc::clone(&conn)));
+            self.connections.insert(device_id, nested);
         }
         
-        // 添加新连接
-        let entry = ConnectionEntry::new(Arc::clone(&conn));
-        self.connections.insert(device_id, entry);
-        self.conn_id_index.insert(conn.id(), device_id);
+        self.conn_id_index.insert(conn_id, device_id);
         
         // 设置连接的设备ID
         conn.set_device_id(device_id);
@@ -329,7 +338,7 @@ impl ConnectionManager {
         // 从待连接列表中移除
         self.pending_connections.write().await.remove(&device_id);
         
-        info!("Connection registered for device {} (conn_id: {})", device_id, conn.id());
+        info!("Connection registered for device {} (conn_id: {})", device_id, conn_id);
         
         // 触发回调
         if let Some(callback) = self.on_connected.read().as_ref() {
@@ -339,7 +348,6 @@ impl ConnectionManager {
         // 发送事件
         let _ = self.event_tx.send(ConnectionEvent::Connected {
             device_id,
-
         });
         
         Ok(())
@@ -357,12 +365,24 @@ impl ConnectionManager {
         }
     }
     
-    /// 获取连接
+    /// 获取连接（返回首个存活连接）
     fn get_connection(&self, device_id: &DeviceId) -> Option<Arc<BepConnection>> {
         self.connections
             .get(device_id)
-            .filter(|entry| entry.conn.is_alive())
-            .map(|entry| Arc::clone(&entry.conn))
+            .and_then(|nested| {
+                nested.iter()
+                    .find(|e| e.value().conn.is_alive())
+                    .map(|e| Arc::clone(&e.value().conn))
+            })
+    }
+
+    /// 按连接ID获取连接
+    fn get_connection_by_id(&self, conn_id: &uuid::Uuid) -> Option<Arc<BepConnection>> {
+        self.conn_id_index.get(conn_id).and_then(|device_id| {
+            self.connections.get(&*device_id).and_then(|nested| {
+                nested.get(conn_id).map(|e| Arc::clone(&e.conn))
+            })
+        })
     }
     
     /// 检查设备是否已连接
@@ -374,7 +394,7 @@ impl ConnectionManager {
     pub fn connected_devices(&self) -> Vec<DeviceId> {
         self.connections
             .iter()
-            .filter(|entry| entry.conn.is_alive())
+            .filter(|entry| entry.value().iter().any(|e| e.value().conn.is_alive()))
             .map(|entry| *entry.key())
             .collect()
     }
@@ -383,9 +403,12 @@ impl ConnectionManager {
     async fn disconnect(&self, device_id: &DeviceId, reason: &str) -> syncthing_core::Result<()> {
         info!("Disconnecting device {}: {}", device_id, reason);
 
-        if let Some((_, entry)) = self.connections.remove(device_id) {
-            entry.conn.close().await?;
-            self.conn_id_index.remove(&entry.conn.id());
+        if let Some((_, nested)) = self.connections.remove(device_id) {
+            for entry in nested {
+                let (conn_id, e) = entry;
+                e.conn.close().await.ok();
+                self.conn_id_index.remove(&conn_id);
+            }
 
             // 触发回调
             if let Some(callback) = self.on_disconnected.read().as_ref() {
@@ -396,6 +419,34 @@ impl ConnectionManager {
         // 触发重连（如果适用）
         if self.should_reconnect(device_id, reason) {
             self.schedule_reconnect(*device_id).await;
+        }
+
+        Ok(())
+    }
+
+    /// 断开指定连接
+    async fn disconnect_connection(&self, conn_id: &uuid::Uuid, reason: &str) -> syncthing_core::Result<()> {
+        let Some((_, device_id)) = self.conn_id_index.remove(conn_id) else {
+            return Ok(());
+        };
+
+        let device_has_other_conns = if let Some(mut nested) = self.connections.get_mut(&device_id) {
+            nested.remove(conn_id);
+            !nested.is_empty()
+        } else {
+            false
+        };
+
+        if !device_has_other_conns {
+            self.connections.remove(&device_id);
+            // 触发重连（如果适用）
+            if self.should_reconnect(&device_id, reason) {
+                self.schedule_reconnect(device_id).await;
+            }
+            // 触发回调
+            if let Some(callback) = self.on_disconnected.read().as_ref() {
+                callback(device_id, reason.to_string());
+            }
         }
 
         Ok(())
@@ -620,20 +671,6 @@ impl ConnectionManager {
         }
     }
     
-    /// 检查是否应该替换现有连接
-    fn should_replace_connection(&self, existing: &BepConnection, new: &BepConnection) -> bool {
-        // 优先保留传出连接（通常更可靠）
-        match (existing.connection_type(), new.connection_type()) {
-            (ConnectionType::Outgoing, ConnectionType::Incoming) => false,
-            (ConnectionType::Incoming, ConnectionType::Outgoing) => true,
-            _ => {
-                // 相同类型时，优先保留较新的连接
-                // 简化处理：保留新连接
-                true
-            }
-        }
-    }
-    
     /// 检查是否应该重连
     fn should_reconnect(&self, _device_id: &DeviceId, reason: &str) -> bool {
         // 检查断开原因是否值得重试
@@ -696,24 +733,32 @@ impl ConnectionManager {
     /// 清理过期连接
     async fn cleanup_stale_connections(&self) {
         let stale_threshold = self.config.connection_timeout;
-        let stale_devices: Vec<DeviceId> = self.connections
-            .iter()
-            .filter(|entry| !entry.conn.is_alive() || entry.is_stale(stale_threshold))
-            .map(|entry| *entry.key())
-            .collect();
+        let mut stale_conns: Vec<uuid::Uuid> = Vec::new();
         
-        for device_id in stale_devices {
-            warn!("Connection to {} is stale or dead, disconnecting", device_id);
-            if let Err(e) = self.disconnect(&device_id, "stale connection").await {
-                warn!("Error disconnecting stale connection {}: {}", device_id, e);
+        for device_entry in self.connections.iter() {
+            for conn_entry in device_entry.value().iter() {
+                let entry = conn_entry.value();
+                if !entry.conn.is_alive() || entry.is_stale(stale_threshold) {
+                    stale_conns.push(*conn_entry.key());
+                }
+            }
+        }
+        
+        for conn_id in stale_conns {
+            if let Err(e) = self.disconnect_connection(&conn_id, "stale connection").await {
+                warn!("Error disconnecting stale connection {}: {}", conn_id, e);
             }
         }
     }
     
     /// 获取统计信息
     pub fn stats(&self) -> ManagerStats {
+        let active_connections: usize = self.connections
+            .iter()
+            .map(|e| e.value().iter().filter(|c| c.value().conn.is_alive()).count())
+            .sum();
         ManagerStats {
-            active_connections: self.connections.len(),
+            active_connections,
             connected_devices: self.connected_devices().len(),
             pending_connections: 0, // 简化处理
         }

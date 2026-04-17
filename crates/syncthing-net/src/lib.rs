@@ -4,6 +4,7 @@
 //! 以及 NAT 穿透功能（STUN/UPnP）
 
 pub mod connection;
+pub mod handshaker;
 pub mod manager;
 pub mod netmon;
 pub mod tcp_transport;

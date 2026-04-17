@@ -346,7 +346,7 @@ mod tests {
         });
         let stream = tokio::net::TcpStream::connect(addr).await.unwrap();
         let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
-        BepConnection::new(crate::connection::TcpBiStream::Plain(stream), ConnectionType::Outgoing, tx)
+        BepConnection::new(Box::new(crate::connection::TcpBiStream::Plain(stream)), ConnectionType::Outgoing, tx)
             .await
             .unwrap()
     }
