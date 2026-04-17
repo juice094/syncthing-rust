@@ -396,60 +396,28 @@ impl<T> PaginatedResponse<T> {
 
 /// Validation utilities
 pub mod validation {
-    use super::*;
+    use super::ApiError;
+
+    fn map_err(e: syncthing_core::SyncthingError) -> ApiError {
+        match e {
+            syncthing_core::SyncthingError::Validation(msg) => ApiError::invalid_request(msg),
+            _ => ApiError::invalid_request(e.to_string()),
+        }
+    }
 
     /// Validate folder ID
     pub fn validate_folder_id(id: &str) -> Result<(), ApiError> {
-        if id.is_empty() {
-            return Err(ApiError::invalid_request("Folder ID cannot be empty"));
-        }
-        if id.len() > 64 {
-            return Err(ApiError::invalid_request(
-                "Folder ID cannot exceed 64 characters",
-            ));
-        }
-        // Check for valid characters
-        if !id.chars().all(|c| c.is_alphanumeric() || c == '-' || c == '_') {
-            return Err(ApiError::invalid_request(
-                "Folder ID can only contain alphanumeric characters, hyphens, and underscores",
-            ));
-        }
-        Ok(())
+        syncthing_core::validation::validate_folder_id(id).map_err(map_err)
     }
 
     /// Validate device ID
     pub fn validate_device_id(id: &str) -> Result<(), ApiError> {
-        if id.is_empty() {
-            return Err(ApiError::invalid_request("Device ID cannot be empty"));
-        }
-        // Device IDs are typically 63 characters with dashes (XXXXXXX-XXXXXXX-...)
-        // or 56 characters without dashes
-        let cleaned: String = id.chars().filter(|&c| c != '-').collect();
-        if cleaned.len() != 56 {
-            return Err(ApiError::invalid_request(
-                "Device ID must be 56 hexadecimal characters (or 63 with dashes)",
-            ));
-        }
-        if !cleaned.chars().all(|c| c.is_ascii_hexdigit()) {
-            return Err(ApiError::invalid_request(
-                "Device ID must contain only hexadecimal characters",
-            ));
-        }
-        Ok(())
+        syncthing_core::validation::validate_device_id(id).map_err(map_err)
     }
 
     /// Validate path
     pub fn validate_path(path: &str) -> Result<(), ApiError> {
-        if path.is_empty() {
-            return Err(ApiError::invalid_request("Path cannot be empty"));
-        }
-        // Check for path traversal attempts
-        if path.contains("..") {
-            return Err(ApiError::invalid_request(
-                "Path cannot contain parent directory references",
-            ));
-        }
-        Ok(())
+        syncthing_core::validation::validate_path(path).map_err(map_err)
     }
 }
 

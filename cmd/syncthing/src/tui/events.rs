@@ -133,8 +133,8 @@ fn handle_add_device_key(app: &mut App, key: KeyEvent) -> bool {
             let name = app.device_form.fields[1].trim();
             let addr = app.device_form.fields[2].trim();
 
-            if id_str.is_empty() {
-                app.popup = Popup::Error("Device ID cannot be empty".to_string());
+            if let Err(e) = syncthing_core::validation::validate_device_id(id_str) {
+                app.popup = Popup::Error(e.to_string());
                 return false;
             }
 
@@ -193,8 +193,12 @@ fn handle_add_folder_key(app: &mut App, key: KeyEvent) -> bool {
             let id = app.folder_form.fields[0].trim();
             let path = app.folder_form.fields[1].trim();
 
-            if id.is_empty() || path.is_empty() {
-                app.popup = Popup::Error("Folder ID and Path cannot be empty".to_string());
+            if let Err(e) = syncthing_core::validation::validate_folder_id(id) {
+                app.popup = Popup::Error(e.to_string());
+                return false;
+            }
+            if let Err(e) = syncthing_core::validation::validate_path(path) {
+                app.popup = Popup::Error(e.to_string());
                 return false;
             }
 

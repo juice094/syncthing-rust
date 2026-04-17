@@ -1,70 +1,13 @@
 //! REST API 服务器启动与配置存储
 
 use std::net::SocketAddr;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::Arc;
 
-use async_trait::async_trait;
-use axum::Router;
-use syncthing_core::traits::{ConfigStore, ConfigStream};
-use syncthing_core::types::Config;
+use syncthing_core::traits::ConfigStore;
 use syncthing_core::{DeviceId, Result, SyncthingError};
 use tokio::net::TcpListener;
 use tracing::{info, warn};
-
-/// 基于 JSON 文件的配置存储
-#[derive(Debug, Clone)]
-pub struct JsonConfigStore {
-    path: PathBuf,
-}
-
-impl JsonConfigStore {
-    pub fn new(path: impl Into<PathBuf>) -> Self {
-        Self { path: path.into() }
-    }
-}
-
-#[async_trait]
-impl ConfigStore for JsonConfigStore {
-    async fn load(&self) -> Result<Config> {
-        let path = self.path.clone();
-        let content = tokio::task::spawn_blocking(move || std::fs::read_to_string(&path))
-            .await
-            .map_err(|e| SyncthingError::io(format!("failed to read config: {}", e)))?
-            .map_err(|e| SyncthingError::io(e.to_string()))?;
-
-        let config: Config = serde_json::from_str(&content)
-            .map_err(|e| SyncthingError::config(format!("failed to parse JSON config: {}", e)))?;
-        Ok(config)
-    }
-
-    async fn save(&self, config: &Config) -> Result<()> {
-        let path = self.path.clone();
-        let content = serde_json::to_string_pretty(config)
-            .map_err(|e| SyncthingError::config(format!("failed to serialize config: {}", e)))?;
-
-        tokio::task::spawn_blocking(move || std::fs::write(&path, content))
-            .await
-            .map_err(|e| SyncthingError::io(format!("failed to write config: {}", e)))?
-            .map_err(|e| SyncthingError::io(e.to_string()))?;
-        Ok(())
-    }
-
-    async fn watch(&self) -> Result<Box<dyn ConfigStream>> {
-        // TODO: 实现文件监听（notify）
-        Ok(Box::new(DummyConfigStream))
-    }
-}
-
-struct DummyConfigStream;
-
-#[async_trait]
-impl ConfigStream for DummyConfigStream {
-    async fn next(&mut self) -> Result<()> {
-        // 永远等待，永不触发
-        std::future::pending().await
-    }
-}
 
 /// API Key 认证中间件
 // Middleware removed: API key checking will be done inside syncthing-api build_router
@@ -78,7 +21,7 @@ pub async fn start_api_server(
     connection_handle: Option<syncthing_net::manager::ConnectionManagerHandle>,
 ) -> Result<tokio::task::JoinHandle<()>> {
     let config_path = config_dir.join("config.json");
-    let config_store = Arc::new(JsonConfigStore::new(&config_path));
+    let config_store = Arc::new(syncthing_api::config::JsonConfigStore::new(&config_path));
 
     // 加载当前配置以获取 GUI 设置
     let config = config_store.load().await?;

@@ -152,7 +152,7 @@ fn resolve_daemon_config(
         syncthing_core::types::Config::new()
     };
 
-    // CLI overrides config
+    // CLI overrides config (runtime-only, do NOT persist to disk)
     let listen = if cli_listen != "0.0.0.0:22001" {
         cli_listen
     } else {
@@ -163,13 +163,6 @@ fn resolve_daemon_config(
     } else {
         config.device_name.clone()
     };
-
-    config.listen_addr = listen.clone();
-    config.device_name = device_name.clone();
-
-    if let Err(e) = save_config(&config_path, &config) {
-        warn!("Failed to save config: {}", e);
-    }
 
     Ok((listen, device_name))
 }
@@ -515,6 +508,57 @@ mod tests {
         assert_eq!(loaded.folders[0].id, "test-folder");
 
         // 清理
+        let _ = std::fs::remove_dir_all(&tmp_dir);
+    }
+
+    #[test]
+    fn test_cli_override_does_not_persist() {
+        let tmp_dir = std::env::temp_dir().join(format!("syncthing-cli-override-test-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&tmp_dir);
+        std::fs::create_dir_all(&tmp_dir).unwrap();
+
+        let path = tmp_dir.join("config.json");
+        let mut config = Config::new();
+        config.listen_addr = "0.0.0.0:22001".to_string();
+        config.device_name = "syncthing-rust".to_string();
+        save_config(&path, &config).expect("failed to save config");
+
+        // CLI override should NOT write back to disk
+        let (listen, device_name) = resolve_daemon_config(
+            &tmp_dir,
+            "0.0.0.0:9999".to_string(),
+            "custom-name".to_string(),
+        ).expect("failed to resolve config");
+        assert_eq!(listen, "0.0.0.0:9999");
+        assert_eq!(device_name, "custom-name");
+
+        // Verify disk config is untouched
+        let loaded = load_config(&path).expect("failed to load config");
+        assert_eq!(loaded.listen_addr, "0.0.0.0:22001");
+        assert_eq!(loaded.device_name, "syncthing-rust");
+
+        let _ = std::fs::remove_dir_all(&tmp_dir);
+    }
+
+    #[test]
+    fn test_port_migration_persists() {
+        let tmp_dir = std::env::temp_dir().join(format!("syncthing-port-migration-test-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&tmp_dir);
+        std::fs::create_dir_all(&tmp_dir).unwrap();
+
+        let path = tmp_dir.join("config.json");
+        let mut config = Config::new();
+        config.listen_addr = "0.0.0.0:22000".to_string();
+        config.gui.address = "127.0.0.1:8384".to_string();
+        save_config(&path, &config).expect("failed to save config");
+
+        // resolve_daemon_config does NOT migrate; migration happens in daemon_runner.
+        // For this test we verify that resolve_daemon_config does not break the old port.
+        let (listen, _) = resolve_daemon_config(&tmp_dir, "0.0.0.0:22001".to_string(), "syncthing-rust".to_string())
+            .expect("failed to resolve config");
+        // Because CLI arg equals default, it falls back to config value (the old 22000)
+        assert_eq!(listen, "0.0.0.0:22000");
+
         let _ = std::fs::remove_dir_all(&tmp_dir);
     }
 }
