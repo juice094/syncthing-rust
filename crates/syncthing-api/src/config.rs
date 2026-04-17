@@ -50,6 +50,7 @@ impl FileConfigStore {
     }
 
     /// Get the configuration file path
+    /// Get the configuration file path
     pub fn path(&self) -> &Path {
         &self.path
     }
@@ -300,6 +301,170 @@ impl ConfigStream for MemoryConfigStream {
             .recv()
             .await
             .map_err(|e| SyncthingError::config(format!("Broadcast channel error: {}", e)))
+    }
+}
+
+/// JSON-based configuration storage
+///
+/// Production-grade implementation with:
+/// - Async tokio::fs I/O
+/// - In-memory caching
+/// - File change watching via notify
+/// - Automatic default config creation
+#[derive(Debug, Clone)]
+pub struct JsonConfigStore {
+    path: PathBuf,
+    cache: Arc<RwLock<Option<Config>>>,
+}
+
+impl JsonConfigStore {
+    /// Create a new JSON config store
+    pub fn new<P: AsRef<Path>>(path: P) -> Self {
+        Self {
+            path: path.as_ref().to_path_buf(),
+            cache: Arc::new(RwLock::new(None)),
+        }
+    }
+
+    pub fn path(&self) -> &Path {
+        &self.path
+    }
+
+    async fn ensure_dir(&self) -> Result<()> {
+        if let Some(parent) = self.path.parent() {
+            tokio::fs::create_dir_all(parent)
+                .await
+                .map_err(|e| SyncthingError::Io(e))?;
+        }
+        Ok(())
+    }
+}
+
+#[async_trait]
+impl ConfigStore for JsonConfigStore {
+    async fn load(&self) -> Result<Config> {
+        {
+            let cache = self.cache.read().await;
+            if let Some(ref config) = *cache {
+                debug!("Returning cached JSON configuration");
+                return Ok(config.clone());
+            }
+        }
+
+        if !self.path.exists() {
+            info!("Config file not found, creating default JSON configuration");
+            let config = Config::new();
+            self.save(&config).await?;
+            return Ok(config);
+        }
+
+        let content = tokio::fs::read_to_string(&self.path)
+            .await
+            .map_err(|e| SyncthingError::Io(e))?;
+
+        let config: Config = serde_json::from_str(&content).map_err(|e| {
+            SyncthingError::config(format!("Failed to parse JSON config: {}", e))
+        })?;
+
+        let mut cache = self.cache.write().await;
+        *cache = Some(config.clone());
+
+        info!("Configuration loaded from {:?}", self.path);
+        Ok(config)
+    }
+
+    async fn save(&self, config: &Config) -> Result<()> {
+        self.ensure_dir().await?;
+
+        let content = serde_json::to_string_pretty(config).map_err(|e| {
+            SyncthingError::config(format!("Failed to serialize JSON config: {}", e))
+        })?;
+
+        tokio::fs::write(&self.path, content)
+            .await
+            .map_err(|e| SyncthingError::Io(e))?;
+
+        let mut cache = self.cache.write().await;
+        *cache = Some(config.clone());
+
+        info!("Configuration saved to {:?}", self.path);
+        Ok(())
+    }
+
+    async fn watch(&self) -> Result<Box<dyn ConfigStream>> {
+        let (tx, rx) = mpsc::channel(10);
+        let path = self.path.clone();
+        let cache = self.cache.clone();
+
+        let mut watcher = RecommendedWatcher::new(
+            move |res: std::result::Result<Event, notify::Error>| {
+                match res {
+                    Ok(event) => {
+                        if event.paths.iter().any(|p| p == &path) {
+                            debug!("JSON configuration file changed: {:?}", event);
+                            let _ = tx.try_send(());
+                        }
+                    }
+                    Err(e) => {
+                        error!("Watch error: {}", e);
+                    }
+                }
+            },
+            NotifyConfig::default(),
+        )
+        .map_err(|e| SyncthingError::config(format!("Failed to create watcher: {}", e)))?;
+
+        watcher
+            .watch(&self.path, RecursiveMode::NonRecursive)
+            .map_err(|e| SyncthingError::config(format!("Failed to watch file: {}", e)))?;
+
+        tokio::spawn(async move {
+            let _watcher = watcher;
+            loop {
+                tokio::time::sleep(tokio::time::Duration::from_secs(60)).await;
+            }
+        });
+
+        let stream = JsonConfigStream {
+            receiver: rx,
+            path: self.path.clone(),
+            cache: cache.clone(),
+        };
+
+        Ok(Box::new(stream))
+    }
+}
+
+/// JSON configuration change stream
+pub struct JsonConfigStream {
+    receiver: mpsc::Receiver<()>,
+    path: PathBuf,
+    cache: Arc<RwLock<Option<Config>>>,
+}
+
+#[async_trait]
+impl ConfigStream for JsonConfigStream {
+    async fn next(&mut self) -> Result<()> {
+        self.receiver
+            .recv()
+            .await
+            .ok_or_else(|| SyncthingError::config("Watch channel closed".to_string()))?;
+
+        if self.path.exists() {
+            let content = tokio::fs::read_to_string(&self.path)
+                .await
+                .map_err(|e| SyncthingError::Io(e))?;
+
+            let config: Config = serde_json::from_str(&content).map_err(|e| {
+                SyncthingError::config(format!("Failed to parse updated JSON: {}", e))
+            })?;
+
+            let mut cache = self.cache.write().await;
+            *cache = Some(config);
+            info!("JSON configuration reloaded from file");
+        }
+
+        Ok(())
     }
 }
 

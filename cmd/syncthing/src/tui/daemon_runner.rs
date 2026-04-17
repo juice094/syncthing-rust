@@ -73,6 +73,29 @@ pub async fn start_daemon(
         config_modified = true;
     }
 
+    // 自动生成 API key（若为空）— 持久化操作
+    if config.gui.api_key.is_empty() {
+        let api_key: String = (0..32)
+            .map(|_| rand::random::<u8>() % 36)
+            .map(|i| if i < 10 { (b'0' + i) as char } else { (b'a' + i - 10) as char })
+            .collect();
+        config.gui.api_key = api_key.clone();
+        info!("Generated API key for REST API: {}", api_key);
+        config_modified = true;
+    } else {
+        info!("REST API enabled at {} with existing API key", config.gui.address);
+    }
+
+    if config_modified {
+        if let Err(e) = save_config(&config_path, &config) {
+            warn!("Failed to save config: {}", e);
+        }
+    }
+
+    // Runtime overrides from CLI (Layer 3) — do not persist
+    config.listen_addr = listen;
+    config.device_name = device_name;
+
     if test_mode {
         // 互操作测试自动配置（仅开发阶段）：本地 Go 节点（127.0.0.1:22001）
         // 注意：这些配置仅在内存中生效，不会持久化到 config.json，避免污染正常用户配置
@@ -103,31 +126,6 @@ pub async fn start_daemon(
                 }
             }
         }
-    }
-
-    if config_modified {
-        if let Err(e) = save_config(&config_path, &config) {
-            warn!("Failed to save config: {}", e);
-        }
-    }
-
-    // 自动生成 API key（若为空）
-    if config.gui.api_key.is_empty() {
-        let api_key: String = (0..32)
-            .map(|_| rand::random::<u8>() % 36)
-            .map(|i| if i < 10 { (b'0' + i) as char } else { (b'a' + i - 10) as char })
-            .collect();
-        config.gui.api_key = api_key.clone();
-        info!("Generated API key for REST API: {}", api_key);
-        if let Err(e) = save_config(&config_path, &config) {
-            warn!("Failed to save config with API key: {}", e);
-        }
-    } else {
-        info!("REST API enabled at {} with existing API key", config.gui.address);
-    }
-
-    if let Err(e) = save_config(&config_path, &config) {
-        warn!("Failed to save config: {}", e);
     }
 
     let db = MemoryDatabase::new();

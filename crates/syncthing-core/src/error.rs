@@ -71,6 +71,10 @@ pub enum SyncthingError {
     #[error("Network error: {0}")]
     Network(String),
     
+    /// 验证错误
+    #[error("Validation error: {0}")]
+    Validation(String),
+    
     /// 其他错误
     #[error("{0}")]
     Other(String),

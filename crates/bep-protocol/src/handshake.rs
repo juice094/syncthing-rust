@@ -274,4 +274,41 @@ mod tests {
         assert_eq!(HELLO_MAGIC, 0x2EA7D90B);
         assert_eq!(MAX_HELLO_SIZE, 1024);
     }
+
+    /// Integration test using MemoryPipe instead of real TCP sockets.
+    #[tokio::test]
+    async fn test_hello_over_memory_pipe() {
+        use syncthing_test_utils::memory_pipe_pair;
+
+        let (mut alice, mut bob) = memory_pipe_pair(1024);
+
+        let alice_hello = Hello {
+            device_name: "alice".to_string(),
+            client_name: "syncthing-rust".to_string(),
+            client_version: "0.1.0".to_string(),
+            num_connections: 1,
+            timestamp: 1,
+        };
+
+        let bob_hello = Hello {
+            device_name: "bob".to_string(),
+            client_name: "syncthing-rust".to_string(),
+            client_version: "0.1.0".to_string(),
+            num_connections: 1,
+            timestamp: 2,
+        };
+
+        let bob_handle = tokio::spawn(async move {
+            let received = recv_hello(&mut bob).await.unwrap();
+            send_hello(&mut bob, &bob_hello).await.unwrap();
+            received
+        });
+
+        send_hello(&mut alice, &alice_hello).await.unwrap();
+        let received = recv_hello(&mut alice).await.unwrap();
+
+        let bob_received = bob_handle.await.unwrap();
+        assert_eq!(bob_received.device_name, "alice");
+        assert_eq!(received.device_name, "bob");
+    }
 }

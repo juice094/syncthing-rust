@@ -8,6 +8,7 @@ members = [
     "crates/syncthing-fs",
     "crates/syncthing-db",
     "crates/syncthing-api",
+    "crates/syncthing-test-utils",
     "crates/bep-protocol",
     "cmd/syncthing",
 ]
