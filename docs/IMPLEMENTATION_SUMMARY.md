@@ -112,13 +112,14 @@
 - **重连修复**: 修复 `schedule_reconnect` 因 `pending_connections` 竞态导致二次拨号被拦截的 bug
 - **TUI 修复**: `Add Folder` 弹窗中 `Space` 键可正常切换设备 checkbox，Tab/BackTab 焦点能正确进入设备选择区
 
-### 2026-04-17：Phase 2 Network Abstraction — 传输层解耦 ✅
+### 2026-04-17：Phase 2 Network Abstraction + BepSession 解耦 ✅
 - **`ReliablePipe` trait**: 在 `syncthing-core` 中定义 `ReliablePipe = AsyncRead + AsyncWrite + local/peer_addr + path_quality + transport_type`，正式将 BEP 语义与 TCP 实现解耦
 - **`TcpBiStream` 实现**: `syncthing-net` 中 `TcpBiStream` 已实现 `ReliablePipe`
 - **`BepConnection::new` 重构**: 签名从 `TcpBiStream` 改为 `Box<dyn ReliablePipe>`，内部使用 `tokio::io::split` 分离读写半流
 - **`BepHandshaker` 抽取**: 新建 `handshaker.rs`，统一封装 BEP Hello 交换逻辑，`tcp_transport.rs` 中所有内联 Hello 代码已替换
 - **`ConnectionManager` 多路径支持**: 内部连接存储从 `device_id -> ConnectionEntry` 重构为 `device_id -> conn_id -> ConnectionEntry`（嵌套 `DashMap`），支持同一设备维护多条并发路径
-- **MemoryPipe 验收测试**: `syncthing-test-utils` 中 `MemoryPipe` 已实现 `ReliablePipe`；新增 `test_bep_connection_over_memory_pipe`，验证 BEP Ping 消息可在内存管道上完整收发
+- **`BepSession` 抽取**: 新建 `session.rs`，将 `daemon_runner.rs` 中 ~230 行的 BEP 消息循环（ClusterConfig → Index → steady-state）抽取为独立的 `BepSession` 组件；`daemon_runner.rs` 通过 `DaemonBepHandler` 实现 `BepSessionHandler` 回调，BEP 相关代码量减少 **>60%**
+- **MemoryPipe 验收测试**: 新增 `test_session_ping_pong` 和 `test_session_block_request_response`，在内存管道上验证 BEP 完整会话周期
 - **编译与测试**: 全 workspace `cargo test` 通过，0 failed
 
 ---
@@ -168,12 +169,13 @@ cargo run --release -p syncthing -- run -l 127.0.0.1:22000 -c %TEMP%\syncthing_t
 
 ### 待完成工作
 1. ✅ **端到端文件同步验证（Pull）**：2026-04-11 已通过跨网络测试验证完整下载
-2. **推送 (Push) 方向**：实现块的上传响应能力（`handle_block_request` 已存在，但缺少与 `Puller` 的对称推送调度）
+2. **推送 (Push) 方向**：`handle_block_request` 已存在且正常工作（BepSession 测试通过），但云端 Go 节点在观察期内未触发块请求，推测与对端同步状态有关；需要进一步验证
 3. ✅ **配置持久化**：`JsonConfigStore` 已落地（2026-04-16），支持 notify 文件监听、内存缓存、异步读写；端口迁移与 API key 生成已正确持久化
 4. **REST API 完善**：`/rest/db/status` 已实现真实统计，但设备删除、文件夹修改等写接口待补充
-5. **TUI 设备删除**：用户无法在 TUI 中直接删除设备，需手动改 `config.json`
-6. **BepSession 解耦**：BEP 会话层逻辑（ClusterConfig 交换 → Index/Request/Response/Close 主循环）仍内嵌在 `daemon_runner.rs`，需抽取为独立组件
-7. **acceptance-tests crate**：因早期 `BepMessage` API 变更暂被排除，修复成本/收益待评估
+5. ✅ **TUI 设备删除**：`events.rs:58-69` 已实现 `d` 键删除设备并自动保存 `config.json`；该 issue 为 stale，已关闭
+6. ✅ **BepSession 解耦**：已完成，`daemon_runner.rs` 已使用 `BepSession` + `DaemonBepHandler`
+7. ✅ **`syncthing-core::traits::BepConnection` 对齐**：由于该 trait 的 `request_block`/`recv_message` 签名与 `Arc<BepConnection>` + `BepSession` 架构存在结构性冲突，已将其标记为 `#[deprecated]`，`SyncModel::handle_connection` 同步移除；`ReliablePipe` + `BepSession` 成为 canonical 架构
+8. **acceptance-tests crate**：因早期 `BepMessage` API 变更暂被排除，修复成本/收益待评估
 
 ---
 

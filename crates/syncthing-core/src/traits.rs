@@ -129,7 +129,11 @@ pub type FileSystemRef = Arc<dyn FileSystem>;
 
 /// BEP Protocol connection
 ///
-/// Implementors: bep-protocol crate (Worker-A)
+/// ⚠️ DEPRECATED: This trait is deprecated in favor of `ReliablePipe` + `BepSession`
+/// in the `syncthing-net` crate. The old trait assumed a single-threaded, owned
+/// connection model that does not match the current `Arc<BepConnection>` +
+/// `BepSessionHandler` architecture.
+#[deprecated(since = "0.1.0", note = "Use syncthing_net::BepSession with ReliablePipe instead")]
 #[async_trait]
 pub trait BepConnection: Send + Sync {
     /// Get remote device ID
@@ -166,6 +170,9 @@ pub trait BepConnection: Send + Sync {
 }
 
 /// Messages that can be received over BEP
+///
+/// ⚠️ DEPRECATED: Used only by the deprecated `BepConnection` trait.
+#[deprecated(since = "0.1.0", note = "Use syncthing_net::BepSession with prost messages instead")]
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum BepMessage {
@@ -437,8 +444,6 @@ pub trait SyncModel: Send + Sync {
     /// Get sync status for a folder
     async fn folder_status(&self, folder: &FolderId) -> Result<FolderStatus>;
 
-    /// Handle incoming connection
-    async fn handle_connection(&self, conn: Box<dyn BepConnection>) -> Result<()>;
 }
 
 /// Result of a sync operation
