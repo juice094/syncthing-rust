@@ -82,8 +82,77 @@ Specific crate results:
 
 ---
 
-## Next Steps
+## Phase 3 Plan — 已制定
 
-1. **72h stress test** — Run long-duration stability test with local Go node.
-2. **Push E2E retry** — Force a file version conflict or pause/resume the cloud peer to trigger an inbound block request.
-3. **Phase 3 planning** — Workspace migration and production folder sync validation.4. **Dependabot security alerts** — Browser-based manual confirmation for GitHub Security tab.
+详见 `docs/PHASE3_PLAN.md`。
+
+**核心方向**：将 BepSession 从"功能正确"推进到"生产可观测 + 长期稳定 + 上下游可集成"。
+
+**本周执行 (3.1 + 3.2)**：
+- `BepSessionEvent` 枚举 + per-session metrics（解决今天 Push E2E 无法观测对端行为的问题）
+- `on_peer_index_update` 回调 + REST API `/rest/db/completion`（回应 devbase 的"同步完成"信号需求）
+
+**下周执行 (3.3 + 3.4)**：
+- Push E2E forced trigger test（在云端 Go 侧删除文件，迫使其回发 Request）
+- 72h stress test infra（自动化变更脚本 + 监控 + 故障恢复）
+
+---
+
+## Phase 3.1 完成 — BepSession Observability
+
+### 代码变更
+- `crates/syncthing-net/src/session.rs`:
+  - `BepSessionEvent` 扩展 6 个变体 + `SessionEnded`
+  - `BepSessionMetrics` 8 个 `AtomicU64` 计数器
+  - `emit()` / `metrics()` 暴露给外部
+  - `handle_message` 每个分支都更新 metrics + 发射事件
+  - 心跳超时检测：270s idle → `HeartbeatTimeout` + 断连
+- `daemon_runner.rs`: 接入 `with_events`，TUI 状态栏可实时显示 `BlockRequested`/`IndexUpdateReceived` 计数
+
+### 验证
+```bash
+cargo check -p syncthing-net   # 0 errors
+cargo test -p syncthing-net --lib  # 46 passed, 0 failed
+```
+
+---
+
+## Phase 3.2 完成 — Peer Sync State + REST API `/rest/db/completion`
+
+### 代码变更
+- `crates/syncthing-sync/src/service.rs`:
+  - `peer_sync_states: DashMap<(DeviceId, String), usize>` 跟踪每个 (device, folder) 的 needed files
+  - `handle_index` / `handle_index_update` 处理完远程索引后自动更新状态
+  - `get_folder_completion(device_id, folder_id)` 公共方法
+  - `impl syncthing_core::traits::SyncModel for SyncService` 覆盖 `folder_completion()`，基于 total_files - needed 计算百分比
+- `crates/syncthing-core/src/traits.rs`:
+  - `SyncModel` trait 新增 `folder_completion(&self, folder, device) -> Result<u64>` 默认方法（返回 100）
+- `crates/syncthing-net/src/session.rs`:
+  - `BepSessionEvent` 新增 `PeerSyncState { device_id, folder }` 变体
+  - `handle_message` Index/IndexUpdate 分支 emit `PeerSyncState`
+- `cmd/syncthing/src/tui/daemon_runner.rs`:
+  - 事件消费任务处理 `PeerSyncState`，记录日志
+- `crates/syncthing-api/src/rest.rs`:
+  - 新增 `GET /rest/db/completion?folder=xxx&device=xxx` 端点
+  - 调用 `sync_model.folder_completion()` 返回 JSON `{ "completion": 95, "device": "...", "folder": "..." }`
+
+### 验证
+```bash
+cargo check --workspace   # 0 errors
+cargo test --workspace    # 245+ passed, 0 failed
+```
+
+---
+
+## 下一步：Phase 3.3 Push E2E Forced Trigger
+
+- 在云端 Go 侧删除文件，迫使其向 Rust 节点回发 Block Request
+- 验证 Push 方向（Rust 作为块服务器）在生产环境中的真实工作
+
+## 当前阻塞
+无。
+
+---
+
+## 杂项
+4. **Dependabot security alerts** — Browser-based manual confirmation for GitHub Security tab.

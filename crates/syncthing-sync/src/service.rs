@@ -30,6 +30,8 @@ pub struct SyncService {
     index_handler: IndexHandler,
     folder_supervisor: RwLock<Option<Supervisor>>,
     block_source: RwLock<Option<Arc<dyn BlockSource>>>,
+    /// Per-(device, folder) needed file count for completion tracking.
+    peer_sync_states: DashMap<(DeviceId, String), usize>,
 }
 
 impl SyncService {
@@ -50,6 +52,7 @@ impl SyncService {
             index_handler,
             folder_supervisor: RwLock::new(None),
             block_source: RwLock::new(None),
+            peer_sync_states: DashMap::new(),
         }
     }
 
@@ -392,6 +395,10 @@ impl SyncService {
         // 触发文件夹的远程索引处理
         folder_model.handle_remote_index(device, needed.clone()).await?;
         
+        // Update peer sync state for completion tracking
+        let key = (device, folder_id.to_string());
+        self.peer_sync_states.insert(key, needed.len());
+        
         Ok(needed)
     }
 
@@ -404,6 +411,10 @@ impl SyncService {
         
         // 触发文件夹的远程索引处理
         folder_model.handle_remote_index(device, needed.clone()).await?;
+        
+        // Update peer sync state for completion tracking
+        let key = (device, folder_id.to_string());
+        self.peer_sync_states.insert(key, needed.len());
         
         Ok(needed)
     }
@@ -436,6 +447,14 @@ impl SyncService {
     /// 获取文件夹模型
     pub fn get_folder(&self, folder_id: &str) -> Option<Arc<FolderModel>> {
         self.folders.get(folder_id).map(|f| f.clone())
+    }
+
+    /// 获取某个文件夹相对于某个设备的同步完成度（needed files 数量）
+    pub fn get_folder_completion(&self, device_id: DeviceId, folder_id: &str) -> usize {
+        self.peer_sync_states
+            .get(&(device_id, folder_id.to_string()))
+            .map(|v| *v)
+            .unwrap_or(0)
     }
 }
 
@@ -502,6 +521,22 @@ impl syncthing_core::traits::SyncModel for SyncService {
         }
     }
 
+    async fn folder_completion(
+        &self,
+        folder: &syncthing_core::FolderId,
+        device: syncthing_core::DeviceId,
+    ) -> syncthing_core::Result<u64> {
+        let needed = self.get_folder_completion(device, folder.as_str());
+        // Simple completion: 100% if needed == 0, else heuristic based on total files
+        let total_files = self.db.get_folder_files(folder.as_str()).await
+            .map(|v| v.len()).unwrap_or(0).max(needed);
+        let completion = if total_files == 0 {
+            100
+        } else {
+            (((total_files - needed) as f64 / total_files as f64) * 100.0) as u64
+        };
+        Ok(completion)
+    }
 }
 
 #[cfg(test)]

@@ -444,6 +444,11 @@ pub trait SyncModel: Send + Sync {
     /// Get sync status for a folder
     async fn folder_status(&self, folder: &FolderId) -> Result<FolderStatus>;
 
+    /// Get completion percentage (0-100) for a folder relative to a peer device.
+    /// Default returns 100% (complete) if not implemented.
+    async fn folder_completion(&self, _folder: &FolderId, _device: DeviceId) -> Result<u64> {
+        Ok(100)
+    }
 }
 
 /// Result of a sync operation
