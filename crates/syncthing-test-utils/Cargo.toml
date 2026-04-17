@@ -5,6 +5,7 @@ edition = "2021"
 
 [dependencies]
 tokio = { workspace = true }
+syncthing-core = { path = "../syncthing-core" }
 
 [dev-dependencies]
 tokio-test = "0.4"

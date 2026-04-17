@@ -138,6 +138,20 @@ impl tokio::io::AsyncWrite for TcpBiStream {
     }
 }
 
+impl syncthing_core::traits::ReliablePipe for TcpBiStream {
+    fn local_addr(&self) -> Option<SocketAddr> {
+        self.local_addr().ok()
+    }
+
+    fn peer_addr(&self) -> Option<SocketAddr> {
+        self.peer_addr().ok()
+    }
+
+    fn transport_type(&self) -> syncthing_core::traits::TransportType {
+        syncthing_core::traits::TransportType::Tcp
+    }
+}
+
 /// BEP 连接包装器
 ///
 /// 封装底层的TCP连接，处理BEP协议细节
@@ -145,9 +159,9 @@ pub struct BepConnection {
     /// 内部状态
     inner: Arc<ConnectionInner>,
     /// 读取端
-    read_half: Arc<Mutex<Option<tokio::io::ReadHalf<TcpBiStream>>>>,
+    read_half: Arc<Mutex<Option<tokio::io::ReadHalf<syncthing_core::traits::BoxedPipe>>>>,
     /// 写入端
-    write_half: Arc<Mutex<Option<tokio::io::WriteHalf<TcpBiStream>>>>,
+    write_half: Arc<Mutex<Option<tokio::io::WriteHalf<syncthing_core::traits::BoxedPipe>>>>,
     /// 消息发送通道
     message_tx: mpsc::UnboundedSender<Message>,
     /// 事件发送器
@@ -168,16 +182,16 @@ struct Message {
 }
 
 impl BepConnection {
-    /// 从TCP流创建新连接
+    /// 从可靠字节管道创建新连接
     pub async fn new(
-        stream: TcpBiStream,
+        pipe: syncthing_core::traits::BoxedPipe,
         conn_type: ConnectionType,
         event_tx: mpsc::UnboundedSender<ConnectionEvent>,
     ) -> Result<Arc<Self>> {
-        let remote_addr = stream.peer_addr()
-            .map_err(|e| SyncthingError::connection(format!("failed to get peer addr: {}", e)))?;
-        let local_addr = stream.local_addr()
-            .map_err(|e| SyncthingError::connection(format!("failed to get local addr: {}", e)))?;
+        let remote_addr = pipe.peer_addr()
+            .unwrap_or_else(|| "0.0.0.0:0".parse().unwrap());
+        let local_addr = pipe.local_addr()
+            .unwrap_or_else(|| "0.0.0.0:0".parse().unwrap());
         
         let (message_tx, message_rx) = mpsc::unbounded_channel();
         let (incoming_tx, incoming_rx) = mpsc::unbounded_channel();
@@ -185,7 +199,7 @@ impl BepConnection {
         
         let id = uuid::Uuid::new_v4();
         
-        let (read_half, write_half) = tokio::io::split(stream);
+        let (read_half, write_half) = tokio::io::split(pipe);
         
         let conn = Arc::new(Self {
             inner: Arc::new(ConnectionInner {
@@ -1065,5 +1079,48 @@ mod tests {
         assert_eq!(bep.compression, bep_protocol::messages::MessageCompression::Lz4 as i32);
         let decoded = MessageHeader::from_bep_header(&bep).unwrap();
         assert!(decoded.compressed);
+    }
+
+    #[tokio::test]
+    async fn test_split_boxed_pipe() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let (pipe_a, pipe_b) = syncthing_test_utils::memory_pipe_pair(1024);
+        let (mut read_half, mut write_half) = tokio::io::split(Box::new(pipe_a) as syncthing_core::traits::BoxedPipe);
+        let (mut read_half_b, _write_half_b) = tokio::io::split(Box::new(pipe_b) as syncthing_core::traits::BoxedPipe);
+
+        write_half.write_all(b"hello").await.unwrap();
+        write_half.flush().await.unwrap();
+        drop(write_half);
+
+        let mut buf = [0u8; 5];
+        read_half_b.read_exact(&mut buf).await.unwrap();
+        assert_eq!(&buf, b"hello");
+    }
+
+    #[tokio::test]
+    async fn test_bep_connection_over_memory_pipe() {
+        let (pipe_a, pipe_b) = syncthing_test_utils::memory_pipe_pair(4096);
+        let (tx_a, _rx_a) = mpsc::unbounded_channel();
+        let (tx_b, _rx_b) = mpsc::unbounded_channel();
+
+        let conn_a = BepConnection::new(
+            Box::new(pipe_a),
+            ConnectionType::Outgoing,
+            tx_a,
+        ).await.unwrap();
+
+        let conn_b = BepConnection::new(
+            Box::new(pipe_b),
+            ConnectionType::Incoming,
+            tx_b,
+        ).await.unwrap();
+
+        // Send a Ping from A
+        conn_a.send_ping().await.unwrap();
+
+        // B should receive it
+        let (msg_type, payload) = conn_b.recv_message().await.unwrap();
+        assert_eq!(msg_type, MessageType::Ping);
+        assert!(payload.is_empty());
     }
 }

@@ -3,7 +3,7 @@
 > **项目说明**：基于 Rust 的 Syncthing 兼容实现，采用多 crate 工作区结构。目标是通过直接参照 Go Syncthing 源码，构建一个功能完整的去中心化文件同步 daemon。
 >
 > **仓库位置**：`C:\Users\22414`  
-> **最新更新**：2026-04-15（新增文件系统 watcher、BEP 连接稳定性修复、REST API 基础实现，默认端口迁移至 22001/8385）
+> **最新更新**：2026-04-17（Phase 2 Network Abstraction 完成：ReliablePipe 解耦、BepHandshaker 抽取、ConnectionManager 多路径支持、MemoryPipe 验收测试通过）
 
 ---
 
@@ -112,6 +112,15 @@
 - **重连修复**: 修复 `schedule_reconnect` 因 `pending_connections` 竞态导致二次拨号被拦截的 bug
 - **TUI 修复**: `Add Folder` 弹窗中 `Space` 键可正常切换设备 checkbox，Tab/BackTab 焦点能正确进入设备选择区
 
+### 2026-04-17：Phase 2 Network Abstraction — 传输层解耦 ✅
+- **`ReliablePipe` trait**: 在 `syncthing-core` 中定义 `ReliablePipe = AsyncRead + AsyncWrite + local/peer_addr + path_quality + transport_type`，正式将 BEP 语义与 TCP 实现解耦
+- **`TcpBiStream` 实现**: `syncthing-net` 中 `TcpBiStream` 已实现 `ReliablePipe`
+- **`BepConnection::new` 重构**: 签名从 `TcpBiStream` 改为 `Box<dyn ReliablePipe>`，内部使用 `tokio::io::split` 分离读写半流
+- **`BepHandshaker` 抽取**: 新建 `handshaker.rs`，统一封装 BEP Hello 交换逻辑，`tcp_transport.rs` 中所有内联 Hello 代码已替换
+- **`ConnectionManager` 多路径支持**: 内部连接存储从 `device_id -> ConnectionEntry` 重构为 `device_id -> conn_id -> ConnectionEntry`（嵌套 `DashMap`），支持同一设备维护多条并发路径
+- **MemoryPipe 验收测试**: `syncthing-test-utils` 中 `MemoryPipe` 已实现 `ReliablePipe`；新增 `test_bep_connection_over_memory_pipe`，验证 BEP Ping 消息可在内存管道上完整收发
+- **编译与测试**: 全 workspace `cargo test` 通过，0 failed
+
 ---
 
 ## 四、构建与测试
@@ -159,10 +168,12 @@ cargo run --release -p syncthing -- run -l 127.0.0.1:22000 -c %TEMP%\syncthing_t
 
 ### 待完成工作
 1. ✅ **端到端文件同步验证（Pull）**：2026-04-11 已通过跨网络测试验证完整下载
-2. **推送 (Push) 方向**：实现块的上传响应能力
-3. **配置持久化**：将 `run` 命令的硬编码配置迁移到 TOML/JSON 配置文件
-4. **Web UI / REST API**：当前尚未实现 Web GUI 或 REST API
-5. **acceptance-tests crate**：因 `BepMessage` API 变更暂被排除，修复成本/收益待评估
+2. **推送 (Push) 方向**：实现块的上传响应能力（`handle_block_request` 已存在，但缺少与 `Puller` 的对称推送调度）
+3. ✅ **配置持久化**：`JsonConfigStore` 已落地（2026-04-16），支持 notify 文件监听、内存缓存、异步读写；端口迁移与 API key 生成已正确持久化
+4. **REST API 完善**：`/rest/db/status` 已实现真实统计，但设备删除、文件夹修改等写接口待补充
+5. **TUI 设备删除**：用户无法在 TUI 中直接删除设备，需手动改 `config.json`
+6. **BepSession 解耦**：BEP 会话层逻辑（ClusterConfig 交换 → Index/Request/Response/Close 主循环）仍内嵌在 `daemon_runner.rs`，需抽取为独立组件
+7. **acceptance-tests crate**：因早期 `BepMessage` API 变更暂被排除，修复成本/收益待评估
 
 ---
 

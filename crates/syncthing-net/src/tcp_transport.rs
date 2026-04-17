@@ -155,32 +155,18 @@ impl SyncthingTcpListener {
         
         debug!("Server TLS handshake completed: peer_device_id={}", device_id);
         
-        // BEP Hello 交换（服务端：先接收，后发送）
+        // BEP Hello 交换
         let mut tls_stream = tls_stream;
-        let remote_hello = bep_protocol::handshake::recv_hello(&mut tls_stream).await
-            .map_err(|e| SyncthingError::protocol(format!("failed to receive hello: {}", e)))?;
-        
-        let our_hello = bep_protocol::messages::Hello {
-            device_name: device_name.clone(),
-            client_name: "syncthing-rust".to_string(),
-            client_version: env!("CARGO_PKG_VERSION").to_string(),
-            num_connections: 1,
-            timestamp: std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap_or_default()
-                .as_millis() as i64,
-        };
-        
-        bep_protocol::handshake::send_hello(&mut tls_stream, &our_hello).await
-            .map_err(|e| SyncthingError::protocol(format!("failed to send hello: {}", e)))?;
-        
-        info!("Incoming BEP hello exchange complete: remote_device={}", remote_hello.device_name);
+        let _remote_hello = crate::handshaker::BepHandshaker::server_handshake(
+            &mut tls_stream,
+            &device_name,
+        ).await?;
         
         // 创建BEP连接（先不关联设备ID）
         let (event_tx, _event_rx) = tokio::sync::mpsc::unbounded_channel();
 
         let conn = BepConnection::new(
-            TcpBiStream::Server(tls_stream),
+            Box::new(TcpBiStream::Server(tls_stream)),
             ConnectionType::Incoming,
             event_tx,
         ).await?;
@@ -245,32 +231,18 @@ pub async fn connect_bep(
     
     debug!("Client TLS handshake completed");
     
-    // BEP Hello 交换（客户端：先发送，后接收）
+    // BEP Hello 交换
     let mut tls_stream = tls_stream;
-    let our_hello = bep_protocol::messages::Hello {
-        device_name: device_name.to_string(),
-        client_name: "syncthing-rust".to_string(),
-        client_version: env!("CARGO_PKG_VERSION").to_string(),
-        num_connections: 1,
-        timestamp: std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_millis() as i64,
-    };
-    
-    bep_protocol::handshake::send_hello(&mut tls_stream, &our_hello).await
-        .map_err(|e| SyncthingError::protocol(format!("failed to send hello: {}", e)))?;
-    
-    let remote_hello = bep_protocol::handshake::recv_hello(&mut tls_stream).await
-        .map_err(|e| SyncthingError::protocol(format!("failed to receive hello: {}", e)))?;
-    
-    info!("Outgoing BEP hello exchange complete: remote_device={}", remote_hello.device_name);
+    let _remote_hello = crate::handshaker::BepHandshaker::client_handshake(
+        &mut tls_stream,
+        device_name,
+    ).await?;
     
     // 创建BEP连接
     let (event_tx, _event_rx) = tokio::sync::mpsc::unbounded_channel();
     
     let conn = BepConnection::new(
-        TcpBiStream::Client(tls_stream),
+        Box::new(TcpBiStream::Client(tls_stream)),
         ConnectionType::Outgoing,
         event_tx,
     ).await?;
@@ -497,18 +469,11 @@ mod tests {
             let acceptor = tokio_rustls::TlsAcceptor::from(Arc::new(server_config));
             let mut tls_stream = acceptor.accept(stream).await.unwrap();
             
-            // Server receives hello first
-            let hello = bep_protocol::handshake::recv_hello(&mut tls_stream).await.unwrap();
-            
-            // Server sends response hello
-            let response_hello = bep_protocol::messages::Hello {
-                device_name: "server-device".to_string(),
-                client_name: "syncthing-rust".to_string(),
-                client_version: "0.1.0".to_string(),
-                num_connections: 1,
-                timestamp: 0,
-            };
-            bep_protocol::handshake::send_hello(&mut tls_stream, &response_hello).await.unwrap();
+            // Server BEP handshake
+            let hello = crate::handshaker::BepHandshaker::server_handshake(
+                &mut tls_stream,
+                "server-device",
+            ).await.unwrap();
             
             hello
         });

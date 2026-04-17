@@ -31,6 +31,7 @@ This directory contains design documents, verification reports, and work logs fo
 |-----|------|---------------|
 | [TODAY_WORK_REPORT_2026-04-09.md](TODAY_WORK_REPORT_2026-04-09.md) | 2026-04-09 | MVP Phase 1 & 2 completion, first Go Syncthing handshake. |
 | [TODAY_WORK_REPORT_syncthing_2026-04-15.md](TODAY_WORK_REPORT_syncthing_2026-04-15.md) | 2026-04-15 | Repository cleanup, watcher e2e, lru upgrade, REST API real-time stats. |
+| [TODAY_WORK_REPORT_syncthing_2026-04-17.md](TODAY_WORK_REPORT_syncthing_2026-04-17.md) | 2026-04-17 | Phase 2 Network Abstraction: ReliablePipe, BepHandshaker, multi-path ConnectionManager, MemoryPipe tests. |
 
 ## Interop & Debugging
 

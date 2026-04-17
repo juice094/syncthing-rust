@@ -5,12 +5,77 @@
 //! must implement these traits exactly as specified.
 
 use async_trait::async_trait;
+use std::net::SocketAddr;
 use std::path::Path;
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 
 use crate::error::Result;
 use crate::types::{BlockHash, FileInfo, FolderId};
 use crate::DeviceId;
+
+/// Transport type identifier for a connection path.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum TransportType {
+    /// Plain TCP or TCP with TLS
+    Tcp,
+    /// QUIC
+    Quic,
+    /// Relay / DERP fallback
+    Relay,
+    /// In-memory pipe (for testing)
+    Memory,
+    /// Other / unknown
+    Other,
+}
+
+/// Quality metrics for a network path.
+#[derive(Debug, Clone)]
+pub struct PathQuality {
+    /// Smoothed round-trip time
+    pub rtt: Duration,
+    /// Packet loss ratio [0.0, 1.0]
+    pub packet_loss: f64,
+    /// Estimated bandwidth in bits per second, if known
+    pub estimated_bps: Option<u64>,
+    /// When this measurement was last updated
+    pub last_updated: Instant,
+}
+
+impl Default for PathQuality {
+    fn default() -> Self {
+        Self {
+            rtt: Duration::from_secs(1),
+            packet_loss: 0.0,
+            estimated_bps: None,
+            last_updated: Instant::now(),
+        }
+    }
+}
+
+/// A generic reliable byte pipe abstracting TCP, QUIC, relay, or in-memory transports.
+///
+/// Implementors must provide [`tokio::io::AsyncRead`] and [`tokio::io::AsyncWrite`]
+/// implementations so that BEP codec can operate on the pipe without knowing the
+/// underlying transport.
+pub trait ReliablePipe: tokio::io::AsyncRead + tokio::io::AsyncWrite + Send + Sync + Unpin {
+    /// Local endpoint address, if meaningful for the transport.
+    fn local_addr(&self) -> Option<SocketAddr>;
+
+    /// Peer endpoint address, if meaningful for the transport.
+    fn peer_addr(&self) -> Option<SocketAddr>;
+
+    /// Current quality estimate for this path.
+    fn path_quality(&self) -> PathQuality {
+        PathQuality::default()
+    }
+
+    /// Transport type discriminator.
+    fn transport_type(&self) -> TransportType;
+}
+
+/// Type alias for boxed reliable pipes used by BEP connections.
+pub type BoxedPipe = Box<dyn ReliablePipe>;
 
 /// File system abstraction
 ///
