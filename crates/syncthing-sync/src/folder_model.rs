@@ -26,6 +26,7 @@ pub struct FolderModel {
     puller: Puller,
     watcher: RwLock<Option<notify::RecommendedWatcher>>,
     pull_notify: tokio::sync::Notify,
+    pending_pulls: RwLock<Vec<FileInfo>>,
 }
 
 impl FolderModel {
@@ -49,6 +50,7 @@ impl FolderModel {
             puller,
             watcher: RwLock::new(None),
             pull_notify: tokio::sync::Notify::new(),
+            pending_pulls: RwLock::new(Vec::new()),
         }
     }
 
@@ -290,7 +292,14 @@ impl FolderModel {
         info!(folder_id = %self.folder.id, "Starting pull");
 
         // 获取需要拉取的文件列表
-        let needed_files: Vec<syncthing_core::types::FileInfo> = match self.puller.check_needed_files(&self.folder).await {
+        // 1. 先检查 pending_pulls（由远程索引触发）
+        let mut pending_files = {
+            let mut pending = self.pending_pulls.write().await;
+            std::mem::take(&mut *pending)
+        };
+        
+        // 2. 再检查文件系统状态（补充本地缺失的文件）
+        let fs_needed = match self.puller.check_needed_files(&self.folder).await {
             Ok(files) => files,
             Err(e) => {
                 error!(folder_id = %self.folder.id, error = %e, "Failed to check needed files");
@@ -306,6 +315,14 @@ impl FolderModel {
                 return Err(e);
             }
         };
+        
+        // 合并 pending_pulls 和 fs_needed，去重
+        for file in fs_needed {
+            if !pending_files.iter().any(|f| f.name == file.name) {
+                pending_files.push(file);
+            }
+        }
+        let needed_files = pending_files;
 
         if needed_files.is_empty() {
             debug!(folder_id = %self.folder.id, "No files need pulling");
@@ -395,6 +412,17 @@ impl FolderModel {
             file_count = files.len(),
             "Handling remote index"
         );
+
+        // 将需要拉取的文件加入 pending_pulls
+        if !files.is_empty() {
+            let mut pending = self.pending_pulls.write().await;
+            for file in files {
+                if !pending.iter().any(|f| f.name == file.name) {
+                    pending.push(file);
+                }
+            }
+            drop(pending);
+        }
 
         // 唤醒 pull loop 立即处理远程索引
         self.pull_notify.notify_waiters();

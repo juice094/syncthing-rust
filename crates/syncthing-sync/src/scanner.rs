@@ -54,6 +54,8 @@ impl Scanner {
                         debug!(file = %db_file.name, "File was deleted");
                         let mut deleted_info = db_file.clone();
                         deleted_info.deleted = Some(true);
+                        deleted_info.blocks = vec![]; // BEP 协议要求 deleted 文件 block list 为空
+                        deleted_info.size = 0;
                         deleted_info.sequence = self.db.increment_sequence(&folder.id).await?;
                         deleted_info.version.increment(1); // 使用设备ID 1作为本地设备
                         changed_files.push(deleted_info);
