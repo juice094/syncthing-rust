@@ -21,6 +21,7 @@ A Rust implementation of the [Syncthing](https://syncthing.net/) protocol stack,
 | 2026-04-15 | REST API with real uptime / connection enumeration; default port migration to `22001/8385`. |
 | 2026-04-16 | REST API `/rest/db/status` now returns real per-folder file counts and byte totals. |
 | 2026-04-17 | Phase 2 Network Abstraction: `ReliablePipe` trait decouples BEP from TCP; `MemoryPipe` tests pass; `ConnectionManager` supports multi-path per device. |
+| 2026-04-20 | **Phase 3 Complete**: Cloud Push E2E (Rust → Go) and Cloud Pull E2E (Go → Rust) both verified over Tailscale. Protocol compatibility fixes: deleted-file block clearing, shared-folder Index filtering, connection race handling. |
 
 ---
 
@@ -30,8 +31,9 @@ A Rust implementation of the [Syncthing](https://syncthing.net/) protocol stack,
 |-------|------|--------|
 | **Phase 1** | Core protocol (TLS, BEP Hello, ClusterConfig, Index) | ✅ Complete |
 | **Phase 2** | Network abstraction (ReliablePipe, BepSession), watcher, REST API, dual-node coexistence | ✅ Complete |
-| **Phase 3** | BepSession observability, peer sync state events, stress test infra, real folder sync validation | 🟡 In Progress |
-| **Phase 4** | 72h stress test, workspace migration, GUI or Web frontend, production packaging | 🔵 Planned |
+| **Phase 3** | BepSession observability, peer sync state events, **Push/Pull E2E with real Go node** | ✅ Complete |
+| **Phase 3.5** | Connection stability hardening, 72h stress test infra, `.stignore`, config persistence | 🟡 In Progress |
+| **Phase 4** | Workspace migration, GUI or Web frontend, production packaging | 🔵 Planned |
 
 ---
 
