@@ -50,6 +50,7 @@ pub enum Popup {
     None,
     AddDevice,
     AddFolder,
+    Help,
     Error(String),
 }
 

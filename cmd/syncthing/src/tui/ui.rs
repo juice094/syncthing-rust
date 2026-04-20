@@ -30,6 +30,7 @@ pub fn draw(f: &mut Frame, app: &mut App) {
     match app.popup {
         Popup::AddDevice => crate::tui::popups::add_device::draw(f, app, theme),
         Popup::AddFolder => crate::tui::popups::add_folder::draw(f, app, theme),
+        Popup::Help => crate::tui::popups::help::draw(f, theme),
         Popup::Error(ref msg) => crate::tui::popups::error::draw(f, msg, theme),
         Popup::None => {}
     }
