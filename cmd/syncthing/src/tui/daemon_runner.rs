@@ -165,6 +165,10 @@ pub async fn start_daemon(
             if let Err(e) = sync_service.connect_device(device_id).await {
                 warn!("Failed to connect device {} to sync service: {}", device_id, e);
             }
+            // Abort any existing session for this device before starting a new one
+            if let Some((_, old_handle)) = sessions.remove(&device_id) {
+                old_handle.abort();
+            }
             let handle2 = tokio::spawn(async move {
                 let (event_tx, mut event_rx) = tokio::sync::mpsc::unbounded_channel::<BepSessionEvent>();
                 let event_device_id = device_id;
@@ -379,9 +383,15 @@ impl BepSessionHandler for DaemonBepHandler {
         folder_id: &str,
         _device_id: DeviceId,
     ) -> syncthing_core::Result<syncthing_core::types::Index> {
-        let files = self.sync_service.generate_index_update(folder_id, 0).await.map_err(|e| {
+        let mut files = self.sync_service.generate_index_update(folder_id, 0).await.map_err(|e| {
             syncthing_core::SyncthingError::internal(format!("generate_index_update failed: {}", e))
         })?;
+        // BEP protocol requires deleted files to have empty block lists
+        for file in &mut files {
+            if file.is_deleted() {
+                file.blocks.clear();
+            }
+        }
         Ok(syncthing_core::types::Index {
             folder: folder_id.to_string(),
             files,

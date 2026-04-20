@@ -319,12 +319,16 @@ impl ConnectionManager {
         
         let conn_id = conn.id();
         
-        // 如果同一 conn_id 已存在，先关闭旧连接
+        // 关闭同一设备的所有旧连接，确保每个设备只有一个活跃连接
         if let Some(nested) = self.connections.get_mut(&device_id) {
-            if let Some((_, existing)) = nested.remove(&conn_id) {
-                info!("Replacing existing connection {} for device {}", conn_id, device_id);
-                existing.conn.close().await.ok();
+            for entry in nested.iter() {
+                let old_conn_id = *entry.key();
+                if old_conn_id != conn_id {
+                    info!("Closing existing connection {} for device {} (new connection {})", old_conn_id, device_id, conn_id);
+                    entry.value().conn.close().await.ok();
+                }
             }
+            nested.clear();
             nested.insert(conn_id, ConnectionEntry::new(Arc::clone(&conn)));
         } else {
             let nested = DashMap::new();

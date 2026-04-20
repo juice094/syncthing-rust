@@ -123,6 +123,7 @@ pub struct BepSession {
     pending_responses: Arc<DashMap<i32, tokio::sync::oneshot::Sender<bep_protocol::messages::Response>>>,
     event_tx: Option<tokio::sync::mpsc::UnboundedSender<BepSessionEvent>>,
     metrics: Arc<BepSessionMetrics>,
+    remote_shared_folders: Option<Vec<String>>,
 }
 
 impl BepSession {
@@ -140,6 +141,7 @@ impl BepSession {
             pending_responses,
             event_tx: None,
             metrics: Arc::new(BepSessionMetrics::default()),
+            remote_shared_folders: None,
         }
     }
 
@@ -158,6 +160,7 @@ impl BepSession {
             pending_responses,
             event_tx: Some(event_tx),
             metrics: Arc::new(BepSessionMetrics::default()),
+            remote_shared_folders: None,
         }
     }
 
@@ -173,7 +176,7 @@ impl BepSession {
     }
 
     /// Run the full BEP session lifecycle.
-    pub async fn run(self) -> Result<()> {
+    pub async fn run(mut self) -> Result<()> {
         // 1. Send ClusterConfig
         let cc = self.handler.generate_cluster_config(self.device_id).await?;
         if let Err(e) = self.conn.send_cluster_config(&cc).await {
@@ -203,11 +206,13 @@ impl BepSession {
                                         remote_cc.folders.len()
                                     );
                                     self.conn.set_state(ConnectionState::ClusterConfigComplete);
-                                    let shared: Vec<String> = remote_cc.folders.into_iter().map(|f| f.id).collect();
+                                    let remote_shared: Vec<String> = remote_cc.folders.into_iter().map(|f| f.id).collect();
                                     self.emit(BepSessionEvent::ClusterConfigComplete {
                                         device_id: self.device_id,
-                                        shared_folders: shared,
+                                        shared_folders: remote_shared.clone(),
                                     });
+                                    // Save remote shared folders for index filtering
+                                    self.remote_shared_folders = Some(remote_shared);
                                     break;
                                 }
                                 Err(e) => {
@@ -246,8 +251,12 @@ impl BepSession {
             }
         }
 
-        // 3. Send Index for each shared folder
-        let shared_folder_ids: Vec<String> = cc.folders.into_iter().map(|f| f.id).collect();
+        // 3. Send Index for each folder shared by BOTH sides
+        let my_folder_ids: Vec<String> = cc.folders.into_iter().map(|f| f.id).collect();
+        let shared_folder_ids: Vec<String> = match &self.remote_shared_folders {
+            Some(remote) => my_folder_ids.into_iter().filter(|id| remote.contains(id)).collect(),
+            None => my_folder_ids,
+        };
         for folder_id in &shared_folder_ids {
             match self.handler.generate_index(folder_id, self.device_id).await {
                 Ok(index) => {

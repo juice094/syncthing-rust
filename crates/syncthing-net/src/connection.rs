@@ -379,10 +379,14 @@ impl BepConnection {
         Ok(())
     }
     
-    /// 接收 BEP 消息
+    /// 接收 BEP 消息（带超时，避免连接断开后永远卡住）
     pub async fn recv_message(&self) -> Result<(MessageType, Bytes)> {
         let mut rx = self.incoming_rx.lock().await;
-        rx.recv().await.ok_or_else(|| SyncthingError::ConnectionClosed)
+        match tokio::time::timeout(Duration::from_secs(120), rx.recv()).await {
+            Ok(Some(msg)) => Ok(msg),
+            Ok(None) => Err(SyncthingError::ConnectionClosed),
+            Err(_) => Err(SyncthingError::timeout("message receive timeout")),
+        }
     }
     
     /// 主运行循环
