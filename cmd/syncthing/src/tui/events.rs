@@ -27,9 +27,18 @@ fn handle_key(app: &mut App, key: KeyEvent) -> bool {
         return false; // F5 由调用方处理启动/停止 daemon
     }
 
+    if key.code == KeyCode::Char('?') && app.popup == Popup::None {
+        app.popup = Popup::Help;
+        return false;
+    }
+
     match app.popup {
         Popup::AddDevice => return handle_add_device_key(app, key),
         Popup::AddFolder => return handle_add_folder_key(app, key),
+        Popup::Help => {
+            app.popup = Popup::None;
+            return false;
+        }
         Popup::Error(_) => {
             app.popup = Popup::None;
             return false;
