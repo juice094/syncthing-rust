@@ -150,10 +150,14 @@ pub async fn start_daemon(
 
     let session_handles: Arc<DashMap<DeviceId, JoinHandle<()>>> = Arc::new(DashMap::new());
 
+    // 存储每个设备的共享文件夹列表（用于 IndexUpdate 过滤）
+    let device_shared_folders: Arc<DashMap<DeviceId, Vec<String>>> = Arc::new(DashMap::new());
+
     let sync_service_clone = Arc::clone(&sync_service);
     let handle_clone = handle.clone();
     let pending_responses_clone = Arc::clone(&pending_responses);
     let session_handles_clone = Arc::clone(&session_handles);
+    let device_shared_folders_clone = Arc::clone(&device_shared_folders);
     manager.on_connected(move |device_id| {
         syncthing_net::metrics::global().record_reconnect(device_id.to_string());
         info!("Device connected: {}", device_id);
@@ -161,6 +165,7 @@ pub async fn start_daemon(
         let handle = handle_clone.clone();
         let pending = Arc::clone(&pending_responses_clone);
         let sessions = Arc::clone(&session_handles_clone);
+        let shared_folders_map = Arc::clone(&device_shared_folders_clone);
         tokio::spawn(async move {
             if let Err(e) = sync_service.connect_device(device_id).await {
                 warn!("Failed to connect device {} to sync service: {}", device_id, e);
@@ -172,11 +177,14 @@ pub async fn start_daemon(
             let handle2 = tokio::spawn(async move {
                 let (event_tx, mut event_rx) = tokio::sync::mpsc::unbounded_channel::<BepSessionEvent>();
                 let event_device_id = device_id;
+                let shared_folders_map = Arc::clone(&shared_folders_map);
                 tokio::spawn(async move {
                     while let Some(event) = event_rx.recv().await {
                         match &event {
                             BepSessionEvent::ClusterConfigComplete { shared_folders, .. } => {
                                 info!("[{}] ClusterConfig complete, shared folders: {:?}", event_device_id, shared_folders);
+                                // 记录该设备的共享文件夹，用于后续 IndexUpdate 过滤
+                                shared_folders_map.insert(event_device_id, shared_folders.clone());
                             }
                             BepSessionEvent::IndexSent { folder, file_count, .. } => {
                                 info!("[{}] Index sent for {} ({} files)", event_device_id, folder, file_count);
@@ -240,9 +248,10 @@ pub async fn start_daemon(
         .context("failed to start sync service")?;
     info!("Sync service started");
 
-    // 启动事件监听任务：当本地索引更新时，向所有已连接设备发送 IndexUpdate
+    // 启动事件监听任务：当本地索引更新时，向共享该文件夹的已连接设备发送 IndexUpdate
     let event_sync_service = sync_service.clone();
     let event_handle = handle.clone();
+    let device_shared_folders_clone = Arc::clone(&device_shared_folders);
     tokio::spawn(async move {
         let mut subscriber = event_sync_service.events().subscribe();
         while let Some(event) = subscriber.recv().await {
@@ -250,14 +259,32 @@ pub async fn start_daemon(
                 if files.is_empty() {
                     continue;
                 }
+                // 防御性清空：确保 deleted 文件的 block list 为空（BEP 协议要求）
+                let mut safe_files = files.clone();
+                for file in &mut safe_files {
+                    if file.is_deleted() {
+                        file.blocks.clear();
+                    }
+                }
                 let update = syncthing_core::types::IndexUpdate {
                     folder: folder.clone(),
-                    files: files.clone(),
+                    files: safe_files,
                 };
                 let wire_update: bep_protocol::messages::IndexUpdate = update.into();
                 match bep_protocol::messages::encode_message(&wire_update) {
                     Ok(payload) => {
                         for device_id in event_handle.connected_devices() {
+                            // 只发送给共享该文件夹的设备
+                            let should_send = match device_shared_folders_clone.get(&device_id) {
+                                Some(entry) => entry.value().contains(&folder),
+                                None => {
+                                    // 尚未收到 ClusterConfig，保守起见不发送
+                                    false
+                                }
+                            };
+                            if !should_send {
+                                continue;
+                            }
                             if let Some(conn) = event_handle.get_connection(&device_id) {
                                 if let Err(e) = conn.send_message(MessageType::IndexUpdate, payload.clone()).await {
                                     warn!("Failed to send IndexUpdate to {} for {}: {}", device_id, folder, e);
