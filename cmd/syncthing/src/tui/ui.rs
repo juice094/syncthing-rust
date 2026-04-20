@@ -26,10 +26,11 @@ pub fn draw(f: &mut Frame, app: &mut App) {
     draw_main_content(f, app, chunks[1]);
     crate::tui::widgets::status_bar::draw(f, app, chunks[2]);
 
+    let theme = &app.theme;
     match app.popup {
-        Popup::AddDevice => crate::tui::popups::add_device::draw(f, app),
-        Popup::AddFolder => crate::tui::popups::add_folder::draw(f, app),
-        Popup::Error(ref msg) => crate::tui::popups::error::draw(f, msg),
+        Popup::AddDevice => crate::tui::popups::add_device::draw(f, app, theme),
+        Popup::AddFolder => crate::tui::popups::add_folder::draw(f, app, theme),
+        Popup::Error(ref msg) => crate::tui::popups::error::draw(f, msg, theme),
         Popup::None => {}
     }
 }
