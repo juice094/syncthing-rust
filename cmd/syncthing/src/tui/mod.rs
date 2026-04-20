@@ -1,7 +1,11 @@
 pub mod app;
 pub mod daemon_runner;
 pub mod events;
+pub mod theme;
 pub mod ui;
+pub mod views;
+pub mod popups;
+pub mod widgets;
 
 use std::io;
 use std::path::PathBuf;
