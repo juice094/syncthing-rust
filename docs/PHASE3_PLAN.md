@@ -166,25 +166,27 @@ fn is_peer_in_sync(local_max_seq: u64, peer_max_seq: u64) -> bool {
 
 ---
 
-## 3.4 72h Stress Test Infra（下周准备）
+## 3.4 72h Stress Test Infra（移交格雷远程执行）
+
+> **状态**: 待启动。本机（Windows）夜间断电，无法执行长期无人值守测试。后续编译版本提交后，由格雷在远程 Linux 服务器上执行。
 
 ### 方案
 
-1. **自动化脚本**（PowerShell/Bash）：
-   - 每 10 分钟在 `test_rust_folder` 创建一个随机内容文件
+1. **自动化脚本**（Bash）：
+   - 每 10 分钟在 `test-folder` 创建一个随机内容文件
    - 每 30 分钟修改一个现有文件
    - 每小时删除一个旧文件
-   - 每 5 分钟查询 REST API `/rest/system/status` 和 `/rest/connections`
+   - 每 5 分钟查询 REST API `/rest/system/status` 和 `/rest/db/completion`
    - 记录到 CSV/JSON 日志
 
 2. **监控指标**：
    - 连接是否存活
    - 消息速率（msg/min）
    - 错误计数
-   - 内存使用（通过 `sysinfo` crate 或外部工具）
+   - 内存使用
 
 3. **故障恢复**：
-   - 如果连接断开，脚本自动等待 5 分钟后检查是否重连成功
+   - 如果连接断开，自动等待 5 分钟后检查是否重连成功
    - 如果 3 次重连失败，记录故障并退出
 
 ### 验收标准
