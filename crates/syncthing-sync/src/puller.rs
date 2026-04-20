@@ -417,4 +417,70 @@ mod tests {
         let content = tokio::fs::read_to_string(&file_path).await.unwrap();
         assert_eq!(content, "hello world");
     }
+
+    /// 集成测试：模拟远程索引更新后，check_needed_files 能发现 needed 文件，
+    /// 且 pull_folder 能成功下载。
+    #[tokio::test]
+    async fn test_check_needed_files_then_pull() {
+        let db = MemoryDatabase::new();
+        let events = EventPublisher::new(10);
+        
+        // 创建临时目录作为 folder path
+        let temp_dir = tempfile::tempdir().unwrap();
+        let folder_path = temp_dir.path().to_path_buf();
+        let folder = syncthing_core::types::Folder::new("test-folder", folder_path.to_str().unwrap());
+        
+        // 准备测试数据
+        let test_data = b"pull test content";
+        let hash = sha2::Sha256::digest(test_data);
+        
+        let file_info = FileInfo {
+            name: "pull_test.txt".to_string(),
+            file_type: syncthing_core::types::FileType::File,
+            size: test_data.len() as i64,
+            permissions: 0o644,
+            modified_s: 0,
+            modified_ns: 0,
+            version: syncthing_core::types::Vector::new(),
+            sequence: 1,
+            block_size: test_data.len() as i32,
+            blocks: vec![BlockInfo {
+                size: test_data.len() as i32,
+                hash: hash.to_vec(),
+                offset: 0,
+            }],
+            symlink_target: None,
+            deleted: Some(false),
+        };
+        
+        // 模拟 index_handler 处理远程索引后更新 DB
+        db.update_file(&folder.id, file_info.clone()).await.unwrap();
+        
+        // 创建 Puller + MockBlockSource
+        let mock_source = Arc::new(MockBlockSource {
+            data: Bytes::from_static(test_data),
+        });
+        let puller = Puller::new(db.clone(), events.clone())
+            .with_block_source(Some(mock_source));
+        
+        // Step 1: check_needed_files 应该发现本地不存在的文件
+        let needed = puller.check_needed_files(&folder).await.unwrap();
+        assert_eq!(needed.len(), 1, "Should detect 1 needed file");
+        assert_eq!(needed[0].name, "pull_test.txt");
+        
+        // Step 2: pull_folder 应该成功下载文件
+        let stats = puller.pull_folder(&folder, needed).await.unwrap();
+        assert_eq!(stats.files_succeeded, 1, "Should succeed pulling 1 file");
+        assert_eq!(stats.files_failed, 0);
+        
+        // Step 3: 验证本地文件内容正确
+        let file_path = folder_path.join("pull_test.txt");
+        assert!(file_path.exists(), "File should exist after pull");
+        let content = tokio::fs::read_to_string(&file_path).await.unwrap();
+        assert_eq!(content, "pull test content");
+        
+        // Step 4: 再次 check_needed_files，应该为空（文件已存在且大小匹配）
+        let needed_after = puller.check_needed_files(&folder).await.unwrap();
+        assert!(needed_after.is_empty(), "Should not need pull after file exists");
+    }
 }

@@ -7,7 +7,7 @@ use std::sync::atomic::{AtomicI32, Ordering};
 
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
-use tracing::{info, warn, Level};
+use tracing::{debug, info, warn, Level};
 use tracing_subscriber::{layer::SubscriberExt, Layer as _, FmtSubscriber};
 
 use syncthing_core::types::Config;
@@ -264,6 +264,12 @@ impl BlockSource for ManagerBlockSource {
                 file.to_string(),
                 format!("encode request failed: {}", e),
             ))?;
+
+        debug!(
+            "Request hex dump for {}: {}",
+            file,
+            hex::encode(&payload)
+        );
 
         // 获取任意已连接的设备
         let device_id = self
