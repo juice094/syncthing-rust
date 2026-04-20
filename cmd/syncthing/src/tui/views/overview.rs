@@ -1,6 +1,5 @@
 use ratatui::{
     layout::{Constraint, Direction, Layout},
-    style::{Color, Style},
     text::{Line, Span, Text},
     widgets::{Block, Borders, Paragraph, Wrap},
     Frame,
@@ -20,30 +19,38 @@ pub fn draw(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
         .map(|id| id.to_string())
         .unwrap_or_else(|| "Unknown".to_string());
 
+    let theme = &app.theme;
     let text = Text::from(vec![
         Line::from(vec![
-            Span::styled("Device ID: ", Style::default().fg(Color::Cyan)),
+            Span::styled("Device ID: ", theme.style_header),
             Span::raw(device_id),
         ]),
         Line::from(vec![
-            Span::styled("Name:      ", Style::default().fg(Color::Cyan)),
+            Span::styled("Name:      ", theme.style_header),
             Span::raw(&app.device_name),
         ]),
         Line::from(vec![
-            Span::styled("Listen:    ", Style::default().fg(Color::Cyan)),
+            Span::styled("Listen:    ", theme.style_header),
             Span::raw(&app.listen),
         ]),
         Line::from(vec![
-            Span::styled("Folders:   ", Style::default().fg(Color::Cyan)),
+            Span::styled("Folders:   ", theme.style_header),
             Span::raw(app.config.folders.len().to_string()),
         ]),
         Line::from(vec![
-            Span::styled("Devices:   ", Style::default().fg(Color::Cyan)),
+            Span::styled("Devices:   ", theme.style_header),
             Span::raw(app.config.devices.len().to_string()),
         ]),
         Line::from(vec![
-            Span::styled("Connected: ", Style::default().fg(Color::Cyan)),
-            Span::raw(app.connected_devices.len().to_string()),
+            Span::styled("Connected: ", theme.style_header),
+            Span::styled(
+                app.connected_devices.len().to_string(),
+                if app.connected_devices.is_empty() {
+                    theme.style_offline
+                } else {
+                    theme.style_online
+                },
+            ),
         ]),
     ]);
 

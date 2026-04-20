@@ -1,5 +1,6 @@
 use ratatui::{
-    style::{Modifier, Style},
+    style::Modifier,
+    text::Span,
     widgets::{Block, Borders, Cell, Row, Table},
     Frame,
 };
@@ -7,6 +8,7 @@ use ratatui::{
 use crate::tui::app::App;
 
 pub fn draw(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
+    let theme = &app.theme;
     let rows: Vec<Row> = app
         .config
         .folders
@@ -19,9 +21,9 @@ pub fn draw(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
                 .collect::<Vec<_>>()
                 .join(", ");
             Row::new(vec![
-                Cell::from(fo.id.clone()),
-                Cell::from(fo.path.clone()),
-                Cell::from(devs),
+                Cell::from(Span::styled(fo.id.clone(), theme.style_header)),
+                Cell::from(Span::styled(fo.path.clone(), theme.style_idle)),
+                Cell::from(Span::styled(devs, theme.style_idle)),
             ])
         })
         .collect();
@@ -35,11 +37,15 @@ pub fn draw(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
         ],
     )
     .header(
-        Row::new(vec!["ID", "Path", "Devices"])
-            .style(Style::default().add_modifier(Modifier::BOLD)),
+        Row::new(vec![
+            Cell::from(Span::styled("ID", theme.style_header)),
+            Cell::from(Span::styled("Path", theme.style_header)),
+            Cell::from(Span::styled("Devices", theme.style_header)),
+        ])
+        .style(Modifier::BOLD),
     )
     .block(Block::default().borders(Borders::ALL).title("Folders (a: add, d: delete)"))
-    .row_highlight_style(Style::default().add_modifier(Modifier::REVERSED));
+    .row_highlight_style(theme.style_header.add_modifier(Modifier::REVERSED));
 
     let mut state = ratatui::widgets::TableState::default();
     state.select(Some(app.folder_selected));
