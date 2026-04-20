@@ -4,6 +4,8 @@ use std::path::PathBuf;
 use syncthing_core::types::{Config, Device, Folder};
 use syncthing_core::DeviceId;
 
+use crate::tui::theme::Theme;
+
 /// 当前激活的 Tab
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Tab {
@@ -80,6 +82,7 @@ pub struct App {
     pub daemon_running: bool,
     pub daemon_status: String,
     pub connected_devices: Vec<DeviceId>,
+    pub theme: Theme,
 
     // 表单
     pub device_form: FormState,
@@ -104,6 +107,7 @@ impl App {
             daemon_running: false,
             daemon_status: "Stopped".to_string(),
             connected_devices: Vec::new(),
+            theme: Theme::default(),
             device_form: FormState::new(vec![String::new(), String::new(), String::new()]),
             folder_form: FormState::new(vec![String::new(), String::new()]),
             folder_device_selection: vec![false; device_count],

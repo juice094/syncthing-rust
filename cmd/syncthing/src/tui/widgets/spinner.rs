@@ -34,7 +34,7 @@ impl Spinner {
     }
 
     /// 渲染当前 spinner 帧
-    pub fn render(&self, frame_counter: u64) -> Line {
+    pub fn render(&self, frame_counter: u64) -> Line<'_> {
         let idx = ((frame_counter / TICKS_PER_FRAME) as usize) % FRAMES.len();
         let symbol = FRAMES[idx];
         Line::from(vec![
