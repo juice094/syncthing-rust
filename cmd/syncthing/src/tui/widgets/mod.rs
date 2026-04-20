@@ -1,4 +1,7 @@
 pub mod header;
+pub mod log_line;
+pub mod progress;
+pub mod spinner;
 pub mod status_bar;
 
 use ratatui::{
