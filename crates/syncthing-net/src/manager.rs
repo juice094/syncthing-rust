@@ -16,7 +16,7 @@ use tokio::time::{interval, sleep};
 use tracing::{debug, info, warn};
 
 use syncthing_core::{
-    DeviceId, RetryConfig, SyncthingError
+    ConnectionType, DeviceId, Identity, RetryConfig, SyncthingError
 };
 
 use crate::connection::{BepConnection, ConnectionEvent};
@@ -95,7 +95,9 @@ struct PendingConnection {
 pub struct ConnectionManager {
     /// 配置
     config: ConnectionManagerConfig,
-    /// 本地设备ID
+    /// 本地设备身份（抽象层，解耦具体密码学方案）
+    identity: Arc<dyn Identity>,
+    /// 本地设备ID（从 identity 缓存，避免虚函数调用）
     local_device_id: DeviceId,
     /// 活跃连接池 (device_id -> conn_id -> connection)
     connections: DashMap<DeviceId, DashMap<uuid::Uuid, ConnectionEntry>>,
@@ -123,7 +125,7 @@ pub struct ConnectionManager {
     self_weak: RwLock<Option<Weak<ConnectionManager>>>,
     /// 并行拨号器
     parallel_dialer: Arc<ParallelDialer>,
-    /// TLS 配置
+    /// TLS 配置（供传输层握手使用，Phase 2 后将由 Transport trait 自行管理）
     tls_config: Arc<SyncthingTlsConfig>,
 }
 
@@ -184,9 +186,10 @@ impl ConnectionManager {
     /// 创建新的连接管理器
     pub fn new(
         config: ConnectionManagerConfig,
-        local_device_id: DeviceId,
+        identity: Arc<dyn Identity>,
         tls_config: Arc<SyncthingTlsConfig>,
     ) -> (Arc<Self>, ConnectionManagerHandle) {
+        let local_device_id = identity.device_id();
         let (event_tx, event_rx) = mpsc::unbounded_channel();
         
         let parallel_dialer = Arc::new(ParallelDialer::with_tcp_connector(
@@ -197,6 +200,7 @@ impl ConnectionManager {
         let manager = Arc::new_cyclic(|weak| {
             Self {
                 config,
+                identity,
                 local_device_id,
                 connections: DashMap::new(),
                 conn_id_index: DashMap::new(),
@@ -318,18 +322,54 @@ impl ConnectionManager {
         debug!("Registering connection for device {}", device_id);
         
         let conn_id = conn.id();
+        let new_conn_type = conn.connection_type();
         
-        // 关闭同一设备的所有旧连接，确保每个设备只有一个活跃连接
+        // 连接竞争解决（Connection Race Resolution）
+        // 当双方同时建立连接时，各自会有 incoming + outgoing 两条连接。
+        // Syncthing 规则：device ID 较小的设备保留 incoming，关闭 outgoing；
+        //                 device ID 较大的设备保留 outgoing，关闭 incoming。
+        // 这样双方保留的是同一个物理连接。
         if let Some(nested) = self.connections.get_mut(&device_id) {
-            for entry in nested.iter() {
-                let old_conn_id = *entry.key();
-                if old_conn_id != conn_id {
-                    info!("Closing existing connection {} for device {} (new connection {})", old_conn_id, device_id, conn_id);
-                    entry.value().conn.close().await.ok();
+            if let Some(existing) = nested.iter().next() {
+                let old_conn_id = *existing.key();
+                let old_conn_type = existing.value().conn.connection_type();
+                
+                let should_replace = if old_conn_type == new_conn_type {
+                    // 同类型连接：保留旧的，避免频繁切换
+                    false
+                } else {
+                    // 不同类型：根据 device ID 竞争解决
+                    let local_smaller = self.local_device_id.0 < device_id.0;
+                    match (old_conn_type, new_conn_type) {
+                        (ConnectionType::Outgoing, ConnectionType::Incoming) => {
+                            // 旧 outgoing，新 incoming
+                            // local_smaller → 保留 incoming（新）
+                            local_smaller
+                        }
+                        (ConnectionType::Incoming, ConnectionType::Outgoing) => {
+                            // 旧 incoming，新 outgoing
+                            // local_larger → 保留 outgoing（新）
+                            !local_smaller
+                        }
+                        _ => unreachable!(),
+                    }
+                };
+                
+                if should_replace {
+                    info!("Closing existing connection {} for device {} (new {} via race resolution)", 
+                          old_conn_id, device_id, conn_id);
+                    existing.value().conn.close().await.ok();
+                    nested.clear();
+                    nested.insert(conn_id, ConnectionEntry::new(Arc::clone(&conn)));
+                } else {
+                    info!("Closing new connection {} for device {} (keeping existing {} via race resolution)", 
+                          conn_id, device_id, old_conn_id);
+                    conn.close().await.ok();
+                    return Ok(());
                 }
+            } else {
+                nested.insert(conn_id, ConnectionEntry::new(Arc::clone(&conn)));
             }
-            nested.clear();
-            nested.insert(conn_id, ConnectionEntry::new(Arc::clone(&conn)));
         } else {
             let nested = DashMap::new();
             nested.insert(conn_id, ConnectionEntry::new(Arc::clone(&conn)));
@@ -344,7 +384,7 @@ impl ConnectionManager {
         // 从待连接列表中移除
         self.pending_connections.write().await.remove(&device_id);
         
-        info!("Connection registered for device {} (conn_id: {})", device_id, conn_id);
+        info!("Connection registered for device {} (conn_id: {}, type: {:?})", device_id, conn_id, new_conn_type);
         
         // 触发回调
         if let Some(callback) = self.on_connected.read().as_ref() {
@@ -777,6 +817,7 @@ impl ConnectionManager {
         
         Self {
             config: manager.config.clone(),
+            identity: Arc::clone(&manager.identity),
             local_device_id: manager.local_device_id,
             connections: manager.connections.clone(),
             conn_id_index: manager.conn_id_index.clone(),
@@ -864,9 +905,10 @@ mod tests {
                     .expect("failed to load generated certificate")
             })
         );
+        let identity = Arc::new(crate::identity::TlsIdentity::new(Arc::clone(&tls_config)));
         let (manager, _handle) = ConnectionManager::new(
             ConnectionManagerConfig::default(),
-            DeviceId::default(),
+            identity,
             tls_config,
         );
         

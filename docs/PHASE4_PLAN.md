@@ -52,12 +52,24 @@
 
 ## 4.2 协议兼容性收尾
 
-| 问题 | 方案 | 优先级 |
+| 问题 | 方案 | 优先级 | 状态 |
+|---|---|---|---|
+| **连接循环**（双向拨号竞争） | 基于 device-ID 比较的竞争解决：`local_id < remote_id` 保留 incoming，反之保留 outgoing | P1 | ✅ 已完成 |
+| **`.stignore`** | 新增 `syncthing-sync/src/ignore.rs`，支持 `*.ext`、`!negation`、`/anchored`、`dir/` 语法，集成到 Scanner | P2 | ✅ 已完成 |
+| **配置持久化** | 移除 `daemon_runner.rs` 硬编码 `test_mode` 注入，配置加载/保存已走正常 `config.json` 路径 | P2 | ✅ 已完成 |
+| **Delta Index** | 验证 `IndexID` + `Sequence` 增量索引在长时间运行后的一致性 | P3 | ⏳ 待验证 |
+
+### 4.2b 身份层解耦（Phase 1/3 网络层演进）
+
+> **背景**: 项目战略从"文件同步工具"转向"坚强网络层"（参照 Tailscale + Steam++ 能力）。
+> 这是所有多传输/抗审查能力的前置条件。
+
+| 任务 | 说明 | 状态 |
 |---|---|---|
-| **连接循环**（双向拨号竞争） | 调研 Go Syncthing 的连接竞争解决逻辑，对齐 Rust 端行为 | P1 |
-| **`.stignore`** | 集成 `syncthing-fs` crate 的 ignore 逻辑到 Scanner | P2 |
-| **配置持久化** | `run` 命令将内存中的 Config 变化（新增设备/文件夹）写回 JSON | P2 |
-| **Delta Index** | 验证 `IndexID` + `Sequence` 增量索引在长时间运行后的一致性 | P3 |
+| **Identity trait** | `syncthing-core/src/identity.rs` — 设备身份与 TLS 证书解耦 | ✅ 已完成 |
+| **TlsIdentity** | `syncthing-net/src/identity.rs` — 当前默认实现，封装 TLS 证书 | ✅ 已完成 |
+| **ConnectionManager 注入** | `ConnectionManager` / `BepSession` 改持 `Arc<dyn Identity>` | ✅ 已完成 |
+| **DeviceIdentity** | 通用 `DeviceId` 包装器，用于测试和过渡场景 | ✅ 已完成 |
 
 ---
 

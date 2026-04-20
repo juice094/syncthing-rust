@@ -12,7 +12,7 @@ use std::time::{Duration, Instant};
 use dashmap::DashMap;
 use tracing::{debug, info, warn};
 
-use syncthing_core::{ConnectionState, DeviceId, Result, SyncthingError};
+use syncthing_core::{ConnectionState, DeviceId, Identity, Result, SyncthingError};
 
 use crate::connection::BepConnection;
 use crate::metrics;
@@ -117,6 +117,10 @@ pub trait BepSessionHandler: Send + Sync {
 
 /// BEP protocol session for a single connection.
 pub struct BepSession {
+    /// 远程设备身份（抽象层）
+    #[allow(dead_code)]
+    identity: Arc<dyn Identity>,
+    /// 远程设备ID（从 identity 缓存）
     device_id: DeviceId,
     conn: Arc<BepConnection>,
     handler: Arc<dyn BepSessionHandler>,
@@ -129,12 +133,14 @@ pub struct BepSession {
 impl BepSession {
     /// Create a new session.
     pub fn new(
-        device_id: DeviceId,
+        identity: Arc<dyn Identity>,
         conn: Arc<BepConnection>,
         handler: Arc<dyn BepSessionHandler>,
         pending_responses: Arc<DashMap<i32, tokio::sync::oneshot::Sender<bep_protocol::messages::Response>>>,
     ) -> Self {
+        let device_id = identity.device_id();
         Self {
+            identity,
             device_id,
             conn,
             handler,
@@ -147,13 +153,15 @@ impl BepSession {
 
     /// Create a new session with event subscription.
     pub fn with_events(
-        device_id: DeviceId,
+        identity: Arc<dyn Identity>,
         conn: Arc<BepConnection>,
         handler: Arc<dyn BepSessionHandler>,
         pending_responses: Arc<DashMap<i32, tokio::sync::oneshot::Sender<bep_protocol::messages::Response>>>,
         event_tx: tokio::sync::mpsc::UnboundedSender<BepSessionEvent>,
     ) -> Self {
+        let device_id = identity.device_id();
         Self {
+            identity,
             device_id,
             conn,
             handler,
@@ -627,7 +635,7 @@ mod tests {
         let pending: Arc<DashMap<i32, tokio::sync::oneshot::Sender<bep_protocol::messages::Response>>> =
             Arc::new(DashMap::new());
 
-        let session = BepSession::new(device_id, Arc::clone(&conn_a), handler, pending);
+        let session = BepSession::new(Arc::new(syncthing_core::DeviceIdentity::new(device_id)), Arc::clone(&conn_a), handler, pending);
         let handle = tokio::spawn(session.run());
 
         // Wait for ClusterConfig from session side
@@ -682,7 +690,7 @@ mod tests {
         let pending: Arc<DashMap<i32, tokio::sync::oneshot::Sender<bep_protocol::messages::Response>>> =
             Arc::new(DashMap::new());
 
-        let session = BepSession::new(device_id, Arc::clone(&conn_a), handler, Arc::clone(&pending));
+        let session = BepSession::new(Arc::new(syncthing_core::DeviceIdentity::new(device_id)), Arc::clone(&conn_a), handler, Arc::clone(&pending));
         let handle = tokio::spawn(session.run());
 
         // Handshake: ClusterConfig -> ClusterConfig -> Index
@@ -753,7 +761,7 @@ mod tests {
             Arc::new(DashMap::new());
 
         let (event_tx, mut event_rx) = tokio::sync::mpsc::unbounded_channel::<BepSessionEvent>();
-        let session = BepSession::with_events(device_id, Arc::clone(&conn_a), handler, Arc::clone(&pending), event_tx);
+        let session = BepSession::with_events(Arc::new(syncthing_core::DeviceIdentity::new(device_id)), Arc::clone(&conn_a), handler, Arc::clone(&pending), event_tx);
         let metrics = session.metrics();
         let handle = tokio::spawn(session.run());
 
@@ -824,8 +832,13 @@ mod tests {
         assert!(matches!(event, BepSessionEvent::BlockRequested { folder, name, size: 3, .. }
             if folder == "test-folder" && name == "hello.txt"));
 
-        // Receive Response
-        let (msg_type, _) = conn_b.recv_message().await.unwrap();
+        // Receive Response (skip stray Ping messages that may arrive from heartbeat)
+        let (msg_type, _) = loop {
+            let (msg_type, payload) = conn_b.recv_message().await.unwrap();
+            if msg_type != MessageType::Ping {
+                break (msg_type, payload);
+            }
+        };
         assert_eq!(msg_type, MessageType::Response);
 
         // 6. Verify metrics (small yield to let async counters settle)

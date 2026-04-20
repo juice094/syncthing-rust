@@ -44,9 +44,6 @@ enum Commands {
         #[arg(short, long, default_value = "syncthing-rust")]
         device_name: String,
 
-        /// 测试模式（自动注入互操作 peer 和 folder）
-        #[arg(long)]
-        test_mode: bool,
     },
 
     /// 启动 TUI 配置管理器
@@ -176,11 +173,11 @@ async fn main() -> Result<()> {
         .context("invalid log level")?;
 
     match cli.command {
-        Commands::Run { listen, device_name, test_mode } => {
+        Commands::Run { listen, device_name } => {
             let subscriber = FmtSubscriber::builder().with_max_level(log_level).finish();
             tracing::subscriber::set_global_default(subscriber)?;
             let (listen, device_name) = resolve_daemon_config(&config_dir, listen, device_name)?;
-            match tui::daemon_runner::start_daemon(config_dir.clone(), listen, device_name, test_mode).await {
+            match tui::daemon_runner::start_daemon(config_dir.clone(), listen, device_name).await {
                 Ok(startup) => {
                     // 启动 REST API 服务器
                     let api_handle = match api_server::start_api_server(&config_dir, startup.sync_service.clone(), startup.device_id, Some(startup.connection_handle.clone())).await {
@@ -439,7 +436,6 @@ mod tests {
         let tls_config = SyncthingTlsConfig::load_or_generate(&config_dir)
             .await
             .expect("failed to load or generate certificate");
-        let device_id = tls_config.device_id();
         let tls_config_arc = Arc::new(tls_config);
 
         let db = MemoryDatabase::new();
@@ -450,8 +446,9 @@ mod tests {
             listen_addr: "127.0.0.1:0".parse().unwrap(),
             ..Default::default()
         };
+        let identity = Arc::new(syncthing_net::identity::TlsIdentity::new(Arc::clone(&tls_config_arc)));
         let (manager, _handle) =
-            ConnectionManager::new(manager_config, device_id, Arc::clone(&tls_config_arc));
+            ConnectionManager::new(manager_config, identity, Arc::clone(&tls_config_arc));
 
         // 连接/断开回调（测试用空操作）
         manager.on_connected(move |_device_id| {

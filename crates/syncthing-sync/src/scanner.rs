@@ -5,6 +5,7 @@
 use crate::database::LocalDatabase;
 use crate::error::{Result, SyncError};
 use crate::events::{EventPublisher, SyncEvent};
+use crate::ignore::IgnoreMatcher;
 use syncthing_core::types::{BlockInfo, FileInfo, FileType, Folder, Vector};
 use sha2::{Digest, Sha256};
 use std::path::Path;
@@ -43,8 +44,12 @@ impl Scanner {
         let mut changed_files = Vec::new();
         let mut visited_paths = std::collections::HashSet::new();
 
+        // 加载 .stignore（如果存在）
+        let ignore_path = path.join(".stignore");
+        let matcher = IgnoreMatcher::load(&ignore_path);
+
         // 递归扫描目录
-        match self.scan_directory(&folder.id, path, path, &mut visited_paths).await {
+        match self.scan_directory(&folder.id, path, path, &mut visited_paths, &matcher).await {
             Ok(files) => {
                 // 检查已删除的文件
                 let db_files = self.db.get_folder_files(&folder.id).await?;
@@ -123,6 +128,7 @@ impl Scanner {
         base_path: &Path,
         current_path: &Path,
         visited: &mut std::collections::HashSet<std::path::PathBuf>,
+        matcher: &IgnoreMatcher,
     ) -> Result<Vec<FileInfo>> {
         let mut files = Vec::new();
         
@@ -159,14 +165,21 @@ impl Scanner {
                 .to_string_lossy()
                 .replace('\\', "/");
 
+            // 应用 .stignore 规则
+            let is_dir = metadata.is_dir();
+            if matcher.matches(&relative_path, is_dir) {
+                trace!(path = %relative_path, "Ignoring path via .stignore");
+                continue;
+            }
+
             if visited.contains(&path) {
                 continue;
             }
             visited.insert(path.clone());
 
-            if metadata.is_dir() {
+            if is_dir {
                 // 递归扫描子目录
-                let sub_files = self.scan_directory(folder_id, base_path, &path, visited).await?;
+                let sub_files = self.scan_directory(folder_id, base_path, &path, visited, matcher).await?;
                 files.extend(sub_files);
 
                 // 添加目录条目
