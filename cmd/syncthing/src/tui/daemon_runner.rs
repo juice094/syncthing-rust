@@ -32,7 +32,6 @@ pub async fn start_daemon(
     config_dir: PathBuf,
     listen: String,
     device_name: String,
-    test_mode: bool,
 ) -> Result<DaemonStartup> {
     info!("Starting Syncthing Rust daemon from TUI...");
 
@@ -90,37 +89,6 @@ pub async fn start_daemon(
     config.listen_addr = listen;
     config.device_name = device_name;
 
-    if test_mode {
-        // 互操作测试自动配置（仅开发阶段）：本地 Go 节点（127.0.0.1:22001）
-        // 注意：这些配置仅在内存中生效，不会持久化到 config.json，避免污染正常用户配置
-        let go_cert_path = std::path::PathBuf::from(r"C:\Users\22414\dev\third_party\syncthing\test_go_home\cert.pem");
-        let go_key_path = std::path::PathBuf::from(r"C:\Users\22414\dev\third_party\syncthing\test_go_home\key.pem");
-        let mut go_device_id = None;
-        if go_cert_path.exists() && go_key_path.exists() {
-            let cert = tokio::fs::read(&go_cert_path).await.unwrap_or_default();
-            let key = tokio::fs::read(&go_key_path).await.unwrap_or_default();
-            if let Ok(cfg) = SyncthingTlsConfig::from_pem(&cert, &key) {
-                let id = cfg.device_id();
-                if !config.devices.iter().any(|d| d.id == id) {
-                    config.devices.push(syncthing_core::types::Device {
-                        id,
-                        name: Some("go-syncthing-local".to_string()),
-                        addresses: vec![syncthing_core::types::AddressType::Tcp("127.0.0.1:22001".to_string())],
-                        paused: false,
-                        introducer: false,
-                    });
-                }
-                go_device_id = Some(id);
-            }
-        }
-        if let Some(idx) = config.folders.iter().position(|f| f.id == "test-folder") {
-            if let Some(gid) = go_device_id {
-                if !config.folders[idx].devices.contains(&gid) {
-                    config.folders[idx].devices.push(gid);
-                }
-            }
-        }
-    }
 
     let db_path = config_dir.join("db");
     let db = FileSystemDatabase::new(&db_path);
@@ -135,8 +103,9 @@ pub async fn start_daemon(
     };
 
     let tls_config_arc = Arc::new(tls_config);
+    let identity = Arc::new(syncthing_net::identity::TlsIdentity::new(Arc::clone(&tls_config_arc)));
     let (manager, handle) =
-        ConnectionManager::new(manager_config, device_id, Arc::clone(&tls_config_arc));
+        ConnectionManager::new(manager_config, identity, Arc::clone(&tls_config_arc));
 
     let pending_responses: Arc<DashMap<i32, tokio::sync::oneshot::Sender<bep_protocol::messages::Response>>> =
         Arc::new(DashMap::new());
@@ -213,7 +182,7 @@ pub async fn start_daemon(
 
                 let handler = DaemonBepHandler { sync_service: Arc::clone(&sync_service) };
                 if let Some(conn) = handle.get_connection(&device_id) {
-                    let session = BepSession::with_events(device_id, conn, Arc::new(handler), pending, event_tx);
+                    let session = BepSession::with_events(Arc::new(syncthing_core::DeviceIdentity::new(device_id)), conn, Arc::new(handler), pending, event_tx);
                     if let Err(e) = session.run().await {
                         warn!("BEP session for {} ended: {}", device_id, e);
                     }

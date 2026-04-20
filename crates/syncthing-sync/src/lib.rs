@@ -21,6 +21,7 @@ pub mod supervisor;
 pub mod sync_task;
 pub mod block_server;
 pub mod watcher;
+pub mod ignore;
 
 pub use supervisor::{Supervisor, RestartConfig, RestartPolicy};
 

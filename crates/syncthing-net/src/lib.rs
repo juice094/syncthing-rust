@@ -17,6 +17,7 @@ pub mod discovery;
 pub mod portmapper;
 pub mod dialer;
 pub mod metrics;
+pub mod identity;
 
 #[cfg(feature = "iroh")]
 pub mod transport;
