@@ -16,7 +16,7 @@ use tokio::time::{interval, sleep};
 use tracing::{debug, info, warn};
 
 use syncthing_core::{
-    ConnectionType, DeviceId, RetryConfig, SyncthingError
+    DeviceId, RetryConfig, SyncthingError
 };
 
 use crate::connection::{BepConnection, ConnectionEvent};
@@ -54,6 +54,7 @@ impl Default for ConnectionManagerConfig {
 
 /// 连接条目
 #[derive(Clone)]
+#[allow(dead_code)]
 struct ConnectionEntry {
     /// 连接对象
     conn: Arc<BepConnection>,
@@ -80,6 +81,7 @@ impl ConnectionEntry {
 }
 
 /// 待连接设备
+#[allow(dead_code)]
 struct PendingConnection {
     device_id: DeviceId,
     addresses: Vec<SocketAddr>,
@@ -318,14 +320,14 @@ impl ConnectionManager {
         let conn_id = conn.id();
         
         // 如果同一 conn_id 已存在，先关闭旧连接
-        if let Some(mut nested) = self.connections.get_mut(&device_id) {
+        if let Some(nested) = self.connections.get_mut(&device_id) {
             if let Some((_, existing)) = nested.remove(&conn_id) {
                 info!("Replacing existing connection {} for device {}", conn_id, device_id);
                 existing.conn.close().await.ok();
             }
             nested.insert(conn_id, ConnectionEntry::new(Arc::clone(&conn)));
         } else {
-            let mut nested = DashMap::new();
+            let nested = DashMap::new();
             nested.insert(conn_id, ConnectionEntry::new(Arc::clone(&conn)));
             self.connections.insert(device_id, nested);
         }
@@ -430,7 +432,7 @@ impl ConnectionManager {
             return Ok(());
         };
 
-        let device_has_other_conns = if let Some(mut nested) = self.connections.get_mut(&device_id) {
+        let device_has_other_conns = if let Some(nested) = self.connections.get_mut(&device_id) {
             nested.remove(conn_id);
             !nested.is_empty()
         } else {
@@ -764,9 +766,10 @@ impl ConnectionManager {
         }
     }
     
+    #[allow(dead_code)]
     /// 从引用创建（用于内部转换）
     fn from_arc(manager: &ConnectionManager) -> Self {
-        let (event_tx, _event_rx) = mpsc::unbounded_channel::<ConnectionEvent>();
+        let (_event_tx, _event_rx) = mpsc::unbounded_channel::<ConnectionEvent>();
         
         Self {
             config: manager.config.clone(),

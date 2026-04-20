@@ -732,7 +732,6 @@ async fn get_db_status(State(state): State<ApiState>) -> impl IntoResponse {
                                     syncthing_core::types::FileType::File => files_count += 1,
                                     syncthing_core::types::FileType::Directory => directories_count += 1,
                                     syncthing_core::types::FileType::Symlink => symlinks_count += 1,
-                                    _ => {}
                                 }
                                 bytes_count += info.size as u64;
                             }

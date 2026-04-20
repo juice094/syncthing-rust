@@ -50,14 +50,11 @@ chrono = { version = "0.4", features = ["serde"] }
 bytes = "1.5"
 dashmap = "5.5"
 parking_lot = "0.12"
+notify = "7.0"
+tempfile = "3"
+walkdir = "2"
 
 [profile.release]
 lto = true
 codegen-units = 1
 opt-level = 3
-
-[patch.crates-io]
-portmapper = { git = "https://github.com/n0-computer/net-tools", branch = "main" }
-noq = { git = "https://github.com/n0-computer/noq", branch = "main" }
-noq-udp = { git = "https://github.com/n0-computer/noq", branch = "main" }
-noq-proto = { git = "https://github.com/n0-computer/noq", branch = "main" }

@@ -219,13 +219,21 @@ pub struct PortMapping {
 impl PortMapping {
     /// 检查映射是否即将过期
     pub fn is_expiring_soon(&self) -> bool {
+        self.is_expiring_soon_at(std::time::Instant::now())
+    }
+
+    fn is_expiring_soon_at(&self, now: std::time::Instant) -> bool {
         if self.duration == 0 {
             return false; // 永久映射
         }
-        
-        let elapsed = self.created_at.elapsed().as_secs() as u32;
+
+        let elapsed = if now > self.created_at {
+            now.duration_since(self.created_at).as_secs() as u32
+        } else {
+            0
+        };
         let remaining = self.duration.saturating_sub(elapsed);
-        
+
         // 如果剩余时间少于最小续约间隔，认为即将过期
         remaining < MIN_RENEWAL_INTERVAL.as_secs() as u32
     }
@@ -445,16 +453,17 @@ mod tests {
         assert!(!mapping.is_expiring_soon());
 
         // 创建一个即将过期的映射（已过去大部分时间）
+        let now = std::time::Instant::now();
         let old_mapping = PortMapping {
             external_port: 22000,
             internal_port: 22000,
             protocol: PortMappingProtocol::TCP,
             duration: 3600, // 1小时
-            created_at: std::time::Instant::now() - Duration::from_secs(3500), // 已过去58分钟
+            created_at: now, // 用模拟的 "now" 来测试
         };
 
         // 应该即将过期（剩余2分钟，小于 MIN_RENEWAL_INTERVAL 的25分钟）
-        assert!(old_mapping.is_expiring_soon());
+        assert!(old_mapping.is_expiring_soon_at(now + Duration::from_secs(3500)));
 
         // 测试短持续时间映射（duration 小于 MIN_RENEWAL_INTERVAL）
         let short_mapping = PortMapping {

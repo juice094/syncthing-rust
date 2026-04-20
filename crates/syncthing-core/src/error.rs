@@ -151,17 +151,6 @@ impl SyncthingError {
 /// 结果类型别名
 pub type Result<T> = std::result::Result<T, SyncthingError>;
 
-/// 添加上下文到错误
-trait Context<T> {
-    fn context(self, msg: &str) -> Result<T>;
-}
-
-impl<T> Context<T> for io::Result<T> {
-    fn context(self, _msg: &str) -> Result<T> {
-        self.map_err(|e| SyncthingError::Io(e))
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

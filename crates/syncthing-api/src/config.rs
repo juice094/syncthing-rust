@@ -51,6 +51,8 @@ impl FileConfigStore {
 
     /// Get the configuration file path
     /// Get the configuration file path
+    /// 返回路径
+    /// 返回路径
     pub fn path(&self) -> &Path {
         &self.path
     }
@@ -326,6 +328,7 @@ impl JsonConfigStore {
         }
     }
 
+    /// 返回缓存路径
     pub fn path(&self) -> &Path {
         &self.path
     }

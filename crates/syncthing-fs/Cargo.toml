@@ -18,7 +18,7 @@ async-trait = { workspace = true }
 thiserror = { workspace = true }
 
 # 文件监控
-notify = "6.1"
+notify = { workspace = true }
 
 # 工具
 tracing = { workspace = true }
@@ -27,8 +27,8 @@ regex = "1.10"
 
 # 哈希计算
 sha2 = { workspace = true }
-hex = "0.4"
+hex = { workspace = true }
 
 [dev-dependencies]
 tokio-test = "0.4"
-tempfile = "3.9"
+tempfile = { workspace = true }

@@ -24,13 +24,13 @@ sled = "0.34"
 lru = "0.16.3"
 
 # 序列化
-serde = { version = "1.0", features = ["derive"] }
-serde_json = "1.0"
+serde = { workspace = true }
+serde_json = { workspace = true }
 
 # 工具
 tracing = { workspace = true }
 
 [dev-dependencies]
 tokio-test = "0.4"
-tempfile = "3.9"
+tempfile = { workspace = true }
 futures = "0.3"

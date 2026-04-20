@@ -496,8 +496,8 @@ pub fn generate_certificate(_device_name: &str) -> Result<(Vec<u8>, Vec<u8>)> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::path::PathBuf;
-    use tokio_test;
+    
+    
     
     #[test]
     fn test_device_id_derivation() {

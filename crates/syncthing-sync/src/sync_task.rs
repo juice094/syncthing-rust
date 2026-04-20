@@ -3,7 +3,6 @@
 //! 管理同步任务队列和执行
 
 use crate::error::Result;
-use syncthing_core::DeviceId;
 use syncthing_core::types::FileInfo;
 use std::collections::VecDeque;
 use std::sync::Arc;

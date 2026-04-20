@@ -13,7 +13,7 @@ use syncthing_core::types::Config;
 use syncthing_core::DeviceId;
 use syncthing_net::{BepSession, BepSessionEvent, BepSessionHandler, ConnectionManager, ConnectionManagerConfig, ConnectionManagerHandle, SyncthingTlsConfig};
 use syncthing_net::protocol::MessageType;
-use syncthing_sync::{database::MemoryDatabase, SyncService, SyncModel, events::SyncEvent};
+use syncthing_sync::{database::FileSystemDatabase, SyncService, SyncModel, events::SyncEvent};
 
 use crate::{ManagerBlockSource, load_config, save_config, CONFIG_FILE_NAME};
 
@@ -22,6 +22,7 @@ pub struct DaemonStartup {
     pub future: std::pin::Pin<Box<dyn std::future::Future<Output = Result<()>> + Send>>,
     pub connection_handle: ConnectionManagerHandle,
     pub sync_service: Arc<SyncService>,
+    #[allow(dead_code)]
     pub session_handles: Arc<DashMap<DeviceId, JoinHandle<()>>>,
     pub device_id: DeviceId,
 }
@@ -59,12 +60,7 @@ pub async fn start_daemon(
 
     let mut config_modified = false;
 
-    // 自动迁移旧冲突端口到新默认端口
-    if config.listen_addr == "0.0.0.0:22000" {
-        warn!("Migrating listen_addr from 0.0.0.0:22000 to 0.0.0.0:22001 to avoid conflict with local Go Syncthing");
-        config.listen_addr = "0.0.0.0:22001".to_string();
-        config_modified = true;
-    }
+    // Port auto-migration removed: use CLI --listen flag if 22000 is occupied
     if config.gui.address == "0.0.0.0:8384" || config.gui.address == "127.0.0.1:8384" {
         warn!("Migrating gui.address from {} to 0.0.0.0:8385 to avoid conflict with local Go Syncthing", config.gui.address);
         config.gui.address = "0.0.0.0:8385".to_string();
@@ -126,7 +122,8 @@ pub async fn start_daemon(
         }
     }
 
-    let db = MemoryDatabase::new();
+    let db_path = config_dir.join("db");
+    let db = FileSystemDatabase::new(&db_path);
     let sync_service = Arc::new(SyncService::new(db).with_config(config.clone()).await);
 
     let manager_config = ConnectionManagerConfig {

@@ -60,6 +60,7 @@ struct ConnectionInner {
     /// 关联的设备ID
     pub device_id: RwLock<Option<DeviceId>>,
     /// 最后ping时间
+    #[allow(dead_code)]
     pub last_ping: RwLock<Instant>,
     /// 最后pong时间
     pub last_pong: RwLock<Instant>,
@@ -1050,7 +1051,7 @@ impl IrohBepConnection {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::protocol::BEP_MAGIC;
+    
     
     #[test]
     fn test_message_header_bep_roundtrip() {
@@ -1085,7 +1086,7 @@ mod tests {
     async fn test_split_boxed_pipe() {
         use tokio::io::{AsyncReadExt, AsyncWriteExt};
         let (pipe_a, pipe_b) = syncthing_test_utils::memory_pipe_pair(1024);
-        let (mut read_half, mut write_half) = tokio::io::split(Box::new(pipe_a) as syncthing_core::traits::BoxedPipe);
+        let (_read_half, mut write_half) = tokio::io::split(Box::new(pipe_a) as syncthing_core::traits::BoxedPipe);
         let (mut read_half_b, _write_half_b) = tokio::io::split(Box::new(pipe_b) as syncthing_core::traits::BoxedPipe);
 
         write_half.write_all(b"hello").await.unwrap();

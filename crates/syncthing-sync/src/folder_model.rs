@@ -5,7 +5,6 @@
 use crate::database::LocalDatabase;
 use crate::error::Result;
 use crate::events::{EventPublisher, SyncEvent};
-use crate::index_handler::IndexHandler;
 use crate::model::FolderState;
 use crate::puller::{Puller, BlockSource};
 use crate::scanner::Scanner;
@@ -25,7 +24,6 @@ pub struct FolderModel {
     events: EventPublisher,
     scanner: Scanner,
     puller: Puller,
-    index_handler: IndexHandler,
     watcher: RwLock<Option<notify::RecommendedWatcher>>,
 }
 
@@ -40,8 +38,6 @@ impl FolderModel {
         let scanner = Scanner::new(db.clone(), events.clone());
         let puller = Puller::new(db.clone(), events.clone())
             .with_block_source(block_source);
-        let index_handler = IndexHandler::new(db.clone(), events.clone());
-
         let folder_id = folder.id.clone();
         Self {
             folder,
@@ -50,7 +46,6 @@ impl FolderModel {
             events,
             scanner,
             puller,
-            index_handler,
             watcher: RwLock::new(None),
         }
     }

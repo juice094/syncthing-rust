@@ -63,15 +63,6 @@ impl LruCache {
         }
     }
 
-    fn get(&mut self, hash: &BlockHash) -> Option<Vec<u8>> {
-        if let Some(entry) = self.entries.get_mut(hash) {
-            entry.touch();
-            Some(entry.data.clone())
-        } else {
-            None
-        }
-    }
-
     fn peek(&self, hash: &BlockHash) -> Option<Vec<u8>> {
         self.entries.get(hash).map(|e| e.data.clone())
     }

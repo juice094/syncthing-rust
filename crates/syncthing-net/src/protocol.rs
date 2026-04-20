@@ -2,9 +2,8 @@
 //!
 //! 参考: syncthing/lib/protocol/*.go
 
-use bytes::{Bytes, BytesMut};
+use bytes::Bytes;
 use serde::Serialize;
-use std::io::Cursor;
 
 use syncthing_core::DeviceId;
 use bep_protocol::messages::Hello as BepHello;

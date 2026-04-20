@@ -26,16 +26,10 @@ use crate::metadata::MetadataStore;
 
 /// Key prefixes for different data types in the database
 mod key_prefix {
-    /// Device index: device/<device_id>/...
-    pub const DEVICE: &[u8] = b"device/";
     /// Folder index: folder/<folder_id>/...
     pub const FOLDER: &[u8] = b"folder/";
     /// Block storage: block/<hash>
     pub const BLOCK: &[u8] = b"block/";
-    /// Global index: global/<folder_id>/...
-    pub const GLOBAL: &[u8] = b"global/";
-    /// Metadata: meta/...
-    pub const META: &[u8] = b"meta/";
 }
 
 /// Block store implementation
