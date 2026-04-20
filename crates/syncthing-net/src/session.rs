@@ -495,6 +495,13 @@ impl BepSession {
                 >(&payload)
                 {
                     Ok(resp) => {
+                        info!(
+                            "Received Response id={} code={} data_len={} from {}",
+                            resp.id,
+                            resp.code,
+                            resp.data.len(),
+                            self.device_id
+                        );
                         if let Some((_, tx)) = self.pending_responses.remove(&resp.id) {
                             let _ = tx.send(resp);
                         } else {
