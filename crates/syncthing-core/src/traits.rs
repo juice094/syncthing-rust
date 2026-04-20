@@ -133,6 +133,7 @@ pub type FileSystemRef = Arc<dyn FileSystem>;
 /// in the `syncthing-net` crate. The old trait assumed a single-threaded, owned
 /// connection model that does not match the current `Arc<BepConnection>` +
 /// `BepSessionHandler` architecture.
+#[allow(deprecated)]
 #[deprecated(since = "0.1.0", note = "Use syncthing_net::BepSession with ReliablePipe instead")]
 #[async_trait]
 pub trait BepConnection: Send + Sync {
@@ -338,6 +339,7 @@ impl AnnouncementHandle for NoopHandle {
 /// Transport layer for connections
 ///
 /// Implementors: syncthing-net crate (Worker-D)
+#[allow(deprecated)]
 #[async_trait]
 pub trait Transport: Send + Sync {
     /// Connect to a device at given address
@@ -353,6 +355,7 @@ pub trait Transport: Send + Sync {
 }
 
 /// Connection listener
+#[allow(deprecated)]
 #[async_trait]
 pub trait ConnectionListener: Send + Sync {
     /// Accept next incoming connection

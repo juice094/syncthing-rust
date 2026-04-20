@@ -125,13 +125,6 @@ fn make_device_file_key(device_id: &str, folder: &FolderId, name: &str) -> Vec<u
         .into_bytes()
 }
 
-/// Key for global index
-/// Format: folder/<folder_id>/file/<file_name>
-fn make_global_file_key(folder: &FolderId, name: &str) -> Vec<u8> {
-    format!("folder/{}/file/{}", folder.as_str(), name)
-        .into_bytes()
-}
-
 /// Key for block index
 /// Format: block/<hash>
 pub fn make_block_key(hash: &BlockHash) -> Vec<u8> {
@@ -476,7 +469,7 @@ impl MetadataStore {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::time::SystemTime;
+    
     use tempfile::TempDir;
 
     fn create_test_file_info(name: &str, size: u64) -> FileInfo {

@@ -2,11 +2,8 @@
 //!
 //! 提供命令行界面和守护进程功能
 
-use std::net::SocketAddr;
 use std::path::PathBuf;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicI32, Ordering};
-use std::time::Duration;
 
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
@@ -14,8 +11,8 @@ use tracing::{info, warn, Level};
 use tracing_subscriber::{layer::SubscriberExt, Layer as _, FmtSubscriber};
 
 use syncthing_core::types::Config;
-use syncthing_net::{ConnectionManager, ConnectionManagerConfig, SyncthingTlsConfig};
-use syncthing_sync::{database::MemoryDatabase, SyncModel, SyncService, BlockSource};
+use syncthing_net::SyncthingTlsConfig;
+use syncthing_sync::BlockSource;
 
 /// Syncthing 命令行参数
 #[derive(Parser, Debug)]
@@ -143,7 +140,7 @@ fn resolve_daemon_config(
     cli_device_name: String,
 ) -> Result<(String, String)> {
     let config_path = config_dir.join(CONFIG_FILE_NAME);
-    let mut config = if config_path.exists() {
+    let config = if config_path.exists() {
         load_config(&config_path).unwrap_or_else(|e| {
             warn!("Failed to load config: {}. Using default.", e);
             syncthing_core::types::Config::new()
@@ -418,9 +415,10 @@ async fn cmd_show_id(config_dir: &PathBuf) -> Result<()> {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
     use super::*;
     use syncthing_net::{ConnectionManager, ConnectionManagerConfig};
-    use syncthing_sync::database::MemoryDatabase;
+    use syncthing_sync::{SyncService, database::MemoryDatabase};
 
     #[tokio::test]
     async fn test_daemon_start_stop() {
@@ -449,22 +447,12 @@ mod tests {
         let (manager, _handle) =
             ConnectionManager::new(manager_config, device_id, Arc::clone(&tls_config_arc));
 
-        // 连接回调
-        let sync_service_clone = Arc::clone(&sync_service);
-        manager.on_connected(move |device_id| {
-            let sync_service = Arc::clone(&sync_service_clone);
-            tokio::spawn(async move {
-                let _ = sync_service.connect_device(device_id).await;
-            });
+        // 连接/断开回调（测试用空操作）
+        manager.on_connected(move |_device_id| {
+            // no-op for test
         });
-
-        // 断开回调
-        let sync_service_clone = Arc::clone(&sync_service);
-        manager.on_disconnected(move |device_id, _reason| {
-            let sync_service = Arc::clone(&sync_service_clone);
-            tokio::spawn(async move {
-                let _ = sync_service.disconnect_device(device_id).await;
-            });
+        manager.on_disconnected(move |_device_id, _reason| {
+            // no-op for test
         });
 
         // 启动服务

@@ -1,6 +1,5 @@
-use std::collections::VecDeque;
 
-use crossterm::event::{Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
+use crossterm::event::{Event, KeyCode, KeyEvent, KeyEventKind};
 
 use std::str::FromStr;
 

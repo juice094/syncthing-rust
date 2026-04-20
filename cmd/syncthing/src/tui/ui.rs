@@ -1,5 +1,5 @@
 use ratatui::{
-    layout::{Alignment, Constraint, Direction, Layout, Margin, Rect},
+    layout::{Alignment, Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span, Text},
     widgets::{
@@ -9,7 +9,7 @@ use ratatui::{
     Frame,
 };
 
-use crate::tui::app::{App, FormState, Popup, Tab};
+use crate::tui::app::{App, Popup, Tab};
 
 pub fn draw(f: &mut Frame, app: &mut App) {
     let area = f.area();
@@ -196,7 +196,7 @@ fn draw_folders(f: &mut Frame, app: &App, area: Rect) {
             .style(Style::default().add_modifier(Modifier::BOLD)),
     )
     .block(Block::default().borders(Borders::ALL).title("Folders (a: add, d: delete)"))
-    .highlight_style(Style::default().add_modifier(Modifier::REVERSED));
+    .row_highlight_style(Style::default().add_modifier(Modifier::REVERSED));
 
     let mut state = ratatui::widgets::TableState::default();
     state.select(Some(app.folder_selected));

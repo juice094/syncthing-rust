@@ -196,7 +196,7 @@ impl ConflictResolver {
         &self,
         folder: &str,
         remote_files: &[FileInfo],
-        folder_path: &Path,
+        _folder_path: &Path,
     ) -> Result<Vec<(FileInfo, FileInfo)>> {
         let mut conflicts = Vec::new();
 

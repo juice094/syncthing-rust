@@ -3,7 +3,7 @@
 use crate::error::Result;
 use crate::events::EventSubscriber;
 use syncthing_core::DeviceId;
-use syncthing_core::types::{Config, FileInfo, Folder, FolderStatus};
+use syncthing_core::types::{Config, Folder, FolderStatus};
 use async_trait::async_trait;
 use std::collections::HashMap;
 

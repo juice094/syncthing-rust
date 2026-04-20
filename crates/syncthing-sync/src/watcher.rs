@@ -4,11 +4,8 @@
 
 use crate::error::{Result, SyncError};
 use notify::{Config, Event, RecommendedWatcher, RecursiveMode, Watcher};
-use std::time::Duration;
 use tokio::sync::mpsc;
 use tracing::{info, warn};
-
-const DEBOUNCE_DURATION: Duration = Duration::from_secs(1);
 
 /// 文件夹文件系统监视器
 pub struct FolderWatcher;

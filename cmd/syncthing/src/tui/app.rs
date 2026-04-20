@@ -118,10 +118,12 @@ impl App {
         self.log_lines.push_back(msg);
     }
 
+    #[allow(dead_code)]
     pub fn selected_device(&self) -> Option<&Device> {
         self.config.devices.get(self.device_selected)
     }
 
+    #[allow(dead_code)]
     pub fn selected_folder(&self) -> Option<&Folder> {
         self.config.folders.get(self.folder_selected)
     }

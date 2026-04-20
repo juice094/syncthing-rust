@@ -2,7 +2,6 @@
 //! 
 //! 实现定期扫描本地文件夹变更的功能
 
-use async_recursion::async_recursion;
 use crate::database::LocalDatabase;
 use crate::error::{Result, SyncError};
 use crate::events::{EventPublisher, SyncEvent};
@@ -125,13 +124,14 @@ impl Scanner {
     ) -> Result<Vec<FileInfo>> {
         let mut files = Vec::new();
         
-        let mut entries = fs::read_dir(current_path).await.map_err(|e| {
+        let entries = std::fs::read_dir(current_path).map_err(|e| {
             SyncError::scan(folder_id.to_string(), format!("Failed to read directory: {}", e))
         })?;
 
-        while let Some(entry) = entries.next_entry().await.map_err(|e| {
-            SyncError::scan(folder_id.to_string(), format!("Failed to read entry: {}", e))
-        })? {
+        for entry in entries {
+            let entry = entry.map_err(|e| {
+                SyncError::scan(folder_id.to_string(), format!("Failed to read entry: {}", e))
+            })?;
             let path = entry.path();
             
             // 跳过隐藏文件和特殊文件
@@ -148,7 +148,7 @@ impl Scanner {
                 }
             }
 
-            let metadata = entry.metadata().await.map_err(|e| {
+            let metadata = entry.metadata().map_err(|e| {
                 SyncError::scan(folder_id.to_string(), format!("Failed to get metadata: {}", e))
             })?;
 

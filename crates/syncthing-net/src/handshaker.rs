@@ -4,9 +4,9 @@
 //! TCP, QUIC, or in-memory pipes can reuse the same logic.
 
 use tokio::io::{AsyncRead, AsyncWrite};
-use tracing::{debug, info};
+use tracing::info;
 
-use syncthing_core::{DeviceId, Result, SyncthingError};
+use syncthing_core::{Result, SyncthingError};
 
 /// BEP Hello exchange utilities.
 pub struct BepHandshaker;

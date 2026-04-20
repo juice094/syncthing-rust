@@ -10,11 +10,11 @@ use dashmap::DashMap;
 use futures::stream::FuturesUnordered;
 use futures::StreamExt;
 use tokio::task::JoinHandle;
-use tracing::{debug, info, warn};
+use tracing::{debug, info};
 
 use syncthing_core::{DeviceId, SyncthingError};
 
-use crate::connection::{BepConnection, TcpBiStream};
+use crate::connection::BepConnection;
 use crate::tcp_transport::connect_bep;
 use crate::tls::SyncthingTlsConfig;
 
@@ -307,7 +307,7 @@ impl ParallelDialer {
 
 /// 根据 IP 特征推断地址类型偏好
 fn infer_address_type(addr: SocketAddr) -> AddressTypePreference {
-    use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
+    use std::net::IpAddr;
 
     let ip = addr.ip();
     let is_private = match ip {

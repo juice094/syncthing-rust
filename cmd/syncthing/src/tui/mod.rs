@@ -8,7 +8,7 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 use crossterm::{
-    event::{self, DisableMouseCapture},
+    event::DisableMouseCapture,
     execute,
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
@@ -109,9 +109,7 @@ async fn run_app<B: Backend>(
         };
 
         if should_exit {
-            // 停止 daemon：取消 future
-            daemon_future = None;
-            daemon_handle = None;
+            // 停止 daemon：变量被 drop，连接自动关闭
             app.daemon_running = false;
             app.daemon_status = "Stopped".to_string();
             break;

@@ -1,6 +1,5 @@
 use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
-use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::Layer;
 
 /// 内存日志 Ring Buffer

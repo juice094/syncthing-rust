@@ -10,7 +10,6 @@ use std::time::Duration;
 use tokio::net::{TcpListener as TokioTcpListener, TcpStream};
 use tokio::time::timeout;
 use tokio_rustls::TlsConnector;
-use tokio_rustls::TlsAcceptor;
 use tracing::{debug, error, info, trace, warn};
 
 use syncthing_core::{ConnectionType, Result, RetryConfig, SyncthingError};
@@ -35,6 +34,7 @@ pub const PROTOCOL_HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(30);
 /// TCP 监听器
 pub struct SyncthingTcpListener {
     /// 绑定地址
+    #[allow(dead_code)]
     bind_addr: SocketAddr,
     /// 底层TCP监听器
     inner: Option<TokioTcpListener>,
@@ -141,7 +141,7 @@ impl SyncthingTcpListener {
         stream: TcpStream,
         _peer_addr: SocketAddr,
         manager: ConnectionManagerHandle,
-        local_device_id: syncthing_core::DeviceId,
+        _local_device_id: syncthing_core::DeviceId,
         device_name: String,
         tls_config: Arc<SyncthingTlsConfig>,
     ) -> Result<()> {
@@ -197,7 +197,7 @@ impl SyncthingTcpListener {
 pub async fn connect_bep(
     addr: SocketAddr,
     target_device: syncthing_core::DeviceId,
-    local_device_id: syncthing_core::DeviceId,
+    _local_device_id: syncthing_core::DeviceId,
     device_name: &str,
     tls_config: &Arc<SyncthingTlsConfig>,
 ) -> Result<Arc<BepConnection>> {
@@ -344,6 +344,7 @@ pub struct TcpTransport {
     /// 拨号器
     dialer: TcpDialer,
     /// 绑定地址
+    #[allow(dead_code)]
     bind_addr: SocketAddr,
 }
 

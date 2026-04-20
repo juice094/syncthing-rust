@@ -20,6 +20,7 @@ pub mod upnp;
 pub(crate) const PORT_MAP_LIFETIME_SEC: u32 = 7200;
 
 /// 服务探测超时
+#[allow(dead_code)]
 pub(crate) const PORT_MAP_SERVICE_TIMEOUT: Duration = Duration::from_millis(250);
 
 /// 端口映射结果
@@ -32,6 +33,7 @@ pub struct Mapping {
 }
 
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 enum MappingInner {
     Upnp(upnp::UpnpMappingState),
     Pmp(pmp::PmpMappingState),

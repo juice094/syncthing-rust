@@ -280,7 +280,8 @@ impl BepSession {
         info!("Entering steady-state BEP loop for {}", self.device_id);
         let mut heartbeat = tokio::time::interval(Duration::from_secs(90));
         let mut last_recv = Instant::now();
-        let mut session_end_reason = String::from("unknown");
+        #[allow(unused_assignments)]
+        let mut session_end_reason = String::new();
         loop {
             tokio::select! {
                 result = self.conn.recv_message() => {
@@ -526,17 +527,13 @@ mod tests {
     use syncthing_core::ConnectionType;
 
     struct MockHandler {
-        cluster_config: tokio::sync::Mutex<Option<bep_protocol::messages::ClusterConfig>>,
         index_calls: tokio::sync::Mutex<Vec<(String, DeviceId)>>,
-        ping_replies: tokio::sync::Mutex<usize>,
     }
 
     impl MockHandler {
         fn new() -> Self {
             Self {
-                cluster_config: tokio::sync::Mutex::new(None),
                 index_calls: tokio::sync::Mutex::new(Vec::new()),
-                ping_replies: tokio::sync::Mutex::new(0),
             }
         }
     }
