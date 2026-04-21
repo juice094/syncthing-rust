@@ -54,6 +54,9 @@ notify = "7.0"
 tempfile = "3"
 walkdir = "2"
 
+# 可选传输层
+tokio-tungstenite = "0.24"
+
 [profile.release]
 lto = true
 codegen-units = 1

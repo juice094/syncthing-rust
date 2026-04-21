@@ -12,9 +12,13 @@
 
 pub mod tcp;
 pub mod bep_adapter;
+pub mod proxy;
 
 #[cfg(feature = "iroh")]
 pub mod iroh;
+
+#[cfg(feature = "websocket")]
+pub mod websocket;
 
 use std::sync::Arc;
 use syncthing_core::Transport;

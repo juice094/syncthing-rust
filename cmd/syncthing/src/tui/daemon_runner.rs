@@ -110,6 +110,13 @@ pub async fn start_daemon(
     // Phase 2：注册 TransportRegistry，启用可插拔传输层
     let mut transport_registry = syncthing_net::transport::TransportRegistry::new();
     transport_registry.register(Arc::new(syncthing_net::transport::RawTcpTransport::new()));
+
+    // 代理感知：若环境变量配置了代理，注册 ProxiedTransport
+    if let Some(proxy_transport) = syncthing_net::transport::proxy::ProxiedTransport::from_env() {
+        info!("Proxy detected: registering ProxiedTransport");
+        transport_registry.register(Arc::new(proxy_transport));
+    }
+
     manager.set_transport_registry(Arc::new(transport_registry));
 
     let pending_responses: Arc<DashMap<i32, tokio::sync::oneshot::Sender<bep_protocol::messages::Response>>> =
