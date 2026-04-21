@@ -6,7 +6,7 @@
 
 A Rust implementation of the [Syncthing](https://syncthing.net/) protocol stack, designed to interoperate with the official Go Syncthing daemon over the BEP (Block Exchange Protocol) wire format.
 
-> **Status**: Work in progress — Phase 2 complete (watcher, REST API observability, and long-term connection stability). Phase 3 (workspaces, 72h stress test) pending.
+> **Status**: v0.1.0 — Alpha. Core file sync (Rust ↔ Go) verified; 257 tests passing; ready for long-term stress testing.
 
 ---
 
@@ -32,7 +32,7 @@ A Rust implementation of the [Syncthing](https://syncthing.net/) protocol stack,
 | **Phase 1** | Core protocol (TLS, BEP Hello, ClusterConfig, Index) | ✅ Complete |
 | **Phase 2** | Network abstraction (ReliablePipe, BepSession), watcher, REST API, dual-node coexistence | ✅ Complete |
 | **Phase 3** | BepSession observability, peer sync state events, **Push/Pull E2E with real Go node** | ✅ Complete |
-| **Phase 3.5** | Connection stability hardening, `.stignore`, config persistence | 🟡 In Progress |
+| **Phase 3.5** | Connection stability hardening, `.stignore`, config persistence | ✅ Complete |
 | **Phase 4** | TUI 增强（设备/文件夹管理、实时同步状态）、72h 压测（格雷远程）、生产打包 | 🔵 Planned |
 
 ---
