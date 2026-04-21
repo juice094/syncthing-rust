@@ -349,7 +349,7 @@ impl AnnouncementHandle for NoopHandle {
 /// 具体实现（TcpTransport / WebSocketTransport / QuicTransport）位于 syncthing-net crate。
 #[async_trait]
 pub trait Transport: Send + Sync + std::fmt::Debug {
-    /// 传输方案名称（如 "tcp", "quic", "websocket", "proxy"）
+    /// 传输方案名称（如 "tcp", "quic", "websocket", "proxy", "derp"）
     fn scheme(&self) -> &'static str;
 
     /// 在给定地址开始监听。
@@ -361,6 +361,14 @@ pub trait Transport: Send + Sync + std::fmt::Debug {
     ///
     /// 返回的 `BoxedPipe` 可直接用于 BEP 协议或 TLS 握手。
     async fn dial(&self, addr: SocketAddr) -> Result<BoxedPipe>;
+
+    /// 向指定设备拨号（带设备 ID 上下文）。
+    ///
+    /// 用于 DERP 等中继传输，需要将目标设备 ID 告知中继服务器进行路由。
+    /// 默认实现回退到普通 `dial(addr)`。
+    async fn dial_device(&self, addr: SocketAddr, _device_id: &DeviceId) -> Result<BoxedPipe> {
+        self.dial(addr).await
+    }
 }
 
 /// 监听器抽象。

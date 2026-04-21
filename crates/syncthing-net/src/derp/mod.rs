@@ -16,7 +16,11 @@
 pub mod protocol;
 pub mod client;
 pub mod server;
+pub mod pipe;
+pub mod transport;
 
 pub use protocol::{Frame, FrameType, PROTOCOL_VERSION, MAX_FRAME_SIZE};
 pub use client::{DerpClient, DerpClientConfig, DerpClientState};
 pub use server::{DerpServer, DerpServerConfig};
+pub use pipe::DerpPipe;
+pub use transport::DerpTransport;
