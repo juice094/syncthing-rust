@@ -1,4 +1,5 @@
 //! TUI 主题系统 — 集中管理配色与样式
+#![allow(dead_code)]
 //!
 //! 所有绘制代码通过 Theme 获取颜色，禁止硬编码 Color::Cyan 等。
 //! 新增主题只需实现 Theme::new_xxx() 方法。
@@ -118,3 +119,4 @@ impl Theme {
         }
     }
 }
+

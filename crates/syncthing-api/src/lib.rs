@@ -13,20 +13,20 @@
 //!
 //! - **REST API**: HTTP endpoints for managing folders, devices, and sync status
 //! - **WebSocket Events**: Real-time event streaming for UI updates
-//! - **Configuration Management**: File-based configuration with TOML format
+//! - **Configuration Management**: JSON-based configuration storage
 //!
 //! # Example
 //!
 //! ```rust,no_run
 //! use std::sync::Arc;
-//! use syncthing_api::config::FileConfigStore;
+//! use syncthing_api::config::JsonConfigStore;
 //! use syncthing_api::events::EventBus;
 //! use syncthing_api::rest::{RestApi, ApiState};
 //!
 //! #[tokio::main]
 //! async fn main() -> Result<(), Box<dyn std::error::Error>> {
 //!     // Create configuration store
-//!     let config_store = Arc::new(FileConfigStore::new("/path/to/config.toml"));
+//!     let config_store = Arc::new(JsonConfigStore::new("/path/to/config.json"));
 //!
 //!     // Create event bus
 //!     let event_bus = EventBus::new();
@@ -52,7 +52,7 @@ pub mod handlers;
 pub mod rest;
 
 // Re-export commonly used types
-pub use config::{FileConfigStore, MemoryConfigStore};
+pub use config::{JsonConfigStore, MemoryConfigStore};
 pub use events::{EventBus, FilteredSubscriber, InstrumentedEventBus};
 pub use rest::{ApiState, RestApi};
 
