@@ -23,6 +23,10 @@ pub enum TransportType {
     Quic,
     /// Relay / DERP fallback
     Relay,
+    /// WebSocket (for firewall traversal)
+    WebSocket,
+    /// Proxied connection (SOCKS5 / HTTP)
+    Proxy,
     /// In-memory pipe (for testing)
     Memory,
     /// Other / unknown
@@ -336,38 +340,41 @@ impl AnnouncementHandle for NoopHandle {
     }
 }
 
-/// Transport layer for connections
+/// 传输层抽象。
 ///
-/// Implementors: syncthing-net crate (Worker-D)
-#[allow(deprecated)]
+/// 负责建立原始字节管道（TCP/QUIC/WebSocket/代理），
+/// 不涉及 TLS、身份验证或 BEP 协议。
+///
+/// 这是 Phase 2 "多传输安全网络层" 的核心抽象。
+/// 具体实现（TcpTransport / WebSocketTransport / QuicTransport）位于 syncthing-net crate。
 #[async_trait]
-pub trait Transport: Send + Sync {
-    /// Connect to a device at given address
-    ///
-    /// Address format depends on transport:
-    /// - TCP: "tcp://host:port"
-    /// - QUIC: "quic://host:port"
-    /// - Relay: "relay://host:port?id=..."
-    async fn connect(&self, addr: &str, expected_device: Option<DeviceId>) -> Result<Box<dyn BepConnection>>;
+pub trait Transport: Send + Sync + std::fmt::Debug {
+    /// 传输方案名称（如 "tcp", "quic", "websocket", "proxy"）
+    fn scheme(&self) -> &'static str;
 
-    /// Listen for incoming connections
-    async fn listen(&self, bind_addr: &str) -> Result<Box<dyn ConnectionListener>>;
+    /// 在给定地址开始监听。
+    ///
+    /// 返回的 `TransportListener` 负责接受传入连接。
+    async fn bind(&self, addr: SocketAddr) -> Result<Box<dyn TransportListener>>;
+
+    /// 向给定地址拨号。
+    ///
+    /// 返回的 `BoxedPipe` 可直接用于 BEP 协议或 TLS 握手。
+    async fn dial(&self, addr: SocketAddr) -> Result<BoxedPipe>;
 }
 
-/// Connection listener
-#[allow(deprecated)]
+/// 监听器抽象。
+///
+/// 与 `Transport` 配对使用，负责接受传入的原始连接。
 #[async_trait]
-pub trait ConnectionListener: Send + Sync {
-    /// Accept next incoming connection
+pub trait TransportListener: Send + Sync + std::fmt::Debug {
+    /// 接受下一个传入连接。
     ///
-    /// Returns None if listener closed.
-    async fn accept(&mut self) -> Result<Option<Box<dyn BepConnection>>>;
+    /// 返回 `(管道, 对端地址)`。如果监听器已关闭，返回错误。
+    async fn accept(&self) -> Result<(BoxedPipe, SocketAddr)>;
 
-    /// Close the listener
-    async fn close(self) -> Result<()>;
-
-    /// Get local address
-    fn local_addr(&self) -> Result<String>;
+    /// 获取本地监听地址。
+    fn local_addr(&self) -> Result<SocketAddr>;
 }
 
 /// Event publisher for internal events

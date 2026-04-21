@@ -9,6 +9,7 @@ use std::time::{Duration, Instant};
 use dashmap::DashMap;
 use futures::stream::FuturesUnordered;
 use futures::StreamExt;
+use parking_lot::RwLock;
 use tokio::task::JoinHandle;
 use tracing::{debug, info};
 
@@ -133,8 +134,8 @@ pub struct ParallelDialer {
     local_device_id: DeviceId,
     /// 设备名称（用于 Hello）
     device_name: String,
-    /// 底层连接器
-    connector: Arc<dyn DialConnector>,
+    /// 底层连接器（可运行时替换，支持 Transport 热切换）
+    connector: RwLock<Arc<dyn DialConnector>>,
 }
 
 impl ParallelDialer {
@@ -149,13 +150,18 @@ impl ParallelDialer {
             device_scores: DashMap::new(),
             local_device_id,
             device_name,
-            connector,
+            connector: RwLock::new(connector),
         }
     }
 
     /// 使用默认 TCP 连接器创建
     pub fn with_tcp_connector(local_device_id: DeviceId, device_name: String) -> Self {
         Self::new(local_device_id, device_name, Arc::new(TcpBepConnector))
+    }
+
+    /// 更换底层连接器（用于 Transport 注册后切换）
+    pub fn set_connector(&self, connector: Arc<dyn DialConnector>) {
+        *self.connector.write() = connector;
     }
 
     /// 获取或初始化某地址的评分记录
@@ -230,7 +236,7 @@ impl ParallelDialer {
 
         for score in &top {
             let addr = score.address;
-            let connector = Arc::clone(&self.connector);
+            let connector = Arc::clone(&*self.connector.read());
             let device_id = device_id;
             let local_device_id = self.local_device_id;
             let device_name = self.device_name.clone();
