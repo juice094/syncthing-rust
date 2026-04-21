@@ -35,10 +35,12 @@ rcgen = { version = "0.13", features = ["pem"] }
 bep-protocol = { path = "../bep-protocol" }
 netdev = "0.41"
 lz4 = "1"
+tokio-tungstenite = { workspace = true, optional = true }
 
 [features]
 default = []
 iroh = []
+websocket = ["dep:tokio-tungstenite"]
 # iroh = ["dep:iroh"]
 
 [dev-dependencies]
