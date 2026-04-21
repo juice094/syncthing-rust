@@ -111,6 +111,9 @@ pub async fn start_daemon(
     let mut transport_registry = syncthing_net::transport::TransportRegistry::new();
     transport_registry.register(Arc::new(syncthing_net::transport::RawTcpTransport::new()));
 
+    // Phase 3：注册 DERP relay 传输（用于 NAT 穿透失败时的中继回退）
+    transport_registry.register(Arc::new(syncthing_net::derp::DerpTransport::new(device_id)));
+
     // 代理感知：若环境变量配置了代理，注册 ProxiedTransport
     if let Some(proxy_transport) = syncthing_net::transport::proxy::ProxiedTransport::from_env() {
         info!("Proxy detected: registering ProxiedTransport");
