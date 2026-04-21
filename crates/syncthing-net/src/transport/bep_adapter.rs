@@ -110,10 +110,10 @@ impl DialConnector for TransportBepConnector {
     ) -> CoreResult<Arc<BepConnection>> {
         debug!("TransportBepConnector dialing {} for device {}", addr, device_id);
 
-        // 1. 原始传输层拨号
+        // 1. 原始传输层拨号（优先使用 dial_device，支持 DERP 等中继传输）
         let pipe = self
             .transport
-            .dial(addr)
+            .dial_device(addr, &device_id)
             .await
             .map_err(|e| SyncthingError::connection(format!("transport dial failed: {}", e)))?;
 
