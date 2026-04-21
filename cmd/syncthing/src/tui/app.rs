@@ -1,5 +1,6 @@
 use std::collections::VecDeque;
 use std::path::PathBuf;
+use std::sync::Arc;
 
 use syncthing_core::types::{Config, Device, Folder};
 use syncthing_core::DeviceId;
@@ -85,6 +86,9 @@ pub struct App {
     pub connected_devices: Vec<DeviceId>,
     pub theme: Theme,
 
+    /// 运行中的 sync_service 引用（用于配置变更通知）
+    pub sync_service: Option<Arc<dyn syncthing_sync::SyncModel>>,
+
     // 表单
     pub device_form: FormState,
     pub folder_form: FormState,
@@ -113,6 +117,7 @@ impl App {
             folder_form: FormState::new(vec![String::new(), String::new()]),
             folder_device_selection: vec![false; device_count],
             folder_device_selected: 0,
+            sync_service: None,
         }
     }
 

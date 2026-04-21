@@ -55,9 +55,15 @@ pub async fn start_daemon(
     } else {
         Config::new()
     };
-    config.local_device_id = Some(device_id);
 
     let mut config_modified = false;
+
+    // 首次启动：将本地 device_id 持久化到配置文件
+    if config.local_device_id != Some(device_id) {
+        config.local_device_id = Some(device_id);
+        config_modified = true;
+        info!("Persisted local device_id to config");
+    }
 
     // Port auto-migration removed: use CLI --listen flag if 22000 is occupied
     if config.gui.address == "0.0.0.0:8384" || config.gui.address == "127.0.0.1:8384" {

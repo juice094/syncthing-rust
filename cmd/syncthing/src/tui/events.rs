@@ -2,6 +2,7 @@
 use crossterm::event::{Event, KeyCode, KeyEvent, KeyEventKind};
 
 use std::str::FromStr;
+use std::sync::Arc;
 
 use syncthing_core::types::{AddressType, Device, Folder};
 use syncthing_core::DeviceId;
@@ -263,7 +264,19 @@ fn handle_add_folder_key(app: &mut App, key: KeyEvent) -> bool {
 fn save_and_log(app: &mut App) {
     let path = app.config_dir.join("config.json");
     match save_config(&path, &app.config) {
-        Ok(_) => app.push_log("Config saved.".to_string()),
+        Ok(_) => {
+            app.push_log("Config saved.".to_string());
+            // 通知运行中的 sync_service 配置已变更
+            if let Some(ref service) = app.sync_service {
+                let service = Arc::clone(service);
+                let config = app.config.clone();
+                tokio::spawn(async move {
+                    if let Err(e) = service.update_config(config).await {
+                        tracing::warn!("Failed to update sync service config: {}", e);
+                    }
+                });
+            }
+        }
         Err(e) => app.push_log(format!("Failed to save config: {}", e)),
     }
 }

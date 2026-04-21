@@ -177,6 +177,7 @@ impl RestApi {
             .route("/rest/db/status", get(get_db_status))
             .route("/rest/db/completion", get(get_db_completion))
             .route("/rest/connections", get(get_connections))
+            .route("/rest/system/connections", get(get_system_connections))
             .route("/rest/folder/:id/status", get(get_folder_status))
             // System operations
             .route("/rest/scan", post(trigger_scan))
@@ -328,6 +329,37 @@ pub struct DeviceConnection {
     pub conn_type: String,
     /// Connected since (Unix timestamp)
     pub connected_since: u64,
+}
+
+/// Go-compatible system connections response
+#[derive(Debug, Serialize)]
+pub struct SystemConnectionsResponse {
+    /// Total stats
+    pub total: ConnectionStats,
+    /// Per-device connections (keyed by device ID)
+    pub connections: std::collections::HashMap<String, ConnectionStats>,
+}
+
+/// Per-connection stats (Go-compatible)
+#[derive(Debug, Serialize, Default)]
+pub struct ConnectionStats {
+    /// At timestamp
+    pub at: String,
+    /// Total bytes in
+    #[serde(rename = "inBytesTotal")]
+    pub in_bytes_total: u64,
+    /// Total bytes out
+    #[serde(rename = "outBytesTotal")]
+    pub out_bytes_total: u64,
+    /// Connection type
+    #[serde(rename = "type")]
+    pub conn_type: String,
+    /// Whether connected
+    pub connected: bool,
+    /// Whether paused
+    pub paused: bool,
+    /// Address
+    pub address: String,
 }
 
 /// Scan request
@@ -808,6 +840,63 @@ async fn get_connections(State(state): State<ApiState>) -> Json<ConnectionStatus
         Json(ConnectionStatus {
             total: 0,
             connections: vec![],
+        })
+    }
+}
+
+/// GET /rest/system/connections - Go-compatible connection enumeration
+async fn get_system_connections(State(state): State<ApiState>) -> Json<SystemConnectionsResponse> {
+    use std::collections::HashMap;
+    let now = format!("{:?}", std::time::SystemTime::now());
+
+    if let Some(ref cm) = state.connection_manager {
+        let devices = cm.connected_devices();
+        let mut connections: HashMap<String, ConnectionStats> = HashMap::new();
+        let total_in = 0u64;
+        let total_out = 0u64;
+
+        for device_id in devices {
+            if let Some(conn) = cm.get_connection(&device_id) {
+                let addr = conn.remote_addr().to_string();
+                connections.insert(
+                    device_id.to_string(),
+                    ConnectionStats {
+                        at: now.clone(),
+                        in_bytes_total: 0,
+                        out_bytes_total: 0,
+                        conn_type: "tcp-server".to_string(),
+                        connected: true,
+                        paused: false,
+                        address: addr.clone(),
+                    },
+                );
+            }
+        }
+
+        Json(SystemConnectionsResponse {
+            total: ConnectionStats {
+                at: now,
+                in_bytes_total: total_in,
+                out_bytes_total: total_out,
+                conn_type: String::new(),
+                connected: false,
+                paused: false,
+                address: String::new(),
+            },
+            connections,
+        })
+    } else {
+        Json(SystemConnectionsResponse {
+            total: ConnectionStats {
+                at: now,
+                in_bytes_total: 0,
+                out_bytes_total: 0,
+                conn_type: String::new(),
+                connected: false,
+                paused: false,
+                address: String::new(),
+            },
+            connections: HashMap::new(),
         })
     }
 }
