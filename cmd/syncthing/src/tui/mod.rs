@@ -149,6 +149,7 @@ async fn toggle_daemon(
     if daemon_future.is_some() {
         *daemon_future = None;
         *daemon_handle = None;
+        app.sync_service = None;
         app.daemon_running = false;
         app.daemon_status = "Stopped".to_string();
         app.push_log("Daemon stopped.".to_string());
@@ -160,6 +161,7 @@ async fn toggle_daemon(
         match daemon_runner::start_daemon(config_dir, listen, device_name).await {
             Ok(startup) => {
                 *daemon_handle = Some(startup.connection_handle);
+                app.sync_service = Some(startup.sync_service);
                 let fut = startup.future;
                 tokio::spawn(async move {
                     if let Err(e) = fut.await {

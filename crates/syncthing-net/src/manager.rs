@@ -425,6 +425,14 @@ impl ConnectionManager {
         
         self.conn_id_index.insert(conn_id, device_id);
         
+        // 清除 pending 状态并重置重试计数（连接成功）
+        {
+            let mut pending = self.pending_connections.write().await;
+            if pending.remove(&device_id).is_some() {
+                debug!("Cleared pending state for {} (connection established)", device_id);
+            }
+        }
+        
         // 设置连接的设备ID
         conn.set_device_id(device_id);
         
