@@ -58,6 +58,7 @@ struct ClientHandle {
 /// DERP 中继服务器
 pub struct DerpServer {
     config: DerpServerConfig,
+    listener: Option<Arc<TcpListener>>,
     /// device_id → ClientHandle
     clients: Arc<DashMap<DeviceId, ClientHandle>>,
     /// addr → device_id（用于断开时清理）
@@ -68,20 +69,37 @@ impl DerpServer {
     pub fn new(config: DerpServerConfig) -> Self {
         Self {
             config,
+            listener: None,
             clients: Arc::new(DashMap::new()),
             addr_index: Arc::new(DashMap::new()),
         }
     }
 
-    /// 启动服务器（阻塞直到关闭）
-    pub async fn run(&self) -> Result<()> {
+    /// 绑定监听地址，返回实际绑定的地址
+    pub async fn bind(&mut self) -> Result<SocketAddr> {
         let listener = TcpListener::bind(self.config.bind_addr).await.map_err(|e| {
             SyncthingError::connection(format!("DERP server bind failed: {}", e))
         })?;
+        let addr = listener.local_addr().map_err(|e| {
+            SyncthingError::connection(format!("DERP server local_addr failed: {}", e))
+        })?;
+        self.listener = Some(Arc::new(listener));
+        Ok(addr)
+    }
+
+    /// 获取已绑定的本地地址
+    pub fn local_addr(&self) -> Option<SocketAddr> {
+        self.listener.as_ref().and_then(|l| l.local_addr().ok())
+    }
+
+    /// 启动服务器（阻塞直到关闭）。必须先调用 `bind()`。
+    pub async fn run(&self) -> Result<()> {
+        let listener = Arc::clone(self.listener.as_ref()
+            .ok_or_else(|| SyncthingError::config("DERP server not bound, call bind() first"))?);
 
         info!(
             "DERP server listening on {} (websocket_upgrade={})",
-            self.config.bind_addr, self.config.websocket_upgrade
+            self.local_addr().unwrap_or(self.config.bind_addr), self.config.websocket_upgrade
         );
 
         // 启动超时清理任务
@@ -296,11 +314,94 @@ impl DerpServer {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    use tokio::net::TcpStream;
 
     #[test]
     fn test_server_config_default() {
         let config = DerpServerConfig::default();
         assert_eq!(config.bind_addr.port(), 3478);
         assert!(!config.websocket_upgrade);
+    }
+
+    /// 端到端测试：两个客户端通过 DERP 服务器互相转发数据包
+    #[tokio::test]
+    async fn test_derp_relay_packet() {
+        let mut config = DerpServerConfig::default();
+        config.bind_addr = "127.0.0.1:0".parse().unwrap();
+        let mut server = DerpServer::new(config);
+        let addr = server.bind().await.unwrap();
+
+        // 启动服务器
+        tokio::spawn(async move {
+            let _ = server.run().await;
+        });
+
+        // 等待服务器启动
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+
+        let device_a = DeviceId::from_bytes(&[1u8; 32]).unwrap();
+        let device_b = DeviceId::from_bytes(&[2u8; 32]).unwrap();
+
+        // 客户端 A 连接
+        let mut stream_a = TcpStream::connect(addr).await.unwrap();
+        let client_info_a = Frame::ClientInfo {
+            device_id: device_a,
+            version: PROTOCOL_VERSION,
+        };
+        stream_a.write_all(&client_info_a.encode()).await.unwrap();
+
+        // 读取 ServerInfo A
+        let mut len_buf = [0u8; 4];
+        stream_a.read_exact(&mut len_buf).await.unwrap();
+        let payload_len = u32::from_be_bytes(len_buf) as usize;
+        let mut payload_buf = vec![0u8; payload_len];
+        stream_a.read_exact(&mut payload_buf).await.unwrap();
+        let mut combined = bytes::BytesMut::from(&len_buf[..]);
+        combined.extend_from_slice(&payload_buf);
+        let (frame, _) = Frame::decode(&mut combined).unwrap().unwrap();
+        assert!(matches!(frame, Frame::ServerInfo { .. }));
+
+        // 客户端 B 连接
+        let mut stream_b = TcpStream::connect(addr).await.unwrap();
+        let client_info_b = Frame::ClientInfo {
+            device_id: device_b,
+            version: PROTOCOL_VERSION,
+        };
+        stream_b.write_all(&client_info_b.encode()).await.unwrap();
+
+        // 读取 ServerInfo B
+        stream_b.read_exact(&mut len_buf).await.unwrap();
+        let payload_len = u32::from_be_bytes(len_buf) as usize;
+        let mut payload_buf = vec![0u8; payload_len];
+        stream_b.read_exact(&mut payload_buf).await.unwrap();
+        let mut combined = bytes::BytesMut::from(&len_buf[..]);
+        combined.extend_from_slice(&payload_buf);
+        let (frame, _) = Frame::decode(&mut combined).unwrap().unwrap();
+        assert!(matches!(frame, Frame::ServerInfo { .. }));
+
+        // A 发送数据包到 B
+        let send_packet = Frame::SendPacket {
+            target: device_b,
+            payload: b"hello from A".to_vec(),
+        };
+        stream_a.write_all(&send_packet.encode()).await.unwrap();
+
+        // B 读取 RecvPacket
+        stream_b.read_exact(&mut len_buf).await.unwrap();
+        let payload_len = u32::from_be_bytes(len_buf) as usize;
+        let mut payload_buf = vec![0u8; payload_len];
+        stream_b.read_exact(&mut payload_buf).await.unwrap();
+        let mut combined = bytes::BytesMut::from(&len_buf[..]);
+        combined.extend_from_slice(&payload_buf);
+        let (frame, _) = Frame::decode(&mut combined).unwrap().unwrap();
+
+        match frame {
+            Frame::RecvPacket { from, payload } => {
+                assert_eq!(from, device_a);
+                assert_eq!(payload, b"hello from A");
+            }
+            other => panic!("expected RecvPacket, got {:?}", other),
+        }
     }
 }
