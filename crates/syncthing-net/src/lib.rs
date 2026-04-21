@@ -18,8 +18,6 @@ pub mod portmapper;
 pub mod dialer;
 pub mod metrics;
 pub mod identity;
-
-#[cfg(feature = "iroh")]
 pub mod transport;
 
 pub use connection::{BepConnection, ConnectionEvent, TcpBiStream};
@@ -28,7 +26,7 @@ pub use connection::IrohBepConnection;
 #[cfg(feature = "iroh")]
 pub use connection::BEP_ALPN;
 #[cfg(feature = "iroh")]
-pub use transport::IrohTransport;
+pub use transport::iroh::IrohTransport;
 pub use session::{BepSession, BepSessionEvent, BepSessionHandler, BepSessionMetrics};
 pub use protocol::{HelloMessage, MessageType, BEP_MAGIC};
 pub use manager::{ConnectionManager, ConnectionManagerConfig, ConnectionManagerHandle, ManagerStats};

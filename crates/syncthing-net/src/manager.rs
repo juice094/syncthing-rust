@@ -24,6 +24,7 @@ use crate::dialer::ParallelDialer;
 use crate::netmon::NetChangeEvent;
 use crate::tcp_transport::{TcpTransport, DEFAULT_TCP_PORT};
 use crate::tls::SyncthingTlsConfig;
+use crate::transport::TransportRegistry;
 
 /// 连接管理器配置
 #[derive(Debug, Clone)]
@@ -127,6 +128,8 @@ pub struct ConnectionManager {
     parallel_dialer: Arc<ParallelDialer>,
     /// TLS 配置（供传输层握手使用，Phase 2 后将由 Transport trait 自行管理）
     tls_config: Arc<SyncthingTlsConfig>,
+    /// 传输层注册表（Phase 2：支持多传输可插拔）
+    transport_registry: RwLock<Option<Arc<TransportRegistry>>>,
 }
 
 /// 连接管理器句柄（用于跨线程共享）
@@ -216,6 +219,7 @@ impl ConnectionManager {
                 self_weak: RwLock::new(Some(weak.clone())),
                 parallel_dialer,
                 tls_config,
+                transport_registry: RwLock::new(None),
             }
         });
         
@@ -242,6 +246,17 @@ impl ConnectionManager {
         *self.on_disconnected.write() = Some(Arc::new(callback));
     }
     
+    /// 设置传输层注册表（必须在 start() 之前调用）
+    pub fn set_transport_registry(&self, registry: Arc<TransportRegistry>) {
+        // 若注册表包含默认传输，同步更新 ParallelDialer 的连接器
+        if let Some(transport) = registry.default_transport() {
+            let connector = Arc::new(crate::transport::bep_adapter::TransportBepConnector::new(transport));
+            self.parallel_dialer.set_connector(connector);
+        }
+        *self.transport_registry.write() = Some(registry);
+        info!("Transport registry set with schemes: {:?}", self.transport_registry.read().as_ref().unwrap().schemes());
+    }
+
     /// 启动连接管理器
     pub async fn start(&self) -> syncthing_core::Result<SocketAddr> {
         if *self.running.read() {
@@ -255,30 +270,62 @@ impl ConnectionManager {
         let handle = ConnectionManagerHandle { inner: self_weak.upgrade()
             .ok_or_else(|| SyncthingError::config("connection manager dropped"))? };
         
-        let mut tcp_transport = TcpTransport::new(
-            self.config.listen_addr,
-            handle.clone(),
-            self.local_device_id,
-            "syncthing-rust".to_string(),
-            Arc::clone(&self.tls_config),
-        );
-        
-        // 启动TCP监听，失败时回退到随机端口
-        let listen_addr = match tcp_transport.start().await {
-            Ok(addr) => addr,
-            Err(e) if self.config.listen_addr.port() != 0 => {
-                warn!("Failed to bind TCP listener to {}, trying random port: {}", self.config.listen_addr, e);
-                let fallback_addr: SocketAddr = "0.0.0.0:0".parse().unwrap();
-                let mut tcp_transport_fallback = TcpTransport::new(
-                    fallback_addr,
-                    handle,
+        // Phase 2：优先使用 TransportRegistry，否则回退到旧式 TcpTransport
+        let listen_addr = if let Some(registry) = self.transport_registry.read().as_ref() {
+            if let Some(transport) = registry.default_transport() {
+                match crate::transport::bep_adapter::BepTransportListener::start(
+                    transport,
+                    &self.config.listen_addr.to_string(),
+                    handle.clone(),
                     self.local_device_id,
                     "syncthing-rust".to_string(),
                     Arc::clone(&self.tls_config),
-                );
-                tcp_transport_fallback.start().await?
+                ).await {
+                    Ok(addr) => addr,
+                    Err(e) if self.config.listen_addr.port() != 0 => {
+                        warn!("Transport listener failed to bind to {}, trying random port: {}", self.config.listen_addr, e);
+                        let fallback_addr = "0.0.0.0:0".to_string();
+                        crate::transport::bep_adapter::BepTransportListener::start(
+                            registry.default_transport()
+                                .ok_or_else(|| SyncthingError::config("no default transport in registry"))?,
+                            &fallback_addr,
+                            handle,
+                            self.local_device_id,
+                            "syncthing-rust".to_string(),
+                            Arc::clone(&self.tls_config),
+                        ).await?
+                    }
+                    Err(e) => return Err(e),
+                }
+            } else {
+                return Err(SyncthingError::config("transport registry has no transports registered"));
             }
-            Err(e) => return Err(e),
+        } else {
+            // 回退：旧式 TcpTransport（Phase 1 行为）
+            let mut tcp_transport = TcpTransport::new(
+                self.config.listen_addr,
+                handle.clone(),
+                self.local_device_id,
+                "syncthing-rust".to_string(),
+                Arc::clone(&self.tls_config),
+            );
+            
+            match tcp_transport.start().await {
+                Ok(addr) => addr,
+                Err(e) if self.config.listen_addr.port() != 0 => {
+                    warn!("Failed to bind TCP listener to {}, trying random port: {}", self.config.listen_addr, e);
+                    let fallback_addr: SocketAddr = "0.0.0.0:0".parse().unwrap();
+                    let mut tcp_transport_fallback = TcpTransport::new(
+                        fallback_addr,
+                        handle,
+                        self.local_device_id,
+                        "syncthing-rust".to_string(),
+                        Arc::clone(&self.tls_config),
+                    );
+                    tcp_transport_fallback.start().await?
+                }
+                Err(e) => return Err(e),
+            }
         };
         
         *self.running.write() = true;
@@ -833,6 +880,7 @@ impl ConnectionManager {
             self_weak: RwLock::new(None),
             parallel_dialer: Arc::clone(&manager.parallel_dialer),
             tls_config: Arc::clone(&manager.tls_config),
+            transport_registry: RwLock::new(manager.transport_registry.read().clone()),
         }
     }
 }

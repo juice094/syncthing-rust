@@ -107,6 +107,11 @@ pub async fn start_daemon(
     let (manager, handle) =
         ConnectionManager::new(manager_config, identity, Arc::clone(&tls_config_arc));
 
+    // Phase 2：注册 TransportRegistry，启用可插拔传输层
+    let mut transport_registry = syncthing_net::transport::TransportRegistry::new();
+    transport_registry.register(Arc::new(syncthing_net::transport::RawTcpTransport::new()));
+    manager.set_transport_registry(Arc::new(transport_registry));
+
     let pending_responses: Arc<DashMap<i32, tokio::sync::oneshot::Sender<bep_protocol::messages::Response>>> =
         Arc::new(DashMap::new());
 
