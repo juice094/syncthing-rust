@@ -1,4 +1,5 @@
 //! 动画加载指示器
+#![allow(dead_code)]
 //!
 //! 基于 frame_counter 实现，不依赖额外定时器。
 //! 在 mod.rs 的 250ms tick 中递增 frame_counter，
