@@ -19,6 +19,7 @@ pub mod dialer;
 pub mod metrics;
 pub mod identity;
 pub mod transport;
+pub mod derp;
 
 pub use connection::{BepConnection, ConnectionEvent, TcpBiStream};
 #[cfg(feature = "iroh")]
