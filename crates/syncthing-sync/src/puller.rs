@@ -232,7 +232,7 @@ impl Puller {
             use std::os::unix::fs::PermissionsExt;
             let perms = std::fs::Permissions::from_mode(file_info.permissions);
             fs::set_permissions(&temp_path, perms).await.map_err(|e| {
-                SyncError::pull(&file_info.name, format!("Failed to set permissions: {}", e))
+                SyncError::pull(file_info.name.clone(), format!("Failed to set permissions: {}", e))
             })?;
         }
 
@@ -250,18 +250,9 @@ impl Puller {
             SyncError::pull(file_info.name.clone(), format!("Failed to open file for timestamp: {}", e))
         })?;
         
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::futimens;
-            // 实际实现需要调用 futimens
-            let _ = file_handle;
-            let _ = modified;
-        }
-        #[cfg(not(unix))]
-        {
-            let _ = file_handle;
-            let _ = modified;
-        }
+        // TODO: 使用 libc::futimens 设置精确时间戳（需要添加 libc 依赖）
+        let _ = file_handle;
+        let _ = modified;
 
         info!(file = %file_info.name, "File download completed");
         Ok(())
