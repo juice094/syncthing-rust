@@ -24,6 +24,7 @@ notify = { workspace = true }
 tracing = { workspace = true }
 walkdir = "2.4"
 regex = "1.10"
+libc = "0.2"
 
 # 哈希计算
 sha2 = { workspace = true }
