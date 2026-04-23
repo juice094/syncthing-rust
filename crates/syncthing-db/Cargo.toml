@@ -14,9 +14,6 @@ syncthing-core = { path = "../syncthing-core" }
 tokio = { workspace = true }
 async-trait = { workspace = true }
 
-# 错误处理
-thiserror = { workspace = true }
-
 # Storage
 sled = "0.34"
 
@@ -27,8 +24,7 @@ lru = "0.16.3"
 serde = { workspace = true }
 serde_json = { workspace = true }
 
-# 工具
-tracing = { workspace = true }
+
 
 [dev-dependencies]
 tokio-test = "0.4"
