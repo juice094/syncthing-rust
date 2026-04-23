@@ -108,7 +108,7 @@ impl SyncthingError {
     
     /// 创建 I/O 错误（从字符串描述）
     pub fn io<S: Into<String>>(message: S) -> Self {
-        Self::Io(io::Error::new(io::ErrorKind::Other, message.into()))
+        Self::Io(io::Error::other(message.into()))
     }
     
     /// 创建存储错误

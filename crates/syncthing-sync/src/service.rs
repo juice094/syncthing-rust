@@ -363,7 +363,7 @@ impl SyncModel for SyncService {
             let folder = entry.value();
             let state = folder.state().await;
             
-            if let Ok(files) = self.db.get_folder_files(&folder.id()).await {
+            if let Ok(files) = self.db.get_folder_files(folder.id()).await {
                 let folder_stats = crate::model::FolderStats {
                     files: state.local_files,
                     directories: files.iter().filter(|f| matches!(f.file_type, syncthing_core::types::FileType::Directory)).count(),
@@ -390,7 +390,7 @@ impl SyncService {
         let folder_model = self.folders.get(folder_id)
             .ok_or_else(|| SyncError::FolderNotFound(folder_id.to_string()))?;
 
-        let needed: Vec<syncthing_core::types::FileInfo> = self.index_handler.handle_index(&folder_model.config(), device, index).await?;
+        let needed: Vec<syncthing_core::types::FileInfo> = self.index_handler.handle_index(folder_model.config(), device, index).await?;
         
         // 触发文件夹的远程索引处理
         folder_model.handle_remote_index(device, needed.clone()).await?;
@@ -407,7 +407,7 @@ impl SyncService {
         let folder_model = self.folders.get(folder_id)
             .ok_or_else(|| SyncError::FolderNotFound(folder_id.to_string()))?;
 
-        let needed: Vec<syncthing_core::types::FileInfo> = self.index_handler.handle_index_update(&folder_model.config(), device, update).await?;
+        let needed: Vec<syncthing_core::types::FileInfo> = self.index_handler.handle_index_update(folder_model.config(), device, update).await?;
         
         // 触发文件夹的远程索引处理
         folder_model.handle_remote_index(device, needed.clone()).await?;

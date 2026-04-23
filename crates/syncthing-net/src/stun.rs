@@ -111,7 +111,7 @@ fn fingerprint(data: &[u8]) -> u32 {
 pub fn is_stun_packet(data: &[u8]) -> bool {
     data.len() >= HEADER_LEN
         && data[0] & 0b11000000 == 0
-        && &data[4..8] == &MAGIC_COOKIE
+        && data[4..8] == MAGIC_COOKIE
 }
 
 /// 解析 STUN Binding Success Response，返回 Transaction ID 与映射地址。

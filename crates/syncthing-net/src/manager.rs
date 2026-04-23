@@ -77,7 +77,7 @@ impl ConnectionEntry {
     fn is_stale(&self, timeout: Duration) -> bool {
         self.conn
             .last_activity_age()
-            .map_or(true, |age| age > timeout)
+            .is_none_or(|age| age > timeout)
     }
 }
 

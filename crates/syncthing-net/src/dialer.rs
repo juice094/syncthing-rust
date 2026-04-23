@@ -69,7 +69,7 @@ impl AddressScore {
         // RTT 奖励：越低越好
         if let Some(rtt) = self.rtt {
             let rtt_ms = rtt.as_millis() as u64;
-            let rtt_bonus = if rtt_ms < 400 { 400 - rtt_ms } else { 0 };
+            let rtt_bonus = 400_u64.saturating_sub(rtt_ms);
             score += rtt_bonus * 100;
         }
 

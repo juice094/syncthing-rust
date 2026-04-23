@@ -144,7 +144,7 @@ impl JsonConfigStore {
         if let Some(parent) = self.path.parent() {
             tokio::fs::create_dir_all(parent)
                 .await
-                .map_err(|e| SyncthingError::Io(e))?;
+                .map_err(SyncthingError::Io)?;
         }
         Ok(())
     }
@@ -170,7 +170,7 @@ impl ConfigStore for JsonConfigStore {
 
         let content = tokio::fs::read_to_string(&self.path)
             .await
-            .map_err(|e| SyncthingError::Io(e))?;
+            .map_err(SyncthingError::Io)?;
 
         let config: Config = serde_json::from_str(&content).map_err(|e| {
             SyncthingError::config(format!("Failed to parse JSON config: {}", e))
@@ -192,7 +192,7 @@ impl ConfigStore for JsonConfigStore {
 
         tokio::fs::write(&self.path, content)
             .await
-            .map_err(|e| SyncthingError::Io(e))?;
+            .map_err(SyncthingError::Io)?;
 
         let mut cache = self.cache.write().await;
         *cache = Some(config.clone());
@@ -263,7 +263,7 @@ impl ConfigStream for JsonConfigStream {
         if self.path.exists() {
             let content = tokio::fs::read_to_string(&self.path)
                 .await
-                .map_err(|e| SyncthingError::Io(e))?;
+                .map_err(SyncthingError::Io)?;
 
             let config: Config = serde_json::from_str(&content).map_err(|e| {
                 SyncthingError::config(format!("Failed to parse updated JSON: {}", e))

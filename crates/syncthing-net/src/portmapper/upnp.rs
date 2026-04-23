@@ -59,11 +59,11 @@ pub fn parse_upnp_disco_response(body: &[u8]) -> Option<UpnpDiscoResponse> {
     for line in text.lines() {
         let lower = line.to_lowercase();
         if lower.starts_with("location:") {
-            location = line.splitn(2, ':').nth(1).unwrap_or("").trim().to_string();
+            location = line.split_once(':').map(|x| x.1).unwrap_or("").trim().to_string();
         } else if lower.starts_with("server:") {
-            server = line.splitn(2, ':').nth(1).unwrap_or("").trim().to_string();
+            server = line.split_once(':').map(|x| x.1).unwrap_or("").trim().to_string();
         } else if lower.starts_with("usn:") {
-            usn = line.splitn(2, ':').nth(1).unwrap_or("").trim().to_string();
+            usn = line.split_once(':').map(|x| x.1).unwrap_or("").trim().to_string();
         }
     }
 
