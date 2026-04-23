@@ -9,9 +9,7 @@ syncthing-core = { path = "../syncthing-core" }
 tokio = { workspace = true }
 bytes = { workspace = true }
 prost = { workspace = true }
-thiserror = { workspace = true }
 tracing = { workspace = true }
-serde = { workspace = true }
 chrono = { workspace = true }
 uuid = { workspace = true }
 parking_lot = { workspace = true }

@@ -9,19 +9,14 @@ bep-protocol = { path = "../bep-protocol" }
 
 tokio = { workspace = true }
 tracing = { workspace = true }
-serde = { workspace = true }
 serde_json = { workspace = true }
 chrono = { workspace = true }
 uuid = { workspace = true }
-hex = { workspace = true }
 sha2 = { workspace = true }
 async-trait = { workspace = true }
 dashmap = { workspace = true }
-parking_lot = { workspace = true }
-futures = { workspace = true }
 bytes = { workspace = true }
 thiserror = { workspace = true }
-rand = { workspace = true }
 async-recursion = "1.0"
 notify = { workspace = true }
 

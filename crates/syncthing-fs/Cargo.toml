@@ -14,21 +14,16 @@ syncthing-core = { path = "../syncthing-core" }
 tokio = { workspace = true }
 async-trait = { workspace = true }
 
-# 错误处理
-thiserror = { workspace = true }
-
 # 文件监控
 notify = { workspace = true }
 
 # 工具
 tracing = { workspace = true }
-walkdir = "2.4"
+walkdir = { workspace = true }
 regex = "1.10"
 libc = "0.2"
 
-# 哈希计算
-sha2 = { workspace = true }
-hex = { workspace = true }
+
 
 [dev-dependencies]
 tokio-test = "0.4"
