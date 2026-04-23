@@ -7,7 +7,7 @@
 //! - `HTTP_PROXY` / `http_proxy`
 //! - `SOCKS5_PROXY` / `socks5_proxy` / `ALL_PROXY`
 //!
-//! 未来扩展：SOCKS5 完整实现、代理认证、代理链。
+//! 未来扩展：SOCKS5 用户名/密码认证、代理链。
 
 use std::net::SocketAddr;
 use std::pin::Pin;
@@ -15,7 +15,7 @@ use std::task::{Context, Poll};
 
 use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
 use tokio::net::TcpStream;
-use tracing::{debug, info, warn};
+use tracing::{debug, info};
 
 use syncthing_core::{
     BoxedPipe, Result, SyncthingError, Transport, TransportListener, TransportType,
@@ -147,10 +147,12 @@ impl Transport for ProxiedTransport {
                 }))
             }
             ProxyType::Socks5 => {
-                warn!("SOCKS5 proxy is not yet fully implemented");
-                Err(SyncthingError::connection(
-                    "SOCKS5 proxy not yet implemented"
-                ))
+                let stream = socks5_handshake(proxy_stream, target).await?;
+                Ok(Box::new(ProxyPipe {
+                    stream,
+                    local_addr: None,
+                    peer_addr: Some(target),
+                }))
             }
         }
     }
@@ -186,6 +188,116 @@ async fn http_connect_handshake(
     }
 
     info!("HTTP CONNECT tunnel established to {}", target);
+    Ok(stream)
+}
+
+/// SOCKS5 握手（RFC 1928）
+///
+/// 仅实现无认证（0x00）方式，不支持用户名/密码或 GSSAPI。
+async fn socks5_handshake(
+    mut stream: TcpStream,
+    target: SocketAddr,
+) -> Result<TcpStream> {
+    // 1. 认证协商：VER=5, NMETHODS=1, METHOD=0x00 (no auth)
+    let auth_request = [0x05u8, 0x01, 0x00];
+    tokio::io::AsyncWriteExt::write_all(&mut stream, &auth_request).await
+        .map_err(|e| SyncthingError::connection(format!("socks5 auth write failed: {}", e)))?;
+
+    let mut auth_response = [0u8; 2];
+    tokio::io::AsyncReadExt::read_exact(&mut stream, &mut auth_response).await
+        .map_err(|e| SyncthingError::connection(format!("socks5 auth read failed: {}", e)))?;
+
+    if auth_response[0] != 0x05 {
+        return Err(SyncthingError::connection(format!(
+            "socks5 wrong version: {}",
+            auth_response[0]
+        )));
+    }
+    if auth_response[1] != 0x00 {
+        return Err(SyncthingError::connection(format!(
+            "socks5 auth method not accepted: {:#04x}",
+            auth_response[1]
+        )));
+    }
+
+    // 2. CONNECT 请求
+    let mut request = vec![0x05u8, 0x01, 0x00]; // VER, CMD=CONNECT, RSV
+
+    match target {
+        SocketAddr::V4(addr) => {
+            request.push(0x01); // ATYP = IPv4
+            request.extend_from_slice(&addr.ip().octets());
+            request.extend_from_slice(&addr.port().to_be_bytes());
+        }
+        SocketAddr::V6(addr) => {
+            request.push(0x04); // ATYP = IPv6
+            request.extend_from_slice(&addr.ip().octets());
+            request.extend_from_slice(&addr.port().to_be_bytes());
+        }
+    }
+
+    tokio::io::AsyncWriteExt::write_all(&mut stream, &request).await
+        .map_err(|e| SyncthingError::connection(format!("socks5 connect write failed: {}", e)))?;
+
+    // 3. 读取响应头（4 bytes: VER, REP, RSV, ATYP）
+    let mut response_header = [0u8; 4];
+    tokio::io::AsyncReadExt::read_exact(&mut stream, &mut response_header).await
+        .map_err(|e| SyncthingError::connection(format!("socks5 response read failed: {}", e)))?;
+
+    if response_header[0] != 0x05 {
+        return Err(SyncthingError::connection("socks5 wrong version in response"));
+    }
+    if response_header[1] != 0x00 {
+        return Err(SyncthingError::connection(format!(
+            "socks5 connect rejected: code {:#04x}",
+            response_header[1]
+        )));
+    }
+
+    // 4. 读取 BND.ADDR + BND.PORT（隧道建立后丢弃）
+    match response_header[3] {
+        0x01 => {
+            // IPv4: 4 bytes addr + 2 bytes port
+            let mut buf = [0u8; 6];
+            tokio::io::AsyncReadExt::read_exact(&mut stream, &mut buf).await
+                .map_err(|e| SyncthingError::connection(format!(
+                    "socks5 bind addr read failed: {}",
+                    e
+                )))?;
+        }
+        0x03 => {
+            // Domain name: 1 byte len + N bytes domain + 2 bytes port
+            let mut len_buf = [0u8; 1];
+            tokio::io::AsyncReadExt::read_exact(&mut stream, &mut len_buf).await
+                .map_err(|e| SyncthingError::connection(format!(
+                    "socks5 domain len read failed: {}",
+                    e
+                )))?;
+            let mut rest = vec![0u8; len_buf[0] as usize + 2];
+            tokio::io::AsyncReadExt::read_exact(&mut stream, &mut rest).await
+                .map_err(|e| SyncthingError::connection(format!(
+                    "socks5 domain read failed: {}",
+                    e
+                )))?;
+        }
+        0x04 => {
+            // IPv6: 16 bytes addr + 2 bytes port
+            let mut buf = [0u8; 18];
+            tokio::io::AsyncReadExt::read_exact(&mut stream, &mut buf).await
+                .map_err(|e| SyncthingError::connection(format!(
+                    "socks5 bind addr v6 read failed: {}",
+                    e
+                )))?;
+        }
+        atyp => {
+            return Err(SyncthingError::connection(format!(
+                "socks5 unknown bind address type: {:#04x}",
+                atyp
+            )));
+        }
+    }
+
+    info!("SOCKS5 tunnel established to {}", target);
     Ok(stream)
 }
 

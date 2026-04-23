@@ -22,12 +22,6 @@ pub mod transport;
 pub mod derp;
 
 pub use connection::{BepConnection, ConnectionEvent, TcpBiStream};
-#[cfg(feature = "iroh")]
-pub use connection::IrohBepConnection;
-#[cfg(feature = "iroh")]
-pub use connection::BEP_ALPN;
-#[cfg(feature = "iroh")]
-pub use transport::iroh::IrohTransport;
 pub use session::{BepSession, BepSessionEvent, BepSessionHandler, BepSessionMetrics};
 pub use protocol::{HelloMessage, MessageType, BEP_MAGIC};
 pub use manager::{ConnectionManager, ConnectionManagerConfig, ConnectionManagerHandle, ManagerStats};
@@ -37,7 +31,7 @@ pub use dialer::{ParallelDialer, AddressScore, AddressTypePreference, DialConnec
 pub use tls::{SyncthingTlsConfig, accept_tls, connect_tls, generate_certificate};
 pub use stun::{query, StunClient, StunRefresher, DEFAULT_STUN_SERVERS};
 pub use upnp::{UpnpClient, UpnpMappingManager, discover_upnp, DEFAULT_MAPPING_DURATION};
-pub use discovery::{DiscoveryManager, DiscoveryConfig, AddressInfo, AddressType};
+pub use discovery::{DiscoveryManager, DiscoveryConfig, AddressInfo, AddressSource};
 pub use portmapper::{PortMapper, Mapping};
 
 /// TLS 相关常量

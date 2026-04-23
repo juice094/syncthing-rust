@@ -27,7 +27,7 @@ pub const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(90);
 /// BEP连接结构
 ///
 /// 封装底层TCP连接，提供BEP协议支持
-pub struct BepConnection {
+pub struct BepRawConnection {
     /// 连接ID
     id: uuid::Uuid,
     /// 底层流
@@ -50,7 +50,7 @@ pub struct BepConnection {
     last_activity: RwLock<Instant>,
 }
 
-impl BepConnection {
+impl BepRawConnection {
     /// 从TCP流创建新连接（客户端模式 - 先发Hello）
     ///
     /// 用于传出连接（拨号）
@@ -328,7 +328,7 @@ impl BepConnection {
     }
 }
 
-impl Drop for BepConnection {
+impl Drop for BepRawConnection {
     fn drop(&mut self) {
         if self.is_alive() {
             debug!("Connection {} dropped while still alive", self.id);
