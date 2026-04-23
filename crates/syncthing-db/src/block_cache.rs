@@ -9,7 +9,6 @@
 //! This module provides a content-addressed block store with LRU caching.
 //! Implements the `BlockStore` trait from syncthing-core.
 
-use std::collections::HashMap;
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -23,106 +22,67 @@ use syncthing_core::{
 use crate::kv::SledStore;
 use crate::metadata::MetadataStore;
 
-/// Cache entry with access tracking
-#[derive(Debug, Clone)]
-struct CacheEntry {
-    data: Vec<u8>,
-    last_access: std::time::Instant,
-    access_count: u64,
-}
-
-impl CacheEntry {
-    fn new(data: Vec<u8>) -> Self {
-        Self {
-            data,
-            last_access: std::time::Instant::now(),
-            access_count: 1,
-        }
-    }
-
-    fn touch(&mut self) {
-        self.last_access = std::time::Instant::now();
-        self.access_count += 1;
-    }
-}
-
-/// LRU cache for frequently accessed blocks
+/// LRU cache for frequently accessed blocks (O(1) operations via `lru` crate).
 #[derive(Debug)]
 struct LruCache {
-    entries: HashMap<BlockHash, CacheEntry>,
+    entries: lru::LruCache<BlockHash, Vec<u8>>,
     max_size: usize,
     current_size: usize,
 }
 
 impl LruCache {
     fn new(max_size: usize) -> Self {
+        // Capacity is in entries; we manage byte-size limits manually.
+        let cap = std::num::NonZeroUsize::new(max_size.max(1)).unwrap();
         Self {
-            entries: HashMap::new(),
+            entries: lru::LruCache::new(cap),
             max_size,
             current_size: 0,
         }
     }
 
     fn peek(&self, hash: &BlockHash) -> Option<Vec<u8>> {
-        self.entries.get(hash).map(|e| e.data.clone())
+        self.entries.peek(hash).cloned()
     }
 
     fn touch(&mut self, hash: &BlockHash) -> bool {
-        if let Some(entry) = self.entries.get_mut(hash) {
-            entry.touch();
-            true
-        } else {
-            false
-        }
+        self.entries.get(hash).is_some()
     }
 
     fn put(&mut self, hash: BlockHash, data: Vec<u8>) -> usize {
         let data_size = data.len();
 
         // If entry already exists, update size accounting
-        if let Some(old_entry) = self.entries.remove(&hash) {
-            self.current_size -= old_entry.data.len();
+        if let Some(old_data) = self.entries.pop(&hash) {
+            self.current_size -= old_data.len();
         }
 
-        // Evict entries if necessary
+        // Evict entries if necessary (O(1) per eviction via lru::LruCache)
         let mut evicted = 0usize;
         while self.current_size + data_size > self.max_size && !self.entries.is_empty() {
-            if self.evict_lru() {
+            if let Some((_, old_data)) = self.entries.pop_lru() {
+                self.current_size -= old_data.len();
                 evicted += 1;
+            } else {
+                break;
             }
         }
 
         // Only insert if it fits
         if data_size <= self.max_size {
             self.current_size += data_size;
-            self.entries.insert(hash, CacheEntry::new(data));
+            self.entries.put(hash, data);
         }
         evicted
     }
 
-    fn evict_lru(&mut self) -> bool {
-        // TODO: optimize to O(1) with a linked list or ordered structure for LRU tracking
-        if let Some((oldest_hash, _)) = self
-            .entries
-            .iter()
-            .min_by_key(|(_, entry)| entry.last_access)
-        {
-            let oldest_hash = *oldest_hash;
-            if let Some(entry) = self.entries.remove(&oldest_hash) {
-                self.current_size -= entry.data.len();
-                return true;
-            }
-        }
-        false
-    }
-
     fn contains(&self, hash: &BlockHash) -> bool {
-        self.entries.contains_key(hash)
+        self.entries.contains(hash)
     }
 
     fn remove(&mut self, hash: &BlockHash) {
-        if let Some(entry) = self.entries.remove(hash) {
-            self.current_size -= entry.data.len();
+        if let Some(data) = self.entries.pop(hash) {
+            self.current_size -= data.len();
         }
     }
 

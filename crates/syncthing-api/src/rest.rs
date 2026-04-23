@@ -673,6 +673,13 @@ async fn get_system_status(State(state): State<ApiState>) -> impl IntoResponse {
                 .map(|d| d.to_string())
                 .unwrap_or_else(|| "unknown".to_string());
 
+            let (totup, totdown) = state.connection_manager.as_ref()
+                .map(|cm| {
+                    let stats = cm.stats();
+                    (stats.total_bytes_sent, stats.total_bytes_received)
+                })
+                .unwrap_or((0, 0));
+
             let status = SystemStatus {
                 my_id,
                 uptime: state.start_time.elapsed().as_secs(),
@@ -682,8 +689,8 @@ async fn get_system_status(State(state): State<ApiState>) -> impl IntoResponse {
                 arch: std::env::consts::ARCH.to_string(),
                 os: std::env::consts::OS.to_string(),
                 syncthing_version: env!("CARGO_PKG_VERSION").to_string(),
-                totup: 0,   // TODO: 统计总上传
-                totdown: 0, // TODO: 统计总下载
+                totup,
+                totdown,
             };
             Ok(Json(status))
         }

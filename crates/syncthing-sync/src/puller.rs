@@ -241,18 +241,19 @@ impl Puller {
             SyncError::pull(file_info.name.clone(), format!("Failed to rename file: {}", e))
         })?;
 
-        // 设置修改时间
+        // 设置修改时间（精确到纳秒）
         let modified = std::time::SystemTime::UNIX_EPOCH
             + std::time::Duration::from_secs(file_info.modified_s as u64)
             + std::time::Duration::from_nanos(file_info.modified_ns as u64);
-        
-        let file_handle = fs::File::open(&file_path).await.map_err(|e| {
-            SyncError::pull(file_info.name.clone(), format!("Failed to open file for timestamp: {}", e))
-        })?;
-        
-        // TODO: 使用 libc::futimens 设置精确时间戳（需要添加 libc 依赖）
-        let _ = file_handle;
-        let _ = modified;
+
+        let mtime = filetime::FileTime::from_system_time(modified);
+        if let Err(e) = filetime::set_file_mtime(&file_path, mtime) {
+            warn!(
+                file = %file_info.name,
+                error = %e,
+                "Failed to set file modification time"
+            );
+        }
 
         info!(file = %file_info.name, "File download completed");
         Ok(())

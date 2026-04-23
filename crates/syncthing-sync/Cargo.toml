@@ -19,6 +19,7 @@ bytes = { workspace = true }
 thiserror = { workspace = true }
 async-recursion = "1.0"
 notify = { workspace = true }
+filetime = "0.2"
 
 [dev-dependencies]
 tokio-test = "0.4"
