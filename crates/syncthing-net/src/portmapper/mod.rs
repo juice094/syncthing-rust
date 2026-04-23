@@ -37,7 +37,7 @@ pub struct Mapping {
 enum MappingInner {
     Upnp(upnp::UpnpMappingState),
     Pmp(pmp::PmpMappingState),
-    Pcp,
+    Pcp(pcp::PcpMappingState),
 }
 
 impl Mapping {
@@ -60,16 +60,46 @@ impl Mapping {
     pub async fn release(&self) -> Result<()> {
         match &self.inner {
             MappingInner::Upnp(state) => upnp::release_mapping(state).await,
-            MappingInner::Pmp(_state) => {
-                // TODO: 实现 PMP 映射释放
-                Ok(())
+            MappingInner::Pmp(state) => {
+                release_pmp_mapping(state).await
             }
-            MappingInner::Pcp => {
-                // TODO: 实现 PCP 映射释放
-                Ok(())
+            MappingInner::Pcp(state) => {
+                release_pcp_mapping(state).await
             }
         }
     }
+}
+
+/// 释放 PMP 映射（发送 lifetime=0 的 UDP 请求）
+async fn release_pmp_mapping(state: &pmp::PmpMappingState) -> Result<()> {
+    let pkt = pmp::build_pmp_request_mapping_packet(state.internal_port, state.external_port, 0);
+    let socket = tokio::net::UdpSocket::bind("0.0.0.0:0")
+        .await
+        .map_err(|e| syncthing_core::SyncthingError::connection(format!("PMP release bind failed: {}", e)))?;
+    socket
+        .send_to(&pkt, state.gateway)
+        .await
+        .map_err(|e| syncthing_core::SyncthingError::connection(format!("PMP release send failed: {}", e)))?;
+    Ok(())
+}
+
+/// 释放 PCP 映射（发送 lifetime=0 的 UDP 请求）
+async fn release_pcp_mapping(state: &pcp::PcpMappingState) -> Result<()> {
+    let pkt = pcp::build_pcp_request_mapping_packet(
+        state.my_ip,
+        state.internal_port,
+        state.external_port,
+        0,
+        std::net::Ipv4Addr::UNSPECIFIED,
+    );
+    let socket = tokio::net::UdpSocket::bind("0.0.0.0:0")
+        .await
+        .map_err(|e| syncthing_core::SyncthingError::connection(format!("PCP release bind failed: {}", e)))?;
+    socket
+        .send_to(&pkt, state.gateway)
+        .await
+        .map_err(|e| syncthing_core::SyncthingError::connection(format!("PCP release send failed: {}", e)))?;
+    Ok(())
 }
 
 /// 端口映射客户端
@@ -78,6 +108,8 @@ impl Mapping {
 #[derive(Debug)]
 pub struct PortMapper {
     local_addr: SocketAddr,
+    /// 上次成功获取的映射缓存，用于续约或释放
+    last_mapping: Option<Mapping>,
 }
 
 impl PortMapper {
@@ -85,6 +117,7 @@ impl PortMapper {
     pub fn new() -> Self {
         Self {
             local_addr: SocketAddr::from(([0, 0, 0, 0], 0)),
+            last_mapping: None,
         }
     }
 
@@ -97,25 +130,27 @@ impl PortMapper {
     /// 分配端口映射
     ///
     /// 当前实现直接尝试 UPnP，PCP 和 NAT-PMP 留待后续实现。
-    pub async fn allocate_port(&self, local_port: u16) -> Result<Mapping> {
+    pub async fn allocate_port(&mut self, local_port: u16) -> Result<Mapping> {
         self.allocate_upnp(local_port).await
     }
 
-    async fn allocate_upnp(&self, local_port: u16) -> Result<Mapping> {
+    async fn allocate_upnp(&mut self, local_port: u16) -> Result<Mapping> {
         let (external, state) = upnp::allocate_port(self.local_addr, local_port).await?;
         let now = Instant::now();
         let lifetime = Duration::from_secs(PORT_MAP_LIFETIME_SEC as u64);
-        Ok(Mapping {
+        let mapping = Mapping {
             external,
             good_until: now + lifetime,
             renew_after: now + lifetime / 2,
             inner: MappingInner::Upnp(state),
-        })
+        };
+        self.last_mapping = Some(mapping.clone());
+        Ok(mapping)
     }
 
-    /// 强制重新发现
+    /// 强制重新发现：清除缓存的映射信息
     pub fn invalidate(&mut self) {
-        // TODO: 清除缓存的服务发现信息
+        self.last_mapping = None;
     }
 }
 

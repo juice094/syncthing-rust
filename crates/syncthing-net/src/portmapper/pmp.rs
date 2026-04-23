@@ -44,6 +44,7 @@ pub struct PmpResponse {
 pub struct PmpMappingState {
     pub gateway: SocketAddr,
     pub external_port: u16,
+    pub internal_port: u16,
 }
 
 /// 构建 NAT-PMP 请求映射包
