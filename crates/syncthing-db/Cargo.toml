@@ -1,6 +1,6 @@
 [package]
 name = "syncthing-db"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 authors = ["Agent-E <UNVERIFIED>"]
 description = "Block and metadata storage - UNVERIFIED DELIVERY"
