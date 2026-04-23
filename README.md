@@ -6,7 +6,7 @@
 
 A Rust implementation of the [Syncthing](https://syncthing.net/) protocol stack, designed to interoperate with the official Go Syncthing daemon over the BEP (Block Exchange Protocol) wire format.
 
-> **Status**: v0.1.0 — Alpha. Core file sync (Rust ↔ Go) verified; 257 tests passing; ready for long-term stress testing.
+> **Status**: v0.2.0 — Beta. Core file sync (Rust ↔ Go) verified; 255+ tests passing; all TODOs resolved; 0 clippy warnings.
 
 ---
 
@@ -22,6 +22,7 @@ A Rust implementation of the [Syncthing](https://syncthing.net/) protocol stack,
 | 2026-04-16 | REST API `/rest/db/status` now returns real per-folder file counts and byte totals. |
 | 2026-04-17 | Phase 2 Network Abstraction: `ReliablePipe` trait decouples BEP from TCP; `MemoryPipe` tests pass; `ConnectionManager` supports multi-path per device. |
 | 2026-04-20 | **Phase 3 Complete**: Cloud Push E2E (Rust → Go) and Cloud Pull E2E (Go → Rust) both verified over Tailscale. Protocol compatibility fixes: deleted-file block clearing, shared-folder Index filtering, connection race handling. |
+| 2026-04-20 | **v0.2.0 Release**: SOCKS5 proxy, iroh dead code cleanup, naming conflict resolution, folder lifecycle control, REST traffic stats, DERP forwarding, LRU O(1) cache, precise timestamps, PCP protocol, 0 TODOs. |
 
 ---
 
@@ -33,7 +34,7 @@ A Rust implementation of the [Syncthing](https://syncthing.net/) protocol stack,
 | **Phase 2** | Network abstraction (ReliablePipe, BepSession), watcher, REST API, dual-node coexistence | ✅ Complete |
 | **Phase 3** | BepSession observability, peer sync state events, **Push/Pull E2E with real Go node** | ✅ Complete |
 | **Phase 3.5** | Connection stability hardening, `.stignore`, config persistence | ✅ Complete |
-| **Phase 4** | TUI 增强（设备/文件夹管理、实时同步状态）、72h 压测（格雷远程）、生产打包 | 🔵 Planned |
+| **Phase 4** | TUI 增强（设备/文件夹管理、实时同步状态）、72h 压测（格雷远程）、生产打包 | 🔵 In Progress |
 
 ---
 
@@ -96,23 +97,25 @@ crates/
 ├── syncthing-sync/     # SyncService, Scanner, Puller, IndexHandler, watcher
 ├── syncthing-api/      # REST API server (Axum)
 └── syncthing-db/       # Database abstractions
-dev/third_party/iroh/   # Optional iroh QUIC transport (see below)
 ```
 
 ---
 
-## Optional: iroh Transport
+## Features
 
-`syncthing-net` includes an optional `iroh` Cargo feature for TLS-over-QUIC transport. The feature expects the `iroh` crate at `dev/third_party/iroh/iroh`. Because `iroh` is a large workspace and its crates.io releases currently have transitive dependency conflicts with this project, it is **not enabled by default** and the dependency line is commented out in `crates/syncthing-net/Cargo.toml`. To enable the feature:
-
-```bash
-# 1. Clone iroh locally
-git clone https://github.com/n0-computer/iroh.git dev/third_party/iroh
-
-# 2. Uncomment the iroh dependency and feature in crates/syncthing-net/Cargo.toml
-# 3. Build with the feature
-cargo build -p syncthing --features iroh
-```
+| Feature | Status |
+|---------|--------|
+| BEP Protocol (TLS + Hello + Index + Request/Response) | ✅ |
+| TCP Transport | ✅ |
+| SOCKS5 / HTTP Proxy | ✅ |
+| DERP Relay | ✅ |
+| UPnP / NAT-PMP / PCP Port Mapping | ✅ (UPnP allocate; PMP/PCP release) |
+| Folder Scan / Pull / Push | ✅ |
+| Conflict Resolution | ✅ |
+| Filesystem Watcher | ✅ |
+| REST API | ✅ |
+| TUI | ✅ |
+| Config Persistence | ✅ |
 
 ---
 
