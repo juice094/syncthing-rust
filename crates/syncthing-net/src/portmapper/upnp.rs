@@ -120,8 +120,9 @@ pub fn build_delete_port_mapping_soap(external_port: u16, protocol: &str) -> Str
 
 /// 分配 UPnP 端口映射
 ///
-/// 当前使用 igd 库进行网关发现和端口映射。
-/// TODO: 未来可替换为原始 SSDP / SOAP 实现。
+/// 使用 `igd` 库进行网关发现 (SSDP) 和端口映射 (SOAP)。
+/// 原始 SSDP/SOAP 实现需要：UDP 多播、HTTP client、XML 解析。
+/// 当前 `igd` 库稳定可靠，替换收益/成本比低，保留作为长期方案。
 pub(crate) async fn allocate_port(local_addr: SocketAddr, local_port: u16) -> Result<(SocketAddr, UpnpMappingState)> {
     let options = SearchOptions {
         timeout: Some(Duration::from_secs(5)),

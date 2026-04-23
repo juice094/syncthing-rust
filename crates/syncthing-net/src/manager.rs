@@ -859,14 +859,28 @@ impl ConnectionManager {
     
     /// 获取统计信息
     pub fn stats(&self) -> ManagerStats {
-        let active_connections: usize = self.connections
-            .iter()
-            .map(|e| e.value().iter().filter(|c| c.value().conn.is_alive()).count())
-            .sum();
+        let mut active_connections: usize = 0;
+        let mut total_bytes_sent: u64 = 0;
+        let mut total_bytes_received: u64 = 0;
+
+        for entry in self.connections.iter() {
+            for conn_entry in entry.value().iter() {
+                let ce = conn_entry.value();
+                if ce.conn.is_alive() {
+                    active_connections += 1;
+                }
+                let stats = ce.conn.stats();
+                total_bytes_sent += stats.bytes_sent;
+                total_bytes_received += stats.bytes_received;
+            }
+        }
+
         ManagerStats {
             active_connections,
             connected_devices: self.connected_devices().len(),
             pending_connections: 0, // 简化处理
+            total_bytes_sent,
+            total_bytes_received,
         }
     }
     
@@ -904,6 +918,8 @@ pub struct ManagerStats {
     pub active_connections: usize,
     pub connected_devices: usize,
     pub pending_connections: usize,
+    pub total_bytes_sent: u64,
+    pub total_bytes_received: u64,
 }
 
 /// 重连调度器

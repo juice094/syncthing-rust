@@ -10,7 +10,7 @@ use crate::folder_model::FolderModel;
 use crate::index_handler::IndexHandler;
 use crate::model::{SyncModel, SyncStats, FolderState};
 use crate::puller::BlockSource;
-use crate::supervisor::{Supervisor, SupervisedTask, RestartConfig};
+use tokio::task::JoinHandle;
 use syncthing_core::DeviceId;
 use syncthing_core::types::{Config, FileInfo, Folder, Index, IndexUpdate};
 use dashmap::DashMap;
@@ -28,10 +28,19 @@ pub struct SyncService {
     shutdown_rx: RwLock<tokio::sync::watch::Receiver<bool>>,
     connected_devices: DashMap<DeviceId, ()>,
     index_handler: IndexHandler,
-    folder_supervisor: RwLock<Option<Supervisor>>,
     block_source: RwLock<Option<Arc<dyn BlockSource>>>,
     /// Per-(device, folder) needed file count for completion tracking.
     peer_sync_states: DashMap<(DeviceId, String), usize>,
+    /// Per-folder task handles for individual start/stop control.
+    folder_tasks: DashMap<String, FolderTaskHandles>,
+}
+
+/// Per-folder async task handles.
+struct FolderTaskHandles {
+    shutdown_tx: tokio::sync::watch::Sender<bool>,
+    scan_handle: JoinHandle<()>,
+    pull_handle: JoinHandle<()>,
+    watcher_handle: JoinHandle<()>,
 }
 
 impl SyncService {
@@ -50,8 +59,8 @@ impl SyncService {
             shutdown_rx: RwLock::new(shutdown_rx),
             connected_devices: DashMap::new(),
             index_handler,
-            folder_supervisor: RwLock::new(None),
             block_source: RwLock::new(None),
+            folder_tasks: DashMap::new(),
             peer_sync_states: DashMap::new(),
         }
     }
@@ -145,78 +154,64 @@ impl SyncService {
         Ok(())
     }
 
-    /// 启动文件夹循环
+    /// 启动所有文件夹循环
     async fn start_folder_loops(&self) {
-        let shutdown_rx = self.shutdown_rx.read().await.clone();
-        let mut supervisor = Supervisor::new();
-
         for entry in self.folders.iter() {
             let folder_id = entry.key().clone();
-            let folder_model = entry.value().clone();
-            
-            let scan_shutdown = shutdown_rx.clone();
-            let pull_shutdown = shutdown_rx.clone();
-            let watcher_shutdown = shutdown_rx.clone();
-            let scan_folder_model = folder_model.clone();
-            let pull_folder_model = folder_model.clone();
-            let watcher_folder_model = folder_model.clone();
+            if let Err(e) = self.start_folder_internal(&folder_id).await {
+                warn!(folder_id = %folder_id, error = %e, "Failed to start folder loops");
+            }
+        }
+    }
 
-            supervisor.add_task(SupervisedTask {
-                name: format!("{}-scan", folder_id),
-                future_factory: Box::new({
-                    let model = scan_folder_model;
-                    let shutdown = scan_shutdown;
-                    move || {
-                        let model = model.clone();
-                        let shutdown = shutdown.clone();
-                        Box::pin(async move {
-                            model.start_scan_loop(shutdown).await;
-                            Ok(())
-                        })
-                    }
-                }),
-                config: RestartConfig::default(),
-            });
+    /// 内部启动单个文件夹循环
+    async fn start_folder_internal(&self, folder_id: &str) -> Result<()> {
+        // 检查 folder 是否存在
+        let folder_model = self.folders.get(folder_id)
+            .ok_or_else(|| SyncError::FolderNotFound(folder_id.to_string()))?;
 
-            supervisor.add_task(SupervisedTask {
-                name: format!("{}-pull", folder_id),
-                future_factory: Box::new({
-                    let model = pull_folder_model;
-                    let shutdown = pull_shutdown;
-                    move || {
-                        let model = model.clone();
-                        let shutdown = shutdown.clone();
-                        Box::pin(async move {
-                            model.start_pull_loop(shutdown).await;
-                            Ok(())
-                        })
-                    }
-                }),
-                config: RestartConfig::default(),
-            });
-
-            supervisor.add_task(SupervisedTask {
-                name: format!("{}-watcher", folder_id),
-                future_factory: Box::new({
-                    let model = watcher_folder_model;
-                    let shutdown = watcher_shutdown;
-                    move || {
-                        let model = model.clone();
-                        let shutdown = shutdown.clone();
-                        Box::pin(async move {
-                            model.start_watcher_loop(shutdown).await;
-                            Ok(())
-                        })
-                    }
-                }),
-                config: RestartConfig::default(),
-            });
-
-            info!(folder_id = %folder_id, "Folder loops started");
+        // 如果已经在运行，直接返回
+        if self.folder_tasks.contains_key(folder_id) {
+            info!(folder_id = %folder_id, "Folder already running");
+            return Ok(());
         }
 
-        supervisor.start();
-        *self.folder_supervisor.write().await = Some(supervisor);
+        // 创建独立的 shutdown channel
+        let (shutdown_tx, scan_shutdown) = tokio::sync::watch::channel(false);
+        let pull_shutdown = shutdown_tx.subscribe();
+        let watcher_shutdown = shutdown_tx.subscribe();
+
+        let model = folder_model.clone();
+        let scan_handle = tokio::spawn({
+            let model = model.clone();
+            async move {
+                model.start_scan_loop(scan_shutdown).await;
+            }
+        });
+
+        let pull_handle = tokio::spawn({
+            let model = model.clone();
+            async move {
+                model.start_pull_loop(pull_shutdown).await;
+            }
+        });
+
+        let watcher_handle = tokio::spawn({
+            let model = model.clone();
+            async move {
+                model.start_watcher_loop(watcher_shutdown).await;
+            }
+        });
+
+        self.folder_tasks.insert(folder_id.to_string(), FolderTaskHandles {
+            shutdown_tx,
+            scan_handle,
+            pull_handle,
+            watcher_handle,
+        });
+
+        info!(folder_id = %folder_id, "Folder loops started");
+        Ok(())
     }
 }
 
@@ -299,12 +294,26 @@ impl SyncModel for SyncService {
     async fn stop(&self) -> Result<()> {
         info!("Stopping sync service");
 
-        // 发送关闭信号
+        // 发送全局关闭信号
         self.shutdown_tx.send(true).ok();
 
-        // 停止 supervisor
-        if let Some(supervisor) = self.folder_supervisor.write().await.take() {
-            supervisor.shutdown().await;
+        // 收集所有 folder_id
+        let folder_ids: Vec<String> = self.folder_tasks.iter().map(|e| e.key().clone()).collect();
+
+        // 发送停止信号
+        for folder_id in &folder_ids {
+            if let Some(handles) = self.folder_tasks.get(folder_id) {
+                handles.shutdown_tx.send(true).ok();
+            }
+        }
+
+        // 等待所有任务完成
+        for folder_id in folder_ids {
+            if let Some((_, handles)) = self.folder_tasks.remove(&folder_id) {
+                let _ = handles.scan_handle.await;
+                let _ = handles.pull_handle.await;
+                let _ = handles.watcher_handle.await;
+            }
         }
 
         info!("Sync service stopped");
@@ -460,13 +469,33 @@ impl SyncService {
 
 #[async_trait::async_trait]
 impl syncthing_core::traits::SyncModel for SyncService {
-    async fn start_folder(&self, _folder: syncthing_core::FolderId) -> syncthing_core::Result<()> {
-        // TODO: 实现单个 folder 的启动/恢复
-        Ok(())
+    async fn start_folder(&self, folder: syncthing_core::FolderId) -> syncthing_core::Result<()> {
+        let folder_id = folder.as_str();
+        self.start_folder_internal(folder_id).await
+            .map_err(|e| syncthing_core::SyncthingError::internal(e.to_string()))
     }
 
-    async fn stop_folder(&self, _folder: syncthing_core::FolderId) -> syncthing_core::Result<()> {
-        // TODO: 实现单个 folder 的停止/暂停
+    async fn stop_folder(&self, folder: syncthing_core::FolderId) -> syncthing_core::Result<()> {
+        let folder_id = folder.as_str();
+
+        // 检查是否在运行
+        let handles = self.folder_tasks.get(folder_id)
+            .ok_or_else(|| syncthing_core::SyncthingError::internal(
+                format!("Folder not running: {}", folder_id)
+            ))?;
+
+        // 发送停止信号
+        handles.shutdown_tx.send(true).ok();
+        drop(handles);
+
+        // 等待任务完成并移除
+        if let Some((_, handles)) = self.folder_tasks.remove(folder_id) {
+            let _ = handles.scan_handle.await;
+            let _ = handles.pull_handle.await;
+            let _ = handles.watcher_handle.await;
+        }
+
+        info!(folder_id = %folder_id, "Folder stopped");
         Ok(())
     }
 

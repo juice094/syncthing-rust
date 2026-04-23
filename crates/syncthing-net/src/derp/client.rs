@@ -157,6 +157,7 @@ impl DerpClient {
 
         // 启动读写任务
         let packet_rx = Arc::clone(&self.packet_rx);
+        let packet_tx = self.packet_tx.clone();
         let keep_alive_interval = self.config.keep_alive_interval;
         let _device_id = self.config.device_id;
 
@@ -180,8 +181,11 @@ impl DerpClient {
                     let mut combined = bytes::BytesMut::from(&len_buf[..]);
                     combined.extend_from_slice(&payload_buf);
                     match crate::derp::protocol::Frame::decode(&mut combined) {
-                        Ok(Some((Frame::RecvPacket { from: _, payload: _ }, _))) => {
-                            // TODO: 将收到的数据包转发给应用层
+                        Ok(Some((Frame::RecvPacket { from, payload }, _))) => {
+                            // 将收到的数据包转发给应用层
+                            if let Err(e) = packet_tx.send((from, payload)) {
+                                warn!("DERP failed to forward packet to app layer: {}", e);
+                            }
                         }
                         Ok(Some((Frame::KeepAlive, _))) => {
                             debug!("DERP keepalive received");
