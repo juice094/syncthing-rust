@@ -50,7 +50,7 @@ impl FsEvent {
 
     /// Check if this event affects the given path
     pub fn affects(&self, path: &Path) -> bool {
-        self.paths().iter().any(|p| *p == path)
+        self.paths().contains(&path)
     }
 }
 

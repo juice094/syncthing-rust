@@ -112,7 +112,7 @@ impl IgnorePatterns {
     pub async fn from_file(path: &Path) -> Result<Self> {
         let content = tokio::fs::read_to_string(path)
             .await
-            .map_err(|e| SyncthingError::Io(e))?;
+            .map_err(SyncthingError::Io)?;
 
         let base_dir = path.parent().unwrap_or(Path::new(""));
         let mut loaded = HashSet::new();
@@ -148,7 +148,7 @@ impl IgnorePatterns {
 
         let content = tokio::fs::read_to_string(&path)
             .await
-            .map_err(|e| SyncthingError::Io(e))?;
+            .map_err(SyncthingError::Io)?;
 
         let base_dir = path.parent().unwrap_or(Path::new("")).to_path_buf();
         let included = Self::from_str(&content);
@@ -192,7 +192,7 @@ impl IgnorePatterns {
 
             // Handle include directives
             if trimmed.starts_with("#include ") || trimmed.starts_with("@include ") {
-                if let Some(file) = trimmed.splitn(2, ' ').nth(1) {
+                if let Some(file) = trimmed.split_once(' ').map(|x| x.1) {
                     let file = file.trim();
                     if !file.is_empty() {
                         includes.push(PathBuf::from(file));

@@ -54,7 +54,7 @@ pub async fn scan_file(path: &Path, block_size: usize) -> Result<FileInfo> {
     let block_size = block_size.clamp(MIN_BLOCK_SIZE, MAX_BLOCK_SIZE);
 
     // Get file metadata
-    let metadata = tokio::fs::metadata(path).await.map_err(|e| SyncthingError::Io(e))?;
+    let metadata = tokio::fs::metadata(path).await.map_err(SyncthingError::Io)?;
 
     if !metadata.is_file() {
         return Err(SyncthingError::io(format!(
@@ -72,7 +72,7 @@ pub async fn scan_file(path: &Path, block_size: usize) -> Result<FileInfo> {
     info.size = metadata.len() as i64;
     let duration = metadata
         .modified()
-        .unwrap_or_else(|_| SystemTime::UNIX_EPOCH)
+        .unwrap_or(SystemTime::UNIX_EPOCH)
         .duration_since(SystemTime::UNIX_EPOCH)
         .unwrap_or_default();
     info.modified_s = duration.as_secs() as i64;
@@ -89,8 +89,8 @@ pub async fn scan_file(path: &Path, block_size: usize) -> Result<FileInfo> {
 ///
 /// Reads the file in chunks and computes SHA-256 hashes for each block.
 async fn compute_block_hashes(path: &Path, block_size: usize) -> Result<Vec<BlockInfo>> {
-    let mut file = File::open(path).await.map_err(|e| SyncthingError::Io(e))?;
-    let metadata = file.metadata().await.map_err(|e| SyncthingError::Io(e))?;
+    let mut file = File::open(path).await.map_err(SyncthingError::Io)?;
+    let metadata = file.metadata().await.map_err(SyncthingError::Io)?;
     let file_size = metadata.len();
 
     let mut blocks = Vec::new();
@@ -98,7 +98,7 @@ async fn compute_block_hashes(path: &Path, block_size: usize) -> Result<Vec<Bloc
     let mut buffer = vec![0u8; block_size];
 
     while offset < file_size {
-        let bytes_read = file.read(&mut buffer).await.map_err(|e| SyncthingError::Io(e))?;
+        let bytes_read = file.read(&mut buffer).await.map_err(SyncthingError::Io)?;
         if bytes_read == 0 {
             break;
         }
@@ -166,7 +166,7 @@ pub fn optimal_block_size(file_size: u64) -> usize {
 /// This is faster for detecting file changes when comparing
 /// modification times and sizes is sufficient.
 pub async fn quick_scan(path: &Path) -> Result<FileInfo> {
-    let metadata = tokio::fs::metadata(path).await.map_err(|e| SyncthingError::Io(e))?;
+    let metadata = tokio::fs::metadata(path).await.map_err(SyncthingError::Io)?;
 
     let file_name = path
         .file_name()
@@ -177,7 +177,7 @@ pub async fn quick_scan(path: &Path) -> Result<FileInfo> {
     info.size = metadata.len() as i64;
     let duration = metadata
         .modified()
-        .unwrap_or_else(|_| SystemTime::UNIX_EPOCH)
+        .unwrap_or(SystemTime::UNIX_EPOCH)
         .duration_since(SystemTime::UNIX_EPOCH)
         .unwrap_or_default();
     info.modified_s = duration.as_secs() as i64;
@@ -210,11 +210,11 @@ pub async fn scan_directory(
     ignore_patterns: Option<&IgnorePatterns>,
 ) -> Result<Vec<FileInfo>> {
     let path = path.to_path_buf();
-    let ignore = ignore_patterns.map(|i| i.clone());
+    let ignore = ignore_patterns.cloned();
 
     // Collect entries in a blocking task to avoid blocking the async runtime
     let entries = tokio::task::spawn_blocking(move || {
-        let metadata = std::fs::metadata(&path).map_err(|e| SyncthingError::Io(e))?;
+        let metadata = std::fs::metadata(&path).map_err(SyncthingError::Io)?;
 
         if !metadata.is_dir() {
             return Err(SyncthingError::io(format!(

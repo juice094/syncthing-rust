@@ -115,7 +115,7 @@ pub fn calculate_block_count(file_size: u64, block_size: usize) -> usize {
     if file_size == 0 {
         return 0;
     }
-    ((file_size + block_size as u64 - 1) / block_size as u64) as usize
+    file_size.div_ceil(block_size as u64) as usize
 }
 
 /// Get the offset and size for a specific block

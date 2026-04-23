@@ -74,12 +74,13 @@ pub async fn start_daemon(
 
     // 自动生成 API key（若为空）— 持久化操作
     if config.gui.api_key.is_empty() {
+        use rand::Rng;
         let api_key: String = (0..32)
-            .map(|_| rand::random::<u8>() % 36)
+            .map(|_| rand::thread_rng().gen_range(0..36))
             .map(|i| if i < 10 { (b'0' + i) as char } else { (b'a' + i - 10) as char })
             .collect();
         config.gui.api_key = api_key.clone();
-        info!("Generated API key for REST API: {}", api_key);
+        info!("Generated API key for REST API: {}... (masked)", &api_key[..4]);
         config_modified = true;
     } else {
         info!("REST API enabled at {} with existing API key", config.gui.address);
