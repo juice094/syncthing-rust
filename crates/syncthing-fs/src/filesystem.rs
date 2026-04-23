@@ -173,16 +173,16 @@ impl FileSystem for NativeFileSystem {
 
         let mut file = fs::File::open(&full_path)
             .await
-            .map_err(|e| SyncthingError::Io(e))?;
+            .map_err(SyncthingError::Io)?;
 
         // Seek to offset
         file.seek(std::io::SeekFrom::Start(offset))
             .await
-            .map_err(|e| SyncthingError::Io(e))?;
+            .map_err(SyncthingError::Io)?;
 
         // Read data
         let mut buffer = vec![0u8; size];
-        let bytes_read = file.read(&mut buffer).await.map_err(|e| SyncthingError::Io(e))?;
+        let bytes_read = file.read(&mut buffer).await.map_err(SyncthingError::Io)?;
         buffer.truncate(bytes_read);
 
         Ok(buffer)
@@ -196,27 +196,28 @@ impl FileSystem for NativeFileSystem {
 
         // Create parent directories if needed
         if let Some(parent) = full_path.parent() {
-            fs::create_dir_all(parent).await.map_err(|e| SyncthingError::Io(e))?;
+            fs::create_dir_all(parent).await.map_err(SyncthingError::Io)?;
         }
 
-        // Open or create file
+        // Open or create file (truncate=false because we seek to offset and write blocks)
         let mut file = fs::OpenOptions::new()
             .write(true)
             .create(true)
+            .truncate(false)
             .open(&full_path)
             .await
-            .map_err(|e| SyncthingError::Io(e))?;
+            .map_err(SyncthingError::Io)?;
 
         // Seek to offset
         file.seek(std::io::SeekFrom::Start(offset))
             .await
-            .map_err(|e| SyncthingError::Io(e))?;
+            .map_err(SyncthingError::Io)?;
 
         // Write data
-        file.write_all(data).await.map_err(|e| SyncthingError::Io(e))?;
+        file.write_all(data).await.map_err(SyncthingError::Io)?;
 
         // Ensure data is flushed to disk
-        file.sync_data().await.map_err(|e| SyncthingError::Io(e))?;
+        file.sync_data().await.map_err(SyncthingError::Io)?;
 
         Ok(())
     }
@@ -256,16 +257,16 @@ impl FileSystem for NativeFileSystem {
     async fn remove(&self, path: &Path) -> Result<()> {
         let full_path = self.full_path(path);
 
-        let metadata = fs::metadata(&full_path).await.map_err(|e| SyncthingError::Io(e))?;
+        let metadata = fs::metadata(&full_path).await.map_err(SyncthingError::Io)?;
 
         if metadata.is_dir() {
             fs::remove_dir_all(&full_path)
                 .await
-                .map_err(|e| SyncthingError::Io(e))?;
+                .map_err(SyncthingError::Io)?;
         } else {
             fs::remove_file(&full_path)
                 .await
-                .map_err(|e| SyncthingError::Io(e))?;
+                .map_err(SyncthingError::Io)?;
         }
 
         Ok(())
@@ -276,7 +277,7 @@ impl FileSystem for NativeFileSystem {
         let full_path = self.full_path(path);
         fs::create_dir_all(&full_path)
             .await
-            .map_err(|e| SyncthingError::Io(e))?;
+            .map_err(SyncthingError::Io)?;
         Ok(())
     }
 
@@ -295,7 +296,7 @@ impl FileSystem for NativeFileSystem {
 
         // Create parent directories for destination
         if let Some(parent) = to_full.parent() {
-            fs::create_dir_all(parent).await.map_err(|e| SyncthingError::Io(e))?;
+            fs::create_dir_all(parent).await.map_err(SyncthingError::Io)?;
         }
 
         // Try atomic rename first
@@ -322,13 +323,13 @@ impl FileSystem for NativeFileSystem {
 
 /// Build FileInfo from a filesystem path
 async fn build_file_info(path: &Path, name: &str) -> Result<FileInfo> {
-    let metadata = fs::symlink_metadata(path).await.map_err(|e| SyncthingError::Io(e))?;
+    let metadata = fs::symlink_metadata(path).await.map_err(SyncthingError::Io)?;
 
     let mut info = FileInfo::new(name);
     info.size = metadata.len() as i64;
     let duration = metadata
         .modified()
-        .unwrap_or_else(|_| SystemTime::UNIX_EPOCH)
+        .unwrap_or(SystemTime::UNIX_EPOCH)
         .duration_since(SystemTime::UNIX_EPOCH)
         .unwrap_or_default();
     info.modified_s = duration.as_secs() as i64;
@@ -344,7 +345,7 @@ async fn build_file_info(path: &Path, name: &str) -> Result<FileInfo> {
 
     // Handle symlinks
     if info.file_type == FileType::Symlink {
-        let target = fs::read_link(path).await.map_err(|e| SyncthingError::Io(e))?;
+        let target = fs::read_link(path).await.map_err(SyncthingError::Io)?;
         info.symlink_target = Some(target.to_string_lossy().to_string());
     }
 
@@ -383,10 +384,10 @@ async fn build_file_info(path: &Path, name: &str) -> Result<FileInfo> {
 /// Copy a file and then delete the original (for cross-device moves)
 async fn copy_and_delete(from: &Path, to: &Path) -> Result<()> {
     // Copy file
-    fs::copy(from, to).await.map_err(|e| SyncthingError::Io(e))?;
+    fs::copy(from, to).await.map_err(SyncthingError::Io)?;
 
     // Remove original
-    fs::remove_file(from).await.map_err(|e| SyncthingError::Io(e))?;
+    fs::remove_file(from).await.map_err(SyncthingError::Io)?;
 
     Ok(())
 }
@@ -406,16 +407,16 @@ pub async fn atomic_write(path: &Path, data: &[u8]) -> Result<()> {
     // Write to temp file
     let mut file = fs::File::create(&temp_path)
         .await
-        .map_err(|e| SyncthingError::Io(e))?;
+        .map_err(SyncthingError::Io)?;
 
-    file.write_all(data).await.map_err(|e| SyncthingError::Io(e))?;
-    file.sync_data().await.map_err(|e| SyncthingError::Io(e))?;
+    file.write_all(data).await.map_err(SyncthingError::Io)?;
+    file.sync_data().await.map_err(SyncthingError::Io)?;
     drop(file);
 
     // Atomically rename temp file to target
     fs::rename(&temp_path, path)
         .await
-        .map_err(|e| SyncthingError::Io(e))?;
+        .map_err(SyncthingError::Io)?;
 
     Ok(())
 }

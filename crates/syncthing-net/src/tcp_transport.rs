@@ -48,6 +48,8 @@ pub struct SyncthingTcpListener {
     tls_config: Arc<SyncthingTlsConfig>,
     /// 运行标志
     running: bool,
+    /// 关闭信号发送端
+    shutdown_tx: Option<tokio::sync::mpsc::Sender<()>>,
 }
 
 impl SyncthingTcpListener {
@@ -67,6 +69,7 @@ impl SyncthingTcpListener {
             device_name,
             tls_config,
             running: false,
+            shutdown_tx: None,
         }
     }
     
@@ -94,34 +97,47 @@ impl SyncthingTcpListener {
         self.running = true;
         info!("TCP listener started on {}", self.bind_addr);
         
-        while self.running {
-            match listener.accept().await {
-                Ok((stream, peer_addr)) => {
-                    debug!("Incoming TCP connection from {}", peer_addr);
-                    
-                    // 处理新连接
-                    let manager = self.manager.clone();
-                    let local_device_id = self.local_device_id;
-                    let device_name = self.device_name.clone();
-                    let tls_config = Arc::clone(&self.tls_config);
-                    
-                    tokio::spawn(async move {
-                        if let Err(e) = Self::handle_incoming(
-                            stream,
-                            peer_addr,
-                            manager,
-                            local_device_id,
-                            device_name,
-                            tls_config,
-                        ).await {
-                            warn!("Failed to handle incoming connection from {}: {}", peer_addr, e);
-                        }
-                    });
+        // 创建关闭通道
+        let (shutdown_tx, mut shutdown_rx) = tokio::sync::mpsc::channel::<()>(1);
+        self.shutdown_tx = Some(shutdown_tx);
+        
+        // 监听循环（使用 tokio::select! 支持 graceful shutdown）
+        loop {
+            tokio::select! {
+                _ = shutdown_rx.recv() => {
+                    info!("TCP listener received shutdown signal");
+                    break;
                 }
-                Err(e) => {
-                    error!("TCP accept error: {}", e);
-                    // 短暂暂停以避免CPU飙升
-                    tokio::time::sleep(Duration::from_millis(100)).await;
+                result = listener.accept() => {
+                    match result {
+                        Ok((stream, peer_addr)) => {
+                            debug!("Incoming TCP connection from {}", peer_addr);
+                            
+                            // 处理新连接
+                            let manager = self.manager.clone();
+                            let local_device_id = self.local_device_id;
+                            let device_name = self.device_name.clone();
+                            let tls_config = Arc::clone(&self.tls_config);
+                            
+                            tokio::spawn(async move {
+                                if let Err(e) = Self::handle_incoming(
+                                    stream,
+                                    peer_addr,
+                                    manager,
+                                    local_device_id,
+                                    device_name,
+                                    tls_config,
+                                ).await {
+                                    warn!("Failed to handle incoming connection from {}: {}", peer_addr, e);
+                                }
+                            });
+                        }
+                        Err(e) => {
+                            error!("TCP accept error: {}", e);
+                            // 短暂暂停以避免CPU飙升
+                            tokio::time::sleep(Duration::from_millis(100)).await;
+                        }
+                    }
                 }
             }
         }
@@ -133,6 +149,9 @@ impl SyncthingTcpListener {
     /// 停止监听器
     pub fn stop(&mut self) {
         self.running = false;
+        if let Some(tx) = self.shutdown_tx.take() {
+            let _ = tx.try_send(());
+        }
         info!("TCP listener stopping...");
     }
     

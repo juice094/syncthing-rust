@@ -271,34 +271,34 @@ impl ConnectionManager {
             .ok_or_else(|| SyncthingError::config("connection manager dropped"))? };
         
         // Phase 2：优先使用 TransportRegistry，否则回退到旧式 TcpTransport
-        let listen_addr = if let Some(registry) = self.transport_registry.read().as_ref() {
-            if let Some(transport) = registry.default_transport() {
-                match crate::transport::bep_adapter::BepTransportListener::start(
-                    transport,
-                    &self.config.listen_addr.to_string(),
-                    handle.clone(),
-                    self.local_device_id,
-                    "syncthing-rust".to_string(),
-                    Arc::clone(&self.tls_config),
-                ).await {
-                    Ok(addr) => addr,
-                    Err(e) if self.config.listen_addr.port() != 0 => {
-                        warn!("Transport listener failed to bind to {}, trying random port: {}", self.config.listen_addr, e);
-                        let fallback_addr = "0.0.0.0:0".to_string();
-                        crate::transport::bep_adapter::BepTransportListener::start(
-                            registry.default_transport()
-                                .ok_or_else(|| SyncthingError::config("no default transport in registry"))?,
-                            &fallback_addr,
-                            handle,
-                            self.local_device_id,
-                            "syncthing-rust".to_string(),
-                            Arc::clone(&self.tls_config),
-                        ).await?
-                    }
-                    Err(e) => return Err(e),
+        let default_transport = {
+            let registry_guard = self.transport_registry.read();
+            registry_guard.as_ref().and_then(|r| r.default_transport())
+        };
+        
+        let listen_addr = if let Some(transport) = default_transport {
+            match crate::transport::bep_adapter::BepTransportListener::start(
+                transport.clone(),
+                &self.config.listen_addr.to_string(),
+                handle.clone(),
+                self.local_device_id,
+                "syncthing-rust".to_string(),
+                Arc::clone(&self.tls_config),
+            ).await {
+                Ok(addr) => addr,
+                Err(e) if self.config.listen_addr.port() != 0 => {
+                    warn!("Transport listener failed to bind to {}, trying random port: {}", self.config.listen_addr, e);
+                    let fallback_addr = "0.0.0.0:0".to_string();
+                    crate::transport::bep_adapter::BepTransportListener::start(
+                        transport,
+                        &fallback_addr,
+                        handle,
+                        self.local_device_id,
+                        "syncthing-rust".to_string(),
+                        Arc::clone(&self.tls_config),
+                    ).await?
                 }
-            } else {
-                return Err(SyncthingError::config("transport registry has no transports registered"));
+                Err(e) => return Err(e),
             }
         } else {
             // 回退：旧式 TcpTransport（Phase 1 行为）

@@ -28,6 +28,12 @@ pub const DEFAULT_MESSAGE_TIMEOUT: Duration = Duration::from_secs(60);
 /// 心跳间隔
 pub const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(90);
 
+/// BEP header 最大大小 (64 KiB)
+pub const MAX_BEP_HEADER_SIZE: usize = 64 * 1024;
+
+/// BEP message 最大大小 (128 MiB)
+pub const MAX_BEP_MESSAGE_SIZE: usize = 128 * 1024 * 1024;
+
 /// 连接事件
 #[derive(Debug, Clone)]
 pub enum ConnectionEvent {
@@ -442,6 +448,11 @@ impl BepConnection {
                     }
                 }
                 let hdr_len = u16::from_be_bytes(hdr_len_buf) as usize;
+                if hdr_len > MAX_BEP_HEADER_SIZE {
+                    return Err(SyncthingError::protocol(format!(
+                        "BEP header too large: {} > {}", hdr_len, MAX_BEP_HEADER_SIZE
+                    )));
+                }
 
                 // 读取 header 字节
                 let mut hdr_buf = vec![0u8; hdr_len];
@@ -459,6 +470,11 @@ impl BepConnection {
                     Err(_) => return Err(SyncthingError::timeout("message length read timeout")),
                 }
                 let msg_len = u32::from_be_bytes(msg_len_buf) as usize;
+                if msg_len > MAX_BEP_MESSAGE_SIZE {
+                    return Err(SyncthingError::protocol(format!(
+                        "BEP message too large: {} > {}", msg_len, MAX_BEP_MESSAGE_SIZE
+                    )));
+                }
 
                 // 读取 message 字节
                 let mut msg_buf = vec![0u8; msg_len];
@@ -985,6 +1001,11 @@ impl IrohBepConnection {
             .await
             .map_err(|e| SyncthingError::connection(format!("read failed: {}", e)))?;
         let hdr_len = u16::from_be_bytes(hdr_len_buf) as usize;
+        if hdr_len > MAX_BEP_HEADER_SIZE {
+            return Err(SyncthingError::protocol(format!(
+                "BEP header too large: {} > {}", hdr_len, MAX_BEP_HEADER_SIZE
+            )));
+        }
 
         // 读取 header
         let mut hdr_buf = vec![0u8; hdr_len];
@@ -998,6 +1019,11 @@ impl IrohBepConnection {
             .await
             .map_err(|e| SyncthingError::connection(format!("read failed: {}", e)))?;
         let msg_len = u32::from_be_bytes(msg_len_buf) as usize;
+        if msg_len > MAX_BEP_MESSAGE_SIZE {
+            return Err(SyncthingError::protocol(format!(
+                "BEP message too large: {} > {}", msg_len, MAX_BEP_MESSAGE_SIZE
+            )));
+        }
 
         // 读取 message
         let mut msg_buf = vec![0u8; msg_len];
