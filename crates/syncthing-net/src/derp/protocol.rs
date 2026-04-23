@@ -155,7 +155,7 @@ impl Frame {
         }
 
         let frame_type = FrameType::from_u8(buf.get_u8())
-            .ok_or_else(|| SyncthingError::protocol(format!("unknown DERP frame type")))?;
+            .ok_or_else(|| SyncthingError::protocol("unknown DERP frame type".to_string()))?;
 
         let frame = match frame_type {
             FrameType::ClientInfo => {

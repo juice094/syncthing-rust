@@ -9,8 +9,10 @@ use std::fmt;
 
 /// 连接状态
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Default)]
 pub enum ConnectionState {
     /// 初始状态
+    #[default]
     Initial,
     /// 连接中
     Connecting,
@@ -59,11 +61,6 @@ impl ConnectionState {
     }
 }
 
-impl Default for ConnectionState {
-    fn default() -> Self {
-        ConnectionState::Initial
-    }
-}
 
 /// 地址类型
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -117,12 +114,14 @@ pub struct ConnectionStats {
 
 /// 连接优先级
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Default)]
 pub enum ConnectionPriority {
     /// 最低优先级
     Lowest = 0,
     /// 低优先级
     Low = 1,
     /// 正常优先级
+    #[default]
     Normal = 2,
     /// 高优先级
     High = 3,
@@ -130,11 +129,6 @@ pub enum ConnectionPriority {
     Highest = 4,
 }
 
-impl Default for ConnectionPriority {
-    fn default() -> Self {
-        ConnectionPriority::Normal
-    }
-}
 
 /// 连接类型
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -310,6 +304,7 @@ pub enum VersionComparison {
 
 /// 索引ID（8字节随机值）
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Default)]
 pub struct IndexID(pub [u8; 8]);
 
 impl IndexID {
@@ -337,11 +332,6 @@ impl fmt::Debug for IndexID {
     }
 }
 
-impl Default for IndexID {
-    fn default() -> Self {
-        Self([0u8; 8])
-    }
-}
 
 /// 索引增量
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -526,18 +516,15 @@ pub struct Options {
 /// 版本控制配置
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type")]
+#[derive(Default)]
 pub enum VersioningConfig {
+    #[default]
     None,
     Simple { params: HashMap<String, String> },
     Staggered { params: HashMap<String, String> },
     External { params: HashMap<String, String> },
 }
 
-impl Default for VersioningConfig {
-    fn default() -> Self {
-        Self::None
-    }
-}
 
 /// 文件夹配置
 #[derive(Debug, Clone, Serialize, Deserialize)]

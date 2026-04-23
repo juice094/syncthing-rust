@@ -322,13 +322,13 @@ fn generate_self_signed_cert() -> Result<(Vec<u8>, Vec<u8>)> {
     let now = chrono::Utc::now();
     // 使用 rcgen 的时间格式
     params.not_before = rcgen::date_time_ymd(
-        now.year() as i32,
+        now.year(),
         now.month() as u8,
         now.day() as u8
     );
     let end = now + chrono::Duration::days(365 * 20);
     params.not_after = rcgen::date_time_ymd(
-        end.year() as i32,
+        end.year(),
         end.month() as u8,
         end.day() as u8
     );

@@ -12,6 +12,7 @@ const BASE32_ALPHABET: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
 
 /// 设备ID (SHA-256 哈希的 32 字节)
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Default)]
 pub struct DeviceId(pub [u8; 32]);
 
 impl DeviceId {
@@ -177,11 +178,6 @@ impl<'de> Deserialize<'de> for DeviceId {
     }
 }
 
-impl Default for DeviceId {
-    fn default() -> Self {
-        Self([0u8; 32])
-    }
-}
 
 /// 字节数组转 Base32（无填充）
 fn to_base32(bytes: &[u8]) -> String {

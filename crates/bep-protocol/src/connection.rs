@@ -289,7 +289,7 @@ impl BepConnection {
         F: FnOnce(&mut ConnectionStats),
     {
         let mut stats = self.stats.write();
-        f(&mut *stats);
+        f(&mut stats);
     }
 
     /// 检查连接是否活跃

@@ -104,9 +104,9 @@ async fn api_key_middleware(
             .and_then(|v| v.to_str().ok());
         let query = req.uri().query().and_then(|q| {
             q.split('&').find_map(|pair| {
-                let mut it = pair.splitn(2, '=');
-                let k = it.next()?;
-                let v = it.next()?;
+                let (k, v) = pair.split_once('=')?;
+                
+                
                 if k.eq_ignore_ascii_case("X-API-Key") {
                     Some(v)
                 } else {

@@ -184,7 +184,7 @@ impl Scanner {
 
                 // 添加目录条目
                 let modified = metadata.modified()
-                    .unwrap_or_else(|_| std::time::SystemTime::UNIX_EPOCH);
+                    .unwrap_or(std::time::SystemTime::UNIX_EPOCH);
                 let modified_secs = modified.duration_since(std::time::UNIX_EPOCH)
                     .unwrap_or_default()
                     .as_secs() as i64;
@@ -217,7 +217,7 @@ impl Scanner {
                 })?;
 
                 let modified = metadata.modified()
-                    .unwrap_or_else(|_| std::time::SystemTime::UNIX_EPOCH);
+                    .unwrap_or(std::time::SystemTime::UNIX_EPOCH);
                 let modified_secs = modified.duration_since(std::time::UNIX_EPOCH)
                     .unwrap_or_default()
                     .as_secs() as i64;
@@ -252,7 +252,7 @@ impl Scanner {
     ) -> Result<FileInfo> {
         let size = metadata.len() as i64;
         let modified = metadata.modified()
-            .unwrap_or_else(|_| std::time::SystemTime::UNIX_EPOCH);
+            .unwrap_or(std::time::SystemTime::UNIX_EPOCH);
         let modified_secs = modified.duration_since(std::time::UNIX_EPOCH)
             .unwrap_or_default()
             .as_secs() as i64;
@@ -366,7 +366,7 @@ impl Scanner {
             match fs::metadata(&full_path).await {
                 Ok(metadata) => {
                     let modified = metadata.modified()
-                        .unwrap_or_else(|_| std::time::SystemTime::UNIX_EPOCH);
+                        .unwrap_or(std::time::SystemTime::UNIX_EPOCH);
                     let modified_secs = modified.duration_since(std::time::UNIX_EPOCH)
                         .unwrap_or_default()
                         .as_secs() as i64;
