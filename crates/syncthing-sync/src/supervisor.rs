@@ -13,6 +13,14 @@ use tokio::task::JoinHandle;
 /// Boxed error type used by supervised tasks.
 pub type BoxError = Box<dyn Error + Send + Sync>;
 
+/// Type alias for a factory that produces supervised task futures.
+pub type TaskFactory = Box<
+    dyn Fn() -> Pin<Box<dyn Future<Output = Result<(), BoxError>> + Send>> + Send + Sync,
+>;
+
+/// Type alias for a permanent-failure callback.
+pub type FailureCallback = Arc<dyn Fn(&str) + Send + Sync>;
+
 /// Restart policy for a supervised task.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RestartPolicy {
@@ -73,9 +81,7 @@ pub struct SupervisedTask {
     /// Human-readable name used for logging and callbacks.
     pub name: String,
     /// Factory that produces a new future each time the task is (re)started.
-    pub future_factory: Box<
-        dyn Fn() -> Pin<Box<dyn Future<Output = Result<(), BoxError>> + Send>> + Send + Sync,
-    >,
+    pub future_factory: TaskFactory,
     /// Restart configuration.
     pub config: RestartConfig,
 }
@@ -83,7 +89,7 @@ pub struct SupervisedTask {
 /// Supervisor that manages a collection of `SupervisedTask`s.
 pub struct Supervisor {
     tasks: Vec<SupervisedTask>,
-    on_permanent_failure: Option<Arc<dyn Fn(&str) + Send + Sync>>,
+    on_permanent_failure: Option<FailureCallback>,
     handles: Vec<JoinHandle<()>>,
     shutdown_tx: broadcast::Sender<()>,
 }
@@ -142,7 +148,7 @@ impl Default for Supervisor {
 async fn supervise_task(
     task: SupervisedTask,
     mut shutdown_rx: broadcast::Receiver<()>,
-    on_permanent_failure: Option<Arc<dyn Fn(&str) + Send + Sync>>,
+    on_permanent_failure: Option<FailureCallback>,
 ) {
     let mut attempt: u32 = 0;
     let mut restart_count: u32 = 0;

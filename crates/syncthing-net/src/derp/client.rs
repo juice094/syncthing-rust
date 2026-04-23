@@ -54,6 +54,9 @@ pub enum DerpClientState {
     Connected,
 }
 
+/// Type alias for the inbound packet channel.
+type PacketRx = mpsc::UnboundedReceiver<(DeviceId, Vec<u8>)>;
+
 /// DERP 客户端
 ///
 /// 通过 TCP 连接到 DERP 服务器，维护长连接并转发数据包。
@@ -63,7 +66,7 @@ pub struct DerpClient {
     /// 出站数据包发送通道（应用层 → DERP 客户端）
     packet_tx: mpsc::UnboundedSender<(DeviceId, Vec<u8>)>,
     /// 入站数据包接收通道（DERP 客户端 → 应用层）
-    packet_rx: Arc<Mutex<mpsc::UnboundedReceiver<(DeviceId, Vec<u8>)>>>,
+    packet_rx: Arc<Mutex<PacketRx>>,
 }
 
 impl DerpClient {

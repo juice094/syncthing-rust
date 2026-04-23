@@ -83,4 +83,8 @@ impl MetricsCollector {
     pub fn len(&self) -> usize {
         self.records.lock().len()
     }
+
+    pub fn is_empty(&self) -> bool {
+        self.records.lock().is_empty()
+    }
 }
