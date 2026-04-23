@@ -158,10 +158,7 @@ impl FolderModel {
             return false;
         }
         
-        match self.state.status {
-            FolderStatus::Idle | FolderStatus::SyncWaiting => true,
-            _ => false,
-        }
+        matches!(self.state.status, FolderStatus::Idle | FolderStatus::SyncWaiting)
     }
 
     /// 检查是否应该拉取
@@ -175,9 +172,6 @@ impl FolderModel {
             return false;
         }
 
-        match self.state.status {
-            FolderStatus::Idle | FolderStatus::ScanWaiting | FolderStatus::SyncWaiting => true,
-            _ => false,
-        }
+        matches!(self.state.status, FolderStatus::Idle | FolderStatus::ScanWaiting | FolderStatus::SyncWaiting)
     }
 }

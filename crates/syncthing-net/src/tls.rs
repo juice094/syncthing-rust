@@ -56,8 +56,7 @@ impl SyncthingTlsConfig {
             .next()
             .ok_or_else(|| SyncthingError::Tls("no private key found".to_string()))??;
         
-        let private_key = PrivateKeyDer::try_from(private_key)
-            .map_err(|_| SyncthingError::Tls("invalid private key".to_string()))?;
+        let private_key = PrivateKeyDer::from(private_key);
         
         // 计算设备ID（从证书公钥的SHA-256）
         let device_id = Self::derive_device_id(&cert_chain[0])?;

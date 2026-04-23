@@ -118,7 +118,7 @@ impl IgnorePatterns {
         let mut loaded = HashSet::new();
         loaded.insert(path.to_path_buf());
 
-        let mut patterns = Self::from_str(&content);
+        let mut patterns = Self::parse(&content);
 
         // Load includes recursively
         let includes = patterns.includes.clone();
@@ -151,7 +151,7 @@ impl IgnorePatterns {
             .map_err(SyncthingError::Io)?;
 
         let base_dir = path.parent().unwrap_or(Path::new("")).to_path_buf();
-        let included = Self::from_str(&content);
+        let included = Self::parse(&content);
 
         patterns.patterns.extend(included.patterns);
         if included.has_includes {
@@ -177,7 +177,7 @@ impl IgnorePatterns {
     ///
     /// # Arguments
     /// * `content` - The ignore file content as a string
-    pub fn from_str(content: &str) -> Self {
+    pub fn parse(content: &str) -> Self {
         let mut patterns = Vec::new();
         let mut has_includes = false;
         let mut includes = Vec::new();
@@ -527,7 +527,7 @@ desktop.ini
 *.crdownload
 "#;
 
-    IgnorePatterns::from_str(patterns)
+    IgnorePatterns::parse(patterns)
 }
 
 #[cfg(test)]
@@ -610,7 +610,7 @@ build/
 !important.log
 "#;
 
-        let patterns = IgnorePatterns::from_str(content);
+        let patterns = IgnorePatterns::parse(content);
 
         assert!(patterns.is_ignored(Path::new("debug.log")));
         assert!(patterns.is_ignored(Path::new("build")));

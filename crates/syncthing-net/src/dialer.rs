@@ -2,6 +2,7 @@
 //!
 //! 实现多地址并发拨号、地址质量评分和最优连接选择
 
+use std::cmp::Reverse;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -18,6 +19,9 @@ use syncthing_core::{DeviceId, SyncthingError};
 use crate::connection::BepConnection;
 use crate::tcp_transport::connect_bep;
 use crate::tls::SyncthingTlsConfig;
+
+/// Result type for a dial task.
+pub type DialResult = Result<(Arc<BepConnection>, SocketAddr, Duration), SyncthingError>;
 
 /// 地址类型偏好（影响评分排序）
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -217,7 +221,7 @@ impl ParallelDialer {
             .iter()
             .map(|addr| self.get_or_create_score(*addr))
             .collect();
-        scored.sort_by(|a, b| b.score().cmp(&a.score()));
+        scored.sort_by_key(|b| Reverse(b.score()));
 
         // 最多并发 3 个
         let top: Vec<AddressScore> = scored.into_iter().take(3).collect();
@@ -230,21 +234,17 @@ impl ParallelDialer {
         );
 
         // 启动并发拨号任务
-        let mut tasks: FuturesUnordered<
-            JoinHandle<Result<(Arc<BepConnection>, SocketAddr, Duration), SyncthingError>>,
-        > = FuturesUnordered::new();
+        let mut tasks: FuturesUnordered<JoinHandle<DialResult>> = FuturesUnordered::new();
 
         for score in &top {
             let addr = score.address;
             let connector = Arc::clone(&*self.connector.read());
-            let device_id = device_id;
+            
             let local_device_id = self.local_device_id;
             let device_name = self.device_name.clone();
             let tls_config = Arc::clone(tls_config);
 
-            let handle: JoinHandle<
-                Result<(Arc<BepConnection>, SocketAddr, Duration), SyncthingError>,
-            > = tokio::spawn(async move {
+            let handle: JoinHandle<DialResult> = tokio::spawn(async move {
                 let start = Instant::now();
                 match connector.connect(addr, device_id, local_device_id, &device_name, &tls_config).await {
                     Ok(conn) => {

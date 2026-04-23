@@ -26,6 +26,11 @@ use crate::tcp_transport::{TcpTransport, DEFAULT_TCP_PORT};
 use crate::tls::SyncthingTlsConfig;
 use crate::transport::TransportRegistry;
 
+/// Callback invoked when a new device connects.
+pub type ConnectedCallback = Arc<dyn Fn(DeviceId) + Send + Sync>;
+/// Callback invoked when a device disconnects.
+pub type DisconnectedCallback = Arc<dyn Fn(DeviceId, String) + Send + Sync>;
+
 /// 连接管理器配置
 #[derive(Debug, Clone)]
 pub struct ConnectionManagerConfig {
@@ -119,9 +124,9 @@ pub struct ConnectionManager {
     /// 网络监控任务句柄
     netmon_handle: RwLock<Option<JoinHandle<()>>>,
     /// 连接回调
-    on_connected: RwLock<Option<Arc<dyn Fn(DeviceId) + Send + Sync>>>,
+    on_connected: RwLock<Option<ConnectedCallback>>,
     /// 断开回调
-    on_disconnected: RwLock<Option<Arc<dyn Fn(DeviceId, String) + Send + Sync>>>,
+    on_disconnected: RwLock<Option<DisconnectedCallback>>,
     /// 自引用弱指针
     self_weak: RwLock<Option<Weak<ConnectionManager>>>,
     /// 并行拨号器
