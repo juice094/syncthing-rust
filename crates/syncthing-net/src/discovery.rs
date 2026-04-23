@@ -201,12 +201,12 @@ pub struct AddressInfo {
     /// 地址字符串
     pub address: String,
     /// 地址类型（local/stun/upnp）
-    pub addr_type: AddressType,
+    pub addr_type: AddressSource,
 }
 
 /// 地址类型
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum AddressType {
+pub enum AddressSource {
     /// 本地地址
     Local,
     /// STUN 获取的地址
@@ -215,12 +215,12 @@ pub enum AddressType {
     Upnp,
 }
 
-impl std::fmt::Display for AddressType {
+impl std::fmt::Display for AddressSource {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            AddressType::Local => write!(f, "local"),
-            AddressType::Stun => write!(f, "stun"),
-            AddressType::Upnp => write!(f, "upnp"),
+            AddressSource::Local => write!(f, "local"),
+            AddressSource::Stun => write!(f, "stun"),
+            AddressSource::Upnp => write!(f, "upnp"),
         }
     }
 }
@@ -247,8 +247,8 @@ mod tests {
 
     #[test]
     fn test_address_type_display() {
-        assert_eq!(AddressType::Local.to_string(), "local");
-        assert_eq!(AddressType::Stun.to_string(), "stun");
-        assert_eq!(AddressType::Upnp.to_string(), "upnp");
+        assert_eq!(AddressSource::Local.to_string(), "local");
+        assert_eq!(AddressSource::Stun.to_string(), "stun");
+        assert_eq!(AddressSource::Upnp.to_string(), "upnp");
     }
 }

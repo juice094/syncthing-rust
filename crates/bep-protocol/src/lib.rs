@@ -14,7 +14,7 @@ pub use messages::{
     Request, Response, Index, IndexUpdate, ClusterConfig, WireFolder,
     encode_message, decode_message,
 };
-pub use connection::BepConnection;
+pub use connection::BepRawConnection;
 
 use syncthing_core::{Result, SyncthingError};
 

@@ -134,14 +134,14 @@ pub enum SyncTaskType {
 
 /// 文件夹配置与状态
 #[derive(Debug, Clone)]
-pub struct FolderModel {
+pub struct FolderConfigState {
     pub config: Folder,
     pub state: FolderState,
     pub local_sequence: u64,
     pub remote_devices: Vec<DeviceId>,
 }
 
-impl FolderModel {
+impl FolderConfigState {
     pub fn new(config: Folder) -> Self {
         let folder_id = config.id.clone();
         Self {
