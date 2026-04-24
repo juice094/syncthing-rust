@@ -415,8 +415,12 @@ impl BepConnection {
             _ = &mut shutdown_rx => {
                 debug!("Connection {} received shutdown signal", self.id());
             }
-            _ = read_handle => {
-                debug!("Connection {} read task ended", self.id());
+            result = read_handle => {
+                match result {
+                    Ok(Ok(())) => debug!("Connection {} read task ended normally", self.id()),
+                    Ok(Err(e)) => warn!("Connection {} read task error: {}", self.id(), e),
+                    Err(e) => warn!("Connection {} read task panicked: {}", self.id(), e),
+                }
             }
             _ = write_handle => {
                 debug!("Connection {} write task ended", self.id());

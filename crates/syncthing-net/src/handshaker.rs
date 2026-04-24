@@ -16,8 +16,8 @@ impl BepHandshaker {
     fn build_hello(device_name: &str) -> bep_protocol::messages::Hello {
         bep_protocol::messages::Hello {
             device_name: device_name.to_string(),
-            client_name: "syncthing-rust".to_string(),
-            client_version: env!("CARGO_PKG_VERSION").to_string(),
+            client_name: "syncthing".to_string(),
+            client_version: "v2.0.16".to_string(),
             num_connections: 1,
             timestamp: std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)

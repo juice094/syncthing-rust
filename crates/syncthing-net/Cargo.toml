@@ -7,8 +7,8 @@ edition = "2021"
 syncthing-core = { path = "../syncthing-core" }
 
 tokio = { workspace = true }
-tokio-rustls = { workspace = true }
-rustls = { workspace = true }
+tokio-rustls = { workspace = true, features = ["ring"] }
+rustls = { workspace = true, features = ["ring"] }
 rustls-pemfile = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
