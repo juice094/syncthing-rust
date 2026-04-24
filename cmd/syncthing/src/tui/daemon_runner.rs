@@ -382,7 +382,7 @@ impl BepSessionHandler for DaemonBepHandler {
                     .collect();
                 bep_protocol::messages::WireFolder {
                     id: f.id.clone(),
-                    label: vec![f.label.clone().unwrap_or_default()],
+                    label: f.label.clone().unwrap_or_default(),
                     r#type: bep_protocol::messages::FolderType::SendReceive as i32,
                     stop_reason: bep_protocol::messages::FolderStopReason::Running as i32,
                     devices,

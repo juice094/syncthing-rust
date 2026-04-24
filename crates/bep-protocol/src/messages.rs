@@ -489,8 +489,8 @@ pub enum Compression {
 pub struct WireFolder {
     #[prost(string, tag = "1")]
     pub id: String,
-    #[prost(string, repeated, tag = "2")]
-    pub label: Vec<String>,
+    #[prost(string, tag = "2")]
+    pub label: String,
     #[prost(enumeration = "FolderType", tag = "3")]
     pub r#type: i32,
     #[prost(enumeration = "FolderStopReason", tag = "7")]

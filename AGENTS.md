@@ -86,6 +86,31 @@
 
 **实现策略**：手写 JSON-RPC 2.0 协议层（~200 行），不依赖第三方 MCP SDK，只使用工作区已有依赖（tokio/serde_json/reqwest），完全可控、零额外依赖风险。
 
+## 阶段性进展（2026-04-24 Session）
+
+### 已完成
+
+| 模块 | 内容 | 状态 |
+|------|------|------|
+| MCP Bridge | 新增 `syncthing-mcp-bridge`，手写 JSON-RPC 2.0，11 tools + 3 resources | ✅ E2E 11/11 通过 |
+| TUI | 粘贴支持（Ctrl+V / Shift+Insert via arboard） | ✅ |
+| clippy | 9 个 warning 全清 | ✅ 0 warnings |
+| syncthing-core | `validate_device_id` 修复：hex 检查 → `DeviceId::from_str`，支持 base32 字符集 | ✅ |
+| syncthing-api | `parse_device_id` 修复：优先 `DeviceId::from_str`，保留 SHA-256 fallback | ✅ |
+| bep-protocol | `WireFolder.label`：`Vec<String>` → `String`，与 Go 端 protobuf 兼容 | ✅ |
+
+### 当前状态
+
+- **BEP Session 启动**：架构完整，`daemon_runner.rs` 中 `on_connected` 回调正确 spawn `BepSession::run()`
+- **ClusterConfig 发送**：Rust 端可正确生成并发送 ClusterConfig（日志验证）
+- **跨设备测试**：Rust 端主动 dial 格雷 Go 节点，连接建立后 10 秒超时（Go 端未回复 ClusterConfig）
+- **根因**：`WireFolder.label` 的 protobuf `repeated string` 与 Go 端 `string` 不兼容，已修复；待格雷重启 Go 节点后验证
+
+### 阻塞项
+
+- **格雷端网络**：Go Syncthing 未监听 Tailscale IP (`100.99.240.98:22000`)，Rust 端 dial 被拒绝 (os error 10061)
+- **下一步**：格雷确认 Go 节点运行状态及监听地址，或提供可用地址
+
 ## 跨项目接口
 
 - **clarity**：clarity-wire 事件总线 → syncthing-rust P2P 网关 → 跨实例验证
