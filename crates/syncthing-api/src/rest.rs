@@ -1199,10 +1199,15 @@ async fn update_config(
 // Helper functions
 
 fn parse_device_id(id: &str) -> DeviceId {
-    let hash = Sha256::digest(id.as_bytes());
-    let mut bytes = [0u8; 32];
-    bytes.copy_from_slice(&hash);
-    DeviceId::from_bytes_array(bytes)
+    // First try to parse as a standard DeviceId (base32 + Luhn-32).
+    // If that fails, fall back to SHA-256 hash for backward compatibility
+    // with test fixtures that use plain names as IDs.
+    id.parse::<DeviceId>().unwrap_or_else(|_| {
+        let hash = Sha256::digest(id.as_bytes());
+        let mut bytes = [0u8; 32];
+        bytes.copy_from_slice(&hash);
+        DeviceId::from_bytes_array(bytes)
+    })
 }
 
 // Request/Response types
