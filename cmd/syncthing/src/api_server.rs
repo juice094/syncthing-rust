@@ -9,7 +9,7 @@ use syncthing_core::{DeviceId, Result, SyncthingError};
 use tokio::net::TcpListener;
 use tracing::{info, warn};
 
-/// API Key 认证中间件
+// API Key 认证中间件
 // Middleware removed: API key checking will be done inside syncthing-api build_router
 // after adding api_key field to ApiState.
 

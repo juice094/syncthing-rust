@@ -11,6 +11,7 @@ members = [
     "crates/syncthing-test-utils",
     "crates/bep-protocol",
     "cmd/syncthing",
+    "cmd/syncthing-mcp-bridge",
 ]
 
 [workspace.dependencies]
