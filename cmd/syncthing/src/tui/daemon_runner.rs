@@ -359,12 +359,13 @@ impl BepSessionHandler for DaemonBepHandler {
         device_id: DeviceId,
     ) -> syncthing_core::Result<bep_protocol::messages::ClusterConfig> {
         let config = self.sync_service.get_config().await.unwrap_or_default();
+        let local_id = config.local_device_id.unwrap_or_default();
         let folders: Vec<bep_protocol::messages::WireFolder> = config
             .folders
             .iter()
             .filter(|f| f.devices.contains(&device_id))
             .map(|f| {
-                let devices: Vec<bep_protocol::messages::WireDevice> = f
+                let mut devices: Vec<bep_protocol::messages::WireDevice> = f
                     .devices
                     .iter()
                     .map(|d| bep_protocol::messages::WireDevice {
@@ -380,6 +381,21 @@ impl BepSessionHandler for DaemonBepHandler {
                         encryption_password_token: Vec::new(),
                     })
                     .collect();
+                // BEP 协议要求 ClusterConfig 的 devices 列表必须包含本地设备
+                if !f.devices.contains(&local_id) {
+                    devices.push(bep_protocol::messages::WireDevice {
+                        id: local_id.as_bytes().to_vec(),
+                        name: String::new(),
+                        addresses: vec![],
+                        compression: bep_protocol::messages::Compression::Metadata as i32,
+                        cert_name: String::new(),
+                        max_sequence: 0,
+                        introducer: false,
+                        index_id: 0,
+                        skip_introduction_removals: false,
+                        encryption_password_token: Vec::new(),
+                    });
+                }
                 bep_protocol::messages::WireFolder {
                     id: f.id.clone(),
                     label: f.label.clone().unwrap_or_default(),

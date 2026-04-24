@@ -4,8 +4,16 @@
 
 use std::io::BufReader;
 use std::path::Path;
-use std::sync::Arc;
+use std::sync::{Arc, Once};
 use std::time::Duration;
+
+static CRYPTO_PROVIDER_INIT: Once = Once::new();
+
+fn ensure_crypto_provider() {
+    CRYPTO_PROVIDER_INIT.call_once(|| {
+        let _ = rustls::crypto::ring::default_provider().install_default();
+    });
+}
 
 use tokio::fs;
 use tokio::net::TcpStream;
@@ -426,6 +434,7 @@ pub async fn accept_tls_stream<S>(
 where
     S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin,
 {
+    ensure_crypto_provider();
     debug!("Starting server TLS handshake over generic stream");
     
     let server_config = config.server_config()
@@ -455,6 +464,7 @@ pub async fn connect_tls_stream<S>(
 where
     S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin,
 {
+    ensure_crypto_provider();
     debug!("Starting client TLS handshake over generic stream");
     
     let client_config = config.client_config()
