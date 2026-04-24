@@ -40,7 +40,7 @@ pub fn draw(f: &mut Frame, app: &App, theme: &Theme) {
     let id_focused = app.folder_form.focus == 0;
     let id_text = format!(
         "Folder ID: {}",
-        app.folder_form.fields.get(0).map(|s| s.as_str()).unwrap_or("")
+        app.folder_form.fields.first().map(|s| s.as_str()).unwrap_or("")
     );
     let id_para = Paragraph::new(id_text)
         .style(if id_focused {
@@ -101,7 +101,7 @@ pub fn draw(f: &mut Frame, app: &App, theme: &Theme) {
             } else {
                 Style::default().fg(theme.text_secondary)
             };
-            ListItem::new(Line::from(format!("{} {} — {}", marker, name, d.id.to_string()))).style(style)
+            ListItem::new(Line::from(format!("{} {} — {}", marker, name, d.id))).style(style)
         })
         .collect();
 

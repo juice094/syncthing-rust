@@ -27,16 +27,8 @@ pub fn validate_device_id(id: &str) -> Result<(), SyncthingError> {
     if id.is_empty() {
         return Err(SyncthingError::Validation("Device ID cannot be empty".to_string()));
     }
-    let cleaned: String = id.chars().filter(|&c| c != '-').collect();
-    if cleaned.len() != 56 {
-        return Err(SyncthingError::Validation(
-            "Device ID must be 56 hexadecimal characters (or 63 with dashes)".to_string(),
-        ));
-    }
-    if !cleaned.chars().all(|c| c.is_ascii_hexdigit()) {
-        return Err(SyncthingError::Validation(
-            "Device ID must contain only hexadecimal characters".to_string(),
-        ));
+    if let Err(e) = id.parse::<crate::DeviceId>() {
+        return Err(SyncthingError::Validation(format!("Invalid device ID: {}", e)));
     }
     Ok(())
 }

@@ -1,5 +1,5 @@
 
-use crossterm::event::{Event, KeyCode, KeyEvent, KeyEventKind};
+use crossterm::event::{Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 
 use std::str::FromStr;
 use std::sync::Arc;
@@ -124,6 +124,17 @@ fn handle_key(app: &mut App, key: KeyEvent) -> bool {
     false
 }
 
+/// 尝试从系统剪贴板粘贴文本到指定表单字段
+fn try_paste_into(fields: &mut [String], focus: usize) {
+    if let Ok(mut clipboard) = arboard::Clipboard::new() {
+        if let Ok(text) = clipboard.get_text() {
+            if let Some(field) = fields.get_mut(focus) {
+                field.push_str(&text);
+            }
+        }
+    }
+}
+
 fn handle_add_device_key(app: &mut App, key: KeyEvent) -> bool {
     match key.code {
         KeyCode::Esc => app.popup = Popup::None,
@@ -136,6 +147,14 @@ fn handle_add_device_key(app: &mut App, key: KeyEvent) -> bool {
             } else {
                 app.device_form.focus -= 1;
             }
+        }
+        KeyCode::Char('v') | KeyCode::Char('V')
+            if key.modifiers.contains(KeyModifiers::CONTROL) =>
+        {
+            try_paste_into(&mut app.device_form.fields, app.device_form.focus);
+        }
+        KeyCode::Insert if key.modifiers.contains(KeyModifiers::SHIFT) => {
+            try_paste_into(&mut app.device_form.fields, app.device_form.focus);
         }
         KeyCode::Enter => {
             let id_str = app.device_form.fields[0].trim();
@@ -198,6 +217,14 @@ fn handle_add_folder_key(app: &mut App, key: KeyEvent) -> bool {
                 app.folder_form.focus -= 1;
             }
         }
+        KeyCode::Char('v') | KeyCode::Char('V')
+            if key.modifiers.contains(KeyModifiers::CONTROL) =>
+        {
+            try_paste_into(&mut app.folder_form.fields, app.folder_form.focus);
+        }
+        KeyCode::Insert if key.modifiers.contains(KeyModifiers::SHIFT) => {
+            try_paste_into(&mut app.folder_form.fields, app.folder_form.focus);
+        }
         KeyCode::Enter => {
             let id = app.folder_form.fields[0].trim();
             let path = app.folder_form.fields[1].trim();
@@ -226,17 +253,17 @@ fn handle_add_folder_key(app: &mut App, key: KeyEvent) -> bool {
             save_and_log(app);
         }
         KeyCode::Down => {
-            if app.folder_form.focus == app.folder_form.fields.len() {
-                if app.folder_device_selected + 1 < app.config.devices.len() {
-                    app.folder_device_selected += 1;
-                }
+            if app.folder_form.focus == app.folder_form.fields.len()
+                && app.folder_device_selected + 1 < app.config.devices.len()
+            {
+                app.folder_device_selected += 1;
             }
         }
         KeyCode::Up => {
-            if app.folder_form.focus == app.folder_form.fields.len() {
-                if app.folder_device_selected > 0 {
-                    app.folder_device_selected -= 1;
-                }
+            if app.folder_form.focus == app.folder_form.fields.len()
+                && app.folder_device_selected > 0
+            {
+                app.folder_device_selected -= 1;
             }
         }
         KeyCode::Char(' ') => {

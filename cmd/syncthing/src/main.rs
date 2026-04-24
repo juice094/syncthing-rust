@@ -2,7 +2,7 @@
 //!
 //! 提供命令行界面和守护进程功能
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicI32, Ordering};
 
 use anyhow::{Context, Result};
@@ -132,7 +132,7 @@ mod api_server;
 
 /// Resolve listen/device_name from config file, overridden by CLI args.
 fn resolve_daemon_config(
-    config_dir: &PathBuf,
+    config_dir: &Path,
     cli_listen: String,
     cli_device_name: String,
 ) -> Result<(String, String)> {
@@ -321,13 +321,13 @@ impl BlockSource for ManagerBlockSource {
 
 /// 启动 TUI 配置管理器
 async fn cmd_tui(
-    config_dir: &PathBuf,
+    config_dir: &Path,
     listen: &str,
     device_name: &str,
     memory_buffer: logging_buffer::MemoryBuffer,
 ) -> Result<()> {
     tui::run_tui(
-        config_dir.clone(),
+        config_dir.to_path_buf(),
         listen.to_string(),
         device_name.to_string(),
         memory_buffer,
@@ -387,7 +387,7 @@ async fn cmd_generate_cert(config_dir: &PathBuf, device_name: &str, force: bool)
 }
 
 /// 显示设备ID
-async fn cmd_show_id(config_dir: &PathBuf) -> Result<()> {
+async fn cmd_show_id(config_dir: &Path) -> Result<()> {
     let cert_path = config_dir.join(syncthing_net::tls::CERT_FILE_NAME);
     let key_path = config_dir.join(syncthing_net::tls::KEY_FILE_NAME);
 

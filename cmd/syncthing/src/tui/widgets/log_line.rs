@@ -56,8 +56,8 @@ fn highlight_spans<'a>(line: &'a str, theme: &Theme) -> Vec<Span<'a>> {
         let key = &before[key_start..];
 
         // 找到 value 的结束（下一个空格，或引号结束）
-        let (value, remaining) = if after.starts_with('"') {
-            if let Some(end) = after[1..].find('"') {
+        let (value, remaining) = if let Some(quoted) = after.strip_prefix('"') {
+            if let Some(end) = quoted.find('"') {
                 (&after[..end + 2], &after[end + 2..])
             } else {
                 (after, "")

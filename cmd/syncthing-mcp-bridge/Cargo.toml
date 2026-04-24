@@ -1,0 +1,21 @@
+[package]
+name = "syncthing-mcp-bridge"
+version = "0.1.0"
+edition = "2021"
+authors = ["juice094"]
+description = "MCP Bridge for syncthing-rust — translates MCP stdio to REST API calls"
+license = "MPL-2.0"
+publish = false
+
+[[bin]]
+name = "syncthing-mcp-bridge"
+path = "src/main.rs"
+
+[dependencies]
+tokio = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+anyhow = { workspace = true }
