@@ -5,10 +5,10 @@
 `syncthing-rust` 是 P2P 文件同步的 Rust 替代实现，已与官方 Go Syncthing 完成 BEP 协议互操作验证。
 
 - **当前状态**：v0.2.0 Beta，255+ tests，0 TODOs，**0 clippy warnings**
-- **传输层**：TCP+TLS / SOCKS5 / DERP 中继 / UPnP / NAT-PMP / PCP 全实现
-- **发现层**：Local Discovery（UDP 广播）✅ / STUN ✅ / PortMapper ✅ / **Global Discovery 📝** / **Relay 📝**
-- **同步**：Push/Pull E2E 双向验证（Rust ↔ Go 跨 Tailscale 网络）
-- **互操作**：与官方 Go Syncthing 的 BEP 协议完全兼容（Hello/ClusterConfig/Index/Request/Response）
+- **传输层**：TCP+TLS / HTTP CONNECT 代理 / SOCKS5 代理 / DERP 中继（自研协议）/ UPnP（PCP/NAT-PMP 骨架待实现）
+- **发现层**：Local Discovery（UDP 广播骨架）⚠️ / STUN（公网 IP 查询）⚠️ / PortMapper（UPnP 主路径）⚠️ / **Global Discovery ❌** / **官方 Relay Protocol ❌**
+- **同步**：Pull 已验证；被动响应块请求（上传）已实现；主动 Push 调度待完善
+- **互操作**：与官方 Go Syncthing 的 BEP 核心消息（Hello/ClusterConfig/Index/Request/Response）在 Tailscale 环境下已验证
 - **观测**：REST API（兼容 Go 布局）+ 文件系统 watcher(1s debounce) + TUI
 
 ## 架构讨论摘要（来自 2026-04-24 会话）
@@ -102,9 +102,9 @@
 
 ### 当前状态
 
-- **Local Discovery**：局域网内自动发现与自动拨号已集成到主流程
-- **STUN/PortMapper**：后台任务运行，成功时扩展 announce 地址列表
-- **BEP 互通**：`WireFolder.label` 和 `client_name` 兼容性修复已提交，待格雷端验证
+- **Local Discovery**：UDP 广播发送/接收、protobuf 编解码、auto-dial 已集成；缺少 IPv6 多播、网卡枚举、广播地址计算
+- **STUN/PortMapper**：STUN 仅能查询公网映射地址，无 NAT 类型检测、无 hole punching；PortMapper 仅 UPnP 路径可用，PCP/NAT-PMP 未实现，daemon 中无自动续约
+- **BEP 互通**：`WireFolder.label` 和 `client_name` 兼容性修复已提交；此前仅在 Tailscale 环境下与 Go 节点验证通过，当前无 Tailscale 时跨网络互联能力为零
 
 ### 阻塞项
 

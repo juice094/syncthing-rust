@@ -58,8 +58,8 @@
 | 连接管理 | ✅ | `ConnectionManager` 有连接池、pending 连接、重试退避 |
 | 并行拨号 | ✅ | `ParallelDialer` 支持最多 3 地址并发竞速 + RTT 评分 |
 | 网络变更监听 | ✅ | `NetMonitor` 检测接口变化并触发重拨 |
-| 端口映射 (UPnP/NAT-PMP) | ✅ | `PortMapper` 已实现 |
-| STUN 客户端 | ✅ | XOR-MAPPED-ADDRESS 解析完整 |
+| 端口映射 (UPnP) | ⚠️ | `PortMapper` UPnP 路径可用；PCP/NAT-PMP 骨架存在但未实现；daemon 中无自动续约 |
+| STUN 客户端 | ⚠️ | 可查询公网映射地址（XOR-MAPPED-ADDRESS 解析完整）；缺少 NAT 类型检测、多服务器对比、hole punching 协调 |
 
 ### 4. `syncthing-sync` — ⚠️ 同步逻辑真实，推送方向未实现
 | 功能 | 状态 | 说明 |
@@ -73,7 +73,7 @@
 | 数据库抽象 | ✅ | `MemoryDatabase` 和 `FileSystemDatabase` (JSON) |
 | **Puller 块拉取** | ✅ | `BlockSource` trait 已对接，`Puller` 可通过 BEP Request/Response 拉取真实块 |
 | 文件系统 watcher | ✅ | `FolderModel` 集成 `notify` watcher，支持秒级触发 scan + IndexUpdate |
-| 推送 (Push) | ❌ | 未实现主动推送逻辑，但 IndexUpdate 可由 watcher/scan 触发自动广播 |
+| 推送 (Push) | ⚠️ | 被动响应块请求（上传）已通过 `block_server.rs` + `BepSession::on_block_request` 实现；主动扫描后触发对端拉取的调度逻辑待完善 |
 
 ### 5. `cmd/syncthing` — ✅ 已成为真实 daemon
 | 子命令 | 状态 |
@@ -97,7 +97,7 @@
 - **TLS ALPN 协商**: 修复 `bep/1.0` ALPN，消除 Go 端警告
 - **BEP 标准帧格式**: 从自定义格式切换为标准 BEP `[header_len][Header][msg_len][Message]` 帧
 - **ClusterConfig 完整性**: 在每个 `WireFolder` 的 `devices` 列表中填入本地设备信息
-- **测试结果**: Rust 与 Go 成功交换双向 `ClusterConfig`，发送 `Index`，进入**稳定 steady-state BEP 循环**，连接持续保持（30s+ 测试通过）
+- **测试结果**: Rust 与 Go 成功交换双向 `ClusterConfig`，发送 `Index`，进入 steady-state BEP 循环；连接在 Tailscale 虚拟网络环境下保持 30s+（真实公网/局域网稳定性待验证）
 
 ### 2026-04-11：跨网络 BEP 互通与文件同步验证 ✅
 - **网络环境**: Rust 节点通过 Tailscale 连接云端 Go 节点 (`100.99.240.98:22000`)
