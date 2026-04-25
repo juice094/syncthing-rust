@@ -88,6 +88,7 @@ impl FolderModel {
         loop {
             tokio::select! {
                 _ = interval.tick() => {
+                    debug!(folder_id = %self.folder.id, "Scan loop tick triggered by interval");
                     if let Err(e) = self.scan().await {
                         error!(folder_id = %self.folder.id, error = %e, "Scan failed");
                     }
@@ -135,6 +136,7 @@ impl FolderModel {
                 }, if debounce_timer.is_some() => {
                     debounce_timer = None;
                     info!(folder_id = %folder_id, "Debounced watcher scan triggered");
+                    debug!(folder_id = %folder_id, "Scan triggered by watcher debounce");
                     if let Err(e) = self.scan().await {
                         error!(folder_id = %folder_id, error = %e, "Watcher-triggered scan failed");
                     }

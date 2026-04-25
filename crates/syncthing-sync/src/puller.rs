@@ -194,7 +194,22 @@ impl Puller {
             trace!(file = %file_info.name, block = idx, offset = block.offset, size = block.size, "Downloading block");
 
             let block_data = match &block_source {
-                Some(source) => source.request_block(folder_id, &file_info.name, block).await?,
+                Some(source) => {
+                    match source.request_block(folder_id, &file_info.name, block).await {
+                        Ok(data) => data,
+                        Err(e) => {
+                            error!(
+                                file = %file_info.name,
+                                block = idx,
+                                offset = block.offset,
+                                size = block.size,
+                                error = %e,
+                                "Block request failed"
+                            );
+                            return Err(e);
+                        }
+                    }
+                }
                 None => return Err(SyncError::pull(file_info.name.clone(), "No block source configured".to_string())),
             };
 
