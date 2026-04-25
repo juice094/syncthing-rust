@@ -148,6 +148,12 @@
   - `run()`: 后台循环，每 30min announce，失败 5min 后重试
 - **daemon_runner 集成**: 启动时从 `cert.pem`/`key.pem` 自动构造 `GlobalDiscovery`，spawn 后台 announce 任务
 - **依赖**: `reqwest`（`rustls-tls` feature）已加入 `syncthing-net/Cargo.toml`
+- **⚠️ 风险点**：
+  1. **mTLS 证书格式假设**：`reqwest::Identity::from_pem` 要求未加密的 PEM 私钥；若用户证书使用加密私钥或 PKCS#8 特定变体，初始化会失败（当前仅打印 warn log，不阻断启动）
+  2. **单服务器无 fallback**：仅连接 `discovery.syncthing.net`，无备用服务器；若官方服务故障或被墙，全局发现完全失效
+  3. **隐私暴露**：向第三方服务器上报 device_id + 公网 IP；未来应支持 `globalAnnounceEnabled: false` 配置项让用户关闭
+  4. **地址陈旧窗口**：30min announce 间隔意味着公网 IP 变化后最长 30min 内其他设备可能拨到旧地址；STUN 检测到变化不会立即触发 re-announce
+  5. **未与连接管理器联动**：`query()` 结果目前未被 `ConnectionManager` 消费（缺少"发现未知设备地址后自动拨号"的闭环）
 
 ### 2026-04-17：Phase 3.1 BepSession Observability ✅
 - **`BepSessionEvent` 枚举**：新增 6 种事件覆盖会话全生命周期 — `ClusterConfigComplete`, `IndexSent`, `IndexReceived`, `IndexUpdateReceived`, `BlockRequested`, `HeartbeatTimeout`, `SessionEnded`
@@ -243,14 +249,18 @@ cmd/
 > ⚠️ **以下内容为方向性思考，尚未进入实施排期，具体优先级可能随项目进展调整。**  
 > 请勿将其视为已确定或已完成的交付物。
 
-### Phase 1 — 核心对等节点能力（当前重点）
-- 推送（Push）方向：实现块的上传响应能力，使 Rust 节点成为真正的双向对等节点
-- 配置持久化：将 `run` 命令的硬编码配置迁移到 TOML/JSON 配置文件
-- REST API：提供与官方 Syncthing 兼容的基础 REST 接口
-- Web GUI 托管：内置轻量 HTTP 服务器，可托管官方 Web GUI 静态资源
+### Phase 1 — 核心对等节点能力（已完成）
+- ✅ 推送（Push）方向：被动响应块请求（上传）已实现；ManagerBlockSource 轮询所有已连接设备
+- ✅ 配置持久化：JSON 配置文件 + CLI override 机制
+- ✅ REST API：兼容 Go 布局的基础接口已运行
+- ⚠️ Web GUI 托管：内置 HTTP 服务器就绪，静态资源托管待实现
 
-### Phase 2 — 网络可达性体验优化
-- 完善 STUN、relay、local discovery，降低对特定网络环境的依赖
+### Phase 2 — 网络可达性体验优化（进行中）
+- ✅ Local Discovery：UDP 广播骨架 + daemon_runner auto-dial
+- ✅ Global Discovery：HTTPS mTLS 客户端（announce/query）
+- ✅ STUN：公网地址检测
+- ✅ PortMapper：UPnP 端口映射
+- ❌ **Relay Protocol**：官方 relay 客户端（XDR over TCP）—— 当前重点
 - 可选的地址解析插件：允许从 Tailscale API / Headscale API 等外部来源动态获取 peer 地址（仅做轻量 API 调用，不引入 Tailscale 内核）
 
 ### Phase 3 — 可选的深度网络集成（远期评估）
