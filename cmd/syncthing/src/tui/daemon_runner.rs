@@ -338,20 +338,60 @@ pub async fn start_daemon(
         }
     };
 
-    // PortMapper background task
+    // PortMapper background task（含自动续约）
     let pm_public_addrs = Arc::clone(&public_addrs);
     let pm_gd = global_discovery.clone();
     tokio::spawn(async move {
         let mut port_mapper = syncthing_net::PortMapper::new()
             .with_local_addr(actual_addr);
         match port_mapper.allocate_port(local_port).await {
-            Ok(mapping) => {
-                let ext = mapping.external_addr();
-                let ext_url = format!("tcp://{}", ext);
-                info!("PortMapper success: {} -> {}", actual_addr, ext);
+            Ok(mut mapping) => {
+                let mut current_ext = mapping.external_addr();
+                let ext_url = format!("tcp://{}", current_ext);
+                info!("PortMapper success: {} -> {}", actual_addr, ext_url);
                 pm_public_addrs.lock().await.push(ext_url);
-                if let Some(gd) = pm_gd {
+                if let Some(ref gd) = pm_gd {
                     gd.trigger_reannounce();
+                }
+
+                // 自动续约循环（每 lifetime/2 续约一次）
+                loop {
+                    let now = std::time::Instant::now();
+                    let renew_after = mapping.renew_after();
+                    if renew_after <= now {
+                        warn!("PortMapper mapping expired before renewal");
+                        break;
+                    }
+                    let sleep_duration = renew_after.duration_since(now);
+                    tokio::time::sleep(sleep_duration).await;
+
+                    match port_mapper.allocate_port(local_port).await {
+                        Ok(new_mapping) => {
+                            let new_ext = new_mapping.external_addr();
+                            info!("PortMapper renewed: {} -> {}", actual_addr, new_ext);
+
+                            // 更新 public_addrs：替换旧的外部地址
+                            {
+                                let mut addrs = pm_public_addrs.lock().await;
+                                let old_url = format!("tcp://{}", current_ext);
+                                if let Some(pos) = addrs.iter().position(|a| a == &old_url) {
+                                    addrs.remove(pos);
+                                }
+                                addrs.push(format!("tcp://{}", new_ext));
+                            }
+
+                            if let Some(ref gd) = pm_gd {
+                                gd.trigger_reannounce();
+                            }
+
+                            current_ext = new_ext;
+                            mapping = new_mapping;
+                        }
+                        Err(e) => {
+                            warn!("PortMapper renewal failed: {}", e);
+                            break;
+                        }
+                    }
                 }
             }
             Err(e) => {
