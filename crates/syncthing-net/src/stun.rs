@@ -257,9 +257,11 @@ fn ip_from_bytes(b: &[u8]) -> Result<IpAddr> {
 
 /// 向指定 STUN 服务器发送 Binding Request 并返回公网地址
 pub async fn query(stun_server: &str, timeout_duration: Duration) -> Result<SocketAddr> {
-    let server_addr: SocketAddr = stun_server
-        .parse()
-        .map_err(|e| SyncthingError::config(format!("invalid STUN server address '{}': {}", stun_server, e)))?;
+    let server_addr = tokio::net::lookup_host(stun_server)
+        .await
+        .map_err(|e| SyncthingError::config(format!("failed to resolve STUN server '{}': {}", stun_server, e)))?
+        .next()
+        .ok_or_else(|| SyncthingError::config(format!("STUN server '{}' resolved to no addresses", stun_server)))?;
 
     let bind_addr = SocketAddr::from(([0, 0, 0, 0], 0));
     let socket = UdpSocket::bind(bind_addr)
