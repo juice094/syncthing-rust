@@ -22,6 +22,7 @@
 
 pub mod events;
 pub mod local;
+pub mod global;
 
 use std::net::SocketAddr;
 use tracing::{debug, info, warn};
@@ -33,6 +34,7 @@ use crate::upnp::UpnpClient;
 
 pub use events::{DiscoveryEvent, DiscoverySource};
 pub use local::{Announce, LocalDiscovery, LOCAL_DISCOVERY_MAGIC, LOCAL_DISCOVERY_PORT};
+pub use global::{GlobalDiscovery, DEFAULT_DISCOVERY_SERVER, ANNOUNCE_INTERVAL, RETRY_INTERVAL};
 
 /// 发现管理器配置
 #[derive(Debug, Clone)]

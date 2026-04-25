@@ -338,6 +338,23 @@ pub async fn start_daemon(
         }
     });
 
+    // ── Global Discovery (Phase 2: 官方发现服务器) ──
+    let global_addrs = Arc::clone(&public_addrs);
+    let cert_path = config_dir.join(syncthing_net::tls::CERT_FILE_NAME);
+    let key_path = config_dir.join(syncthing_net::tls::KEY_FILE_NAME);
+    let global_device_id = device_id;
+    tokio::spawn(async move {
+        match syncthing_net::GlobalDiscovery::from_cert_files(global_device_id, &cert_path, &key_path, None).await {
+            Ok(gd) => {
+                info!("GlobalDiscovery initialized for {}", global_device_id);
+                gd.run(global_addrs).await;
+            }
+            Err(e) => {
+                warn!("GlobalDiscovery initialization failed: {}", e);
+            }
+        }
+    });
+
     // ── Local Discovery (Phase 0: 恢复连接能力) ──
     let discovery_device_id = device_id;
     let mut discovery_addrs = vec![format!("tcp://{}", actual_addr)];

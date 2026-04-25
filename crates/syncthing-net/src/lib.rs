@@ -33,6 +33,7 @@ pub use stun::{query, StunClient, StunRefresher, DEFAULT_STUN_SERVERS};
 pub use upnp::{UpnpClient, UpnpMappingManager, discover_upnp, DEFAULT_MAPPING_DURATION};
 pub use discovery::{DiscoveryManager, DiscoveryConfig, AddressInfo, AddressSource};
 pub use discovery::{LocalDiscovery, DiscoveryEvent, DiscoverySource};
+pub use discovery::{GlobalDiscovery, DEFAULT_DISCOVERY_SERVER, ANNOUNCE_INTERVAL, RETRY_INTERVAL};
 pub use portmapper::{PortMapper, Mapping};
 
 /// TLS 相关常量
