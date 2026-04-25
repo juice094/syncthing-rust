@@ -11,9 +11,10 @@
 - **互操作**：与官方 Go Syncthing 的 BEP 核心消息（Hello/ClusterConfig/Index/Request/Response）在 Tailscale 环境下已验证
 - **观测**：REST API（兼容 Go 布局）+ 文件系统 watcher(1s debounce) + TUI
 
-## 架构讨论摘要（来自 2026-04-24 会话）
+## 架构讨论摘要
 
-以下为本项目相关的粗粒度架构决策与待探索方向。
+> **完整架构决策记录**见 [`docs/design/ARCHITECTURE_DECISIONS.md`](docs/design/ARCHITECTURE_DECISIONS.md)。
+> 以下仅保留快速参考。
 
 ### 1. 分布式验证网络（BEP 扩展）
 

@@ -15,8 +15,8 @@ cargo clippy --workspace            # 0 warnings
 ## Status
 
 - Version: **v0.2.0 Beta**
-- Tests: 255+ passed, 0 TODOs, 0 clippy warnings
-- Transports: TCP+TLS / SOCKS5 / DERP relay / UPnP / NAT-PMP / PCP
+- Tests: 255+ passed, 0 clippy warnings
+- Transports: TCP+TLS ✅ / HTTP CONNECT ⚠️（代码完整，主流程未接入） / SOCKS5 ⚠️（同上） / DERP（自研协议，非 Syncthing 官方 Relay） / UPnP ⚠️（无自动续约） / NAT-PMP ❌ / PCP ❌
 
 ## BEP Messages
 
@@ -38,8 +38,9 @@ Core message types for Go interop:
 
 ## Current Blocker
 
-- **格雷端网络**: Go Syncthing not listening on Tailscale IP (`100.99.240.98:22000`); Rust dial refused (os error 10061)
-- **Next step**: confirm Go node status / listening address, or provide alternative address
+- **跨网络互联**: 无 Tailscale 时无法与隔离网络中的节点建立连接；Global Discovery + 官方 Relay Protocol 完全空白
+- **ManagerBlockSource 缺陷**: Pull 方向向**任意**已连接设备请求块，非目标定向
+- **Next step**: 实现 Global Discovery 客户端 + 官方 Relay Protocol XDR 编解码
 
 ## Cross-Project Interfaces
 

@@ -70,5 +70,6 @@ docs/
 ## 阅读建议
 
 - **新协作者**: 先看 [`reports/IMPLEMENTATION_SUMMARY.md`](reports/IMPLEMENTATION_SUMMARY.md) 了解架构，再看根目录 `README.md` 编译运行。
+- **架构决策**: [`design/ARCHITECTURE_DECISIONS.md`](design/ARCHITECTURE_DECISIONS.md) 是所有粗粒度架构决策的统一入口。
 - **当前开发重点**: [`design/NETWORK_DISCOVERY_DESIGN.md`](design/NETWORK_DISCOVERY_DESIGN.md) 是网络层下一阶段（Phase 5）的权威参考。
 - **历史追溯**: 需要了解某个决策的背景时，查阅 `archive/` 中的工作日报。

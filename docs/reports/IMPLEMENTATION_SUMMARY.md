@@ -3,7 +3,7 @@
 > **项目说明**：基于 Rust 的 Syncthing 兼容实现，采用多 crate 工作区结构。目标是通过直接参照 Go Syncthing 源码，构建一个功能完整的去中心化文件同步 daemon。
 >
 > **仓库位置**：`C:\Users\22414`  
-> **最新更新**：2026-04-17（Phase 2 Network Abstraction 完成：ReliablePipe 解耦、BepHandshaker 抽取、ConnectionManager 多路径支持、MemoryPipe 验收测试通过）
+> **最新更新**：2026-04-25（BEP Go-interop 修复、Local Discovery 集成、STUN/PortMapper 接入 daemon、clippy 0 warnings、UDP 测试稳定化）
 
 ---
 
@@ -55,7 +55,7 @@
 | BEP Hello (protobuf) | ✅ | 已通过真实 Go 节点验证 |
 | BEP 标准帧解析 | ✅ | 正确实现 `[2 bytes header_len][protobuf Header][4 bytes msg_len][protobuf Message]` |
 | iroh TLS-over-QUIC | ✅ | 可选 feature，能通过 BEP Hello + Ping 测试 |
-| 连接管理 | ✅ | `ConnectionManager` 有连接池、pending 连接、重试退避 |
+| 连接管理 | ⚠️ | `ConnectionManager` 有连接池、pending 连接、重试退避；存储结构支持多路径，但 `get_connection()` API 只返回第一个 alive 连接，未暴露多路径能力 |
 | 并行拨号 | ✅ | `ParallelDialer` 支持最多 3 地址并发竞速 + RTT 评分 |
 | 网络变更监听 | ✅ | `NetMonitor` 检测接口变化并触发重拨 |
 | 端口映射 (UPnP) | ⚠️ | `PortMapper` UPnP 路径可用；PCP/NAT-PMP 骨架存在但未实现；daemon 中无自动续约 |
@@ -128,6 +128,19 @@
 - 明确 `.sync-conflict` 的暂停/恢复策略：devbase watcher 驱动，syncthing-rust BEP 层无需特殊处理
 - 坦诚 BEP 协议无全局"同步完成"信号，提供 pragmatic 替代方案（`FolderStatus::Idle` + `needed_files.is_empty()`）与中期增强路径（`on_peer_sync_state` 回调）
 
+### 2026-04-20：BEP 协议兼容性修复 + Local Discovery Phase 0 ✅
+- **`client_name` 伪装**: `"syncthing-rust"` → `"syncthing"`，匹配 Go 端预期
+- **`WireFolder.label` 修复**: `Vec<String>` → `String`，与 Go 端 protobuf `string`（非 `repeated string`）兼容
+- **`validate_device_id`**: 测试用例改为 Base32-Luhn 带 dash 格式
+- **Local Discovery 集成**: `discovery.rs` 拆分为 `discovery/{mod,local,events}.rs`；`daemon_runner.rs` 集成 `LocalDiscovery::run()` + auto-dial
+- **docs 重组**: 18 份历史文档归档到 `archive/`，建立 `design/plans/reports` 分层结构
+
+### 2026-04-25：质量门清理 + Phase 5 基础设施 ✅
+- **clippy 0 warnings**: 手动修复 4 个 + auto-fix 6 个，workspace 全绿
+- **UDP 测试稳定化**: `test_udp_broadcast_roundtrip` 改用临时端口，消除 Windows WSAEADDRINUSE
+- **STUN/PortMapper 接入**: `daemon_runner.rs` 启动时 spawn 后台任务检测公网地址/申请端口映射
+- **AGENTS.md 修正**: 将夸大的 "全实现" 声明降维为准确描述
+
 ### 2026-04-17：Phase 3.1 BepSession Observability ✅
 - **`BepSessionEvent` 枚举**：新增 6 种事件覆盖会话全生命周期 — `ClusterConfigComplete`, `IndexSent`, `IndexReceived`, `IndexUpdateReceived`, `BlockRequested`, `HeartbeatTimeout`, `SessionEnded`
 - **`BepSessionMetrics` 原子计数器**：`messages_sent/recv`, `bytes_sent/recv`, `blocks_requested/served`, `heartbeat_timeouts`, `errors`，全部使用 `AtomicU64` 无锁统计
@@ -183,13 +196,14 @@ cargo run --release -p syncthing -- run -l 127.0.0.1:22000 -c %TEMP%\syncthing_t
 
 ### 待完成工作
 1. ✅ **端到端文件同步验证（Pull）**：2026-04-11 已通过跨网络测试验证完整下载
-2. **推送 (Push) 方向**：`handle_block_request` 已存在且正常工作（BepSession 测试通过），但云端 Go 节点在观察期内未触发块请求，推测与对端同步状态有关；需要进一步验证
+2. **推送 (Push) 方向**：被动响应块请求（上传）链路完整（`block_server.rs` → `BepSession::on_block_request` → `sync_service.handle_block_request`），但 **主动扫描后触发对端拉取的调度逻辑待完善**
 3. ✅ **配置持久化**：`JsonConfigStore` 已落地（2026-04-16），支持 notify 文件监听、内存缓存、异步读写；端口迁移与 API key 生成已正确持久化
 4. **REST API 完善**：`/rest/db/status` 已实现真实统计，但设备删除、文件夹修改等写接口待补充
 5. ✅ **TUI 设备删除**：`events.rs:58-69` 已实现 `d` 键删除设备并自动保存 `config.json`；该 issue 为 stale，已关闭
 6. ✅ **BepSession 解耦**：已完成，`daemon_runner.rs` 已使用 `BepSession` + `DaemonBepHandler`
 7. ✅ **`syncthing-core::traits::BepConnection` 对齐**：由于该 trait 的 `request_block`/`recv_message` 签名与 `Arc<BepConnection>` + `BepSession` 架构存在结构性冲突，已将其标记为 `#[deprecated]`，`SyncModel::handle_connection` 同步移除；`ReliablePipe` + `BepSession` 成为 canonical 架构
 8. **acceptance-tests crate**：因早期 `BepMessage` API 变更暂被排除，修复成本/收益待评估
+9. **ManagerBlockSource 缺陷**：`request_block` 使用 `connected_devices().into_iter().next()` 向**任意**已连接设备请求块，非目标定向请求；多设备场景下会拉取错误数据
 
 ---
 
