@@ -6,7 +6,7 @@
 
 A Rust implementation of the [Syncthing](https://syncthing.net/) protocol stack, designed to interoperate with the official Go Syncthing daemon over the BEP (Block Exchange Protocol) wire format.
 
-> **Status**: v0.2.0 — BEP 协议层（TLS + Hello + ClusterConfig + Index + Request/Response）在 **Tailscale 虚拟网络环境下** 已与官方 Go 节点完成双向互通验证（握手 + 文件收发）。当前处于**无 Tailscale 时无法与隔离网络中的云服务器建立连接**的阶段；网络发现层设计已完成，待实现。
+> **Status**: v0.2.0 — BEP 协议层（TLS + Hello + ClusterConfig + Index + Request/Response）在 **Tailscale 虚拟网络环境下** 已与官方 Go 节点完成双向互通验证（握手 + 文件收发）。网络发现层核心实现已完成（Local Discovery + Global Discovery + STUN + UPnP + Relay Protocol v1），尚未与 ConnectionManager/Transport 完全集成，因此无 Tailscale 时仍无法自动与隔离网络中的云服务器建立连接。
 
 ---
 
@@ -23,6 +23,7 @@ A Rust implementation of the [Syncthing](https://syncthing.net/) protocol stack,
 | 2026-04-17 | Phase 2 Network Abstraction: `ReliablePipe` trait decouples BEP from TCP; `MemoryPipe` tests pass; `ConnectionManager` supports multi-path per device. |
 | 2026-04-20 | **v0.2.0 Release**: BEP 协议兼容性修复（ClusterConfig 本地设备、Hello 伪装、TLS crypto provider、WireFolder label），双向文件同步验证通过。 |
 | 2026-04-20 | **Network Discovery 设计完成** — Local + Global Discovery + STUN + UPnP + Relay 完整设计文档出稿，旨在解决无 Tailscale 时的设备互联问题。 |
+| 2026-04-25 | **Network Discovery 核心实现完成** — Global Discovery（HTTPS mTLS）+ Relay Protocol v1（XDR/TLS/明文 Session Mode）客户端可用，质量门全绿（255+ tests, 0 clippy warnings）。 |
 
 ---
 
@@ -35,7 +36,7 @@ A Rust implementation of the [Syncthing](https://syncthing.net/) protocol stack,
 | **Phase 3** | BepSession observability, peer sync state events, **Push/Pull E2E with real Go node** | ✅ Complete |
 | **Phase 3.5** | Connection stability hardening, `.stignore`, config persistence | ✅ Complete |
 | **Phase 4** | TUI 增强（设备/文件夹管理、实时同步状态） | 🔵 In Progress |
-| **Phase 5** | **自建网络发现层** — 消除 Tailscale 依赖，实现无 VPN 环境下的设备发现与互联 | 📝 Design Complete |
+| **Phase 5** | **自建网络发现层** — 消除 Tailscale 依赖，实现无 VPN 环境下的设备发现与互联 | 📝 核心协议实现完成；Transport/Dialer 集成待做 |
 
 > **Phase 5 详情**: 参见 [`docs/design/NETWORK_DISCOVERY_DESIGN.md`](docs/design/NETWORK_DISCOVERY_DESIGN.md)。
 
@@ -127,11 +128,11 @@ docs/
 | TUI | ✅ | 设备/文件夹管理、实时状态 |
 | Config Persistence | ✅ | `JsonConfigStore` 支持 notify 监听 + 异步读写 |
 | Local Discovery (LAN) | ⚠️ | UDP 广播/接收/run 循环已集成；IPv6 多播、网卡枚举、子网广播地址计算缺失 |
-| Global Discovery | ❌ | 完全空白 |
+| Global Discovery | ✅ | HTTPS mTLS 客户端（announce/query），daemon_runner 自动 spawn |
 | STUN (公网 IP 查询) | ⚠️ | Binding Request + XOR-MAPPED-ADDRESS 解析可用；NAT 类型检测、hole punching 缺失 |
 | UPnP | ⚠️ | `igd` crate 集成可用；自动续约缺失 |
 | NAT-PMP / PCP | ❌ | 骨架存在，未实现 |
-| Relay (官方 Protocol) | ❌ | 完全空白；现有 DERP 为自研协议，无法与 Go 互通 |
+| Relay (官方 Protocol) | ✅ | XDR 编解码 + Protocol Mode（TLS）+ Session Mode（明文），核心客户端可用；未集成 Dialer/Transport |
 
 ---
 
