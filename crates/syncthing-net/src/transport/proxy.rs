@@ -97,7 +97,7 @@ impl ProxyConfig {
 /// 代理传输层。
 ///
 /// 包装底层 TCP 连接，通过代理服务器建立到目标的隧道。
-/// 当前支持 HTTP CONNECT；SOCKS5 为 stub（返回错误）。
+/// 当前支持 HTTP CONNECT 和 SOCKS5（无认证）。
 #[derive(Debug)]
 pub struct ProxiedTransport {
     config: ProxyConfig,

@@ -115,7 +115,7 @@ docs/
 
 | Feature | Status | Notes |
 |---------|--------|-------|
-| BEP Protocol (TLS + Hello + Index + Request/Response) | ✅ | 已与官方 Go 节点互通验证 |
+| BEP Protocol (TLS + Hello + Index + Request/Response) | ✅ | 已与官方 Go 节点在 Tailscale 环境下互通验证 |
 | TCP Transport | ✅ | |
 | SOCKS5 / HTTP Proxy | ✅ | |
 | Folder Scan / Pull / Push | ✅ | 双向文件同步验证通过 |
