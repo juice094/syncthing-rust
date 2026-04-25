@@ -1,7 +1,7 @@
 //! 设备发现管理器
 //!
-//! 集成 STUN 和 UPnP 支持公网设备发现
-//! 
+//! 集成 Local Discovery、STUN 和 UPnP 支持设备发现。
+//!
 //! 使用示例:
 //! ```rust,ignore
 //! use syncthing_net::{DiscoveryManager, StunClient, UpnpClient};
@@ -20,6 +20,9 @@
 //! }
 //! ```
 
+pub mod events;
+pub mod local;
+
 use std::net::SocketAddr;
 use tracing::{debug, info, warn};
 
@@ -27,6 +30,9 @@ use syncthing_core::Result;
 
 use crate::stun::StunClient;
 use crate::upnp::UpnpClient;
+
+pub use events::{DiscoveryEvent, DiscoverySource};
+pub use local::{Announce, LocalDiscovery, LOCAL_DISCOVERY_MAGIC, LOCAL_DISCOVERY_PORT};
 
 /// 发现管理器配置
 #[derive(Debug, Clone)]

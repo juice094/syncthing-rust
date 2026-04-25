@@ -32,6 +32,7 @@ pub use tls::{SyncthingTlsConfig, accept_tls, connect_tls, generate_certificate}
 pub use stun::{query, StunClient, StunRefresher, DEFAULT_STUN_SERVERS};
 pub use upnp::{UpnpClient, UpnpMappingManager, discover_upnp, DEFAULT_MAPPING_DURATION};
 pub use discovery::{DiscoveryManager, DiscoveryConfig, AddressInfo, AddressSource};
+pub use discovery::{LocalDiscovery, DiscoveryEvent, DiscoverySource};
 pub use portmapper::{PortMapper, Mapping};
 
 /// TLS 相关常量
@@ -41,3 +42,9 @@ pub mod tls_constants {
 
 /// 版本信息
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
+
+#[cfg(test)]
+#[ctor::ctor]
+fn init_crypto_provider() {
+    let _ = rustls::crypto::ring::default_provider().install_default();
+}

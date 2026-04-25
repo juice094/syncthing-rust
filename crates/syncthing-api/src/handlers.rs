@@ -490,9 +490,9 @@ mod tests {
 
     #[test]
     fn test_validate_device_id() {
-        // Valid device ID (56 hex chars)
-        let valid_id = "A1B2C3D4".repeat(7);
-        assert!(validation::validate_device_id(&valid_id).is_ok());
+        // Valid device ID (Base32-Luhn format with dashes)
+        let valid_id = "YTKWHNG-OT27ZGH-6VVBRIJ-OHOUNWT-DYLJ2NR-TCXUXHI-QDUQR2U-OPLCBQG";
+        assert!(validation::validate_device_id(valid_id).is_ok());
 
         // Invalid - too short
         assert!(validation::validate_device_id("tooshort").is_err());
@@ -500,8 +500,9 @@ mod tests {
         // Invalid - empty
         assert!(validation::validate_device_id("").is_err());
 
-        // Invalid - non-hex
-        assert!(validation::validate_device_id("G".repeat(56).as_str()).is_err());
+        // Invalid - bad checksum (changed last char)
+        let bad_checksum = "YTKWHNG-OT27ZGH-6VVBRIJ-OHOUNWT-DYLJ2NR-TCXUXHI-QDUQR2U-OPLCBQF";
+        assert!(validation::validate_device_id(bad_checksum).is_err());
     }
 
     #[test]

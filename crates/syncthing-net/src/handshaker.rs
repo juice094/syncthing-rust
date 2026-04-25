@@ -105,7 +105,7 @@ mod tests {
 
         assert_eq!(client_result.device_name, "server-device");
         assert_eq!(server_result.device_name, "client-device");
-        assert_eq!(client_result.client_name, "syncthing-rust");
-        assert_eq!(server_result.client_name, "syncthing-rust");
+        assert_eq!(client_result.client_name, "syncthing");
+        assert_eq!(server_result.client_name, "syncthing");
     }
 }

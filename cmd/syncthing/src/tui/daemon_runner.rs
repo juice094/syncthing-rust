@@ -299,6 +299,43 @@ pub async fn start_daemon(
         .context("failed to start connection manager")?;
     info!("Listening on: {}", actual_addr);
 
+    // ── Local Discovery (Phase 0: 恢复连接能力) ──
+    let discovery_device_id = device_id.clone();
+    let discovery_addrs = vec![format!("tcp://{}", actual_addr)];
+    let (discovery_tx, mut discovery_rx) = tokio::sync::mpsc::channel::<syncthing_net::DiscoveryEvent>(32);
+    let discovery_handle = handle.clone();
+    let discovery_config = sync_service.get_config().await.unwrap_or_default();
+    let known_device_ids: std::collections::HashSet<syncthing_core::DeviceId> =
+        discovery_config.devices.iter().map(|d| d.id).collect();
+
+    tokio::spawn(async move {
+        let discovery = syncthing_net::LocalDiscovery::new(discovery_device_id, discovery_addrs);
+        if let Err(e) = discovery.run(discovery_tx).await {
+            warn!("Local discovery error: {}", e);
+        }
+    });
+
+    tokio::spawn(async move {
+        while let Some(event) = discovery_rx.recv().await {
+            match event {
+                syncthing_net::DiscoveryEvent::DeviceDiscovered { device_id, addresses, .. } => {
+                    if known_device_ids.contains(&device_id) {
+                        let addrs: Vec<SocketAddr> = addresses.iter()
+                            .filter_map(|a| a.parse().ok())
+                            .collect();
+                        if !addrs.is_empty() {
+                            info!("Local discovery: auto-dialing {} at {:?}", device_id, addrs);
+                            if let Err(e) = discovery_handle.connect_to(device_id, addrs).await {
+                                warn!("Failed to auto-dial discovered device {}: {}", device_id, e);
+                            }
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+    });
+
     let peers: Vec<(syncthing_core::DeviceId, Vec<SocketAddr>)> = {
         let cfg = sync_service.get_config().await.unwrap_or_default();
         cfg.devices

@@ -505,6 +505,6 @@ mod tests {
         // Verify server received the correct protobuf Hello
         let received_hello = server_handle.await.unwrap();
         assert_eq!(received_hello.device_name, "test-device");
-        assert_eq!(received_hello.client_name, "syncthing-rust");
+        assert_eq!(received_hello.client_name, "syncthing");
     }
 }
