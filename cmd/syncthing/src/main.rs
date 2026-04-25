@@ -299,10 +299,24 @@ impl ManagerBlockSource {
                 format!("response channel closed for {}", device_id),
             ))?;
 
+        debug!(
+            "Block response from {}: code={} data_len={} (requested size={})",
+            device_id, response.code, response.data.len(), block.size
+        );
+
         if response.code != bep_protocol::messages::ErrorCode::NoError as i32 {
             return Err(syncthing_sync::SyncError::pull(
                 file.to_string(),
                 format!("remote error code {} from {}", response.code, device_id),
+            ));
+        }
+        if response.data.len() != block.size as usize {
+            return Err(syncthing_sync::SyncError::pull(
+                file.to_string(),
+                format!(
+                    "block size mismatch from {}: expected {} got {}",
+                    device_id, block.size, response.data.len()
+                ),
             ));
         }
         Ok(bytes::Bytes::from(response.data))
@@ -318,17 +332,16 @@ impl BlockSource for ManagerBlockSource {
         block: &syncthing_core::types::BlockInfo,
     ) -> syncthing_sync::Result<bytes::Bytes> {
         let devices = self.manager.connected_devices();
+        debug!(
+            "Requesting block {}/{} offset={} size={}: {} connected device(s)",
+            folder, file, block.offset, block.size, devices.len()
+        );
         if devices.is_empty() {
             return Err(syncthing_sync::SyncError::pull(
                 file.to_string(),
                 "No connected devices".to_string(),
             ));
         }
-
-        debug!(
-            "Requesting block {}/{} offset={} from {} candidate device(s)",
-            folder, file, block.offset, devices.len()
-        );
 
         let mut last_error = None;
 

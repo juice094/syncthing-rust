@@ -172,7 +172,7 @@ impl SyncService {
 
         // 如果已经在运行，直接返回
         if self.folder_tasks.contains_key(folder_id) {
-            info!(folder_id = %folder_id, "Folder already running");
+            warn!(folder_id = %folder_id, "Folder already running, skipping start_folder_internal");
             return Ok(());
         }
 
