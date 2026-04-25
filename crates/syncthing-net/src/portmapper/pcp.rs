@@ -32,7 +32,6 @@ pub struct PcpResponse {
     pub op_code: u8,
     pub result_code: PcpResultCode,
     pub lifetime: u32,
-    pub epoch: u32,
 }
 
 /// PCP 映射状态
@@ -43,6 +42,11 @@ pub struct PcpMappingState {
     pub internal_port: u16,
     pub my_ip: std::net::Ipv4Addr,
 }
+
+use std::time::Duration;
+use syncthing_core::Result;
+use tokio::net::UdpSocket;
+use tokio::time::timeout;
 
 /// 将 IPv4 地址编码为 IPv4-mapped IPv6 地址（16 字节）
 fn encode_ipv4_mapped(ip: std::net::Ipv4Addr) -> [u8; 16] {
@@ -111,21 +115,75 @@ pub fn parse_pcp_response(pkt: &[u8]) -> Option<PcpResponse> {
     }
 
     let result_code = pkt[3];
-    let epoch = u32::from_be_bytes([pkt[4], pkt[5], pkt[6], pkt[7]]);
-
-    let lifetime = if pkt.len() >= 60 {
-        // MAP response: lifetime is in the opcode-specific area at offset 4..8?
-        // Actually in response, the header structure changes.
-        // For simplicity, use the same layout as request.
-        u32::from_be_bytes([pkt[4], pkt[5], pkt[6], pkt[7]])
-    } else {
-        0
-    };
+    // RFC 6887: response header lifetime at offset 4..8
+    let lifetime = u32::from_be_bytes([pkt[4], pkt[5], pkt[6], pkt[7]]);
 
     Some(PcpResponse {
         op_code,
         result_code,
         lifetime,
-        epoch,
     })
+}
+
+/// 探测 PCP 网关是否响应
+pub async fn probe_gateway(gateway: std::net::SocketAddr, my_ip: std::net::Ipv4Addr) -> bool {
+    let socket = match UdpSocket::bind("0.0.0.0:0").await {
+        Ok(s) => s,
+        Err(_) => return false,
+    };
+    let pkt = build_pcp_announce_request(my_ip);
+    if socket.send_to(&pkt, gateway).await.is_err() {
+        return false;
+    }
+    let mut buf = [0u8; 24];
+    match timeout(Duration::from_millis(250), socket.recv_from(&mut buf)).await {
+        Ok(Ok((len, _))) => parse_pcp_response(&buf[..len])
+            .map(|r| r.result_code == PCP_CODE_OK)
+            .unwrap_or(false),
+        _ => false,
+    }
+}
+
+/// 分配 PCP 端口映射
+pub async fn allocate_port(
+    gateway: std::net::SocketAddr,
+    local_port: u16,
+    my_ip: std::net::Ipv4Addr,
+) -> Result<(std::net::SocketAddr, PcpMappingState)> {
+    let socket = UdpSocket::bind("0.0.0.0:0").await
+        .map_err(|e| syncthing_core::SyncthingError::connection(format!("PCP bind failed: {}", e)))?;
+
+    let pkt = build_pcp_request_mapping_packet(my_ip, local_port, local_port, PCP_MAP_LIFETIME_SEC, std::net::Ipv4Addr::UNSPECIFIED);
+    socket.send_to(&pkt, gateway).await
+        .map_err(|e| syncthing_core::SyncthingError::connection(format!("PCP send failed: {}", e)))?;
+
+    let mut buf = [0u8; 60];
+    let (len, _) = timeout(Duration::from_secs(5), socket.recv_from(&mut buf)).await
+        .map_err(|_| syncthing_core::SyncthingError::connection("PCP mapping timeout"))?
+        .map_err(|e| syncthing_core::SyncthingError::connection(format!("PCP recv failed: {}", e)))?;
+
+    let resp = parse_pcp_response(&buf[..len])
+        .ok_or_else(|| syncthing_core::SyncthingError::connection("PCP invalid response"))?;
+
+    if resp.result_code != PCP_CODE_OK {
+        return Err(syncthing_core::SyncthingError::connection(format!("PCP error code: {}", resp.result_code)));
+    }
+
+    if len < 60 {
+        return Err(syncthing_core::SyncthingError::connection("PCP MAP response too short"));
+    }
+
+    // MAP response: external port at offset 42..44, external IP at 44..60 (IPv4-mapped IPv6)
+    let external_port = u16::from_be_bytes([buf[42], buf[43]]);
+    let external_ip = std::net::Ipv4Addr::new(buf[44 + 12], buf[44 + 13], buf[44 + 14], buf[44 + 15]);
+
+    let external_addr = std::net::SocketAddr::from((external_ip, external_port));
+    let state = PcpMappingState {
+        gateway,
+        external_port,
+        internal_port: local_port,
+        my_ip,
+    };
+
+    Ok((external_addr, state))
 }

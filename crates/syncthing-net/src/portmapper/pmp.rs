@@ -3,6 +3,10 @@
 //! 参考来源: Tailscale net/portmapper/portmapper.go
 
 use std::net::{Ipv4Addr, SocketAddr};
+use std::time::Duration;
+use syncthing_core::Result;
+use tokio::net::UdpSocket;
+use tokio::time::timeout;
 
 /// NAT-PMP 默认端口
 pub const PMP_DEFAULT_PORT: u16 = 5351;
@@ -100,6 +104,84 @@ pub fn parse_pmp_response(pkt: &[u8]) -> Option<PmpResponse> {
     }
 
     Some(res)
+}
+
+/// 构建 NAT-PMP GetExternalAddress 请求包（4 字节）
+pub fn build_pmp_request_public_addr_packet() -> Vec<u8> {
+    vec![PMP_VERSION, PMP_OP_MAP_PUBLIC_ADDR, 0, 0]
+}
+
+/// 探测 NAT-PMP 网关是否响应
+pub async fn probe_gateway(gateway: SocketAddr) -> bool {
+    let socket = match UdpSocket::bind("0.0.0.0:0").await {
+        Ok(s) => s,
+        Err(_) => return false,
+    };
+    let pkt = build_pmp_request_public_addr_packet();
+    if socket.send_to(&pkt, gateway).await.is_err() {
+        return false;
+    }
+    let mut buf = [0u8; 16];
+    match timeout(Duration::from_millis(250), socket.recv_from(&mut buf)).await {
+        Ok(Ok((len, _))) => parse_pmp_response(&buf[..len]).is_some(),
+        _ => false,
+    }
+}
+
+/// 获取 NAT-PMP 外部公网地址
+pub async fn get_external_address(gateway: SocketAddr) -> Result<Ipv4Addr> {
+    let socket = UdpSocket::bind("0.0.0.0:0").await
+        .map_err(|e| syncthing_core::SyncthingError::connection(format!("PMP bind failed: {}", e)))?;
+    let pkt = build_pmp_request_public_addr_packet();
+    socket.send_to(&pkt, gateway).await
+        .map_err(|e| syncthing_core::SyncthingError::connection(format!("PMP send failed: {}", e)))?;
+
+    let mut buf = [0u8; 16];
+    let (len, _) = timeout(Duration::from_secs(2), socket.recv_from(&mut buf)).await
+        .map_err(|_| syncthing_core::SyncthingError::connection("PMP get external address timeout"))?
+        .map_err(|e| syncthing_core::SyncthingError::connection(format!("PMP recv failed: {}", e)))?;
+
+    let resp = parse_pmp_response(&buf[..len])
+        .ok_or_else(|| syncthing_core::SyncthingError::connection("PMP invalid response"))?;
+
+    if resp.result_code != PMP_CODE_OK {
+        return Err(syncthing_core::SyncthingError::connection(format!("PMP error code: {}", resp.result_code)));
+    }
+
+    resp.public_addr.ok_or_else(|| syncthing_core::SyncthingError::connection("PMP no public address"))
+}
+
+/// 分配 NAT-PMP 端口映射
+pub async fn allocate_port(gateway: SocketAddr, local_port: u16) -> Result<(SocketAddr, PmpMappingState)> {
+    let external_ip = get_external_address(gateway).await?;
+
+    let socket = UdpSocket::bind("0.0.0.0:0").await
+        .map_err(|e| syncthing_core::SyncthingError::connection(format!("PMP bind failed: {}", e)))?;
+
+    let pkt = build_pmp_request_mapping_packet(local_port, local_port, PMP_MAP_LIFETIME_SEC);
+    socket.send_to(&pkt, gateway).await
+        .map_err(|e| syncthing_core::SyncthingError::connection(format!("PMP send failed: {}", e)))?;
+
+    let mut buf = [0u8; 16];
+    let (len, _) = timeout(Duration::from_secs(5), socket.recv_from(&mut buf)).await
+        .map_err(|_| syncthing_core::SyncthingError::connection("PMP mapping timeout"))?
+        .map_err(|e| syncthing_core::SyncthingError::connection(format!("PMP recv failed: {}", e)))?;
+
+    let resp = parse_pmp_response(&buf[..len])
+        .ok_or_else(|| syncthing_core::SyncthingError::connection("PMP invalid mapping response"))?;
+
+    if resp.result_code != PMP_CODE_OK {
+        return Err(syncthing_core::SyncthingError::connection(format!("PMP mapping error: {}", resp.result_code)));
+    }
+
+    let external_addr = SocketAddr::from((external_ip, resp.external_port));
+    let state = PmpMappingState {
+        gateway,
+        external_port: resp.external_port,
+        internal_port: local_port,
+    };
+
+    Ok((external_addr, state))
 }
 
 #[cfg(test)]
