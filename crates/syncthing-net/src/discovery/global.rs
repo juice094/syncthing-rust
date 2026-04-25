@@ -207,14 +207,11 @@ impl GlobalDiscovery {
 
     /// 运行后台 announce 循环
     ///
-    /// 首次启动等待 5 秒（给 STUN/PortMapper 时间发现地址），
+    /// 立即首次 announce（通常只包含本地地址），
     /// 之后每 `ANNOUNCE_INTERVAL` 向发现服务器注册一次。
     /// 失败时等待 `RETRY_INTERVAL` 后重试。
-    /// 外部可通过 `trigger_reannounce()` 唤醒立即 announce。
+    /// 外部可通过 `trigger_reannounce()` 唤醒立即 announce（用于 STUN/UPnP 发现新地址后补发）。
     pub async fn run(&self, addresses: Arc<tokio::sync::Mutex<Vec<String>>>) {
-        // 首次启动等待 5 秒，让 STUN/PortMapper 有机会获取公网地址
-        tokio::time::sleep(Duration::from_secs(5)).await;
-
         loop {
             let addrs: Vec<String> = addresses.lock().await.clone();
             if addrs.is_empty() {
