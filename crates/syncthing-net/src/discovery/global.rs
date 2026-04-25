@@ -9,6 +9,7 @@ use std::time::Duration;
 
 use reqwest::Client;
 use serde_json::json;
+use tokio::sync::Notify;
 use tracing::{debug, error, info, warn};
 
 use syncthing_core::{DeviceId, Result, SyncthingError};
@@ -33,12 +34,19 @@ pub struct GlobalDiscovery {
     server_url: String,
     device_id: DeviceId,
     client: Client,
+    /// 外部触发 re-announce 的通知器
+    notify: Arc<Notify>,
 }
 
 impl GlobalDiscovery {
     /// 使用默认官方发现服务器创建
     pub fn new(device_id: DeviceId, client: Client) -> Self {
         Self::with_server(device_id, client, DEFAULT_DISCOVERY_SERVER.to_string())
+    }
+
+    /// 获取通知器引用，用于外部触发 re-announce
+    pub fn notifier(&self) -> Arc<Notify> {
+        Arc::clone(&self.notify)
     }
 
     /// 使用自定义发现服务器创建
@@ -54,6 +62,7 @@ impl GlobalDiscovery {
             server_url,
             device_id,
             client,
+            notify: Arc::new(Notify::new()),
         }
     }
 
@@ -85,6 +94,11 @@ impl GlobalDiscovery {
 
         let server_url = server_url.unwrap_or_else(|| DEFAULT_DISCOVERY_SERVER.to_string());
         Ok(Self::with_server(device_id, client, server_url))
+    }
+
+    /// 触发一次立即 re-announce（外部调用，如 STUN/UPnP 发现新地址后）
+    pub fn trigger_reannounce(&self) {
+        self.notify.notify_one();
     }
 
     /// 向发现服务器注册地址
@@ -193,29 +207,37 @@ impl GlobalDiscovery {
 
     /// 运行后台 announce 循环
     ///
-    /// 每 `ANNOUNCE_INTERVAL` 向发现服务器注册一次地址。
+    /// 首次启动等待 5 秒（给 STUN/PortMapper 时间发现地址），
+    /// 之后每 `ANNOUNCE_INTERVAL` 向发现服务器注册一次。
     /// 失败时等待 `RETRY_INTERVAL` 后重试。
+    /// 外部可通过 `trigger_reannounce()` 唤醒立即 announce。
     pub async fn run(&self, addresses: Arc<tokio::sync::Mutex<Vec<String>>>) {
-        let mut interval = tokio::time::interval(ANNOUNCE_INTERVAL);
-        interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+        // 首次启动等待 5 秒，让 STUN/PortMapper 有机会获取公网地址
+        tokio::time::sleep(Duration::from_secs(5)).await;
 
         loop {
-            interval.tick().await;
-
             let addrs: Vec<String> = addresses.lock().await.clone();
             if addrs.is_empty() {
                 warn!("Global discovery: no addresses to announce, skipping");
-                continue;
+            } else {
+                match self.announce(&addrs).await {
+                    Ok(()) => {}
+                    Err(e) => {
+                        warn!(
+                            "Global discovery announce failed: {}, retrying in {:?}",
+                            e, RETRY_INTERVAL
+                        );
+                        tokio::time::sleep(RETRY_INTERVAL).await;
+                        continue;
+                    }
+                }
             }
 
-            match self.announce(&addrs).await {
-                Ok(()) => {}
-                Err(e) => {
-                    warn!(
-                        "Global discovery announce failed: {}, retrying in {:?}",
-                        e, RETRY_INTERVAL
-                    );
-                    tokio::time::sleep(RETRY_INTERVAL).await;
+            // 等待 ANNOUNCE_INTERVAL 或被外部唤醒
+            tokio::select! {
+                _ = tokio::time::sleep(ANNOUNCE_INTERVAL) => {}
+                _ = self.notify.notified() => {
+                    info!("GlobalDiscovery re-announce triggered by address change");
                 }
             }
         }

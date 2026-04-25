@@ -161,13 +161,21 @@
   - 消息类型：Ping/Pong, JoinRelayRequest, JoinSessionRequest, Response, ConnectRequest, SessionInvitation, RelayFull
   - `RelayProtocolClient`：Protocol Mode（TLS `bep-relay`）连接，支持 `join_relay()` / `request_session()` / `wait_invitation()` / `ping()`
   - `join_session()`：Session Mode（明文 TCP）连接，返回可用于 BEP TLS 握手的 `TcpStream`
-- **daemon_runner 集成**：TCP auto-dial 10 秒后，若设备仍未连接，自动尝试配置的 `relay://` 地址 fallback
-- **⚠️ 风险点**：
-  1. ~~**未与 Transport/Dialer 集成**：`ParallelDialer` 目前只处理 `SocketAddr`（TCP 直连），尚未支持 `relay://` 地址解析和 relay 连接路径~~ ✅ 已通过 `connect_bep_via_relay` + `daemon_runner` fallback 解决
-  2. ~~**TLS ALPN 未验证**：`bep-relay` ALPN 字符串在 `rustls::ClientConfig` 中尚未显式配置~~ ✅ `SyncthingTlsConfig::relay_client_config()` 已配置 `bep-relay`
-  3. **SessionInvitation 地址解析**：`address` 字段为空时回退到 protocol mode 同一 IP，已在 `resolve_session_addr` 中处理
-  4. **缺少 relay pool 获取**：目前只能连接硬编码的 relay 地址，无法从 `relays.syncthing.net` 自动获取可用 relay 列表
-  5. **被动邀请无后台任务**：`wait_invitation()` 是阻塞调用，daemon_runner 尚未 spawn 永久 mode relay 监听任务
+- **daemon_runner 集成**：
+  - TCP auto-dial 10 秒后，若设备仍未连接，自动尝试配置的 `relay://` 地址 fallback
+  - 被动监听：若配置或 pool 中有 relay 地址，spawn 永久 mode 后台任务等待 `SessionInvitation`
+  - Relay pool 自动获取：`relays.syncthing.net/endpoint` → 无配置地址的设备自动使用 pool 中的 relay
+- **⚠️ 风险点（已解决）**：
+  1. ✅ **Transport/Dialer 集成**：`connect_bep_via_relay` + `daemon_runner` fallback
+  2. ✅ **TLS ALPN**：`SyncthingTlsConfig::relay_client_config()` 配置 `bep-relay`
+  3. ✅ **SessionInvitation 地址解析**：`resolve_session_addr` 空地址回退
+  4. ✅ **Relay pool 获取**：`relay/pool.rs` 实现 `fetch_relay_pool()` + `fetch_default_relay()`
+  5. ✅ **被动邀请后台任务**：`run_relay_listener()` 在 daemon_runner 中作为后台循环运行
+  6. ✅ **Global Discovery 地址联动**：`GlobalDiscovery::trigger_reannounce()` + STUN/PortMapper 成功后触发
+- **⚠️ 剩余风险点**：
+  1. **Relay pool 无健康检查**：获取的 relay 列表未验证可用性（未 ping），可能尝试连接已下线的 relay
+  2. **被动监听单点故障**：只监听第一个 relay 地址，若该 relay 下线，无法接收邀请
+  3. **Global Discovery 首次 5s 延迟仍可能错过 STUN/UPnP**：极端网络环境下 STUN 可能 >5s 才返回
 
 ### 2026-04-17：Phase 3.1 BepSession Observability ✅
 - **`BepSessionEvent` 枚举**：新增 6 种事件覆盖会话全生命周期 — `ClusterConfigComplete`, `IndexSent`, `IndexReceived`, `IndexUpdateReceived`, `BlockRequested`, `HeartbeatTimeout`, `SessionEnded`
