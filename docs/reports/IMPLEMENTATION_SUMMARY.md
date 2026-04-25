@@ -161,10 +161,11 @@
   - 消息类型：Ping/Pong, JoinRelayRequest, JoinSessionRequest, Response, ConnectRequest, SessionInvitation, RelayFull
   - `RelayProtocolClient`：Protocol Mode（TLS `bep-relay`）连接，支持 `join_relay()` / `request_session()` / `wait_invitation()` / `ping()`
   - `join_session()`：Session Mode（明文 TCP）连接，返回可用于 BEP TLS 握手的 `TcpStream`
+- **daemon_runner 集成**：TCP auto-dial 10 秒后，若设备仍未连接，自动尝试配置的 `relay://` 地址 fallback
 - **⚠️ 风险点**：
-  1. **未与 Transport/Dialer 集成**：`ParallelDialer` 目前只处理 `SocketAddr`（TCP 直连），尚未支持 `relay://` 地址解析和 relay 连接路径
-  2. **TLS ALPN 未验证**：`bep-relay` ALPN 字符串在 `rustls::ClientConfig` 中尚未显式配置，可能与某些 relay 服务器握手失败
-  3. **SessionInvitation 地址解析**：`address` 字段为空时应回退到 protocol mode 连接的同一 IP，当前实现依赖调用方处理
+  1. ~~**未与 Transport/Dialer 集成**：`ParallelDialer` 目前只处理 `SocketAddr`（TCP 直连），尚未支持 `relay://` 地址解析和 relay 连接路径~~ ✅ 已通过 `connect_bep_via_relay` + `daemon_runner` fallback 解决
+  2. ~~**TLS ALPN 未验证**：`bep-relay` ALPN 字符串在 `rustls::ClientConfig` 中尚未显式配置~~ ✅ `SyncthingTlsConfig::relay_client_config()` 已配置 `bep-relay`
+  3. **SessionInvitation 地址解析**：`address` 字段为空时回退到 protocol mode 同一 IP，已在 `resolve_session_addr` 中处理
   4. **缺少 relay pool 获取**：目前只能连接硬编码的 relay 地址，无法从 `relays.syncthing.net` 自动获取可用 relay 列表
   5. **被动邀请无后台任务**：`wait_invitation()` 是阻塞调用，daemon_runner 尚未 spawn 永久 mode relay 监听任务
 

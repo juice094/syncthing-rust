@@ -132,7 +132,7 @@ docs/
 | STUN (公网 IP 查询) | ⚠️ | Binding Request + XOR-MAPPED-ADDRESS 解析可用；NAT 类型检测、hole punching 缺失 |
 | UPnP | ⚠️ | `igd` crate 集成可用；自动续约缺失 |
 | NAT-PMP / PCP | ❌ | 骨架存在，未实现 |
-| Relay (官方 Protocol) | ✅ | XDR 编解码 + Protocol Mode（TLS）+ Session Mode（明文），核心客户端可用；未集成 Dialer/Transport |
+| Relay (官方 Protocol) | ✅ | XDR 编解码 + Protocol Mode（TLS）+ Session Mode（明文）+ daemon_runner fallback 集成 |
 
 ---
 

@@ -154,6 +154,16 @@ impl SyncthingTlsConfig {
         config.alpn_protocols = vec![b"bep/1.0".to_vec()];
         Ok(config)
     }
+
+    /// 获取 Relay Protocol 用的 TLS 客户端配置（ALPN = `bep-relay`）
+    pub fn relay_client_config(&self) -> std::result::Result<ClientConfig, rustls::Error> {
+        let mut config = ClientConfig::builder()
+            .dangerous()
+            .with_custom_certificate_verifier(Arc::new(SyncthingCertVerifier))
+            .with_client_auth_cert(self.cert_chain.clone(), self.private_key.clone_key())?;
+        config.alpn_protocols = vec![b"bep-relay".to_vec()];
+        Ok(config)
+    }
     
     /// 获取设备ID
     pub fn device_id(&self) -> DeviceId {
