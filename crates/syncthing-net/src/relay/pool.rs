@@ -2,6 +2,7 @@
 //!
 //! 从 Syncthing 官方 relay pool (`relays.syncthing.net/endpoint`) 获取可用中继服务器列表。
 
+use std::sync::Arc;
 use std::time::Duration;
 
 use tracing::{debug, warn};
@@ -108,6 +109,79 @@ pub async fn filter_healthy_relays(urls: Vec<String>, timeout_secs: u64) -> Vec<
                 debug!("Relay {} TCP connect timeout", url);
             }
         }
+    }
+    healthy
+}
+
+/// 对 relay 地址列表进行 TLS 级健康检查，返回可达的子集
+///
+/// 每个地址尝试：解析 URL → TCP connect → TLS 握手（ALPN = `bep-relay`）→
+/// 发送 `JoinRelayRequest` → 接收 `ResponseSuccess` → 断开连接。
+/// 超时 `timeout_secs` 秒。
+pub async fn filter_healthy_relays_tls(
+    urls: Vec<String>,
+    timeout_secs: u64,
+    tls_config: &crate::tls::SyncthingTlsConfig,
+) -> Vec<String> {
+    use super::client::RelayProtocolClient;
+    use super::dial::parse_relay_url;
+
+    let rustls_config = match tls_config.relay_client_config() {
+        Ok(cfg) => Arc::new(cfg),
+        Err(e) => {
+            warn!("Failed to build relay TLS config for health check: {}", e);
+            return Vec::new();
+        }
+    };
+
+    let mut healthy = Vec::new();
+    for url in urls {
+        let (addr, _) = match parse_relay_url(&url) {
+            Ok(a) => a,
+            Err(e) => {
+                debug!("Skipping malformed relay URL {}: {}", url, e);
+                continue;
+            }
+        };
+
+        // TCP + TLS 握手
+        let mut client = match tokio::time::timeout(
+            Duration::from_secs(timeout_secs),
+            RelayProtocolClient::connect(addr, &rustls_config),
+        )
+        .await
+        {
+            Ok(Ok(client)) => client,
+            Ok(Err(e)) => {
+                debug!("Relay {} TLS connect failed: {}", url, e);
+                continue;
+            }
+            Err(_) => {
+                debug!("Relay {} TLS connect timeout", url);
+                continue;
+            }
+        };
+
+        // JoinRelay，验证 relay 接受连接
+        match tokio::time::timeout(
+            Duration::from_secs(timeout_secs),
+            client.join_relay(),
+        )
+        .await
+        {
+            Ok(Ok(())) => {
+                debug!("Relay {} passed TLS + JoinRelay health check", url);
+                healthy.push(url);
+            }
+            Ok(Err(e)) => {
+                debug!("Relay {} JoinRelay failed: {}", url, e);
+            }
+            Err(_) => {
+                debug!("Relay {} JoinRelay timeout", url);
+            }
+        }
+
+        // 断开连接：client 在这里 drop，TLS 连接会优雅关闭
     }
     healthy
 }

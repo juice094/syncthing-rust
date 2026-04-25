@@ -17,6 +17,25 @@ use syncthing_sync::{database::FileSystemDatabase, SyncService, SyncModel, event
 
 use crate::{ManagerBlockSource, load_config, save_config, CONFIG_FILE_NAME};
 
+/// GlobalDiscovery 优雅退出 Drop guard
+pub(crate) struct GlobalDiscoveryShutdown {
+    tx: Option<tokio::sync::broadcast::Sender<()>>,
+}
+
+impl GlobalDiscoveryShutdown {
+    fn new(tx: tokio::sync::broadcast::Sender<()>) -> Self {
+        Self { tx: Some(tx) }
+    }
+}
+
+impl Drop for GlobalDiscoveryShutdown {
+    fn drop(&mut self) {
+        if let Some(tx) = self.tx.take() {
+            let _ = tx.send(());
+        }
+    }
+}
+
 /// Daemon 启动结果
 pub struct DaemonStartup {
     pub future: std::pin::Pin<Box<dyn std::future::Future<Output = Result<()>> + Send>>,
@@ -25,6 +44,8 @@ pub struct DaemonStartup {
     #[allow(dead_code)]
     pub session_handles: Arc<DashMap<DeviceId, JoinHandle<()>>>,
     pub device_id: DeviceId,
+    #[allow(dead_code)]
+    pub global_discovery_shutdown: Option<GlobalDiscoveryShutdown>,
 }
 
 /// 启动 daemon，返回 future 和句柄
@@ -360,6 +381,11 @@ pub async fn start_daemon(
         }
     });
 
+    // 在移动 global_discovery 之前捕获 shutdown sender
+    let global_discovery_shutdown = global_discovery.as_ref().map(|gd| {
+        GlobalDiscoveryShutdown::new(gd.shutdown_sender())
+    });
+
     // Global Discovery background task
     if let Some(gd) = global_discovery {
         let global_addrs = Arc::clone(&public_addrs);
@@ -411,9 +437,9 @@ pub async fn start_daemon(
     let relay_pool_urls: Vec<String> = if config.options.relays_enabled {
         match syncthing_net::relay::fetch_relay_pool(None).await {
             Ok(urls) => {
-                info!("Fetched {} relay(s) from pool, running health check...", urls.len());
-                let healthy = syncthing_net::relay::filter_healthy_relays(urls, 3).await;
-                info!("{} relay(s) passed health check", healthy.len());
+                info!("Fetched {} relay(s) from pool, running TLS health check...", urls.len());
+                let healthy = syncthing_net::relay::filter_healthy_relays_tls(urls, 3, tls_config_arc.as_ref()).await;
+                info!("{} relay(s) passed TLS health check", healthy.len());
                 healthy
             }
             Err(e) => {
@@ -556,6 +582,7 @@ pub async fn start_daemon(
         sync_service,
         session_handles,
         device_id,
+        global_discovery_shutdown,
     })
 }
 
