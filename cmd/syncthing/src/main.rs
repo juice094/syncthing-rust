@@ -235,10 +235,12 @@ pub(crate) struct ManagerBlockSource {
     pending_responses: std::sync::Arc<dashmap::DashMap<i32, tokio::sync::oneshot::Sender<bep_protocol::messages::Response>>>,
 }
 
-#[async_trait::async_trait]
-impl BlockSource for ManagerBlockSource {
-    async fn request_block(
+impl ManagerBlockSource {
+    /// 尝试向指定设备请求一个块。
+    /// 返回 Ok 表示设备返回了 NoError 响应；Err 表示发送失败、超时或设备返回错误码。
+    async fn try_request_block_from_device(
         &self,
+        device_id: syncthing_core::DeviceId,
         folder: &str,
         file: &str,
         block: &syncthing_core::types::BlockInfo,
@@ -262,36 +264,19 @@ impl BlockSource for ManagerBlockSource {
                 format!("encode request failed: {}", e),
             ))?;
 
-        debug!(
-            "Request hex dump for {}: {}",
-            file,
-            hex::encode(&payload)
-        );
-
-        // 获取任意已连接的设备
-        let device_id = self
-            .manager
-            .connected_devices()
-            .into_iter()
-            .next()
-            .ok_or_else(|| syncthing_sync::SyncError::pull(
-                file.to_string(),
-                "No connected devices".to_string(),
-            ))?;
-
         let conn = self
             .manager
             .get_connection(&device_id)
             .ok_or_else(|| syncthing_sync::SyncError::pull(
                 file.to_string(),
-                "Connection not available".to_string(),
+                format!("Connection to {} not available", device_id),
             ))?;
 
         conn.send_message(syncthing_net::protocol::MessageType::Request, payload)
             .await
             .map_err(|e| syncthing_sync::SyncError::pull(
                 file.to_string(),
-                format!("send request failed: {}", e),
+                format!("send request to {} failed: {}", device_id, e),
             ))?;
 
         // 注册等待响应
@@ -302,20 +287,63 @@ impl BlockSource for ManagerBlockSource {
             .await
             .map_err(|_| syncthing_sync::SyncError::pull(
                 file.to_string(),
-                "response timeout".to_string(),
+                format!("response timeout from {}", device_id),
             ))?
             .map_err(|_| syncthing_sync::SyncError::pull(
                 file.to_string(),
-                "response channel closed".to_string(),
+                format!("response channel closed for {}", device_id),
             ))?;
 
         if response.code != bep_protocol::messages::ErrorCode::NoError as i32 {
             return Err(syncthing_sync::SyncError::pull(
                 file.to_string(),
-                format!("remote error code: {}", response.code),
+                format!("remote error code {} from {}", response.code, device_id),
             ));
         }
         Ok(bytes::Bytes::from(response.data))
+    }
+}
+
+#[async_trait::async_trait]
+impl BlockSource for ManagerBlockSource {
+    async fn request_block(
+        &self,
+        folder: &str,
+        file: &str,
+        block: &syncthing_core::types::BlockInfo,
+    ) -> syncthing_sync::Result<bytes::Bytes> {
+        let devices = self.manager.connected_devices();
+        if devices.is_empty() {
+            return Err(syncthing_sync::SyncError::pull(
+                file.to_string(),
+                "No connected devices".to_string(),
+            ));
+        }
+
+        debug!(
+            "Requesting block {}/{} offset={} from {} candidate device(s)",
+            folder, file, block.offset, devices.len()
+        );
+
+        let mut last_error = None;
+
+        for device_id in devices {
+            match self.try_request_block_from_device(device_id, folder, file, block).await {
+                Ok(data) => {
+                    debug!("Block {}/{} offset={} served by {}", folder, file, block.offset, device_id);
+                    return Ok(data);
+                }
+                Err(e) => {
+                    debug!("Device {} failed block request: {}", device_id, e);
+                    last_error = Some(e);
+                }
+            }
+        }
+
+        Err(last_error.unwrap_or_else(|| syncthing_sync::SyncError::pull(
+            file.to_string(),
+            "All connected devices failed to serve block".to_string(),
+        )))
     }
 }
 
