@@ -373,7 +373,7 @@ mod tests {
         let addrs = vec!["tcp://127.0.0.1:22001".to_string()];
         let port = 54_321u16;
 
-        let discovery = LocalDiscovery::new(device_id.clone(), addrs.clone()).with_port(port);
+        let discovery = LocalDiscovery::new(device_id, addrs.clone()).with_port(port);
 
         // Spawn listener
         let listen_handle = tokio::spawn(async move {
@@ -384,7 +384,7 @@ mod tests {
         tokio::time::sleep(Duration::from_millis(200)).await;
 
         // Send broadcast
-        let sender = LocalDiscovery::new(device_id.clone(), addrs.clone()).with_port(port);
+        let sender = LocalDiscovery::new(device_id, addrs.clone()).with_port(port);
         sender.broadcast().await.unwrap();
 
         // Wait for reception (with timeout)
