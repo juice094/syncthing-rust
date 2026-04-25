@@ -98,6 +98,8 @@
 | BEP 互操作修复 | `client_name` → "syncthing"，`WireFolder.label` → `String`，`validate_device_id` Base32-Luhn | ✅ |
 | Local Discovery | 模块拆分为 `discovery/{mod,local,events}.rs`，`daemon_runner.rs` 集成 `run()` + auto-dial | ✅ |
 | STUN/PortMapper | `daemon_runner.rs` 启动时接入后台公网地址检测与端口映射 | ✅ |
+| Global Discovery | HTTPS mTLS + JSON 客户端 (`discovery/global.rs`) | ✅ |
+| Relay Protocol v1 | XDR 编解码 + 健康检查 + backoff (`relay/`) | ✅ |
 | clippy | 修复全部 workspace warnings（含手动修复 4 个 + auto-fix 6 个） | ✅ 0 warnings |
 | UDP 测试 | `test_udp_broadcast_roundtrip` 改用临时端口，消除 Windows 10048 冲突 | ✅ |
 
@@ -112,14 +114,12 @@
 - **格雷端网络**：Go Syncthing 未监听 Tailscale IP (`100.99.240.98:22000`)，Rust 端 dial 被拒绝 (os error 10061)
 - **下一步**：格雷确认 Go 节点运行状态及监听地址，或提供可用地址
 
-## 当前粗粒度待办（更新）
+## 当前粗粒度待办（接管修正，2026-04-25 Session-0ecf987e 后）
 
-1. 格雷端 BEP 互通验证（修复后的首次完整握手 + 文件同步）
-2. 实现 **Global Discovery** 客户端（HTTPS mTLS + JSON，P2 优先级）
-3. 实现 **Syncthing Relay Protocol** 客户端（XDR 编解码，P1 优先级）
-4. 输出 BEP 扩展的 `Verify` 消息类型草案
-5. 输出跨实例发现与握手流程图
-6. **不做**：共识算法实现、信誉系统、加密信道重建
+1. 格雷端 BEP 互通验证（修复后的首次完整握手 + 文件同步）——阻塞于格雷端网络状态
+2. 输出 BEP 扩展的 `Verify` 消息类型草案
+3. 输出跨实例发现与握手流程图
+4. **不做**：共识算法实现、信誉系统、加密信道重建
 
 ## 跨项目接口
 
