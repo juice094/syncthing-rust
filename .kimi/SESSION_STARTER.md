@@ -11,16 +11,19 @@ Syncthing Rust 实现，完成度 **75-80%**，核心功能就绪，待实际互
 | 维度 | 状态 | 备注 |
 |------|------|------|
 | 编译 | ✅ 通过 | `cargo check --workspace` 0错误 |
-| 测试 | ✅ 300+通过 | 单元测试全覆盖 |
+| 测试 | ✅ 279 passed | 全 workspace 测试通过，1 ignored |
+| clippy | ✅ 0 warnings | workspace 级别 |
 | API服务 | ✅ 可用 | `:8384/rest/health` 可访问 |
 | 证书持久化 | ✅ 已实现 | 设备ID保持一致 |
 | Hello交换 | ✅ 已实现 | BEP协议握手就绪 |
-| 与Go互通 | ⚠️ 待验证 | 代码就绪，需实际测试 |
+| Global Discovery | ✅ 已实现 | `discovery/global.rs` HTTPS mTLS |
+| Relay Protocol v1 | ✅ 已实现 | `relay/` XDR + 健康检查 + backoff |
+| 与Go互通 | ⚠️ 阻塞 | 格雷端未监听 Tailscale IP，待格雷确认 |
 | 端到端同步 | ⚠️ 待验证 | 需双设备测试 |
 
 ## 快速验证命令
 
-```bash
+```powershell
 # 1. 编译检查（必须0错误）
 cargo check --workspace
 
@@ -28,25 +31,19 @@ cargo check --workspace
 cargo test --workspace
 
 # 3. 构建并启动
-./target/release/syncthing.exe run
+cargo run --release --bin syncthing -- run
 
 # 4. 测试API
 curl http://127.0.0.1:8384/rest/health
 ```
 
-## 可执行文件位置
-
-```
-target/release/syncthing.exe   # 8.4MB - 主程序
-target/release/demo.exe        # 1.2MB - 演示程序
-```
-
 ## 下一步工作（优先级排序）
 
-1. **P0** - 与Go原版实际互通测试
-2. **P0** - 端到端文件同步验证
-3. **P1** - 性能优化
-4. **P1** - Web GUI实现
+1. **P0** - 格雷端 Go Syncthing 网络状态确认与互通验证
+2. **P1** - BEP 扩展 `Verify` 消息类型草案输出
+3. **P1** - 跨实例发现与握手流程图输出
+4. **P2** - Local Discovery IPv6 多播 / 网卡枚举
+5. **P2** - STUN NAT 类型检测 / hole punching
 
 ## 关键文档索引
 
@@ -76,4 +73,4 @@ target/release/demo.exe        # 1.2MB - 演示程序
 
 ---
 
-**最后更新**: 2026-04-04
+**最后更新**: 2026-04-25（接管 Session-0ecf987e 后修正）
