@@ -327,8 +327,10 @@ mod tests {
     /// 端到端测试：两个客户端通过 DERP 服务器互相转发数据包
     #[tokio::test]
     async fn test_derp_relay_packet() {
-        let mut config = DerpServerConfig::default();
-        config.bind_addr = "127.0.0.1:0".parse().unwrap();
+        let config = DerpServerConfig {
+            bind_addr: "127.0.0.1:0".parse().unwrap(),
+            ..Default::default()
+        };
         let mut server = DerpServer::new(config);
         let addr = server.bind().await.unwrap();
 

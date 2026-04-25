@@ -261,7 +261,7 @@ mod tests {
                 let t = times2.clone();
                 Box::pin(async move {
                     t.lock().unwrap().push(Instant::now());
-                    Err(Box::new(std::io::Error::new(std::io::ErrorKind::Other, "fail")) as BoxError)
+                    Err(Box::new(std::io::Error::other("fail")) as BoxError)
                 })
             }),
             config: RestartConfig {
@@ -311,7 +311,7 @@ mod tests {
                 let c = counter2.clone();
                 Box::pin(async move {
                     c.fetch_add(1, Ordering::SeqCst);
-                    Err(Box::new(std::io::Error::new(std::io::ErrorKind::Other, "fail")) as BoxError)
+                    Err(Box::new(std::io::Error::other("fail")) as BoxError)
                 })
             }),
             config: RestartConfig {

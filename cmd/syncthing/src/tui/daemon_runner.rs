@@ -300,7 +300,7 @@ pub async fn start_daemon(
     info!("Listening on: {}", actual_addr);
 
     // ── Local Discovery (Phase 0: 恢复连接能力) ──
-    let discovery_device_id = device_id.clone();
+    let discovery_device_id = device_id;
     let discovery_addrs = vec![format!("tcp://{}", actual_addr)];
     let (discovery_tx, mut discovery_rx) = tokio::sync::mpsc::channel::<syncthing_net::DiscoveryEvent>(32);
     let discovery_handle = handle.clone();
@@ -317,21 +317,18 @@ pub async fn start_daemon(
 
     tokio::spawn(async move {
         while let Some(event) = discovery_rx.recv().await {
-            match event {
-                syncthing_net::DiscoveryEvent::DeviceDiscovered { device_id, addresses, .. } => {
-                    if known_device_ids.contains(&device_id) {
-                        let addrs: Vec<SocketAddr> = addresses.iter()
-                            .filter_map(|a| a.parse().ok())
-                            .collect();
-                        if !addrs.is_empty() {
-                            info!("Local discovery: auto-dialing {} at {:?}", device_id, addrs);
-                            if let Err(e) = discovery_handle.connect_to(device_id, addrs).await {
-                                warn!("Failed to auto-dial discovered device {}: {}", device_id, e);
-                            }
+            if let syncthing_net::DiscoveryEvent::DeviceDiscovered { device_id, addresses, .. } = event {
+                if known_device_ids.contains(&device_id) {
+                    let addrs: Vec<SocketAddr> = addresses.iter()
+                        .filter_map(|a| a.parse().ok())
+                        .collect();
+                    if !addrs.is_empty() {
+                        info!("Local discovery: auto-dialing {} at {:?}", device_id, addrs);
+                        if let Err(e) = discovery_handle.connect_to(device_id, addrs).await {
+                            warn!("Failed to auto-dial discovered device {}: {}", device_id, e);
                         }
                     }
                 }
-                _ => {}
             }
         }
     });

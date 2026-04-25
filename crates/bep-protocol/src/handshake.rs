@@ -235,7 +235,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_invalid_magic() {
-        let buf = vec![0x00, 0x00, 0x00, 0x00]; // Invalid magic
+        let buf = [0x00, 0x00, 0x00, 0x00]; // Invalid magic
         let result = recv_hello(&mut &buf[..]).await;
         assert!(result.is_err());
     }

@@ -1014,8 +1014,10 @@ mod tests {
             })
         );
         let identity = Arc::new(crate::identity::TlsIdentity::new(Arc::clone(&tls_config)));
-        let mut config = ConnectionManagerConfig::default();
-        config.listen_addr = "127.0.0.1:0".parse().unwrap();
+        let config = ConnectionManagerConfig {
+            listen_addr: "127.0.0.1:0".parse().unwrap(),
+            ..Default::default()
+        };
         let (manager, _handle) = ConnectionManager::new(config, identity, tls_config);
 
         // 注册 TransportRegistry

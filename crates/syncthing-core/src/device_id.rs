@@ -330,7 +330,7 @@ mod tests {
         for c in s.chars() {
             if c != '-' {
                 assert!(
-                    (c >= 'A' && c <= 'Z' && !"0189".contains(c)) || (c >= '2' && c <= '7'),
+                    (c.is_ascii_uppercase() && !"0189".contains(c)) || ('2'..='7').contains(&c),
                     "非法字符: {}",
                     c
                 );
@@ -382,8 +382,8 @@ mod tests {
         for c in s.chars() {
             if c != '-' {
                 assert!(
-                    (c >= 'A' && c <= 'Z' && !"OI".contains(c)) || // A-Z 除了 O,I
-                    (c >= '2' && c <= '7'),
+                    (c.is_ascii_uppercase() && !"OI".contains(c)) || // A-Z 除了 O,I
+                    ('2'..='7').contains(&c),
                     "非法字符: {}", c
                 );
             }

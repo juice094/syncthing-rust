@@ -234,7 +234,7 @@ mod tests {
         let decoded = MessageHeader::from_bep_header(&bep).unwrap();
 
         assert_eq!(decoded.message_type, MessageType::Ping);
-        assert_eq!(decoded.compressed, false);
+        assert!(!decoded.compressed);
     }
 
     #[test]
