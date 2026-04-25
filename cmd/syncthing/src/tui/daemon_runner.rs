@@ -299,9 +299,53 @@ pub async fn start_daemon(
         .context("failed to start connection manager")?;
     info!("Listening on: {}", actual_addr);
 
+    // ── NAT Traversal: STUN + PortMapper (Phase 5 infra) ──
+    let local_port = actual_addr.port();
+    let public_addrs = Arc::new(tokio::sync::Mutex::new(Vec::<String>::new()));
+
+    // PortMapper background task
+    let pm_public_addrs = Arc::clone(&public_addrs);
+    tokio::spawn(async move {
+        let mut port_mapper = syncthing_net::PortMapper::new()
+            .with_local_addr(actual_addr);
+        match port_mapper.allocate_port(local_port).await {
+            Ok(mapping) => {
+                let ext = mapping.external_addr();
+                let ext_url = format!("tcp://{}", ext);
+                info!("PortMapper success: {} -> {}", actual_addr, ext);
+                pm_public_addrs.lock().await.push(ext_url);
+            }
+            Err(e) => {
+                warn!("PortMapper failed (expected if router has no UPnP/NAT-PMP): {}", e);
+            }
+        }
+    });
+
+    // STUN background task
+    let stun_public_addrs = Arc::clone(&public_addrs);
+    tokio::spawn(async move {
+        let stun = syncthing_net::StunClient::new()
+            .with_local_port(local_port);
+        match stun.get_public_address().await {
+            Ok(pub_addr) => {
+                let pub_url = format!("tcp://{}", pub_addr);
+                info!("STUN public address: {}", pub_addr);
+                stun_public_addrs.lock().await.push(pub_url);
+            }
+            Err(e) => {
+                warn!("STUN detection failed (expected behind symmetric NAT/firewall): {}", e);
+            }
+        }
+    });
+
     // ── Local Discovery (Phase 0: 恢复连接能力) ──
     let discovery_device_id = device_id;
-    let discovery_addrs = vec![format!("tcp://{}", actual_addr)];
+    let mut discovery_addrs = vec![format!("tcp://{}", actual_addr)];
+    // Append any already-known public addresses
+    {
+        let pa = public_addrs.lock().await;
+        discovery_addrs.extend(pa.iter().cloned());
+    }
     let (discovery_tx, mut discovery_rx) = tokio::sync::mpsc::channel::<syncthing_net::DiscoveryEvent>(32);
     let discovery_handle = handle.clone();
     let discovery_config = sync_service.get_config().await.unwrap_or_default();
