@@ -155,6 +155,19 @@
   4. **地址陈旧窗口**：30min announce 间隔意味着公网 IP 变化后最长 30min 内其他设备可能拨到旧地址；STUN 检测到变化不会立即触发 re-announce
   5. **未与连接管理器联动**：`query()` 结果目前未被 `ConnectionManager` 消费（缺少"发现未知设备地址后自动拨号"的闭环）
 
+### 2026-04-25：Relay Protocol v1 客户端（Phase 3）✅
+- **协议实现**: `crates/syncthing-net/src/relay/{protocol,client,types}.rs`
+  - XDR 编解码：Magic header + 大端序整数 + 4 字节对齐 opaque/string
+  - 消息类型：Ping/Pong, JoinRelayRequest, JoinSessionRequest, Response, ConnectRequest, SessionInvitation, RelayFull
+  - `RelayProtocolClient`：Protocol Mode（TLS `bep-relay`）连接，支持 `join_relay()` / `request_session()` / `wait_invitation()` / `ping()`
+  - `join_session()`：Session Mode（明文 TCP）连接，返回可用于 BEP TLS 握手的 `TcpStream`
+- **⚠️ 风险点**：
+  1. **未与 Transport/Dialer 集成**：`ParallelDialer` 目前只处理 `SocketAddr`（TCP 直连），尚未支持 `relay://` 地址解析和 relay 连接路径
+  2. **TLS ALPN 未验证**：`bep-relay` ALPN 字符串在 `rustls::ClientConfig` 中尚未显式配置，可能与某些 relay 服务器握手失败
+  3. **SessionInvitation 地址解析**：`address` 字段为空时应回退到 protocol mode 连接的同一 IP，当前实现依赖调用方处理
+  4. **缺少 relay pool 获取**：目前只能连接硬编码的 relay 地址，无法从 `relays.syncthing.net` 自动获取可用 relay 列表
+  5. **被动邀请无后台任务**：`wait_invitation()` 是阻塞调用，daemon_runner 尚未 spawn 永久 mode relay 监听任务
+
 ### 2026-04-17：Phase 3.1 BepSession Observability ✅
 - **`BepSessionEvent` 枚举**：新增 6 种事件覆盖会话全生命周期 — `ClusterConfigComplete`, `IndexSent`, `IndexReceived`, `IndexUpdateReceived`, `BlockRequested`, `HeartbeatTimeout`, `SessionEnded`
 - **`BepSessionMetrics` 原子计数器**：`messages_sent/recv`, `bytes_sent/recv`, `blocks_requested/served`, `heartbeat_timeouts`, `errors`，全部使用 `AtomicU64` 无锁统计
@@ -255,12 +268,13 @@ cmd/
 - ✅ REST API：兼容 Go 布局的基础接口已运行
 - ⚠️ Web GUI 托管：内置 HTTP 服务器就绪，静态资源托管待实现
 
-### Phase 2 — 网络可达性体验优化（进行中）
+### Phase 2 — 网络可达性体验优化（核心完成）
 - ✅ Local Discovery：UDP 广播骨架 + daemon_runner auto-dial
 - ✅ Global Discovery：HTTPS mTLS 客户端（announce/query）
 - ✅ STUN：公网地址检测
 - ✅ PortMapper：UPnP 端口映射
-- ❌ **Relay Protocol**：官方 relay 客户端（XDR over TCP）—— 当前重点
+- ✅ Relay Protocol：官方 XDR over TCP 客户端（protocol mode + session mode）
+- ⚠️ Transport/Dialer 集成：relay 地址尚未接入 `ParallelDialer` 和 `ConnectionManager`
 - 可选的地址解析插件：允许从 Tailscale API / Headscale API 等外部来源动态获取 peer 地址（仅做轻量 API 调用，不引入 Tailscale 内核）
 
 ### Phase 3 — 可选的深度网络集成（远期评估）

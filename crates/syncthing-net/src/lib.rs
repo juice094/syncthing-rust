@@ -20,6 +20,7 @@ pub mod metrics;
 pub mod identity;
 pub mod transport;
 pub mod derp;
+pub mod relay;
 
 pub use connection::{BepConnection, ConnectionEvent, TcpBiStream};
 pub use session::{BepSession, BepSessionEvent, BepSessionHandler, BepSessionMetrics};
