@@ -118,10 +118,13 @@ pub async fn filter_healthy_relays(urls: Vec<String>, timeout_secs: u64) -> Vec<
 /// 每个地址尝试：解析 URL → TCP connect → TLS 握手（ALPN = `bep-relay`）→
 /// 发送 `JoinRelayRequest` → 接收 `ResponseSuccess` → 断开连接。
 /// 超时 `timeout_secs` 秒。
+///
+/// 当 `need` > 0 时，收集到 `need` 个健康 relay 后立即停止，减少 startup latency。
 pub async fn filter_healthy_relays_tls(
     urls: Vec<String>,
     timeout_secs: u64,
     tls_config: &crate::tls::SyncthingTlsConfig,
+    need: usize,
 ) -> Vec<String> {
     use super::client::RelayProtocolClient;
     use super::dial::parse_relay_url;
@@ -136,6 +139,9 @@ pub async fn filter_healthy_relays_tls(
 
     let mut healthy = Vec::new();
     for url in urls {
+        if need > 0 && healthy.len() >= need {
+            break;
+        }
         let (addr, _) = match parse_relay_url(&url) {
             Ok(a) => a,
             Err(e) => {

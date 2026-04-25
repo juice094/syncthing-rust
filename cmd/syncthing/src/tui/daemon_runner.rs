@@ -473,12 +473,17 @@ pub async fn start_daemon(
         }
     });
 
-    // 获取 relay pool（若启用），并进行 TCP 健康检查
+    // 获取 relay pool（若启用），并进行分层健康检查
     let relay_pool_urls: Vec<String> = if config.options.relays_enabled {
         match syncthing_net::relay::fetch_relay_pool(None).await {
             Ok(urls) => {
-                info!("Fetched {} relay(s) from pool, running TLS health check...", urls.len());
-                let healthy = syncthing_net::relay::filter_healthy_relays_tls(urls, 3, tls_config_arc.as_ref()).await;
+                info!("Fetched {} relay(s) from pool, running staged health check...", urls.len());
+                // Stage 1: lightweight TCP connect (all relays)
+                let tcp_healthy = syncthing_net::relay::filter_healthy_relays(urls, 3).await;
+                info!("{} relay(s) passed TCP health check", tcp_healthy.len());
+                // Stage 2: deep TLS + JoinRelay on top 10, stop at 3 to reduce startup latency
+                let to_check = tcp_healthy.into_iter().take(10).collect();
+                let healthy = syncthing_net::relay::filter_healthy_relays_tls(to_check, 3, tls_config_arc.as_ref(), 3).await;
                 info!("{} relay(s) passed TLS health check", healthy.len());
                 healthy
             }
@@ -588,12 +593,22 @@ pub async fn start_daemon(
         let relay_tls = Arc::clone(&tls_config_arc);
         let relay_device_name = config.device_name.clone();
         tokio::spawn(async move {
+            let mut backoff = Duration::from_secs(1);
+            const MAX_BACKOFF: Duration = Duration::from_secs(300);
+            const RESET_THRESHOLD: Duration = Duration::from_secs(60);
             loop {
+                let start = std::time::Instant::now();
                 match run_relay_listener(&relay_url, device_id, &relay_tls, &relay_handle, &relay_device_name).await {
-                    Ok(()) => warn!("Relay listener for {} exited, reconnecting in 30s", relay_url),
-                    Err(e) => warn!("Relay listener for {} error: {}, reconnecting in 30s", relay_url, e),
+                    Ok(()) => warn!("Relay listener for {} exited, reconnecting in {:?}", relay_url, backoff),
+                    Err(e) => warn!("Relay listener for {} error: {}, reconnecting in {:?}", relay_url, e, backoff),
                 }
-                tokio::time::sleep(Duration::from_secs(30)).await;
+                tokio::time::sleep(backoff).await;
+                // Exponential backoff; reset if the listener ran successfully for a while
+                if start.elapsed() > RESET_THRESHOLD {
+                    backoff = Duration::from_secs(1);
+                } else {
+                    backoff = (backoff * 2).min(MAX_BACKOFF);
+                }
             }
         });
     }
