@@ -75,6 +75,43 @@ pub async fn fetch_default_relay() -> Option<String> {
     }
 }
 
+/// 对 relay 地址列表进行 TCP 健康检查，返回可达的子集
+///
+/// 每个地址尝试 TCP connect，超时 `timeout_secs` 秒。
+/// 仅检查 TCP 层连通性，不完成 TLS 握手，避免过重开销。
+pub async fn filter_healthy_relays(urls: Vec<String>, timeout_secs: u64) -> Vec<String> {
+    use super::dial::parse_relay_url;
+
+    let mut healthy = Vec::new();
+    for url in urls {
+        let (addr, _) = match parse_relay_url(&url) {
+            Ok(a) => a,
+            Err(e) => {
+                debug!("Skipping malformed relay URL {}: {}", url, e);
+                continue;
+            }
+        };
+        match tokio::time::timeout(
+            Duration::from_secs(timeout_secs),
+            tokio::net::TcpStream::connect(addr),
+        )
+        .await
+        {
+            Ok(Ok(_)) => {
+                debug!("Relay {} is healthy", url);
+                healthy.push(url);
+            }
+            Ok(Err(e)) => {
+                debug!("Relay {} TCP connect failed: {}", url, e);
+            }
+            Err(_) => {
+                debug!("Relay {} TCP connect timeout", url);
+            }
+        }
+    }
+    healthy
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

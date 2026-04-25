@@ -172,10 +172,14 @@
   4. ✅ **Relay pool 获取**：`relay/pool.rs` 实现 `fetch_relay_pool()` + `fetch_default_relay()`
   5. ✅ **被动邀请后台任务**：`run_relay_listener()` 在 daemon_runner 中作为后台循环运行
   6. ✅ **Global Discovery 地址联动**：`GlobalDiscovery::trigger_reannounce()` + STUN/PortMapper 成功后触发
-- **⚠️ 剩余风险点**：
-  1. **Relay pool 无健康检查**：获取的 relay 列表未验证可用性（未 ping），可能尝试连接已下线的 relay
-  2. **被动监听单点故障**：只监听第一个 relay 地址，若该 relay 下线，无法接收邀请
-  3. **Global Discovery 首次 5s 延迟仍可能错过 STUN/UPnP**：极端网络环境下 STUN 可能 >5s 才返回
+- **⚠️ 剩余风险点（本轮已解决）**：
+  1. ✅ **Relay pool 健康检查**：`filter_healthy_relays()` TCP 3 秒超时探测，daemon_runner 获取 pool 后自动过滤
+  2. ✅ **被动监听冗余**：收集配置+pool 去重后取前 3 个地址，分别 spawn 永久 mode 监听任务
+  3. ✅ **Global Discovery 首启延迟**：取消 5s sleep，改为立即首次 announce；STUN/UPnP 完成后 trigger_reannounce 补发
+- **⚠️ 当前剩余风险点**：
+  1. **Relay 健康检查只做 TCP 层**：未验证 TLS + JoinRelay 是否成功，可能存在 TCP 通但 relay 已满或拒绝连接的情况
+  2. **Global Discovery 未优雅退出**：daemon 停止时 GlobalDiscovery 后台任务仍在运行（无 shutdown signal）
+  3. **被动监听任务无上限**：若用户配置了大量 relay 地址或 pool 返回很多，可能创建过多并发连接（当前限制为 3）
 
 ### 2026-04-17：Phase 3.1 BepSession Observability ✅
 - **`BepSessionEvent` 枚举**：新增 6 种事件覆盖会话全生命周期 — `ClusterConfigComplete`, `IndexSent`, `IndexReceived`, `IndexUpdateReceived`, `BlockRequested`, `HeartbeatTimeout`, `SessionEnded`

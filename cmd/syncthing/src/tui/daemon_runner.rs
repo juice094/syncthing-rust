@@ -407,12 +407,14 @@ pub async fn start_daemon(
         }
     });
 
-    // 获取 relay pool（若启用）
+    // 获取 relay pool（若启用），并进行 TCP 健康检查
     let relay_pool_urls: Vec<String> = if config.options.relays_enabled {
         match syncthing_net::relay::fetch_relay_pool(None).await {
             Ok(urls) => {
-                info!("Fetched {} relay(s) from pool", urls.len());
-                urls
+                info!("Fetched {} relay(s) from pool, running health check...", urls.len());
+                let healthy = syncthing_net::relay::filter_healthy_relays(urls, 3).await;
+                info!("{} relay(s) passed health check", healthy.len());
+                healthy
             }
             Err(e) => {
                 warn!("Failed to fetch relay pool: {}", e);
@@ -501,25 +503,29 @@ pub async fn start_daemon(
     });
 
     // ── Relay 被动监听（永久 mode）──
-    // 若配置中存在 relay 地址，使用第一个作为监听服务器；否则使用 pool 中的第一个
-    let first_relay_url = {
+    // 收集配置中的 relay 地址（去重），若不足 3 个用 pool 补齐，分别 spawn 监听任务
+    let mut relay_listen_urls: std::collections::HashSet<String> = {
         let cfg = sync_service.get_config().await.unwrap_or_default();
         cfg.devices.iter().filter_map(|d| {
             d.addresses.iter().find_map(|a| match a {
                 syncthing_core::types::AddressType::Relay(url) => Some(url.clone()),
                 _ => None,
             })
-        }).next()
-    }.or(first_pool_relay);
-    if let Some(relay_url) = first_relay_url {
+        }).collect()
+    };
+    for url in relay_pool_urls {
+        relay_listen_urls.insert(url);
+    }
+    let relay_listen_urls: Vec<String> = relay_listen_urls.into_iter().take(3).collect();
+    for relay_url in relay_listen_urls {
         let relay_handle = handle.clone();
         let relay_tls = Arc::clone(&tls_config_arc);
         let relay_device_name = config.device_name.clone();
         tokio::spawn(async move {
             loop {
                 match run_relay_listener(&relay_url, device_id, &relay_tls, &relay_handle, &relay_device_name).await {
-                    Ok(()) => warn!("Relay listener exited, reconnecting in 30s"),
-                    Err(e) => warn!("Relay listener error: {}, reconnecting in 30s", e),
+                    Ok(()) => warn!("Relay listener for {} exited, reconnecting in 30s", relay_url),
+                    Err(e) => warn!("Relay listener for {} error: {}, reconnecting in 30s", relay_url, e),
                 }
                 tokio::time::sleep(Duration::from_secs(30)).await;
             }
