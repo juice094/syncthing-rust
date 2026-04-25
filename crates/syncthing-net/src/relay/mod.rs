@@ -14,8 +14,10 @@
 pub mod protocol;
 pub mod client;
 pub mod types;
+pub mod dial;
 
 pub use client::{join_session, RelayProtocolClient};
+pub use dial::connect_bep_via_relay;
 pub use protocol::{
     ConnectRequest, Header, JoinRelayRequest, JoinSessionRequest, Message, MessageType, Ping,
     Pong, RelayFull, Response, SessionInvitation, MAGIC,
