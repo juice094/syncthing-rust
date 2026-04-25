@@ -4,8 +4,9 @@
 
 `syncthing-rust` 是 P2P 文件同步的 Rust 替代实现，已与官方 Go Syncthing 完成 BEP 协议互操作验证。
 
-- **当前状态**：v0.2.0 Beta，255+ tests，0 TODOs，0 clippy warnings
+- **当前状态**：v0.2.0 Beta，255+ tests，0 TODOs，**0 clippy warnings**
 - **传输层**：TCP+TLS / SOCKS5 / DERP 中继 / UPnP / NAT-PMP / PCP 全实现
+- **发现层**：Local Discovery（UDP 广播）✅ / STUN ✅ / PortMapper ✅ / **Global Discovery 📝** / **Relay 📝**
 - **同步**：Push/Pull E2E 双向验证（Rust ↔ Go 跨 Tailscale 网络）
 - **互操作**：与官方 Go Syncthing 的 BEP 协议完全兼容（Hello/ClusterConfig/Index/Request/Response）
 - **观测**：REST API（兼容 Go 布局）+ 文件系统 watcher(1s debounce) + TUI
@@ -86,30 +87,38 @@
 
 **实现策略**：手写 JSON-RPC 2.0 协议层（~200 行），不依赖第三方 MCP SDK，只使用工作区已有依赖（tokio/serde_json/reqwest），完全可控、零额外依赖风险。
 
-## 阶段性进展（2026-04-24 Session）
+## 阶段性进展（2026-04-25 Session）
 
 ### 已完成
 
 | 模块 | 内容 | 状态 |
 |------|------|------|
-| MCP Bridge | 新增 `syncthing-mcp-bridge`，手写 JSON-RPC 2.0，11 tools + 3 resources | ✅ E2E 11/11 通过 |
-| TUI | 粘贴支持（Ctrl+V / Shift+Insert via arboard） | ✅ |
-| clippy | 9 个 warning 全清 | ✅ 0 warnings |
-| syncthing-core | `validate_device_id` 修复：hex 检查 → `DeviceId::from_str`，支持 base32 字符集 | ✅ |
-| syncthing-api | `parse_device_id` 修复：优先 `DeviceId::from_str`，保留 SHA-256 fallback | ✅ |
-| bep-protocol | `WireFolder.label`：`Vec<String>` → `String`，与 Go 端 protobuf 兼容 | ✅ |
+| docs 重组 | 归档历史文档，建立 design/plans/reports/archive 分层结构 | ✅ |
+| BEP 互操作修复 | `client_name` → "syncthing"，`WireFolder.label` → `String`，`validate_device_id` Base32-Luhn | ✅ |
+| Local Discovery | 模块拆分为 `discovery/{mod,local,events}.rs`，`daemon_runner.rs` 集成 `run()` + auto-dial | ✅ |
+| STUN/PortMapper | `daemon_runner.rs` 启动时接入后台公网地址检测与端口映射 | ✅ |
+| clippy | 修复全部 workspace warnings（含手动修复 4 个 + auto-fix 6 个） | ✅ 0 warnings |
+| UDP 测试 | `test_udp_broadcast_roundtrip` 改用临时端口，消除 Windows 10048 冲突 | ✅ |
 
 ### 当前状态
 
-- **BEP Session 启动**：架构完整，`daemon_runner.rs` 中 `on_connected` 回调正确 spawn `BepSession::run()`
-- **ClusterConfig 发送**：Rust 端可正确生成并发送 ClusterConfig（日志验证）
-- **跨设备测试**：Rust 端主动 dial 格雷 Go 节点，连接建立后 10 秒超时（Go 端未回复 ClusterConfig）
-- **根因**：`WireFolder.label` 的 protobuf `repeated string` 与 Go 端 `string` 不兼容，已修复；待格雷重启 Go 节点后验证
+- **Local Discovery**：局域网内自动发现与自动拨号已集成到主流程
+- **STUN/PortMapper**：后台任务运行，成功时扩展 announce 地址列表
+- **BEP 互通**：`WireFolder.label` 和 `client_name` 兼容性修复已提交，待格雷端验证
 
 ### 阻塞项
 
 - **格雷端网络**：Go Syncthing 未监听 Tailscale IP (`100.99.240.98:22000`)，Rust 端 dial 被拒绝 (os error 10061)
 - **下一步**：格雷确认 Go 节点运行状态及监听地址，或提供可用地址
+
+## 当前粗粒度待办（更新）
+
+1. 格雷端 BEP 互通验证（修复后的首次完整握手 + 文件同步）
+2. 实现 **Global Discovery** 客户端（HTTPS mTLS + JSON，P2 优先级）
+3. 实现 **Syncthing Relay Protocol** 客户端（XDR 编解码，P1 优先级）
+4. 输出 BEP 扩展的 `Verify` 消息类型草案
+5. 输出跨实例发现与握手流程图
+6. **不做**：共识算法实现、信誉系统、加密信道重建
 
 ## 跨项目接口
 
