@@ -177,8 +177,8 @@
   2. ✅ **被动监听冗余**：收集配置+pool 去重后取前 3 个地址，分别 spawn 永久 mode 监听任务
   3. ✅ **Global Discovery 首启延迟**：取消 5s sleep，改为立即首次 announce；STUN/UPnP 完成后 trigger_reannounce 补发
 - **⚠️ 当前剩余风险点**：
-  1. **Relay 健康检查只做 TCP 层**：未验证 TLS + JoinRelay 是否成功，可能存在 TCP 通但 relay 已满或拒绝连接的情况
-  2. **Global Discovery 未优雅退出**：daemon 停止时 GlobalDiscovery 后台任务仍在运行（无 shutdown signal）
+  1. ✅ **Relay 健康检查只做 TCP 层**：已升级为 `filter_healthy_relays_tls()`，完整验证 TCP → TLS（ALPN = `bep-relay`）→ JoinRelay → ResponseSuccess；daemon_runner 已切换为 TLS 级健康检查
+  2. ✅ **Global Discovery 未优雅退出**：`GlobalDiscovery` 已集成 `broadcast::Sender/Receiver` _SHUTDOWN 机制，`run()` 通过 `tokio::select!` 监听退出信号；`daemon_runner.rs` 在 `DaemonStartup` 中注入 `GlobalDiscoveryShutdown` Drop guard，确保 daemon 停止时自动触发优雅退出
   3. **被动监听任务无上限**：若用户配置了大量 relay 地址或 pool 返回很多，可能创建过多并发连接（当前限制为 3）
 
 ### 2026-04-17：Phase 3.1 BepSession Observability ✅

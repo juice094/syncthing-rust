@@ -19,7 +19,7 @@ pub mod pool;
 
 pub use client::{join_session, RelayProtocolClient};
 pub use dial::connect_bep_via_relay;
-pub use pool::{fetch_default_relay, fetch_relay_pool, filter_healthy_relays, DEFAULT_RELAY_POOL_URL};
+pub use pool::{fetch_default_relay, fetch_relay_pool, filter_healthy_relays, filter_healthy_relays_tls, DEFAULT_RELAY_POOL_URL};
 pub use protocol::{
     ConnectRequest, Header, JoinRelayRequest, JoinSessionRequest, Message, MessageType, Ping,
     Pong, RelayFull, Response, SessionInvitation, MAGIC,

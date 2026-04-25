@@ -9,7 +9,7 @@ use std::time::Duration;
 
 use reqwest::Client;
 use serde_json::json;
-use tokio::sync::Notify;
+use tokio::sync::{broadcast, Notify};
 use tracing::{debug, error, info, warn};
 
 use syncthing_core::{DeviceId, Result, SyncthingError};
@@ -36,12 +36,24 @@ pub struct GlobalDiscovery {
     client: Client,
     /// 外部触发 re-announce 的通知器
     notify: Arc<Notify>,
+    /// 优雅退出信号发送端
+    shutdown_tx: broadcast::Sender<()>,
 }
 
 impl GlobalDiscovery {
     /// 使用默认官方发现服务器创建
     pub fn new(device_id: DeviceId, client: Client) -> Self {
         Self::with_server(device_id, client, DEFAULT_DISCOVERY_SERVER.to_string())
+    }
+
+    /// 触发优雅退出
+    pub fn shutdown(&self) {
+        let _ = self.shutdown_tx.send(());
+    }
+
+    /// 获取 shutdown 发送端（用于外部 Drop guard）
+    pub fn shutdown_sender(&self) -> broadcast::Sender<()> {
+        self.shutdown_tx.clone()
     }
 
     /// 获取通知器引用，用于外部触发 re-announce
@@ -58,11 +70,13 @@ impl GlobalDiscovery {
             format!("{}/", server_url)
         };
 
+        let (shutdown_tx, _) = broadcast::channel(1);
         Self {
             server_url,
             device_id,
             client,
             notify: Arc::new(Notify::new()),
+            shutdown_tx,
         }
     }
 
@@ -93,7 +107,14 @@ impl GlobalDiscovery {
             .map_err(|e| SyncthingError::network(format!("reqwest client: {}", e)))?;
 
         let server_url = server_url.unwrap_or_else(|| DEFAULT_DISCOVERY_SERVER.to_string());
-        Ok(Self::with_server(device_id, client, server_url))
+        let (shutdown_tx, _) = broadcast::channel(1);
+        Ok(Self {
+            server_url,
+            device_id,
+            client,
+            notify: Arc::new(Notify::new()),
+            shutdown_tx,
+        })
     }
 
     /// 触发一次立即 re-announce（外部调用，如 STUN/UPnP 发现新地址后）
@@ -212,6 +233,7 @@ impl GlobalDiscovery {
     /// 失败时等待 `RETRY_INTERVAL` 后重试。
     /// 外部可通过 `trigger_reannounce()` 唤醒立即 announce（用于 STUN/UPnP 发现新地址后补发）。
     pub async fn run(&self, addresses: Arc<tokio::sync::Mutex<Vec<String>>>) {
+        let mut shutdown_rx = self.shutdown_tx.subscribe();
         loop {
             let addrs: Vec<String> = addresses.lock().await.clone();
             if addrs.is_empty() {
@@ -230,11 +252,15 @@ impl GlobalDiscovery {
                 }
             }
 
-            // 等待 ANNOUNCE_INTERVAL 或被外部唤醒
+            // 等待 ANNOUNCE_INTERVAL、外部唤醒或优雅退出信号
             tokio::select! {
                 _ = tokio::time::sleep(ANNOUNCE_INTERVAL) => {}
                 _ = self.notify.notified() => {
                     info!("GlobalDiscovery re-announce triggered by address change");
+                }
+                _ = shutdown_rx.recv() => {
+                    info!("GlobalDiscovery shutting down gracefully");
+                    break;
                 }
             }
         }
