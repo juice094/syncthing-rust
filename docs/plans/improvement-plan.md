@@ -2,15 +2,15 @@
 
 ## 项目现状
 
-- 版本: v0.1.0 (Alpha)
-- 代码规模: ~27,500 行 Rust
-- 核心功能: Rust ↔ Go 双向文件同步已验证
-- 测试: 257 passed, 0 failed
-- 架构: 身份层/传输层/网络层三阶段解耦完成
+- 版本: v0.2.0 (Beta)
+- 代码规模: ~30,000 行 Rust
+- 核心功能: BEP 协议层（TLS + Hello + ClusterConfig + Index + Request/Response）在 Tailscale 环境下与 Go 节点验证通过；局域网 Local Discovery + auto-dial 已集成
+- 测试: 255+ passed, 0 failed
+- 架构: 身份层/传输层/网络层/BEP 会话层四阶段解耦完成
 
 ## 改进目标
 
-将 v0.1.0 (Alpha) 推进到 v0.2.0 (Beta)，核心标准:
+将 v0.2.0 (Beta) 推进到生产就绪，核心标准:
 - 72h 压测无崩溃、无内存泄漏
 - 零 panic/unwrap 生产路径
 - REST API 与 Go Syncthing 完全兼容
@@ -22,8 +22,8 @@
 
 ### A1. 依赖安全扫描
 - [ ] 运行 `cargo audit`，修复已知漏洞
-- [ ] 检查是否有未使用的依赖（bloat）
-- [ ] 评估关键依赖的维护状态（tokio、rustls、axum）
+- [x] 检查是否有未使用的依赖（bloat）— 2026-04-20 iroh 死代码已清理
+- [x] 评估关键依赖的维护状态（tokio、rustls、axum）— 2026-04-20 tokio-rustls 0.26 统一完成
 
 ### A2. Panic/unwrap 清理
 - [ ] 统计所有 `.unwrap()` / `.expect()` / `panic!`
@@ -40,10 +40,10 @@
 ## 工作流 B: 稳定性加固 (Stability) — P0
 
 ### B1. 连接管理器强化
-- [ ] 心跳超时后优雅关闭（当前可能直接 abort）
-- [ ] 连接质量评分动态更新（RTT、丢包率）
-- [ ] 多路径同时保持时的心跳协调
-- [ ] 网络变更事件（WiFi 切换）的检测与快速恢复
+- [x] 心跳超时后优雅关闭 — 2026-04-17 BepSession 实现 270s 心跳超时检测 + `HeartbeatTimeout` 事件 + 会话终止
+- [ ] 连接质量评分动态更新（RTT、丢包率）— ParallelDialer 有 RTT 记录但未实时反馈到 ConnectionManager
+- [ ] 多路径同时保持时的心跳协调 — 存储结构支持，但 API 未暴露多路径
+- [x] 网络变更事件（WiFi 切换）的检测与快速恢复 — `NetMonitor` 已检测接口变化并触发重拨
 
 ### B2. 资源泄漏防护
 - [ ] 文件句柄泄漏检查（特别是临时文件）
@@ -61,17 +61,19 @@
 ## 工作流 C: 功能完善 (Features) — P1
 
 ### C1. REST API 补齐
-- [ ] `/rest/system/connections` ✅ 已完成
+- [x] `/rest/system/connections` ✅ 已完成
+- [x] `/rest/system/status` — 真实 uptime / folder/device 计数 ✅ 已完成
+- [x] `/rest/db/status` — 真实 per-folder file counts / bytes ✅ 已完成
 - [ ] `/rest/system/log` — 返回运行时日志
 - [ ] `/rest/system/upgrade` — 检查更新（返回当前版本）
-- [ ] `/rest/system/config` — 完整配置读写
+- [ ] `/rest/system/config` — 完整配置读写（当前读可用，写接口待补充）
 - [ ] `/rest/events` — 事件流（WebSocket/SSE）
 - [ ] `/rest/db/file` — 单个文件状态查询
 
 ### C2. TUI 配置热同步
 - [ ] REST API 修改配置后，TUI 自动重载
 - [ ] TUI 修改配置后，REST API 立即生效
-- [ ] 文件系统监听 config.json，外部修改自动加载
+- [x] 文件系统监听 config.json，外部修改自动加载 — `JsonConfigStore` 已集成 `notify` watcher
 
 ### C3. 日志与监控
 - [ ] 结构化日志输出（JSON 格式选项）
@@ -141,8 +143,8 @@
 ## 执行优先级
 
 ```
-P0 (立即开始): A1, A2, B1, B2
-P1 (本周内):   C1, C2, E1, E2
+P0 (立即开始): A1, A2, B2
+P1 (本周内):   C1 (写接口), E1, E2
 P2 (下周):     D1, D2, F1, F2
 P3 (未来):     D3, F3, C3
 ```

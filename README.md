@@ -117,18 +117,21 @@ docs/
 |---------|--------|-------|
 | BEP Protocol (TLS + Hello + Index + Request/Response) | ✅ | 已与官方 Go 节点在 Tailscale 环境下互通验证 |
 | TCP Transport | ✅ | |
-| SOCKS5 / HTTP Proxy | ✅ | |
-| Folder Scan / Pull / Push | ✅ | 双向文件同步验证通过 |
+| HTTP CONNECT / SOCKS5 Proxy | ⚠️ | 代码完整，但 `ParallelDialer` 主流程未实际使用代理 |
+| Folder Scan / Pull | ⚠️ | Pull 通过 BEP Request/Response 真实拉取；`ManagerBlockSource` 向**任意**已连接设备请求块，多设备场景下非定向 |
+| Push (被动响应上传) | ✅ | `block_server.rs` + `BepSession::on_block_request` 链路完整 |
+| Push (主动调度) | 📝 | 主动扫描后触发对端拉取的调度逻辑待完善 |
 | Conflict Resolution | ✅ | |
 | Filesystem Watcher | ✅ | `notify` + 1s debounce |
-| REST API | ✅ | |
+| REST API | ✅ | 读接口完整，部分写接口待补充 |
 | TUI | ✅ | 设备/文件夹管理、实时状态 |
-| Config Persistence | ✅ | |
-| Local Discovery (LAN) | 📝 | Phase 5 设计完成，待实现 |
-| Global Discovery | 📝 | Phase 5 设计完成，待实现 |
-| STUN / NAT Detection | 📝 | Phase 5 设计完成，待实现 |
-| UPnP / NAT-PMP / PCP | 📝 | 模块骨架存在，待接入 |
-| Relay (TCP fallback) | 📝 | Phase 5 设计完成，待实现 |
+| Config Persistence | ✅ | `JsonConfigStore` 支持 notify 监听 + 异步读写 |
+| Local Discovery (LAN) | ⚠️ | UDP 广播/接收/run 循环已集成；IPv6 多播、网卡枚举、子网广播地址计算缺失 |
+| Global Discovery | ❌ | 完全空白 |
+| STUN (公网 IP 查询) | ⚠️ | Binding Request + XOR-MAPPED-ADDRESS 解析可用；NAT 类型检测、hole punching 缺失 |
+| UPnP | ⚠️ | `igd` crate 集成可用；自动续约缺失 |
+| NAT-PMP / PCP | ❌ | 骨架存在，未实现 |
+| Relay (官方 Protocol) | ❌ | 完全空白；现有 DERP 为自研协议，无法与 Go 互通 |
 
 ---
 
