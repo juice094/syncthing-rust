@@ -299,12 +299,27 @@ pub async fn start_daemon(
         .context("failed to start connection manager")?;
     info!("Listening on: {}", actual_addr);
 
-    // ── NAT Traversal: STUN + PortMapper (Phase 5 infra) ──
+    // ── NAT Traversal: STUN + PortMapper + Global Discovery (Phase 2/5) ──
     let local_port = actual_addr.port();
     let public_addrs = Arc::new(tokio::sync::Mutex::new(Vec::<String>::new()));
 
+    // 预先创建 GlobalDiscovery，成功后共享给 STUN/PortMapper 用于触发 re-announce
+    let cert_path = config_dir.join(syncthing_net::tls::CERT_FILE_NAME);
+    let key_path = config_dir.join(syncthing_net::tls::KEY_FILE_NAME);
+    let global_discovery = match syncthing_net::GlobalDiscovery::from_cert_files(device_id, &cert_path, &key_path, None).await {
+        Ok(gd) => {
+            info!("GlobalDiscovery initialized for {}", device_id);
+            Some(Arc::new(gd))
+        }
+        Err(e) => {
+            warn!("GlobalDiscovery initialization failed: {}", e);
+            None
+        }
+    };
+
     // PortMapper background task
     let pm_public_addrs = Arc::clone(&public_addrs);
+    let pm_gd = global_discovery.clone();
     tokio::spawn(async move {
         let mut port_mapper = syncthing_net::PortMapper::new()
             .with_local_addr(actual_addr);
@@ -314,6 +329,9 @@ pub async fn start_daemon(
                 let ext_url = format!("tcp://{}", ext);
                 info!("PortMapper success: {} -> {}", actual_addr, ext);
                 pm_public_addrs.lock().await.push(ext_url);
+                if let Some(gd) = pm_gd {
+                    gd.trigger_reannounce();
+                }
             }
             Err(e) => {
                 warn!("PortMapper failed (expected if router has no UPnP/NAT-PMP): {}", e);
@@ -323,6 +341,7 @@ pub async fn start_daemon(
 
     // STUN background task
     let stun_public_addrs = Arc::clone(&public_addrs);
+    let stun_gd = global_discovery.clone();
     tokio::spawn(async move {
         let stun = syncthing_net::StunClient::new()
             .with_local_port(local_port);
@@ -331,6 +350,9 @@ pub async fn start_daemon(
                 let pub_url = format!("tcp://{}", pub_addr);
                 info!("STUN public address: {}", pub_addr);
                 stun_public_addrs.lock().await.push(pub_url);
+                if let Some(gd) = stun_gd {
+                    gd.trigger_reannounce();
+                }
             }
             Err(e) => {
                 warn!("STUN detection failed (expected behind symmetric NAT/firewall): {}", e);
@@ -338,22 +360,13 @@ pub async fn start_daemon(
         }
     });
 
-    // ── Global Discovery (Phase 2: 官方发现服务器) ──
-    let global_addrs = Arc::clone(&public_addrs);
-    let cert_path = config_dir.join(syncthing_net::tls::CERT_FILE_NAME);
-    let key_path = config_dir.join(syncthing_net::tls::KEY_FILE_NAME);
-    let global_device_id = device_id;
-    tokio::spawn(async move {
-        match syncthing_net::GlobalDiscovery::from_cert_files(global_device_id, &cert_path, &key_path, None).await {
-            Ok(gd) => {
-                info!("GlobalDiscovery initialized for {}", global_device_id);
-                gd.run(global_addrs).await;
-            }
-            Err(e) => {
-                warn!("GlobalDiscovery initialization failed: {}", e);
-            }
-        }
-    });
+    // Global Discovery background task
+    if let Some(gd) = global_discovery {
+        let global_addrs = Arc::clone(&public_addrs);
+        tokio::spawn(async move {
+            gd.run(global_addrs).await;
+        });
+    }
 
     // ── Local Discovery (Phase 0: 恢复连接能力) ──
     let discovery_device_id = device_id;
@@ -394,6 +407,24 @@ pub async fn start_daemon(
         }
     });
 
+    // 获取 relay pool（若启用）
+    let relay_pool_urls: Vec<String> = if config.options.relays_enabled {
+        match syncthing_net::relay::fetch_relay_pool(None).await {
+            Ok(urls) => {
+                info!("Fetched {} relay(s) from pool", urls.len());
+                urls
+            }
+            Err(e) => {
+                warn!("Failed to fetch relay pool: {}", e);
+                Vec::new()
+            }
+        }
+    } else {
+        info!("Relay is disabled in config");
+        Vec::new()
+    };
+    let first_pool_relay = relay_pool_urls.first().cloned();
+
     // 提取 TCP 直连地址和 Relay 地址
     let mut tcp_peers: Vec<(syncthing_core::DeviceId, Vec<SocketAddr>)> = Vec::new();
     let mut relay_peers: Vec<(syncthing_core::DeviceId, Vec<String>)> = Vec::new();
@@ -404,10 +435,16 @@ pub async fn start_daemon(
                 syncthing_core::types::AddressType::Tcp(s) => s.parse().ok(),
                 _ => None,
             }).collect();
-            let relay_addrs: Vec<String> = d.addresses.iter().filter_map(|a| match a {
+            let mut relay_addrs: Vec<String> = d.addresses.iter().filter_map(|a| match a {
                 syncthing_core::types::AddressType::Relay(s) => Some(s.clone()),
                 _ => None,
             }).collect();
+            // 若设备未配置 relay 地址但 relay pool 可用，使用 pool 中的第一个作为 fallback
+            if relay_addrs.is_empty() {
+                if let Some(ref url) = first_pool_relay {
+                    relay_addrs.push(url.clone());
+                }
+            }
             if !tcp_addrs.is_empty() {
                 tcp_peers.push((d.id, tcp_addrs));
             }
@@ -463,6 +500,32 @@ pub async fn start_daemon(
         }
     });
 
+    // ── Relay 被动监听（永久 mode）──
+    // 若配置中存在 relay 地址，使用第一个作为监听服务器；否则使用 pool 中的第一个
+    let first_relay_url = {
+        let cfg = sync_service.get_config().await.unwrap_or_default();
+        cfg.devices.iter().filter_map(|d| {
+            d.addresses.iter().find_map(|a| match a {
+                syncthing_core::types::AddressType::Relay(url) => Some(url.clone()),
+                _ => None,
+            })
+        }).next()
+    }.or(first_pool_relay);
+    if let Some(relay_url) = first_relay_url {
+        let relay_handle = handle.clone();
+        let relay_tls = Arc::clone(&tls_config_arc);
+        let relay_device_name = config.device_name.clone();
+        tokio::spawn(async move {
+            loop {
+                match run_relay_listener(&relay_url, device_id, &relay_tls, &relay_handle, &relay_device_name).await {
+                    Ok(()) => warn!("Relay listener exited, reconnecting in 30s"),
+                    Err(e) => warn!("Relay listener error: {}, reconnecting in 30s", e),
+                }
+                tokio::time::sleep(Duration::from_secs(30)).await;
+            }
+        });
+    }
+
     let connection_handle = handle.clone();
     let session_handles_clone = Arc::clone(&session_handles);
     let future: std::pin::Pin<Box<dyn std::future::Future<Output = Result<()>> + Send>> = Box::pin(async move {
@@ -488,6 +551,73 @@ pub async fn start_daemon(
         session_handles,
         device_id,
     })
+}
+
+/// Relay 永久 mode 监听循环
+///
+/// 连接到 relay 服务器，注册为可用节点，等待 SessionInvitation，
+/// 收到后建立 session mode 连接并完成 BEP TLS + Hello，注册到 ConnectionManager。
+async fn run_relay_listener(
+    relay_url: &str,
+    local_device_id: syncthing_core::DeviceId,
+    tls_config: &Arc<syncthing_net::SyncthingTlsConfig>,
+    handle: &syncthing_net::ConnectionManagerHandle,
+    device_name: &str,
+) -> syncthing_core::Result<()> {
+    use syncthing_core::{ConnectionState, ConnectionType, SyncthingError};
+    use syncthing_net::connection::{BepConnection, TcpBiStream};
+    use syncthing_net::handshaker::BepHandshaker;
+    use syncthing_net::tls::{accept_tls_stream, connect_tls_stream};
+    use tracing::info;
+
+    let (relay_addr, _) = syncthing_net::relay::dial::parse_relay_url(relay_url)?;
+    let rustls_config = tls_config
+        .relay_client_config()
+        .map_err(|e| SyncthingError::Tls(format!("relay config: {}", e)))?;
+    let rustls_config = std::sync::Arc::new(rustls_config);
+
+    let mut client = syncthing_net::relay::RelayProtocolClient::connect(relay_addr, &rustls_config)
+        .await?;
+    client.join_relay().await?;
+    info!("Relay listener joined {}", relay_addr);
+
+    loop {
+        let invitation = client.wait_invitation().await?;
+        info!("Relay invitation received from {:?}", invitation.from);
+
+        let session_addr = syncthing_net::relay::dial::resolve_session_addr(relay_addr, &invitation)?;
+        let session_stream = syncthing_net::relay::join_session(session_addr, &invitation.key).await?;
+
+        // BEP TLS + Hello + Connection 注册
+        // accept_tls_stream / connect_tls_stream 返回不同类型，必须在分支内完成全部操作
+        if invitation.server_socket {
+            let (mut tls_stream, peer_device) = accept_tls_stream(session_stream, tls_config).await?;
+            let _remote_hello = BepHandshaker::server_handshake(&mut tls_stream, device_name).await?;
+            let (event_tx, _event_rx) = tokio::sync::mpsc::unbounded_channel();
+            let conn = BepConnection::new(
+                Box::new(TcpBiStream::Server(tls_stream)),
+                ConnectionType::Incoming,
+                event_tx,
+            ).await?;
+            conn.set_device_id(peer_device);
+            conn.set_state(ConnectionState::ProtocolHandshakeComplete);
+            handle.register_connection(peer_device, conn).await?;
+            info!("Relay incoming (server) connection registered for {}", peer_device);
+        } else {
+            let (mut tls_stream, peer_device) = connect_tls_stream(session_stream, tls_config, Some(local_device_id)).await?;
+            let _remote_hello = BepHandshaker::client_handshake(&mut tls_stream, device_name).await?;
+            let (event_tx, _event_rx) = tokio::sync::mpsc::unbounded_channel();
+            let conn = BepConnection::new(
+                Box::new(TcpBiStream::Client(tls_stream)),
+                ConnectionType::Incoming,
+                event_tx,
+            ).await?;
+            conn.set_device_id(peer_device);
+            conn.set_state(ConnectionState::ProtocolHandshakeComplete);
+            handle.register_connection(peer_device, conn).await?;
+            info!("Relay incoming (client) connection registered for {}", peer_device);
+        }
+    }
 }
 
 struct DaemonBepHandler {

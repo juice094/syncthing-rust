@@ -156,7 +156,7 @@ pub async fn connect_bep_via_relay(
 /// 解析 relay URL
 ///
 /// 格式: `relay://host:port/?id=<device_id>`
-fn parse_relay_url(url: &str) -> Result<(SocketAddr, DeviceId)> {
+pub fn parse_relay_url(url: &str) -> Result<(SocketAddr, DeviceId)> {
     let url = url
         .strip_prefix("relay://")
         .ok_or_else(|| SyncthingError::config("relay URL must start with relay://"))?;
@@ -184,7 +184,7 @@ fn parse_relay_url(url: &str) -> Result<(SocketAddr, DeviceId)> {
 /// 解析 session 地址
 ///
 /// 如果 invitation.address 为空，回退到 protocol mode 连接的同一 IP。
-fn resolve_session_addr(
+pub fn resolve_session_addr(
     protocol_addr: SocketAddr,
     invitation: &SessionInvitation,
 ) -> Result<SocketAddr> {
