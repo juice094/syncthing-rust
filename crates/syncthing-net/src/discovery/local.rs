@@ -371,7 +371,10 @@ mod tests {
             "YTKWHNG-OT27ZGH-6VVBRIJ-OHOUNWT-DYLJ2NR-TCXUXHI-QDUQR2U-OPLCBQG",
         ).unwrap();
         let addrs = vec!["tcp://127.0.0.1:22001".to_string()];
-        let port = 54_321u16;
+        // Use an ephemeral port to avoid Windows bind conflicts (os error 10048)
+        let temp = std::net::UdpSocket::bind("0.0.0.0:0").unwrap();
+        let port = temp.local_addr().unwrap().port();
+        drop(temp);
 
         let discovery = LocalDiscovery::new(device_id, addrs.clone()).with_port(port);
 
