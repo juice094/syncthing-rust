@@ -27,6 +27,7 @@ base64 = { workspace = true }
 prost = { workspace = true }
 igd = { version = "0.12", features = ["aio", "tokio"] }
 rcgen = { version = "0.13", features = ["pem"] }
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json"] }
 bep-protocol = { path = "../bep-protocol" }
 netdev = "0.41"
 lz4 = "1"

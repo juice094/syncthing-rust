@@ -141,6 +141,14 @@
 - **STUN/PortMapper 接入**: `daemon_runner.rs` 启动时 spawn 后台任务检测公网地址/申请端口映射
 - **AGENTS.md 修正**: 将夸大的 "全实现" 声明降维为准确描述
 
+### 2026-04-25：Global Discovery 客户端（Phase 2）✅
+- **`GlobalDiscovery` 实现**: `crates/syncthing-net/src/discovery/global.rs`
+  - `announce()`: HTTPS POST `{ "addresses": [...] }`，mTLS 客户端证书认证
+  - `query()`: HTTPS GET `?device=<id>`，返回地址列表（404 返回空列表）
+  - `run()`: 后台循环，每 30min announce，失败 5min 后重试
+- **daemon_runner 集成**: 启动时从 `cert.pem`/`key.pem` 自动构造 `GlobalDiscovery`，spawn 后台 announce 任务
+- **依赖**: `reqwest`（`rustls-tls` feature）已加入 `syncthing-net/Cargo.toml`
+
 ### 2026-04-17：Phase 3.1 BepSession Observability ✅
 - **`BepSessionEvent` 枚举**：新增 6 种事件覆盖会话全生命周期 — `ClusterConfigComplete`, `IndexSent`, `IndexReceived`, `IndexUpdateReceived`, `BlockRequested`, `HeartbeatTimeout`, `SessionEnded`
 - **`BepSessionMetrics` 原子计数器**：`messages_sent/recv`, `bytes_sent/recv`, `blocks_requested/served`, `heartbeat_timeouts`, `errors`，全部使用 `AtomicU64` 无锁统计

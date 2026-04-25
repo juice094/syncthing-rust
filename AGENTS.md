@@ -6,7 +6,7 @@
 
 - **当前状态**：v0.2.0 Beta，255+ tests，0 TODOs，**0 clippy warnings**
 - **传输层**：TCP+TLS / HTTP CONNECT 代理 / SOCKS5 代理 / DERP 中继（自研协议）/ UPnP（PCP/NAT-PMP 骨架待实现）
-- **发现层**：Local Discovery（UDP 广播骨架）⚠️ / STUN（公网 IP 查询）⚠️ / PortMapper（UPnP 主路径）⚠️ / **Global Discovery ❌** / **官方 Relay Protocol ❌**
+- **发现层**：Local Discovery（UDP 广播骨架）⚠️ / STUN（公网 IP 查询）⚠️ / PortMapper（UPnP 主路径）⚠️ / **Global Discovery（HTTPS mTLS 客户端）✅** / **官方 Relay Protocol ❌**
 - **同步**：Pull 已验证；被动响应块请求（上传）已实现；主动 Push 调度待完善
 - **互操作**：与官方 Go Syncthing 的 BEP 核心消息（Hello/ClusterConfig/Index/Request/Response）在 Tailscale 环境下已验证
 - **观测**：REST API（兼容 Go 布局）+ 文件系统 watcher(1s debounce) + TUI
