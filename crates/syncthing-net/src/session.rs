@@ -646,7 +646,7 @@ mod tests {
         let reply_cc = bep_protocol::messages::ClusterConfig {
             folders: vec![bep_protocol::messages::WireFolder {
                 id: "test-folder".to_string(),
-                label: vec![],
+                label: String::new(),
                 r#type: 0,
                 stop_reason: 0,
                 devices: vec![],
@@ -700,7 +700,7 @@ mod tests {
         let reply_cc = bep_protocol::messages::ClusterConfig {
             folders: vec![bep_protocol::messages::WireFolder {
                 id: "test-folder".to_string(),
-                label: vec![],
+                label: String::new(),
                 r#type: 0,
                 stop_reason: 0,
                 devices: vec![],
@@ -773,7 +773,7 @@ mod tests {
         let reply_cc = bep_protocol::messages::ClusterConfig {
             folders: vec![bep_protocol::messages::WireFolder {
                 id: "test-folder".to_string(),
-                label: vec![],
+                label: String::new(),
                 r#type: 0,
                 stop_reason: 0,
                 devices: vec![],

@@ -6,7 +6,7 @@
 
 A Rust implementation of the [Syncthing](https://syncthing.net/) protocol stack, designed to interoperate with the official Go Syncthing daemon over the BEP (Block Exchange Protocol) wire format.
 
-> **Status**: v0.2.0 — Beta. Core file sync (Rust ↔ Go) verified; 255+ tests passing; all TODOs resolved; 0 clippy warnings.
+> **Status**: v0.2.0 — BEP 协议层（TLS + Hello + ClusterConfig + Index + Request/Response）在 **Tailscale 虚拟网络环境下** 已与官方 Go 节点完成双向互通验证（握手 + 文件收发）。当前处于**无 Tailscale 时无法与隔离网络中的云服务器建立连接**的阶段；网络发现层设计已完成，待实现。
 
 ---
 
@@ -21,8 +21,8 @@ A Rust implementation of the [Syncthing](https://syncthing.net/) protocol stack,
 | 2026-04-15 | REST API with real uptime / connection enumeration; default port migration to `22001/8385`. |
 | 2026-04-16 | REST API `/rest/db/status` now returns real per-folder file counts and byte totals. |
 | 2026-04-17 | Phase 2 Network Abstraction: `ReliablePipe` trait decouples BEP from TCP; `MemoryPipe` tests pass; `ConnectionManager` supports multi-path per device. |
-| 2026-04-20 | **Phase 3 Complete**: Cloud Push E2E (Rust → Go) and Cloud Pull E2E (Go → Rust) both verified over Tailscale. Protocol compatibility fixes: deleted-file block clearing, shared-folder Index filtering, connection race handling. |
-| 2026-04-20 | **v0.2.0 Release**: SOCKS5 proxy, iroh dead code cleanup, naming conflict resolution, folder lifecycle control, REST traffic stats, DERP forwarding, LRU O(1) cache, precise timestamps, PCP protocol, 0 TODOs. |
+| 2026-04-20 | **v0.2.0 Release**: BEP 协议兼容性修复（ClusterConfig 本地设备、Hello 伪装、TLS crypto provider、WireFolder label），双向文件同步验证通过。 |
+| 2026-04-20 | **Network Discovery 设计完成** — Local + Global Discovery + STUN + UPnP + Relay 完整设计文档出稿，旨在解决无 Tailscale 时的设备互联问题。 |
 
 ---
 
@@ -34,7 +34,10 @@ A Rust implementation of the [Syncthing](https://syncthing.net/) protocol stack,
 | **Phase 2** | Network abstraction (ReliablePipe, BepSession), watcher, REST API, dual-node coexistence | ✅ Complete |
 | **Phase 3** | BepSession observability, peer sync state events, **Push/Pull E2E with real Go node** | ✅ Complete |
 | **Phase 3.5** | Connection stability hardening, `.stignore`, config persistence | ✅ Complete |
-| **Phase 4** | TUI 增强（设备/文件夹管理、实时同步状态）、72h 压测（格雷远程）、生产打包 | 🔵 In Progress |
+| **Phase 4** | TUI 增强（设备/文件夹管理、实时同步状态） | 🔵 In Progress |
+| **Phase 5** | **自建网络发现层** — 消除 Tailscale 依赖，实现无 VPN 环境下的设备发现与互联 | 📝 Design Complete |
+
+> **Phase 5 详情**: 参见 [`docs/design/NETWORK_DISCOVERY_DESIGN.md`](docs/design/NETWORK_DISCOVERY_DESIGN.md)。
 
 ---
 
@@ -55,6 +58,8 @@ The daemon will:
 - Generate an Ed25519 TLS certificate on first run (stored in `%LOCALAPPDATA%\syncthing-rust` on Windows, or `~/.local/share/syncthing-rust` on Linux).
 - Listen for BEP connections on `0.0.0.0:22001` (falling back to a random port if occupied).
 - Serve the REST API on `0.0.0.0:8385` (loopback addresses bypass API key auth for local debugging).
+
+> **Note on device connectivity**: v0.2.0 的 BEP 互通验证**依赖 Tailscale 虚拟网络**（`100.x.x.x`）。当前无 Tailscale 时，**无法与隔离网络中的云服务器建立连接**。Phase 5 网络发现层（Local Discovery + Global Discovery + Relay）的目标正是消除这一外部依赖，实现零配置互联。
 
 ---
 
@@ -93,41 +98,49 @@ cmd/syncthing/          # CLI entry point and TUI
 crates/
 ├── syncthing-core/     # DeviceId, FileInfo, VersionVector, core types
 ├── bep-protocol/       # BEP Hello, Request/Response, Index, ClusterConfig
-├── syncthing-net/      # TCP+TLS transport, ConnectionManager, dialer, STUN
+├── syncthing-net/      # TCP+TLS transport, ConnectionManager, dialer, (STUN/UPnP/Relay WIP)
 ├── syncthing-sync/     # SyncService, Scanner, Puller, IndexHandler, watcher
 ├── syncthing-api/      # REST API server (Axum)
 └── syncthing-db/       # Database abstractions
+docs/
+├── design/             # 活跃的设计文档
+├── plans/              # 计划与路线图
+├── reports/            # 验证报告与实现总结
+└── archive/            # 历史归档
 ```
 
 ---
 
 ## Features
 
-| Feature | Status |
-|---------|--------|
-| BEP Protocol (TLS + Hello + Index + Request/Response) | ✅ |
-| TCP Transport | ✅ |
-| SOCKS5 / HTTP Proxy | ✅ |
-| DERP Relay | ✅ |
-| UPnP / NAT-PMP / PCP Port Mapping | ✅ (UPnP allocate; PMP/PCP release) |
-| Folder Scan / Pull / Push | ✅ |
-| Conflict Resolution | ✅ |
-| Filesystem Watcher | ✅ |
-| REST API | ✅ |
-| TUI | ✅ |
-| Config Persistence | ✅ |
+| Feature | Status | Notes |
+|---------|--------|-------|
+| BEP Protocol (TLS + Hello + Index + Request/Response) | ✅ | 已与官方 Go 节点互通验证 |
+| TCP Transport | ✅ | |
+| SOCKS5 / HTTP Proxy | ✅ | |
+| Folder Scan / Pull / Push | ✅ | 双向文件同步验证通过 |
+| Conflict Resolution | ✅ | |
+| Filesystem Watcher | ✅ | `notify` + 1s debounce |
+| REST API | ✅ | |
+| TUI | ✅ | 设备/文件夹管理、实时状态 |
+| Config Persistence | ✅ | |
+| Local Discovery (LAN) | 📝 | Phase 5 设计完成，待实现 |
+| Global Discovery | 📝 | Phase 5 设计完成，待实现 |
+| STUN / NAT Detection | 📝 | Phase 5 设计完成，待实现 |
+| UPnP / NAT-PMP / PCP | 📝 | 模块骨架存在，待接入 |
+| Relay (TCP fallback) | 📝 | Phase 5 设计完成，待实现 |
 
 ---
 
 ## Documentation
 
-Project reports and design documents are kept under [`docs/`](docs/):
+项目文档按活跃程度分层存放：
 
-- [`docs/README.md`](docs/README.md) — Documentation index and reading guide.
-- [`docs/IMPLEMENTATION_SUMMARY.md`](docs/IMPLEMENTATION_SUMMARY.md) — Architecture and crate-level status.
-- [`docs/VERIFICATION_REPORT_BEP_2026-04-11.md`](docs/VERIFICATION_REPORT_BEP_2026-04-11.md) — Cross-network BEP interop test results.
-- [`docs/FEATURE_COMPARISON.md`](docs/FEATURE_COMPARISON.md) — Comparison with official Go Syncthing.
-- [`docs/MVP_RECOVERY_PLAN.md`](docs/MVP_RECOVERY_PLAN.md) — Recovery plan from earlier project stages.
+- **[`docs/README.md`](docs/README.md)** — 文档导航页，说明各目录用途。
+- **[`docs/design/NETWORK_DISCOVERY_DESIGN.md`](docs/design/NETWORK_DISCOVERY_DESIGN.md)** — 当前核心设计文档（网络发现层）。
+- **[`docs/reports/IMPLEMENTATION_SUMMARY.md`](docs/reports/IMPLEMENTATION_SUMMARY.md)** — 架构总览与 crate 级状态。
+- **[`docs/reports/VERIFICATION_REPORT_BEP_2026-04-11.md`](docs/reports/VERIFICATION_REPORT_BEP_2026-04-11.md)** — BEP 互操作测试报告。
+- **[`docs/design/FEATURE_COMPARISON.md`](docs/design/FEATURE_COMPARISON.md)** — 与官方 Go Syncthing 的功能对标。
 
 ---
 
