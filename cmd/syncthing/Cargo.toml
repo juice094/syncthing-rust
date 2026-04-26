@@ -26,7 +26,7 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 sha2 = { workspace = true }
 rand = { workspace = true }
-ratatui = "0.29"
+ratatui = "0.30"
 crossterm = "0.28"
 rustls = { workspace = true, features = ["ring"] }
 dashmap = { workspace = true }
