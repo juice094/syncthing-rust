@@ -38,3 +38,7 @@ config.json.bak*
 # External vendored dependencies
 dev/third_party/iroh/
 test_gray_folder/
+# Stress test artifacts
+stress-test-*.csv
+stress-test-data/
+
