@@ -188,7 +188,8 @@ impl RestApi {
             .route("/rest/resume/:id", post(resume_folder))
             // Config
             .route("/rest/config", get(get_config).put(update_config))
-            .route("/rest/config/folders", get(list_folders))
+            .route("/rest/config/folders", get(list_folders).post(create_folder))
+            .route("/rest/config/folders/:id", get(get_folder).put(update_folder).delete(delete_folder))
             .route("/rest/config/devices", get(list_devices))
             // System operations — Go canonical paths
             .route("/rest/system/config", post(system_config_post))

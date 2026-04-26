@@ -539,8 +539,6 @@ pub async fn start_daemon(
         info!("Relay is disabled in config");
         Vec::new()
     };
-    let first_pool_relay = relay_pool_urls.first().cloned();
-
     // 提取 TCP 直连地址和 Relay 地址
     let mut peers: Vec<(syncthing_core::DeviceId, Vec<SocketAddr>, Vec<String>)> = Vec::new();
     {
@@ -554,9 +552,9 @@ pub async fn start_daemon(
                 syncthing_core::types::AddressType::Relay(s) => Some(s.clone()),
                 _ => None,
             }).collect();
-            // 若设备未配置 relay 地址但 relay pool 可用，使用 pool 中的第一个作为 fallback
+            // 若设备未配置 relay 地址但 relay pool 可用，使用所有 healthy relay 作为候选
             if relay_addrs.is_empty() {
-                if let Some(ref url) = first_pool_relay {
+                for url in &relay_pool_urls {
                     relay_addrs.push(url.clone());
                 }
             }
