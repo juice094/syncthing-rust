@@ -51,7 +51,7 @@ chrono = { version = "0.4", features = ["serde"] }
 bytes = "1.5"
 dashmap = "5.5"
 parking_lot = "0.12"
-notify = "7.0"
+notify = "8"
 tempfile = "3"
 walkdir = "2"
 

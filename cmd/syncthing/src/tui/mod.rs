@@ -97,7 +97,7 @@ async fn run_app<B: Backend>(
     let mut event_tx: Option<tokio::sync::mpsc::Sender<TuiEvent>> = None;
 
     loop {
-        terminal.draw(|f| ui::draw(f, app))?;
+        terminal.draw(|f| ui::draw(f, app)).map_err(|e| io::Error::other(format!("{}", e)))?;
 
         let timeout = tick_rate
             .checked_sub(last_tick.elapsed())
