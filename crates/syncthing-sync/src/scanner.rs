@@ -30,40 +30,56 @@ impl Scanner {
 
     /// 扫描单个文件夹
     pub async fn scan_folder(&self, folder: &Folder) -> Result<Vec<FileInfo>> {
-        info!(folder_id = %folder.id, path = %folder.path, "Starting folder scan");
+        self.scan_folder_at(folder, None).await
+    }
 
+    /// 扫描文件夹中的子目录
+    pub async fn scan_folder_sub(&self, folder: &Folder, sub: &str) -> Result<Vec<FileInfo>> {
+        self.scan_folder_at(folder, Some(sub)).await
+    }
+
+    async fn scan_folder_at(&self, folder: &Folder, sub: Option<&str>) -> Result<Vec<FileInfo>> {
         let path = Path::new(&folder.path);
-        if !path.exists() {
-            return Err(SyncError::scan(folder.id.clone(), format!("Path does not exist: {}", folder.path)));
+        let scan_root = match sub {
+            Some(s) => path.join(s),
+            None => path.to_path_buf(),
+        };
+
+        info!(folder_id = %folder.id, path = %scan_root.display(), "Starting folder scan");
+
+        if !scan_root.exists() {
+            return Err(SyncError::scan(folder.id.clone(), format!("Path does not exist: {}", scan_root.display())));
         }
 
-        if !path.is_dir() {
-            return Err(SyncError::scan(folder.id.clone(), format!("Path is not a directory: {}", folder.path)));
+        if !scan_root.is_dir() {
+            return Err(SyncError::scan(folder.id.clone(), format!("Path is not a directory: {}", scan_root.display())));
         }
 
         let mut changed_files = Vec::new();
         let mut visited_paths = std::collections::HashSet::new();
 
-        // 加载 .stignore（如果存在）
+        // 加载 .stignore（如果存在）—— 始终以 folder 根目录为基准
         let ignore_path = path.join(".stignore");
         let matcher = IgnoreMatcher::load(&ignore_path);
 
         // 递归扫描目录
-        match self.scan_directory(&folder.id, path, path, &mut visited_paths, &matcher).await {
+        match self.scan_directory(&folder.id, path, &scan_root, &mut visited_paths, &matcher).await {
             Ok(files) => {
-                // 检查已删除的文件
-                let db_files = self.db.get_folder_files(&folder.id).await?;
-                for db_file in db_files {
-                    let full_path = path.join(&db_file.name);
-                    if !full_path.exists() && !db_file.is_deleted() {
-                        debug!(file = %db_file.name, "File was deleted");
-                        let mut deleted_info = db_file.clone();
-                        deleted_info.deleted = Some(true);
-                        deleted_info.blocks = vec![]; // BEP 协议要求 deleted 文件 block list 为空
-                        deleted_info.size = 0;
-                        deleted_info.sequence = self.db.increment_sequence(&folder.id).await?;
-                        deleted_info.version.increment(1); // 使用设备ID 1作为本地设备
-                        changed_files.push(deleted_info);
+                // 仅全量扫描时检查已删除的文件
+                if sub.is_none() {
+                    let db_files = self.db.get_folder_files(&folder.id).await?;
+                    for db_file in db_files {
+                        let full_path = path.join(&db_file.name);
+                        if !full_path.exists() && !db_file.is_deleted() {
+                            debug!(file = %db_file.name, "File was deleted");
+                            let mut deleted_info = db_file.clone();
+                            deleted_info.deleted = Some(true);
+                            deleted_info.blocks = vec![]; // BEP 协议要求 deleted 文件 block list 为空
+                            deleted_info.size = 0;
+                            deleted_info.sequence = self.db.increment_sequence(&folder.id).await?;
+                            deleted_info.version.increment(1); // 使用设备ID 1作为本地设备
+                            changed_files.push(deleted_info);
+                        }
                     }
                 }
 

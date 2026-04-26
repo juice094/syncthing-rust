@@ -182,6 +182,15 @@ impl FolderModel {
 
     /// 执行扫描
     pub async fn scan(&self) -> Result<Vec<FileInfo>> {
+        self.scan_inner(None).await
+    }
+
+    /// 扫描子目录
+    pub async fn scan_sub(&self, sub: &str) -> Result<Vec<FileInfo>> {
+        self.scan_inner(Some(sub)).await
+    }
+
+    async fn scan_inner(&self, sub: Option<&str>) -> Result<Vec<FileInfo>> {
         if self.folder.paused {
             debug!(folder_id = %self.folder.id, "Folder is paused, skipping scan");
             return Ok(vec![]);
@@ -200,10 +209,15 @@ impl FolderModel {
             to: FolderStatus::Scanning,
         });
 
-        info!(folder_id = %self.folder.id, "Starting scan");
+        info!(folder_id = %self.folder.id, sub = ?sub, "Starting scan");
 
         // 执行扫描
-        let changed_files = match self.scanner.scan_folder(&self.folder).await {
+        let scan_result = match sub {
+            Some(s) => self.scanner.scan_folder_sub(&self.folder, s).await,
+            None => self.scanner.scan_folder(&self.folder).await,
+        };
+
+        let changed_files = match scan_result {
             Ok(files) => {
                 let changed_count = files.len();
                 info!(

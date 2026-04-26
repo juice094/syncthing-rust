@@ -1,2 +1,0 @@
-timestamp,elapsed_secs,connected_a_b,connected_b_a,folder_state_a,folder_state_b,files_a,files_b,errors
-20569T05:59:00Z,0,true,true,present,present,1,0,0

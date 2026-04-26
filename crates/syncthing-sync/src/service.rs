@@ -330,6 +330,16 @@ impl SyncModel for SyncService {
         }
     }
 
+    async fn scan_folder_sub(&self, folder_id: &str, sub: &str) -> Result<()> {
+        match self.folders.get(folder_id) {
+            Some(folder) => {
+                folder.scan_sub(sub).await?;
+                Ok(())
+            }
+            None => Err(SyncError::FolderNotFound(folder_id.to_string())),
+        }
+    }
+
     async fn pull_folder(&self, folder_id: &str) -> Result<()> {
         match self.folders.get(folder_id) {
             Some(folder) => {
@@ -501,6 +511,11 @@ impl syncthing_core::traits::SyncModel for SyncService {
 
     async fn scan_folder(&self, folder: &syncthing_core::FolderId) -> syncthing_core::Result<()> {
         crate::model::SyncModel::scan_folder(self, folder.as_str()).await
+            .map_err(|e| syncthing_core::SyncthingError::internal(e.to_string()))
+    }
+
+    async fn scan_folder_sub(&self, folder: &syncthing_core::FolderId, sub: &str) -> syncthing_core::Result<()> {
+        crate::model::SyncModel::scan_folder_sub(self, folder.as_str(), sub).await
             .map_err(|e| syncthing_core::SyncthingError::internal(e.to_string()))
     }
 
