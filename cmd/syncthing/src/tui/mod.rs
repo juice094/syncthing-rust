@@ -7,6 +7,16 @@ pub mod views;
 pub mod popups;
 pub mod widgets;
 
+/// Sync engine → TUI 事件
+#[derive(Debug, Clone)]
+pub enum TuiEvent {
+    FolderStateChanged { folder: String, status: syncthing_core::types::FolderStatus },
+    DeviceConnected { device_id: syncthing_core::DeviceId },
+    DeviceDisconnected { device_id: syncthing_core::DeviceId },
+    #[allow(dead_code)]
+    SyncProgress { folder: String, progress: f64 },
+}
+
 use std::io;
 use std::path::PathBuf;
 use std::time::Duration;
@@ -84,6 +94,7 @@ async fn run_app<B: Backend>(
 
     let mut daemon_future: Option<std::pin::Pin<Box<dyn std::future::Future<Output = anyhow::Result<()>> + Send>>> = None;
     let mut daemon_handle: Option<syncthing_net::ConnectionManagerHandle> = None;
+    let mut event_tx: Option<tokio::sync::mpsc::Sender<TuiEvent>> = None;
 
     loop {
         terminal.draw(|f| ui::draw(f, app))?;
@@ -103,7 +114,7 @@ async fn run_app<B: Backend>(
                     if key.code == crossterm::event::KeyCode::F(5)
                         && key.kind == crossterm::event::KeyEventKind::Press =>
                 {
-                    toggle_daemon(app, &mut daemon_future, &mut daemon_handle).await;
+                    toggle_daemon(app, &mut daemon_future, &mut daemon_handle, &mut event_tx).await;
                     false
                 }
                 _ => events::handle_event(app, event),
@@ -116,13 +127,39 @@ async fn run_app<B: Backend>(
             // 停止 daemon：变量被 drop，连接自动关闭
             app.daemon_running = false;
             app.daemon_status = "Stopped".to_string();
+            app.event_rx = None;
             break;
         }
 
+        // 接收 sync engine 事件
+        if let Some(ref mut rx) = app.event_rx {
+            while let Ok(event) = rx.try_recv() {
+                match event {
+                    TuiEvent::FolderStateChanged { folder, status } => {
+                        app.folder_states.insert(folder, status);
+                    }
+                    TuiEvent::DeviceConnected { device_id } => {
+                        if !app.connected_devices.contains(&device_id) {
+                            app.connected_devices.push(device_id);
+                        }
+                    }
+                    TuiEvent::DeviceDisconnected { device_id } => {
+                        app.connected_devices.retain(|&id| id != device_id);
+                    }
+                    TuiEvent::SyncProgress { .. } => {}
+                }
+            }
+        }
+
         if last_tick.elapsed() >= tick_rate {
-            // 轮询 daemon 状态
+            // 轮询 daemon 状态（fallback，事件桥未覆盖时）
             if let Some(ref handle) = daemon_handle {
-                app.connected_devices = handle.connected_devices();
+                let live = handle.connected_devices();
+                for id in live {
+                    if !app.connected_devices.contains(&id) {
+                        app.connected_devices.push(id);
+                    }
+                }
                 if app.daemon_running {
                     app.daemon_status = format!("Running | {} devices connected", app.connected_devices.len());
                 }
@@ -145,11 +182,14 @@ async fn toggle_daemon(
     app: &mut App,
     daemon_future: &mut Option<std::pin::Pin<Box<dyn std::future::Future<Output = anyhow::Result<()>> + Send>>>,
     daemon_handle: &mut Option<syncthing_net::ConnectionManagerHandle>,
+    event_tx: &mut Option<tokio::sync::mpsc::Sender<TuiEvent>>,
 ) {
     if daemon_future.is_some() {
         *daemon_future = None;
         *daemon_handle = None;
+        *event_tx = None;
         app.sync_service = None;
+        app.event_rx = None;
         app.daemon_running = false;
         app.daemon_status = "Stopped".to_string();
         app.push_log("Daemon stopped.".to_string());
@@ -160,8 +200,46 @@ async fn toggle_daemon(
 
         match daemon_runner::start_daemon(config_dir, listen, device_name).await {
             Ok(startup) => {
-                *daemon_handle = Some(startup.connection_handle);
-                app.sync_service = Some(startup.sync_service);
+                *daemon_handle = Some(startup.connection_handle.clone());
+                app.sync_service = Some(startup.sync_service.clone());
+
+                // 启动事件桥
+                let (tx, rx) = tokio::sync::mpsc::channel::<TuiEvent>(256);
+                *event_tx = Some(tx.clone());
+                app.event_rx = Some(rx);
+
+                let sync_service = startup.sync_service.clone();
+                tokio::spawn(async move {
+                    let mut subscriber = sync_service.events().subscribe();
+                    while let Some(event) = subscriber.recv().await {
+                        let tui_event = match event {
+                            syncthing_sync::SyncEvent::FolderStateChanged { folder, to, .. } => {
+                                Some(TuiEvent::FolderStateChanged { folder, status: to })
+                            }
+                            syncthing_sync::SyncEvent::DeviceConnected { device } => {
+                                Some(TuiEvent::DeviceConnected { device_id: device })
+                            }
+                            syncthing_sync::SyncEvent::DeviceDisconnected { device, .. } => {
+                                Some(TuiEvent::DeviceDisconnected { device_id: device })
+                            }
+                            syncthing_sync::SyncEvent::DownloadProgress { folder, file: _, bytes_done, bytes_total } => {
+                                let progress = if bytes_total > 0 {
+                                    bytes_done as f64 / bytes_total as f64
+                                } else {
+                                    0.0
+                                };
+                                Some(TuiEvent::SyncProgress { folder, progress })
+                            }
+                            _ => None,
+                        };
+                        if let Some(te) = tui_event {
+                            if tx.send(te).await.is_err() {
+                                break;
+                            }
+                        }
+                    }
+                });
+
                 let fut = startup.future;
                 tokio::spawn(async move {
                     if let Err(e) = fut.await {
