@@ -17,6 +17,9 @@ use syncthing_sync::{database::FileSystemDatabase, SyncService, SyncModel, event
 
 use crate::{ManagerBlockSource, load_config, save_config, CONFIG_FILE_NAME};
 
+use syncthing_core::traits::ConfigStore;
+use syncthing_api::config::JsonConfigStore;
+
 /// GlobalDiscovery 优雅退出 Drop guard
 pub(crate) struct GlobalDiscoveryShutdown {
     tx: Option<tokio::sync::broadcast::Sender<()>>,
@@ -628,6 +631,30 @@ pub async fn start_daemon(
             for d in finished {
                 session_handles_clone.remove(&d);
             }
+        }
+    });
+
+    // 配置热同步：监听 config.json 变更并通知 sync_service
+    let config_path_for_watch = config_path.clone();
+    let sync_service_for_watch = Arc::clone(&sync_service);
+    tokio::spawn(async move {
+        let store = JsonConfigStore::new(&config_path_for_watch);
+        match store.watch().await {
+            Ok(mut stream) => {
+                while let Ok(()) = stream.next().await {
+                    match store.load().await {
+                        Ok(new_config) => {
+                            if let Err(e) = sync_service_for_watch.update_config(new_config.clone()).await {
+                                warn!("Failed to update sync service config from watch: {}", e);
+                            } else {
+                                info!("Config hot-reloaded from {:?}", config_path_for_watch);
+                            }
+                        }
+                        Err(e) => warn!("Failed to load config for hot-reload: {}", e),
+                    }
+                }
+            }
+            Err(e) => warn!("Config watch setup failed: {}", e),
         }
     });
 

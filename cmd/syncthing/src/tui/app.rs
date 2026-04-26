@@ -92,6 +92,9 @@ pub struct App {
     /// 文件夹实时状态缓存（来自 sync engine 事件）
     pub folder_states: HashMap<String, FolderStatus>,
 
+    /// 同步进度缓存（folder -> 0.0~1.0）
+    pub sync_progress: HashMap<String, f64>,
+
     /// 事件接收器（由 daemon 启动时设置）
     pub event_rx: Option<tokio::sync::mpsc::Receiver<crate::tui::TuiEvent>>,
 
@@ -125,6 +128,7 @@ impl App {
             folder_device_selected: 0,
             sync_service: None,
             folder_states: HashMap::new(),
+            sync_progress: HashMap::new(),
             event_rx: None,
         }
     }

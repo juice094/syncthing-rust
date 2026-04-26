@@ -146,7 +146,9 @@ async fn run_app<B: Backend>(
                     TuiEvent::DeviceDisconnected { device_id } => {
                         app.connected_devices.retain(|&id| id != device_id);
                     }
-                    TuiEvent::SyncProgress { .. } => {}
+                    TuiEvent::SyncProgress { folder, progress } => {
+                        app.sync_progress.insert(folder, progress);
+                    }
                 }
             }
         }
