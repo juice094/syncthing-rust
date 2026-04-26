@@ -91,6 +91,7 @@ impl ConnectionEntry {
 struct PendingConnection {
     device_id: DeviceId,
     addresses: Vec<SocketAddr>,
+    relay_urls: Vec<String>,
     retry_count: u32,
     last_attempt: Option<Instant>,
     // 重试任务的取消句柄
@@ -113,6 +114,8 @@ pub struct ConnectionManager {
     pending_connections: TokioRwLock<HashMap<DeviceId, PendingConnection>>,
     /// 设备地址映射
     device_addresses: DashMap<DeviceId, Vec<SocketAddr>>,
+    /// 设备 Relay URL 映射
+    device_relay_urls: DashMap<DeviceId, Vec<String>>,
     /// 事件发送器
     event_tx: mpsc::UnboundedSender<ConnectionEvent>,
     /// 事件接收器
@@ -188,7 +191,17 @@ impl ConnectionManagerHandle {
     
     /// 连接到设备
     pub async fn connect_to(&self, device_id: DeviceId, addresses: Vec<SocketAddr>) -> syncthing_core::Result<()> {
-        self.inner.connect_to(device_id, addresses).await
+        self.inner.connect_to_with_relay(device_id, addresses, vec![]).await
+    }
+
+    /// 连接到设备（含 relay fallback）
+    pub async fn connect_to_with_relay(
+        &self,
+        device_id: DeviceId,
+        addresses: Vec<SocketAddr>,
+        relay_urls: Vec<String>,
+    ) -> syncthing_core::Result<()> {
+        self.inner.connect_to_with_relay(device_id, addresses, relay_urls).await
     }
 
     /// 获取统计信息
@@ -221,6 +234,7 @@ impl ConnectionManager {
                 conn_id_index: DashMap::new(),
                 pending_connections: TokioRwLock::new(HashMap::new()),
                 device_addresses: DashMap::new(),
+                device_relay_urls: DashMap::new(),
                 event_tx,
                 event_rx: RwLock::new(Some(event_rx)),
                 running: RwLock::new(false),
@@ -579,8 +593,13 @@ impl ConnectionManager {
         }
     }
     
-    /// 连接到设备
-    async fn connect_to(&self, device_id: DeviceId, addresses: Vec<SocketAddr>) -> syncthing_core::Result<()> {
+    /// 连接到设备（含 relay fallback）
+    async fn connect_to_with_relay(
+        &self,
+        device_id: DeviceId,
+        addresses: Vec<SocketAddr>,
+        relay_urls: Vec<String>,
+    ) -> syncthing_core::Result<()> {
         // 检查是否已连接
         if self.is_connected(&device_id) {
             debug!("Device {} is already connected", device_id);
@@ -598,6 +617,9 @@ impl ConnectionManager {
 
         // 存储地址
         self.device_addresses.insert(device_id, addresses.clone());
+        if !relay_urls.is_empty() {
+            self.device_relay_urls.insert(device_id, relay_urls.clone());
+        }
 
         // 继承已有重试次数（如果存在）
         let retry_count = {
@@ -612,6 +634,7 @@ impl ConnectionManager {
             pending.insert(device_id, PendingConnection {
                 device_id,
                 addresses: addresses.clone(),
+                relay_urls: relay_urls.clone(),
                 retry_count,
                 last_attempt: Some(Instant::now()),
                 _cancel_tx: Some(cancel_tx),
@@ -619,7 +642,7 @@ impl ConnectionManager {
         }
 
         // 启动连接任务
-        self.spawn_connect_task(device_id, addresses, cancel_rx);
+        self.spawn_connect_task(device_id, addresses, relay_urls, cancel_rx);
 
         Ok(())
     }
@@ -629,6 +652,7 @@ impl ConnectionManager {
         &self,
         device_id: DeviceId,
         addresses: Vec<SocketAddr>,
+        relay_urls: Vec<String>,
         mut cancel_rx: oneshot::Receiver<()>,
     ) {
         let parallel_dialer = Arc::clone(&self.parallel_dialer);
@@ -647,6 +671,7 @@ impl ConnectionManager {
                 result = parallel_dialer.dial(
                     device_id,
                     addresses,
+                    relay_urls,
                     &tls_config,
                     &local_device_id,
                 ) => {
@@ -778,8 +803,12 @@ impl ConnectionManager {
                     .get(&device_id)
                     .map(|e| e.clone())
                     .unwrap_or_default();
-                if !addresses.is_empty() {
-                    if let Err(e) = self.connect_to(device_id, addresses).await {
+                let relay_urls = self.device_relay_urls
+                    .get(&device_id)
+                    .map(|e| e.clone())
+                    .unwrap_or_default();
+                if !addresses.is_empty() || !relay_urls.is_empty() {
+                    if let Err(e) = self.connect_to_with_relay(device_id, addresses, relay_urls).await {
                         warn!("Rebind redial to {} failed: {}", device_id, e);
                     }
                 }
@@ -802,8 +831,12 @@ impl ConnectionManager {
             .get(&device_id)
             .map(|e| e.clone())
             .unwrap_or_default();
+        let relay_urls = self.device_relay_urls
+            .get(&device_id)
+            .map(|e| e.clone())
+            .unwrap_or_default();
 
-        if addresses.is_empty() {
+        if addresses.is_empty() && relay_urls.is_empty() {
             warn!("No addresses available for device {}, skipping reconnect", device_id);
             return;
         }
@@ -818,6 +851,7 @@ impl ConnectionManager {
                 pending.insert(device_id, PendingConnection {
                     device_id,
                     addresses: addresses.clone(),
+                    relay_urls: relay_urls.clone(),
                     retry_count: 1,
                     last_attempt: Some(Instant::now()),
                     _cancel_tx: None,
@@ -839,7 +873,7 @@ impl ConnectionManager {
             if let Some(manager) = weak.upgrade() {
                 // 清除 pending 状态，否则 connect_to 会因"already pending"而直接返回
                 manager.pending_connections.write().await.remove(&device_id);
-                if let Err(e) = manager.connect_to(device_id, addresses).await {
+                if let Err(e) = manager.connect_to_with_relay(device_id, addresses, relay_urls).await {
                     warn!("Scheduled reconnect to {} failed: {}", device_id, e);
                 }
             }
@@ -907,6 +941,7 @@ impl ConnectionManager {
             conn_id_index: manager.conn_id_index.clone(),
             pending_connections: TokioRwLock::new(HashMap::new()),
             device_addresses: manager.device_addresses.clone(),
+            device_relay_urls: manager.device_relay_urls.clone(),
             event_tx: manager.event_tx.clone(),
             event_rx: RwLock::new(None),
             running: RwLock::new(*manager.running.read()),

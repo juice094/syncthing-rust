@@ -1,5 +1,29 @@
 # Changelog
 
+## [0.2.0] — 2026-04-26
+
+### Overview
+Beta release. REST API write endpoints, TUI real-time observability, config hot-reload, and Relay-integrated parallel dialer. 279 tests passing, 0 clippy warnings.
+
+### What's Working
+- **REST API Write Endpoints**: `PUT /rest/config`, `POST /rest/system/{config,restart,shutdown,pause,resume}`, `POST /rest/db/scan`
+- **TUI Real-time State**: Event bridge from sync engine → TUI (folder states, device connect/disconnect, sync progress, config changes)
+- **Config Hot-reload**: `notify`-based `config.json` watcher reloads running daemon without restart
+- **Relay Parallel Dialer**: Relay URLs now race alongside direct TCP addresses in `ParallelDialer` with unified RTT scoring
+- **E2E Test Harness**: `TestNode` spawns temporary nodes with auto-generated certs for handshake/integration tests
+
+### Architecture Milestones
+- Phase 3-A — Relay addresses integrated into `ParallelDialer` scoring/racing ✅
+- Phase 4 — TUI event bridge + live sync state + config hot-reload ✅
+
+### Known Limitations
+- Cross-network auto-discovery without Tailscale still in integration (Phase 5)
+- QUIC / full ICE not yet implemented
+- Web GUI not planned (TUI only)
+- 72h stress test not started
+
+---
+
 ## [0.1.0] — 2026-04-20
 
 ### Overview

@@ -502,8 +502,7 @@ pub async fn start_daemon(
     let first_pool_relay = relay_pool_urls.first().cloned();
 
     // 提取 TCP 直连地址和 Relay 地址
-    let mut tcp_peers: Vec<(syncthing_core::DeviceId, Vec<SocketAddr>)> = Vec::new();
-    let mut relay_peers: Vec<(syncthing_core::DeviceId, Vec<String>)> = Vec::new();
+    let mut peers: Vec<(syncthing_core::DeviceId, Vec<SocketAddr>, Vec<String>)> = Vec::new();
     {
         let cfg = sync_service.get_config().await.unwrap_or_default();
         for d in cfg.devices.into_iter().filter(|d| d.id != device_id) {
@@ -521,57 +520,20 @@ pub async fn start_daemon(
                     relay_addrs.push(url.clone());
                 }
             }
-            if !tcp_addrs.is_empty() {
-                tcp_peers.push((d.id, tcp_addrs));
-            }
-            if !relay_addrs.is_empty() {
-                relay_peers.push((d.id, relay_addrs));
+            if !tcp_addrs.is_empty() || !relay_addrs.is_empty() {
+                peers.push((d.id, tcp_addrs, relay_addrs));
             }
         }
     }
 
-    // TCP 自动拨号
+    // 并行拨号：direct + relay 统一竞速
     let handle_clone = handle.clone();
     tokio::spawn(async move {
         tokio::time::sleep(Duration::from_secs(2)).await;
-        for (peer_id, addrs) in tcp_peers {
-            info!("Auto-dialing peer {} at {:?}", peer_id, addrs);
-            if let Err(e) = handle_clone.connect_to(peer_id, addrs).await {
+        for (peer_id, addrs, relay_urls) in peers {
+            info!("Auto-dialing peer {} at {:?} with {} relay candidates", peer_id, addrs, relay_urls.len());
+            if let Err(e) = handle_clone.connect_to_with_relay(peer_id, addrs, relay_urls).await {
                 warn!("Failed to auto-dial peer {}: {}", peer_id, e);
-            }
-        }
-    });
-
-    // Relay fallback：TCP 失败后尝试通过 relay 连接
-    let handle_clone = handle.clone();
-    let tls_config_arc_clone = Arc::clone(&tls_config_arc);
-    let device_name_clone = config.device_name.clone();
-    tokio::spawn(async move {
-        tokio::time::sleep(Duration::from_secs(10)).await;
-        for (peer_id, relay_urls) in relay_peers {
-            if handle_clone.get_connection(&peer_id).is_some() {
-                continue; // TCP 已成功，跳过 relay
-            }
-            for relay_url in relay_urls {
-                info!("Relay fallback: trying to connect {} via {}", peer_id, relay_url);
-                match syncthing_net::relay::connect_bep_via_relay(
-                    &relay_url,
-                    peer_id,
-                    &device_name_clone,
-                    &tls_config_arc_clone,
-                ).await {
-                    Ok(conn) => {
-                        if let Err(e) = handle_clone.register_connection(peer_id, conn).await {
-                            warn!("Relay fallback: failed to register connection for {}: {}", peer_id, e);
-                        } else {
-                            info!("Relay fallback: connected to {} via {}", peer_id, relay_url);
-                            break;
-                        }
-                    }
-                    Err(e) => {
-                        warn!("Relay fallback: failed for {} via {}: {}", peer_id, relay_url, e);
-                    }
-                }
             }
         }
     });

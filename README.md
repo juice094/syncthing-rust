@@ -17,7 +17,8 @@ A Rust implementation of the [Syncthing](https://syncthing.net/) protocol stack,
 |-----------|-------|
 | BEP Protocol (TLS + Hello + ClusterConfig + Index + Request/Response) | ✅ Verified against Go Syncthing on Tailscale |
 | File Sync (Pull via BEP blocks, passive Push upload) | ✅ End-to-end tested |
-| Network Discovery (Local + Global + STUN + UPnP + Relay v1) | ✅ Core implementation complete |
+| Network Discovery (Local + Global + STUN + UPnP + Relay v1) | ✅ Core implementation complete; Relay now in parallel dialer |
+| REST API (read + write, Go-layout compatible) | ✅ Config merge, pause/resume, scan, restart/shutdown |
 | Tests | **279 passed, 1 ignored, 0 failed** |
 | Lint | **0 clippy warnings** |
 | Binary size | ~8 MB (release, Windows x64) |
@@ -63,7 +64,10 @@ curl http://127.0.0.1:8385/rest/system/status | ConvertFrom-Json
 - Scan local folders, compute SHA-256 block hashes, broadcast `IndexUpdate`.
 - Watch filesystem changes (`notify` + 1s debounce → scan → broadcast in ~2s).
 - Discover peers via LAN UDP broadcast, Global Discovery (HTTPS mTLS), STUN, UPnP, and Syncthing Relay v1.
-- Expose a REST API (Go-layout compatible) for observability.
+- Parallel dialer races direct TCP and Relay candidates with RTT scoring.
+- Expose a REST API (Go-layout compatible) with read + write endpoints (config, pause/resume, scan, restart/shutdown).
+- TUI real-time sync state (folder states, device connections, sync progress) via event bridge.
+- Hot-reload `config.json` changes without restart (notify-based watcher).
 
 **Doesn't (yet)**
 - Auto-dial across isolated networks without Tailscale or manual config (Phase 5).
@@ -82,8 +86,8 @@ curl http://127.0.0.1:8385/rest/system/status | ConvertFrom-Json
 | **Phase 2** | Network abstraction, watcher, REST API, dual-node coexistence | ✅ Complete |
 | **Phase 3** | BepSession observability, Push/Pull E2E with real Go node | ✅ Complete |
 | **Phase 3.5** | Connection stability, config persistence | ✅ Complete |
-| **Phase 4** | TUI hardening (device/folder management, live sync state) | 🔵 In Progress |
-| **Phase 5** | Zero-Tailscale interconnection (full Transport/Dialer integration of discovery layer) | 📝 Core done; integration pending |
+| **Phase 4** | TUI hardening (event bridge, live sync state, config hot-reload) | ✅ Complete |
+| **Phase 5** | Zero-Tailscale interconnection (full Transport/Dialer integration of discovery layer) | 🔵 In Progress |
 
 Phase 5 design: [`docs/design/NETWORK_DISCOVERY_DESIGN.md`](docs/design/NETWORK_DISCOVERY_DESIGN.md).
 
