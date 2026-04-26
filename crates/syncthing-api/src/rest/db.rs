@@ -14,8 +14,6 @@ use super::ApiState;
 pub struct ScanRequest {
     /// Folder ID to scan (optional, scans all if not specified)
     pub folder: Option<String>,
-    /// Subdirectory to scan (optional)
-    pub subdir: Option<String>,
 }
 
 /// Error response
