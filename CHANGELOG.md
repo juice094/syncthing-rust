@@ -15,6 +15,7 @@ Beta release. REST API write endpoints, TUI real-time observability, config hot-
 ### Architecture Milestones
 - Phase 3-A — Relay addresses integrated into `ParallelDialer` scoring/racing ✅
 - Phase 4 — TUI event bridge + live sync state + config hot-reload ✅
+- Phase 5 — Discovery results (Global query + Local broadcast) dynamically feed `ConnectionManager` address pool ✅
 
 ### Known Limitations
 - Cross-network auto-discovery without Tailscale still in integration (Phase 5)

@@ -102,12 +102,14 @@
 | E2E Test Harness | `TestNode` 临时目录 + 自签证书 + `SyncService` + `ConnectionManager` + REST API | ✅ |
 | E2E Handshake Test | `test_two_node_empty_folder_handshake`（TCP+TLS+BEP Hello）通过 | ✅ |
 | Phase 3-A Relay Dialer | `ParallelDialer::dial` 统一竞速 direct TCP + Relay URL；RTT 评分共享 | ✅ |
+| Phase 5 Discovery→CM | Global Discovery 周期性 query + Local Discovery 地址池更新 → `ConnectionManager::update_addresses` | ✅ |
 
 ### 当前状态
 
-- **Local Discovery**：UDP 广播发送/接收、protobuf 编解码、auto-dial 已集成；缺少 IPv6 多播、网卡枚举、广播地址计算
+- **Local Discovery**：UDP 广播发送/接收、protobuf 编解码、auto-dial 已集成；地址发现后更新 `ConnectionManager` 地址池 ✅；缺少 IPv6 多播、网卡枚举、广播地址计算
+- **Global Discovery**：Announce + Query 双通路完整；每 5 分钟 query 配置中的 peers，结果注入 `ConnectionManager` 地址池 ✅
 - **STUN/PortMapper**：STUN 仅能查询公网映射地址，无 NAT 类型检测、无 hole punching；PortMapper 仅 UPnP 路径可用，PCP/NAT-PMP 未实现，daemon 中无自动续约
-- **BEP 互通**：`WireFolder.label` 和 `client_name` 兼容性修复已提交；此前仅在 Tailscale 环境下与 Go 节点验证通过，当前无 Tailscale 时跨网络互联能力为零
+- **BEP 互通**：`WireFolder.label` 和 `client_name` 兼容性修复已提交；此前仅在 Tailscale 环境下与 Go 节点验证通过；Phase 5 完成后无 Tailscale 跨网络互联能力已具备理论条件（需实际网络验证）
 
 ### 阻塞项
 

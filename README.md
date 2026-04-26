@@ -87,7 +87,7 @@ curl http://127.0.0.1:8385/rest/system/status | ConvertFrom-Json
 | **Phase 3** | BepSession observability, Push/Pull E2E with real Go node | ✅ Complete |
 | **Phase 3.5** | Connection stability, config persistence | ✅ Complete |
 | **Phase 4** | TUI hardening (event bridge, live sync state, config hot-reload) | ✅ Complete |
-| **Phase 5** | Zero-Tailscale interconnection (full Transport/Dialer integration of discovery layer) | 🔵 In Progress |
+| **Phase 5** | Zero-Tailscale interconnection (discovery results → ConnectionManager address pool) | 🔵 Core integrated; field validation pending |
 
 Phase 5 design: [`docs/design/NETWORK_DISCOVERY_DESIGN.md`](docs/design/NETWORK_DISCOVERY_DESIGN.md).
 
