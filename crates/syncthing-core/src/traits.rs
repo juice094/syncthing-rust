@@ -456,6 +456,12 @@ pub trait SyncModel: Send + Sync {
     /// Scan a folder for local changes and update index
     async fn scan_folder(&self, folder: &FolderId) -> Result<()>;
 
+    /// Scan a sub-path within a folder for local changes and update index.
+    /// Default falls back to a full folder scan.
+    async fn scan_folder_sub(&self, folder: &FolderId, _sub: &str) -> Result<()> {
+        self.scan_folder(folder).await
+    }
+
     /// Request pull (download) for a folder
     async fn pull(&self, folder: &FolderId) -> Result<SyncResult>;
 

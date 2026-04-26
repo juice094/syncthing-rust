@@ -40,6 +40,9 @@ pub trait SyncModel: Send + Sync {
     /// 触发文件夹扫描
     async fn scan_folder(&self, folder_id: &str) -> Result<()>;
 
+    /// 触发子目录扫描
+    async fn scan_folder_sub(&self, folder_id: &str, sub: &str) -> Result<()>;
+
     /// 触发文件夹拉取
     async fn pull_folder(&self, folder_id: &str) -> Result<()>;
 

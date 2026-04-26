@@ -1286,6 +1286,33 @@ async fn system_pause(
     Json(request): Json<PauseResumeRequest>,
 ) -> impl IntoResponse {
     let mut paused = Vec::new();
+
+    // Handle devices: update config and disconnect active connections
+    if !request.device.is_empty() {
+        match state.config_store.load().await {
+            Ok(mut config) => {
+                for device_id_str in &request.device {
+                    let device_id = parse_device_id(device_id_str);
+                    if let Some(device) = config.devices.iter_mut().find(|d| d.id.to_string() == device_id.to_string()) {
+                        device.paused = true;
+                        paused.push(device_id_str.clone());
+                    }
+                    if let Some(ref cm) = state.connection_manager {
+                        if cm.get_connection(&device_id).is_some() {
+                            if let Err(e) = cm.disconnect(&device_id, "paused by user").await {
+                                warn!("Failed to disconnect device {}: {}", device_id_str, e);
+                            }
+                        }
+                    }
+                }
+                if let Err(e) = state.config_store.save(&config).await {
+                    warn!("Failed to save config after pause: {}", e);
+                }
+            }
+            Err(e) => warn!("Failed to load config for pause: {}", e),
+        }
+    }
+
     if let Some(ref model) = state.sync_model {
         for folder_id in &request.folder {
             if let Err(e) = model.stop_folder(FolderId::new(folder_id)).await {
@@ -1303,6 +1330,26 @@ async fn system_resume(
     Json(request): Json<PauseResumeRequest>,
 ) -> impl IntoResponse {
     let mut resumed = Vec::new();
+
+    // Handle devices: update config to un-pause
+    if !request.device.is_empty() {
+        match state.config_store.load().await {
+            Ok(mut config) => {
+                for device_id_str in &request.device {
+                    let device_id = parse_device_id(device_id_str);
+                    if let Some(device) = config.devices.iter_mut().find(|d| d.id.to_string() == device_id.to_string()) {
+                        device.paused = false;
+                        resumed.push(device_id_str.clone());
+                    }
+                }
+                if let Err(e) = state.config_store.save(&config).await {
+                    warn!("Failed to save config after resume: {}", e);
+                }
+            }
+            Err(e) => warn!("Failed to load config for resume: {}", e),
+        }
+    }
+
     if let Some(ref model) = state.sync_model {
         for folder_id in &request.folder {
             if let Err(e) = model.start_folder(FolderId::new(folder_id)).await {
@@ -1328,7 +1375,13 @@ async fn db_scan_post(
     Json(request): Json<DbScanRequest>,
 ) -> impl IntoResponse {
     if let Some(ref model) = state.sync_model {
-        match model.scan_folder(&FolderId::new(&request.folder)).await {
+        let result = match request.sub {
+            Some(ref sub) if !sub.is_empty() => {
+                model.scan_folder_sub(&FolderId::new(&request.folder), sub).await
+            }
+            _ => model.scan_folder(&FolderId::new(&request.folder)).await,
+        };
+        match result {
             Ok(_) => Ok(Json(serde_json::json!({ "ok": true }))),
             Err(e) => Err((
                 StatusCode::INTERNAL_SERVER_ERROR,
