@@ -34,6 +34,11 @@ impl TestNode {
     pub async fn new(name: &str) -> Result<Self> {
         let config_dir = std::env::temp_dir()
             .join(format!("syncthing-e2e-{}-{:x}", name, rand::random::<u64>()));
+        Self::new_with_dir(name, config_dir).await
+    }
+
+    /// 创建并启动一个指定目录的节点（用于 stress test 等持久化场景）
+    pub async fn new_with_dir(name: &str, config_dir: PathBuf) -> Result<Self> {
         tokio::fs::create_dir_all(&config_dir)
             .await
             .context("create config dir")?;
