@@ -3,10 +3,13 @@
 //! Compatible with syncthing-go local discovery protocol.
 //! See `docs/design/NETWORK_DISCOVERY_DESIGN.md` for full protocol details.
 
-use std::net::SocketAddr;
+use std::net::{Ipv6Addr, SocketAddr, SocketAddrV4, SocketAddrV6};
 use std::time::Duration;
 use syncthing_core::{DeviceId, Result, SyncthingError};
 use tokio::net::UdpSocket;
+
+/// IPv6 multicast target for local discovery.
+const LOCAL_DISCOVERY_V6_MULTICAST: Ipv6Addr = Ipv6Addr::new(0xff12, 0, 0, 0, 0, 0, 0x8384, 21027);
 
 /// Magic number for local discovery (same as BEP Hello).
 pub const LOCAL_DISCOVERY_MAGIC: u32 = 0x2EA7D90B;
@@ -189,12 +192,55 @@ impl LocalDiscovery {
         self
     }
 
-    /// Send a single broadcast announcement.
+    /// Compute per-interface broadcast/multicast targets.
+    ///
+    /// Returns a list of `SocketAddr` to send announcements to:
+    /// - IPv4: per-subnet broadcast addresses (e.g. 192.168.1.255)
+    /// - IPv6: the well-known multicast group `[ff12::8384:21027]:21027`
+    ///
+    /// Falls back to global broadcast `255.255.255.255` if interface enumeration fails.
+    fn get_broadcast_targets_sync(port: u16) -> Vec<SocketAddr> {
+        let mut targets = Vec::new();
+
+        let ifaces = netdev::get_interfaces();
+        for iface in ifaces {
+            if !iface.is_up() || iface.is_loopback() || !iface.is_running() {
+                continue;
+            }
+
+            // IPv4 broadcast targets
+            if iface.is_broadcast() {
+                for net in &iface.ipv4 {
+                    let bcast: std::net::Ipv4Addr = net.broadcast();
+                    targets.push(SocketAddr::V4(SocketAddrV4::new(bcast, LOCAL_DISCOVERY_PORT)));
+                }
+            }
+
+            // IPv6 multicast target (one per interface that supports multicast)
+            if iface.is_multicast() && !iface.ipv6.is_empty() {
+                targets.push(SocketAddr::V6(SocketAddrV6::new(
+                    LOCAL_DISCOVERY_V6_MULTICAST,
+                    port,
+                    0,
+                    0,
+                )));
+            }
+        }
+
+        // Always include global IPv4 broadcast as a fallback.
+        // Per-subnet broadcasts may be blocked by host firewalls;
+        // 255.255.255.255 is the safest universal target.
+        targets.push(SocketAddr::from(([255, 255, 255, 255], port)));
+
+        targets
+    }
+
+    /// Send a single broadcast / multicast announcement.
     pub async fn broadcast(&self) -> Result<()> {
-        let socket = UdpSocket::bind("0.0.0.0:0").await
-            .map_err(|e| SyncthingError::network(format!("bind failed: {}", e)))?;
-        socket.set_broadcast(true)
-            .map_err(|e| SyncthingError::network(format!("set_broadcast failed: {}", e)))?;
+        let port = self.port;
+        let targets = tokio::task::spawn_blocking(move || Self::get_broadcast_targets_sync(port))
+            .await
+            .map_err(|e| SyncthingError::network(format!("interface enumeration failed: {}", e)))?;
 
         let announce = Announce {
             id: self.device_id.as_bytes().to_vec(),
@@ -207,10 +253,39 @@ impl LocalDiscovery {
         packet.extend_from_slice(&LOCAL_DISCOVERY_MAGIC.to_be_bytes());
         packet.extend_from_slice(&payload);
 
-        let broadcast_addr = SocketAddr::from(([255, 255, 255, 255], self.port));
-        match socket.send_to(&packet, broadcast_addr).await {
-            Ok(n) => tracing::debug!("Sent {} bytes broadcast to {}", n, broadcast_addr),
-            Err(e) => tracing::warn!("Broadcast send failed: {}", e),
+        // IPv4 socket for broadcast
+        let v4_socket = UdpSocket::bind("0.0.0.0:0").await
+            .map_err(|e| SyncthingError::network(format!("v4 bind failed: {}", e)))?;
+        v4_socket.set_broadcast(true)
+            .map_err(|e| SyncthingError::network(format!("set_broadcast failed: {}", e)))?;
+
+        // IPv6 socket for multicast
+        let v6_socket = match UdpSocket::bind("[::]:0").await {
+            Ok(s) => {
+                // Default IPV6_MULTICAST_HOPS is already 1 (link-local), no need to set
+                Some(s)
+            }
+            Err(e) => {
+                tracing::debug!("IPv6 socket bind failed (expected if no IPv6): {}", e);
+                None
+            }
+        };
+
+        for target in targets {
+            let result = match target {
+                SocketAddr::V4(_) => v4_socket.send_to(&packet, target).await,
+                SocketAddr::V6(_) => {
+                    if let Some(ref s) = v6_socket {
+                        s.send_to(&packet, target).await
+                    } else {
+                        continue;
+                    }
+                }
+            };
+            match result {
+                Ok(n) => tracing::debug!("Sent {} bytes announcement to {}", n, target),
+                Err(e) => tracing::warn!("Announcement send to {} failed: {}", target, e),
+            }
         }
 
         Ok(())
@@ -240,7 +315,7 @@ impl LocalDiscovery {
         Ok((announce, addr))
     }
 
-    /// Run the discovery service (broadcast sender + listener).
+    /// Run the discovery service (broadcast sender + dual-stack listener).
     ///
     /// When a valid Announce from a *different* device is received, a
     /// `DiscoveryEvent::DeviceDiscovered` is sent via `event_tx`.
@@ -251,11 +326,28 @@ impl LocalDiscovery {
         let broadcast_interval = tokio::time::interval(LOCAL_DISCOVERY_INTERVAL);
         tokio::pin!(broadcast_interval);
 
-        let bind_addr = SocketAddr::from(([0, 0, 0, 0], self.port));
-        let socket = UdpSocket::bind(bind_addr).await
-            .map_err(|e| SyncthingError::network(format!("listen bind failed: {}", e)))?;
+        // IPv4 listen socket
+        let v4_bind = SocketAddr::from(([0, 0, 0, 0], self.port));
+        let v4_socket = UdpSocket::bind(v4_bind).await
+            .map_err(|e| SyncthingError::network(format!("v4 listen bind failed: {}", e)))?;
 
-        let mut buf = vec![0u8; 65536];
+        // IPv6 listen socket (optional)
+        let v6_socket = match UdpSocket::bind(SocketAddr::from(([0, 0, 0, 0, 0, 0, 0, 0], self.port))).await {
+            Ok(s) => {
+                // Join the multicast group on all IPv6-capable interfaces
+                if let Err(e) = s.join_multicast_v6(&LOCAL_DISCOVERY_V6_MULTICAST, 0) {
+                    tracing::warn!("Failed to join IPv6 multicast group: {}", e);
+                }
+                Some(s)
+            }
+            Err(e) => {
+                tracing::debug!("IPv6 listen bind failed (expected if no IPv6): {}", e);
+                None
+            }
+        };
+
+        let mut v4_buf = vec![0u8; 65536];
+        let mut v6_buf = vec![0u8; 65536];
 
         loop {
             tokio::select! {
@@ -264,46 +356,65 @@ impl LocalDiscovery {
                         tracing::warn!("Broadcast error: {}", e);
                     }
                 }
-                result = socket.recv_from(&mut buf) => {
-                    match result {
-                        Ok((len, addr)) => {
-                            if len < 4 { continue; }
-                            let magic = u32::from_be_bytes([buf[0], buf[1], buf[2], buf[3]]);
-                            if magic != LOCAL_DISCOVERY_MAGIC { continue; }
-                            match Announce::decode(&buf[4..len]) {
-                                Ok(announce) => {
-                                    match DeviceId::from_bytes(&announce.id) {
-                                        Ok(device_id) if device_id != self.device_id => {
-                                            tracing::info!(
-                                                "Local discovery: {} at {:?} (from {})",
-                                                device_id, announce.addresses, addr
-                                            );
-                                            let _ = event_tx.send(
-                                                super::events::DiscoveryEvent::DeviceDiscovered {
-                                                    device_id,
-                                                    addresses: announce.addresses,
-                                                    source: super::events::DiscoverySource::Local,
-                                                }
-                                            ).await;
-                                        }
-                                        Ok(_) => {
-                                            // Own announce, ignore
-                                        }
-                                        Err(e) => {
-                                            tracing::debug!("Bad device id in announce: {}", e);
-                                        }
+                result = v4_socket.recv_from(&mut v4_buf) => {
+                    Self::handle_packet(result, &v4_buf, &self.device_id, &event_tx).await;
+                }
+                result = async {
+                    if let Some(ref s) = v6_socket {
+                        s.recv_from(&mut v6_buf).await
+                    } else {
+                        std::future::pending().await
+                    }
+                } => {
+                    Self::handle_packet(result, &v6_buf, &self.device_id, &event_tx).await;
+                }
+            }
+        }
+    }
+
+    /// Process a received UDP packet.
+    async fn handle_packet(
+        result: std::io::Result<(usize, SocketAddr)>,
+        buf: &[u8],
+        self_device_id: &DeviceId,
+        event_tx: &tokio::sync::mpsc::Sender<super::events::DiscoveryEvent>,
+    ) {
+        match result {
+            Ok((len, addr)) => {
+                if len < 4 { return; }
+                let magic = u32::from_be_bytes([buf[0], buf[1], buf[2], buf[3]]);
+                if magic != LOCAL_DISCOVERY_MAGIC { return; }
+                match Announce::decode(&buf[4..len]) {
+                    Ok(announce) => {
+                        match DeviceId::from_bytes(&announce.id) {
+                            Ok(device_id) if device_id != *self_device_id => {
+                                tracing::info!(
+                                    "Local discovery: {} at {:?} (from {})",
+                                    device_id, announce.addresses, addr
+                                );
+                                let _ = event_tx.send(
+                                    super::events::DiscoveryEvent::DeviceDiscovered {
+                                        device_id,
+                                        addresses: announce.addresses,
+                                        source: super::events::DiscoverySource::Local,
                                     }
-                                }
-                                Err(e) => {
-                                    tracing::debug!("Bad announce from {}: {}", addr, e);
-                                }
+                                ).await;
+                            }
+                            Ok(_) => {
+                                // Own announce, ignore
+                            }
+                            Err(e) => {
+                                tracing::debug!("Bad device id in announce: {}", e);
                             }
                         }
-                        Err(e) => {
-                            tracing::warn!("Receive error: {}", e);
-                        }
+                    }
+                    Err(e) => {
+                        tracing::debug!("Bad announce from {}: {}", addr, e);
                     }
                 }
+            }
+            Err(e) => {
+                tracing::warn!("Receive error: {}", e);
             }
         }
     }
@@ -389,6 +500,9 @@ mod tests {
         // Send broadcast
         let sender = LocalDiscovery::new(device_id, addrs.clone()).with_port(port);
         sender.broadcast().await.unwrap();
+
+        // Give broadcast time to propagate (especially with interface enumeration)
+        tokio::time::sleep(Duration::from_millis(100)).await;
 
         // Wait for reception (with timeout)
         let result = tokio::time::timeout(Duration::from_secs(5), listen_handle).await;

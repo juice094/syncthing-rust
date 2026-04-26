@@ -38,7 +38,7 @@ pub struct DerpClientConfig {
 impl Default for DerpClientConfig {
     fn default() -> Self {
         Self {
-            server_addr: "127.0.0.1:3478".parse().unwrap(),
+            server_addr: SocketAddr::from(([127, 0, 0, 1], 3478)),
             device_id: DeviceId::default(),
             keep_alive_interval: Duration::from_secs(30),
             connect_timeout: Duration::from_secs(10),

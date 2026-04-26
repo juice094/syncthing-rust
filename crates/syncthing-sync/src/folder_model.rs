@@ -427,7 +427,9 @@ impl FolderModel {
         }
 
         // 唤醒 pull loop 立即处理远程索引
-        self.pull_notify.notify_waiters();
+        // 使用 notify_one 而非 notify_waiters，确保即使 pull loop 正在执行 pull() 
+        // 也能在完成后立即收到通知，不会丢失唤醒信号。
+        self.pull_notify.notify_one();
         
         Ok(())
     }

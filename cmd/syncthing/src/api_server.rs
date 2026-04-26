@@ -58,7 +58,7 @@ pub async fn start_api_server(
             l
         }
         Err(e) if addr.port() != 0 => {
-            let fallback: SocketAddr = "0.0.0.0:0".parse().unwrap();
+            let fallback: SocketAddr = SocketAddr::from(([0, 0, 0, 0], 0));
             warn!("Failed to bind REST API to {}, trying random port: {}", addr, e);
             let l = TcpListener::bind(fallback).await
                 .map_err(|e2| SyncthingError::Network(format!("failed to bind REST API fallback: {}", e2)))?;
