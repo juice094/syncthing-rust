@@ -1,8 +1,8 @@
-use std::collections::VecDeque;
+use std::collections::{HashMap, VecDeque};
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use syncthing_core::types::{Config, Device, Folder};
+use syncthing_core::types::{Config, Device, Folder, FolderStatus};
 use syncthing_core::DeviceId;
 
 use crate::tui::theme::Theme;
@@ -89,6 +89,12 @@ pub struct App {
     /// 运行中的 sync_service 引用（用于配置变更通知）
     pub sync_service: Option<Arc<dyn syncthing_sync::SyncModel>>,
 
+    /// 文件夹实时状态缓存（来自 sync engine 事件）
+    pub folder_states: HashMap<String, FolderStatus>,
+
+    /// 事件接收器（由 daemon 启动时设置）
+    pub event_rx: Option<tokio::sync::mpsc::Receiver<crate::tui::TuiEvent>>,
+
     // 表单
     pub device_form: FormState,
     pub folder_form: FormState,
@@ -118,6 +124,8 @@ impl App {
             folder_device_selection: vec![false; device_count],
             folder_device_selected: 0,
             sync_service: None,
+            folder_states: HashMap::new(),
+            event_rx: None,
         }
     }
 
