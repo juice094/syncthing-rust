@@ -129,7 +129,7 @@ fn save_config(path: &PathBuf, config: &Config) -> anyhow::Result<()> {
 mod tui;
 mod logging_buffer;
 mod syncbench;
-mod api_server;
+use syncthing::api_server;
 
 /// Resolve listen/device_name from config file, overridden by CLI args.
 fn resolve_daemon_config(
@@ -464,7 +464,7 @@ async fn cmd_show_id(config_dir: &Path) -> Result<()> {
 }
 
 #[cfg(test)]
-mod test_harness;
+use syncthing::test_harness;
 
 #[cfg(test)]
 mod tests {
