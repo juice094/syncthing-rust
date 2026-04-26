@@ -165,8 +165,6 @@ pub struct AddDeviceRequest {
     pub addresses: Option<Vec<String>>,
     /// Whether this device is an introducer
     pub introducer: Option<bool>,
-    /// Compression mode string
-    pub compression: Option<String>,
 }
 
 /// Device response payload
@@ -180,8 +178,6 @@ pub struct DeviceResponse {
     pub addresses: Vec<String>,
     /// Whether this device is an introducer
     pub introducer: bool,
-    /// Compression mode string
-    pub compression: String,
 }
 
 impl From<syncthing_core::types::Device> for DeviceResponse {
@@ -191,7 +187,6 @@ impl From<syncthing_core::types::Device> for DeviceResponse {
             name: device.name.unwrap_or_default(),
             addresses: device.addresses.iter().map(|a| a.as_str().to_string()).collect(),
             introducer: device.introducer,
-            compression: "metadata".to_string(),
         }
     }
 }
@@ -207,6 +202,4 @@ pub struct UpdateDeviceRequest {
     pub addresses: Vec<String>,
     /// Whether this device is an introducer
     pub introducer: bool,
-    /// Compression mode string
-    pub compression: String,
 }
