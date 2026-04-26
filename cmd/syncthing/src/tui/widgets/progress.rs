@@ -1,5 +1,5 @@
 //! 同步进度条组件
-#![allow(dead_code)]
+
 //!
 //! 基于 ratatui::widgets::Gauge，使用 theme 配色。
 //! 支持百分比和字节双显示模式。
