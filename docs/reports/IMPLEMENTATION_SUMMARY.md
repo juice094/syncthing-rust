@@ -3,7 +3,7 @@
 > **项目说明**：基于 Rust 的 Syncthing 兼容实现，采用多 crate 工作区结构。目标是通过直接参照 Go Syncthing 源码，构建一个功能完整的去中心化文件同步 daemon。
 >
 > **仓库位置**：`C:\Users\22414`  
-> **最新更新**：2026-04-25（BEP Go-interop 修复、Local Discovery 集成、STUN/PortMapper 接入 daemon、clippy 0 warnings、UDP 测试稳定化）
+> **最新更新**：2026-04-26（REST API write endpoints、TUI event bridge + real-time sync state、config hot-reload、E2E test harness、Relay 接入 ParallelDialer、clippy 0 warnings）
 
 ---
 

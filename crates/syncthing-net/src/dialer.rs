@@ -19,6 +19,7 @@ use syncthing_core::{DeviceId, SyncthingError};
 use crate::connection::BepConnection;
 use crate::tcp_transport::connect_bep;
 use crate::tls::SyncthingTlsConfig;
+use crate::relay::dial::parse_relay_url;
 
 /// Result type for a dial task.
 pub type DialResult = Result<(Arc<BepConnection>, SocketAddr, Duration), SyncthingError>;
@@ -126,6 +127,38 @@ impl DialConnector for TcpBepConnector {
     }
 }
 
+/// Relay 拨号连接器抽象
+#[async_trait::async_trait]
+pub trait RelayDialConnector: Send + Sync {
+    /// 通过 relay 服务器建立 BEP 连接
+    async fn connect_via_relay(
+        &self,
+        relay_url: &str,
+        target_device_id: DeviceId,
+        local_device_id: DeviceId,
+        device_name: &str,
+        tls_config: &Arc<SyncthingTlsConfig>,
+    ) -> Result<Arc<BepConnection>, SyncthingError>;
+}
+
+/// 基于真实 Relay 协议的连接器
+pub struct RelayBepConnector;
+
+#[async_trait::async_trait]
+impl RelayDialConnector for RelayBepConnector {
+    async fn connect_via_relay(
+        &self,
+        relay_url: &str,
+        target_device_id: DeviceId,
+        _local_device_id: DeviceId,
+        device_name: &str,
+        tls_config: &Arc<SyncthingTlsConfig>,
+    ) -> Result<Arc<BepConnection>, SyncthingError> {
+        crate::relay::connect_bep_via_relay(relay_url, target_device_id, device_name, tls_config)
+            .await
+    }
+}
+
 /// 并行拨号器
 ///
 /// 维护每地址的历史评分，支持对多个候选地址并发拨号并返回最先成功的连接。
@@ -140,6 +173,8 @@ pub struct ParallelDialer {
     device_name: String,
     /// 底层连接器（可运行时替换，支持 Transport 热切换）
     connector: RwLock<Arc<dyn DialConnector>>,
+    /// Relay 连接器（可选）
+    relay_connector: Option<Arc<dyn RelayDialConnector>>,
 }
 
 impl ParallelDialer {
@@ -155,12 +190,20 @@ impl ParallelDialer {
             local_device_id,
             device_name,
             connector: RwLock::new(connector),
+            relay_connector: None,
         }
     }
 
     /// 使用默认 TCP 连接器创建
     pub fn with_tcp_connector(local_device_id: DeviceId, device_name: String) -> Self {
-        Self::new(local_device_id, device_name, Arc::new(TcpBepConnector))
+        let mut dialer = Self::new(local_device_id, device_name, Arc::new(TcpBepConnector));
+        dialer.relay_connector = Some(Arc::new(RelayBepConnector));
+        dialer
+    }
+
+    /// 设置 Relay 连接器
+    pub fn set_relay_connector(&mut self, connector: Arc<dyn RelayDialConnector>) {
+        self.relay_connector = Some(connector);
     }
 
     /// 更换底层连接器（用于 Transport 注册后切换）
@@ -201,65 +244,117 @@ impl ParallelDialer {
 
     /// 并发拨号
     ///
-    /// 1. 按历史评分对地址排序
-    /// 2. 取前 3 个地址并发拨号
+    /// 1. 按历史评分对地址排序（direct 与 relay 共同参与排序）
+    /// 2. 取前 3 个候选并发拨号
     /// 3. 第一个成功握手者胜出，其余任务立即取消
     /// 4. 更新该地址的评分统计
     pub async fn dial(
         &self,
         device_id: DeviceId,
         addresses: Vec<SocketAddr>,
+        relay_urls: Vec<String>,
         tls_config: &Arc<SyncthingTlsConfig>,
         _local_device_id: &DeviceId,
     ) -> Result<Arc<BepConnection>, SyncthingError> {
-        if addresses.is_empty() {
+        if addresses.is_empty() && relay_urls.is_empty() {
             return Err(SyncthingError::connection("no addresses to dial"));
         }
 
-        // 构造评分并降序排序
-        let mut scored: Vec<AddressScore> = addresses
-            .iter()
-            .map(|addr| self.get_or_create_score(*addr))
-            .collect();
-        scored.sort_by_key(|b| Reverse(b.score()));
+        // 构造候选列表：(is_relay, socket_addr, optional_relay_url, score)
+        let mut candidates: Vec<(bool, SocketAddr, Option<String>, AddressScore)> = Vec::new();
+
+        // Direct candidates
+        for addr in &addresses {
+            candidates.push((false, *addr, None, self.get_or_create_score(*addr)));
+        }
+
+        // Relay candidates
+        for url in &relay_urls {
+            if let Ok((relay_addr, _)) = parse_relay_url(url) {
+                let score = self.scores
+                    .entry(relay_addr)
+                    .or_insert_with(|| AddressScore {
+                        address: relay_addr,
+                        rtt: None,
+                        success_count: 0,
+                        failure_count: 0,
+                        last_success: None,
+                        address_type: AddressTypePreference::Relay,
+                    })
+                    .clone();
+                candidates.push((true, relay_addr, Some(url.clone()), score));
+            }
+        }
+
+        // 按评分降序排序
+        candidates.sort_by_key(|(_, _, _, s)| Reverse(s.score()));
 
         // 最多并发 3 个
-        let top: Vec<AddressScore> = scored.into_iter().take(3).collect();
+        let top: Vec<(bool, SocketAddr, Option<String>, AddressScore)> = candidates.into_iter().take(3).collect();
 
         info!(
-            "Parallel dialing {} with {} candidates (top 3: {:?})",
+            "Parallel dialing {} with {} direct + {} relay candidates (top 3: {:?})",
             device_id,
             addresses.len(),
-            top.iter().map(|s| (s.address, s.score())).collect::<Vec<_>>()
+            relay_urls.len(),
+            top.iter().map(|(_, addr, _, s)| (*addr, s.score())).collect::<Vec<_>>()
         );
 
         // 启动并发拨号任务
         let mut tasks: FuturesUnordered<JoinHandle<DialResult>> = FuturesUnordered::new();
 
-        for score in &top {
-            let addr = score.address;
-            let connector = Arc::clone(&*self.connector.read());
-            
-            let local_device_id = self.local_device_id;
-            let device_name = self.device_name.clone();
-            let tls_config = Arc::clone(tls_config);
+        for (is_relay, addr, relay_url, _score) in &top {
+            if *is_relay {
+                let relay_connector = match &self.relay_connector {
+                    Some(c) => Arc::clone(c),
+                    None => continue,
+                };
+                let url = relay_url.as_ref().unwrap().clone();
+                let local_device_id = self.local_device_id;
+                let device_name = self.device_name.clone();
+                let tls_config = Arc::clone(tls_config);
+                let addr = *addr;
 
-            let handle: JoinHandle<DialResult> = tokio::spawn(async move {
-                let start = Instant::now();
-                match connector.connect(addr, device_id, local_device_id, &device_name, &tls_config).await {
-                    Ok(conn) => {
-                        let rtt = start.elapsed();
-                        debug!("Dial to {} succeeded in {:?}", addr, rtt);
-                        Ok((conn, addr, rtt))
+                let handle: JoinHandle<DialResult> = tokio::spawn(async move {
+                    let start = Instant::now();
+                    match relay_connector.connect_via_relay(&url, device_id, local_device_id, &device_name, &tls_config).await {
+                        Ok(conn) => {
+                            let rtt = start.elapsed();
+                            debug!("Relay dial via {} succeeded in {:?}", url, rtt);
+                            Ok((conn, addr, rtt))
+                        }
+                        Err(e) => {
+                            debug!("Relay dial via {} failed: {}", url, e);
+                            Err(e)
+                        }
                     }
-                    Err(e) => {
-                        debug!("Dial to {} failed: {}", addr, e);
-                        Err(e)
-                    }
-                }
-            });
+                });
 
-            tasks.push(handle);
+                tasks.push(handle);
+            } else {
+                let connector = Arc::clone(&*self.connector.read());
+                let local_device_id = self.local_device_id;
+                let device_name = self.device_name.clone();
+                let tls_config = Arc::clone(tls_config);
+                let addr = *addr;
+
+                let handle: JoinHandle<DialResult> = tokio::spawn(async move {
+                    let start = Instant::now();
+                    match connector.connect(addr, device_id, local_device_id, &device_name, &tls_config).await {
+                        Ok(conn) => {
+                            let rtt = start.elapsed();
+                            debug!("Dial to {} succeeded in {:?}", addr, rtt);
+                            Ok((conn, addr, rtt))
+                        }
+                        Err(e) => {
+                            debug!("Dial to {} failed: {}", addr, e);
+                            Err(e)
+                        }
+                    }
+                });
+
+                tasks.push(handle);
+            }
         }
 
         let mut last_error: Option<SyncthingError> = None;
@@ -286,8 +381,8 @@ impl ParallelDialer {
         }
 
         // 全部失败：为每个参与的地址记录失败（若尚未记录）
-        for score in &top {
-            self.record_failure(score.address);
+        for (_, addr, _, _) in &top {
+            self.record_failure(*addr);
         }
 
         Err(last_error.unwrap_or_else(|| {
@@ -408,7 +503,7 @@ mod tests {
         );
 
         let result = dialer
-            .dial(DeviceId::default(), vec![fast, medium, slow], &tls, &local_id)
+            .dial(DeviceId::default(), vec![fast, medium, slow], vec![], &tls, &local_id)
             .await;
 
         assert!(result.is_ok());
@@ -465,7 +560,7 @@ mod tests {
 
         let start = Instant::now();
         let result = dialer
-            .dial(DeviceId::default(), vec![fast, slow], &tls, &local_id)
+            .dial(DeviceId::default(), vec![fast, slow], vec![], &tls, &local_id)
             .await;
         let elapsed = start.elapsed();
 
