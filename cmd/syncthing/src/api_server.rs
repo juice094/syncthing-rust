@@ -19,7 +19,7 @@ pub async fn start_api_server(
     sync_service: Arc<syncthing_sync::SyncService>,
     my_id: DeviceId,
     connection_handle: Option<syncthing_net::manager::ConnectionManagerHandle>,
-) -> Result<tokio::task::JoinHandle<()>> {
+) -> Result<(tokio::task::JoinHandle<()>, SocketAddr)> {
     let config_path = config_dir.join("config.json");
     let config_store = Arc::new(syncthing_api::config::JsonConfigStore::new(&config_path));
 
@@ -28,7 +28,7 @@ pub async fn start_api_server(
 
     if !config.gui.enabled {
         info!("REST API is disabled (gui.enabled = false)");
-        return Ok(tokio::spawn(async {}));
+        return Ok((tokio::spawn(async {}), SocketAddr::from(([0, 0, 0, 0], 0))));
     }
 
     let addr: SocketAddr = config
@@ -68,6 +68,9 @@ pub async fn start_api_server(
         Err(e) => return Err(SyncthingError::Network(format!("failed to bind REST API: {}", e))),
     };
 
+    let addr = listener.local_addr()
+        .map_err(|e| SyncthingError::Network(format!("failed to get local addr: {}", e)))?;
+
     let handle = tokio::spawn(async move {
         let svc = router.into_make_service_with_connect_info::<SocketAddr>();
         if let Err(e) = axum::serve(listener, svc).await {
@@ -75,5 +78,5 @@ pub async fn start_api_server(
         }
     });
 
-    Ok(handle)
+    Ok((handle, addr))
 }

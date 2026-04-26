@@ -135,6 +135,8 @@ pub struct ConnectionManager {
     tls_config: Arc<SyncthingTlsConfig>,
     /// 传输层注册表（Phase 2：支持多传输可插拔）
     transport_registry: RwLock<Option<Arc<TransportRegistry>>>,
+    /// 实际绑定的监听地址
+    listen_addr: RwLock<Option<SocketAddr>>,
 }
 
 /// 连接管理器句柄（用于跨线程共享）
@@ -177,6 +179,11 @@ impl ConnectionManagerHandle {
     /// 按连接ID获取连接
     pub fn get_connection_by_id(&self, conn_id: &uuid::Uuid) -> Option<Arc<BepConnection>> {
         self.inner.get_connection_by_id(conn_id)
+    }
+
+    /// 获取实际绑定的监听地址
+    pub fn local_addr(&self) -> Option<SocketAddr> {
+        *self.inner.listen_addr.read()
     }
     
     /// 连接到设备
@@ -225,6 +232,7 @@ impl ConnectionManager {
                 parallel_dialer,
                 tls_config,
                 transport_registry: RwLock::new(None),
+                listen_addr: RwLock::new(None),
             }
         });
         
@@ -340,6 +348,8 @@ impl ConnectionManager {
         
         // 启动维护任务
         self.spawn_maintenance_task();
+        
+        *self.listen_addr.write() = Some(listen_addr);
         
         info!("Connection manager started on {}", listen_addr);
         
@@ -908,6 +918,7 @@ impl ConnectionManager {
             parallel_dialer: Arc::clone(&manager.parallel_dialer),
             tls_config: Arc::clone(&manager.tls_config),
             transport_registry: RwLock::new(manager.transport_registry.read().clone()),
+            listen_addr: RwLock::new(*manager.listen_addr.read()),
         }
     }
 }

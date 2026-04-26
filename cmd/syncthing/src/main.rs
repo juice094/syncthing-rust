@@ -2,6 +2,7 @@
 //!
 //! 提供命令行界面和守护进程功能
 
+use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicI32, Ordering};
 
@@ -185,11 +186,11 @@ async fn main() -> Result<()> {
             match tui::daemon_runner::start_daemon(config_dir.clone(), listen, device_name).await {
                 Ok(startup) => {
                     // 启动 REST API 服务器
-                    let api_handle = match api_server::start_api_server(&config_dir, startup.sync_service.clone(), startup.device_id, Some(startup.connection_handle.clone())).await {
+                    let (api_handle, _api_addr) = match api_server::start_api_server(&config_dir, startup.sync_service.clone(), startup.device_id, Some(startup.connection_handle.clone())).await {
                         Ok(h) => h,
                         Err(e) => {
                             warn!("Failed to start REST API server: {}", e);
-                            tokio::spawn(async {})
+                            (tokio::spawn(async {}), SocketAddr::from(([0, 0, 0, 0], 0)))
                         }
                     };
                     let daemon_result = startup.future.await;
@@ -463,6 +464,9 @@ async fn cmd_show_id(config_dir: &Path) -> Result<()> {
 }
 
 #[cfg(test)]
+mod test_harness;
+
+#[cfg(test)]
 mod tests {
     use std::sync::Arc;
     use super::*;
@@ -597,5 +601,38 @@ mod tests {
         assert_eq!(listen, "0.0.0.0:22000");
 
         let _ = std::fs::remove_dir_all(&tmp_dir);
+    }
+
+    #[tokio::test]
+    async fn test_two_node_empty_folder_handshake() {
+        let node_a = test_harness::TestNode::new("a").await.expect("create node a");
+        let node_b = test_harness::TestNode::new("b").await.expect("create node b");
+
+        // 创建共享文件夹
+        let folder_a_path = node_a.config_dir.join("sync");
+        let folder_b_path = node_b.config_dir.join("sync");
+        let mut folder_a = syncthing_core::types::Folder::new("default", folder_a_path.to_str().unwrap());
+        folder_a.devices.push(node_b.device_id);
+        node_a.add_folder(folder_a).await.expect("a add folder");
+
+        let mut folder_b = syncthing_core::types::Folder::new("default", folder_b_path.to_str().unwrap());
+        folder_b.devices.push(node_a.device_id);
+        node_b.add_folder(folder_b).await.expect("b add folder");
+
+        // 互相配置对端并发起连接
+        node_a.connect_to(&node_b).await.expect("a connect to b");
+        node_b.connect_to(&node_a).await.expect("b connect to a");
+
+        // 等待连接建立
+        node_a.wait_for_connection(node_b.device_id, std::time::Duration::from_secs(15))
+            .await
+            .expect("a wait for b");
+        node_b.wait_for_connection(node_a.device_id, std::time::Duration::from_secs(15))
+            .await
+            .expect("b wait for a");
+
+        // 清理
+        node_a.shutdown().await;
+        node_b.shutdown().await;
     }
 }
