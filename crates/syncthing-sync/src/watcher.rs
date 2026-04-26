@@ -72,3 +72,50 @@ impl FolderWatcher {
         Ok((watcher, rx))
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Write;
+    use tokio::time::{timeout, Duration};
+
+    #[tokio::test]
+    async fn test_watcher_detects_file_creation() {
+        // 创建临时目录
+        let temp_dir = tempfile::tempdir().unwrap();
+        let path = temp_dir.path().to_str().unwrap();
+
+        // 启动 watcher
+        let (_watcher, mut rx) = FolderWatcher::watch("test-folder", path).unwrap();
+
+        // 短暂等待 watcher 初始化（Windows 需要）
+        tokio::time::sleep(Duration::from_millis(500)).await;
+
+        // 创建文件
+        let file_path = temp_dir.path().join("test_file.txt");
+        {
+            let mut file = std::fs::File::create(&file_path).unwrap();
+            file.write_all(b"hello").unwrap();
+        }
+
+        // 等待事件（最多 5 秒）
+        let event = timeout(Duration::from_secs(5), rx.recv()).await;
+
+        assert!(
+            event.is_ok(),
+            "Watcher did not detect file creation within 5s"
+        );
+        let event = event.unwrap().expect("Channel closed unexpectedly");
+        assert!(
+            matches!(event.kind, notify::EventKind::Create(_)),
+            "Expected Create event, got {:?}",
+            event.kind
+        );
+        assert!(
+            event.paths.contains(&file_path),
+            "Event path mismatch: expected {:?}, got {:?}",
+            file_path,
+            event.paths
+        );
+    }
+}
