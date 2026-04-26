@@ -130,3 +130,41 @@
 - **clarity**：clarity-wire 事件总线 → syncthing-rust P2P 网关 → 跨实例验证
 - **devbase**：`.syncdone` 标记格式已对齐；边界图谱版本通过 P2P 同步后写入 devbase OpLog
 - **syncthing-mcp-bridge**（独立进程）：Kimi/Claude ← MCP stdio ← Bridge ← REST API → syncthing-rust
+
+---
+
+## 代码健康与架构约束（2026-04-26 注入）
+
+> 以下规则为硬性约束，任何 PR/Agent 交付物触碰红线 → 必须修正后方可合并。
+
+### 1. 分层耦合红线
+
+| 层级 | 允许依赖 | 禁止依赖 |
+|------|----------|----------|
+| `syncthing-core` | 无（纯 trait + 类型） | 任何内部 crate |
+| `syncthing-api` | `syncthing-core` | `syncthing-net` 具体类型、`syncthing-sync` 具体类型 |
+| `cmd/syncthing` | 所有 crates | 无 |
+
+**具体禁令**：
+- `ApiState` 禁止直接持有 `ConnectionManagerHandle`、`LocalDatabase` 等具体类型。如需网络/数据库能力，应通过 `syncthing-core::traits` 抽象或新增 trait。
+- 新增 API 端点时，若涉及网络/同步操作，必须走 `SyncModel`/`ConfigStore` trait，禁止直接调用 `syncthing-net`/`syncthing-sync` 内部函数。
+
+### 2. 上帝对象与文件规模
+
+- `daemon_runner.rs` 当前 858 行，**禁止继续膨胀**。新增网络组件（如 DERP、WebSocket proxy）时，必须拆分为独立模块（如 `discovery_task.rs`、`relay_task.rs`、`dial_task.rs`）。
+- 单文件软上限：**600 行**。超过需拆分时，应在 Plan 阶段明确拆分方案。
+
+### 3. Trait 唯一性
+
+- `syncthing-core::traits::SyncModel` 为 canonical trait。
+- `syncthing-sync` 内部禁止再定义同名 `SyncModel` trait。现有双生 trait（`syncthing-sync/src/model.rs`）应在后续重构中合并或重命名。
+
+### 4. 测试策略
+
+- 新增功能必须配套 **集成测试**（`tests/*.rs` 或 `cmd/syncthing/src/bin/stress_test.rs` 场景），禁止仅用 `#[cfg(test)]` 单元测试覆盖端到端行为。
+- 网络层改动（如 relay 策略、discovery 逻辑）必须通过 `TestNode` 双实例验证，单实例测试视为无效。
+
+### 5. 依赖与存储抽象
+
+- `syncthing-db` 深度绑定 `sled`，若未来需替换存储后端，新增抽象必须落在 `syncthing-core::traits::BlockStore`，禁止在 `syncthing-db` 内部暴露 sled 特有 API。
+- 禁止为消除 `cargo audit` warning 而引入 breaking change 依赖升级；允许接受 unmaintained 警告作为记录债务，但必须在 `docs/plans/` 中留下 ADR。
