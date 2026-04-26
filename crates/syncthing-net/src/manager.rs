@@ -204,6 +204,21 @@ impl ConnectionManagerHandle {
         self.inner.connect_to_with_relay(device_id, addresses, relay_urls).await
     }
 
+    /// 更新设备的地址池（由 discovery 层调用）
+    pub fn update_addresses(
+        &self,
+        device_id: DeviceId,
+        addresses: Vec<SocketAddr>,
+        relay_urls: Vec<String>,
+    ) {
+        if !addresses.is_empty() {
+            self.inner.device_addresses.insert(device_id, addresses);
+        }
+        if !relay_urls.is_empty() {
+            self.inner.device_relay_urls.insert(device_id, relay_urls);
+        }
+    }
+
     /// 获取统计信息
     pub fn stats(&self) -> ManagerStats {
         self.inner.stats()

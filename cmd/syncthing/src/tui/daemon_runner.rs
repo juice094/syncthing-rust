@@ -7,7 +7,7 @@ use std::time::Duration;
 use anyhow::{Context, Result};
 use dashmap::DashMap;
 use tokio::task::JoinHandle;
-use tracing::{info, warn};
+use tracing::{debug, info, warn};
 
 use syncthing_core::types::Config;
 use syncthing_core::DeviceId;
@@ -429,11 +429,48 @@ pub async fn start_daemon(
         GlobalDiscoveryShutdown::new(gd.shutdown_sender())
     });
 
-    // Global Discovery background task
+    // Global Discovery background task (announce)
+    let global_discovery_query = global_discovery.clone();
     if let Some(gd) = global_discovery {
         let global_addrs = Arc::clone(&public_addrs);
         tokio::spawn(async move {
             gd.run(global_addrs).await;
+        });
+    }
+
+    // Global Discovery periodic query task (Phase 5: feed peer addresses into ConnectionManager)
+    if let Some(gd) = global_discovery_query {
+        let query_handle = handle.clone();
+        let query_devices: Vec<syncthing_core::DeviceId> = sync_service.get_config().await
+            .unwrap_or_default()
+            .devices.into_iter()
+            .filter(|d| d.id != device_id)
+            .map(|d| d.id)
+            .collect();
+        tokio::spawn(async move {
+            let mut interval = tokio::time::interval(Duration::from_secs(300));
+            loop {
+                interval.tick().await;
+                for peer_id in &query_devices {
+                    match gd.query(*peer_id).await {
+                        Ok(urls) => {
+                            let tcp_addrs: Vec<SocketAddr> = urls.iter().filter_map(|u| {
+                                u.strip_prefix("tcp://").and_then(|s| s.parse().ok())
+                            }).collect();
+                            let relay_urls: Vec<String> = urls.iter().filter_map(|u| {
+                                if u.starts_with("relay://") { Some(u.clone()) } else { None }
+                            }).collect();
+                            if !tcp_addrs.is_empty() || !relay_urls.is_empty() {
+                                info!("Global discovery: updating {} with {} tcp + {} relay addr(s)", peer_id, tcp_addrs.len(), relay_urls.len());
+                                query_handle.update_addresses(*peer_id, tcp_addrs, relay_urls);
+                            }
+                        }
+                        Err(e) => {
+                            debug!("Global discovery query for {} failed: {}", peer_id, e);
+                        }
+                    }
+                }
+            }
         });
     }
 
@@ -466,9 +503,12 @@ pub async fn start_daemon(
                         .filter_map(|a| a.parse().ok())
                         .collect();
                     if !addrs.is_empty() {
-                        info!("Local discovery: auto-dialing {} at {:?}", device_id, addrs);
-                        if let Err(e) = discovery_handle.connect_to(device_id, addrs).await {
-                            warn!("Failed to auto-dial discovered device {}: {}", device_id, e);
+                        info!("Local discovery: discovered {} at {:?}, updating address pool", device_id, addrs);
+                        discovery_handle.update_addresses(device_id, addrs.clone(), vec![]);
+                        if discovery_handle.get_connection(&device_id).is_none() {
+                            if let Err(e) = discovery_handle.connect_to(device_id, addrs).await {
+                                warn!("Failed to auto-dial discovered device {}: {}", device_id, e);
+                            }
                         }
                     }
                 }
