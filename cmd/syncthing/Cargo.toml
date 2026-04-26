@@ -30,6 +30,7 @@ ratatui = "0.29"
 crossterm = "0.28"
 rustls = { workspace = true, features = ["ring"] }
 dashmap = { workspace = true }
+parking_lot = { workspace = true }
 walkdir = { workspace = true }
 hex = { workspace = true }
 axum = "0.7"

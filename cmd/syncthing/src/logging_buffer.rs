@@ -1,5 +1,6 @@
 use std::collections::VecDeque;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
+use parking_lot::Mutex;
 use tracing_subscriber::Layer;
 
 /// 内存日志 Ring Buffer
@@ -18,12 +19,12 @@ impl MemoryBuffer {
     }
 
     pub fn take_lines(&self, n: usize) -> Vec<String> {
-        let guard = self.inner.lock().unwrap();
+        let guard = self.inner.lock();
         guard.iter().rev().take(n).cloned().rev().collect()
     }
 
     pub fn push(&self, msg: String) {
-        let mut guard = self.inner.lock().unwrap();
+        let mut guard = self.inner.lock();
         if guard.len() >= self.capacity {
             guard.pop_front();
         }

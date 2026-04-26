@@ -255,18 +255,44 @@ fn ip_from_bytes(b: &[u8]) -> Result<IpAddr> {
     }
 }
 
-/// 向指定 STUN 服务器发送 Binding Request 并返回公网地址
-pub async fn query(stun_server: &str, timeout_duration: Duration) -> Result<SocketAddr> {
+/// NAT 类型
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum NatType {
+    /// 无 NAT 或 Full Cone — 映射稳定，任何外部地址可直接连接
+    Open,
+    /// Restricted / Port Restricted Cone — 映射稳定，但需先向外发送包
+    Restricted,
+    /// Symmetric NAT — 映射随目标地址变化，P2P 困难
+    Symmetric,
+    /// UDP 完全不通
+    Blocked,
+    /// 无法判断（服务器不足或查询失败）
+    Unknown,
+}
+
+impl NatType {
+    /// 该 NAT 类型下 P2P 直连是否可行
+    pub fn is_p2p_feasible(self) -> bool {
+        matches!(self, NatType::Open | NatType::Restricted)
+    }
+
+    /// 是否应直接 fallback 到 Relay
+    pub fn needs_relay(self) -> bool {
+        matches!(self, NatType::Symmetric | NatType::Blocked | NatType::Unknown)
+    }
+}
+
+/// 使用已有 UDP socket 向指定 STUN 服务器查询
+async fn query_with_socket(
+    socket: &UdpSocket,
+    stun_server: &str,
+    timeout_duration: Duration,
+) -> Result<SocketAddr> {
     let server_addr = tokio::net::lookup_host(stun_server)
         .await
         .map_err(|e| SyncthingError::config(format!("failed to resolve STUN server '{}': {}", stun_server, e)))?
         .next()
         .ok_or_else(|| SyncthingError::config(format!("STUN server '{}' resolved to no addresses", stun_server)))?;
-
-    let bind_addr = SocketAddr::from(([0, 0, 0, 0], 0));
-    let socket = UdpSocket::bind(bind_addr)
-        .await
-        .map_err(|e| SyncthingError::connection(format!("failed to bind UDP socket: {}", e)))?;
 
     let tx_id = new_tx_id();
     let request = build_binding_request(tx_id);
@@ -286,6 +312,15 @@ pub async fn query(stun_server: &str, timeout_duration: Duration) -> Result<Sock
         return Err(SyncthingError::protocol("transaction ID mismatch"));
     }
     Ok(addr)
+}
+
+/// 向指定 STUN 服务器发送 Binding Request 并返回公网地址
+pub async fn query(stun_server: &str, timeout_duration: Duration) -> Result<SocketAddr> {
+    let bind_addr = SocketAddr::from(([0, 0, 0, 0], 0));
+    let socket = UdpSocket::bind(bind_addr)
+        .await
+        .map_err(|e| SyncthingError::connection(format!("failed to bind UDP socket: {}", e)))?;
+    query_with_socket(&socket, stun_server, timeout_duration).await
 }
 
 /// STUN 客户端
@@ -353,6 +388,54 @@ impl StunClient {
         }
 
         Err(SyncthingError::connection("all STUN servers failed"))
+    }
+
+    /// 检测 NAT 类型
+    ///
+    /// 使用同一个 UDP socket 向两个不同的 STUN 服务器查询，
+    /// 比较返回的映射地址来判断 NAT 类型。
+    ///
+    /// 返回 `(NatType, 首选公网地址)`。
+    pub async fn detect_nat_type(&self) -> Result<(NatType, Option<SocketAddr>)> {
+        if self.servers.len() < 2 {
+            warn!("NAT type detection requires at least 2 STUN servers, got {}", self.servers.len());
+            return Ok((NatType::Unknown, None));
+        }
+
+        let bind_addr = SocketAddr::from(([0, 0, 0, 0], self.local_port));
+        let socket = UdpSocket::bind(bind_addr)
+            .await
+            .map_err(|e| SyncthingError::connection(format!("failed to bind UDP socket: {}", e)))?;
+
+        let addr_a = match query_with_socket(&socket, &self.servers[0], self.timeout).await {
+            Ok(a) => a,
+            Err(e) => {
+                warn!("STUN server {} failed: {}", self.servers[0], e);
+                return Ok((NatType::Blocked, None));
+            }
+        };
+
+        let addr_b = match query_with_socket(&socket, &self.servers[1], self.timeout).await {
+            Ok(b) => b,
+            Err(e) => {
+                warn!("STUN server {} failed: {}", self.servers[1], e);
+                return Ok((NatType::Unknown, Some(addr_a)));
+            }
+        };
+
+        let nat_type = if addr_a == addr_b {
+            // 两个服务器看到相同的 IP:Port → Cone NAT（或无 NAT）
+            NatType::Open
+        } else if addr_a.ip() == addr_b.ip() {
+            // IP 相同，端口不同 → Restricted Cone（端口受限）
+            NatType::Restricted
+        } else {
+            // IP 都不同 → Symmetric NAT
+            NatType::Symmetric
+        };
+
+        info!("NAT type detected: {:?} ({} vs {})", nat_type, addr_a, addr_b);
+        Ok((nat_type, Some(addr_a)))
     }
 
     /// 构建 STUN 绑定请求消息（保留用于测试兼容）
@@ -603,6 +686,132 @@ mod tests {
             .await
             .unwrap();
         assert!(StunClient::is_public_address(&addr));
+    }
+
+    #[test]
+    fn test_nat_type_helpers() {
+        assert!(NatType::Open.is_p2p_feasible());
+        assert!(NatType::Restricted.is_p2p_feasible());
+        assert!(!NatType::Symmetric.is_p2p_feasible());
+        assert!(!NatType::Blocked.is_p2p_feasible());
+        assert!(!NatType::Unknown.is_p2p_feasible());
+
+        assert!(!NatType::Open.needs_relay());
+        assert!(!NatType::Restricted.needs_relay());
+        assert!(NatType::Symmetric.needs_relay());
+        assert!(NatType::Blocked.needs_relay());
+        assert!(NatType::Unknown.needs_relay());
+    }
+
+    #[tokio::test]
+    async fn test_detect_nat_type_mock_open() {
+        // Simulate Cone NAT: both servers return the same mapped address
+        let addr_a = SocketAddr::from(([127, 0, 0, 1], 0));
+        let socket_a = UdpSocket::bind(addr_a).await.unwrap();
+        let server_a = socket_a.local_addr().unwrap();
+
+        let addr_b = SocketAddr::from(([127, 0, 0, 1], 0));
+        let socket_b = UdpSocket::bind(addr_b).await.unwrap();
+        let server_b = socket_b.local_addr().unwrap();
+
+        let mapped = SocketAddr::from(([203, 0, 113, 7], 9876));
+
+        tokio::spawn(async move {
+            let mut buf = [0u8; 1024];
+            let (len, from) = socket_a.recv_from(&mut buf).await.unwrap();
+            let tx_id = extract_tx_id(&buf[..len]);
+            socket_a.send_to(&build_test_response(tx_id, mapped, true), from).await.unwrap();
+        });
+
+        tokio::spawn(async move {
+            let mut buf = [0u8; 1024];
+            let (len, from) = socket_b.recv_from(&mut buf).await.unwrap();
+            let tx_id = extract_tx_id(&buf[..len]);
+            socket_b.send_to(&build_test_response(tx_id, mapped, true), from).await.unwrap();
+        });
+
+        let client = StunClient::with_servers(vec![
+            server_a.to_string(),
+            server_b.to_string(),
+        ]).with_timeout(Duration::from_secs(2));
+
+        let (nat_type, pub_addr) = client.detect_nat_type().await.unwrap();
+        assert_eq!(nat_type, NatType::Open);
+        assert_eq!(pub_addr, Some(mapped));
+    }
+
+    #[tokio::test]
+    async fn test_detect_nat_type_mock_symmetric() {
+        // Simulate Symmetric NAT: servers return different mapped addresses
+        let addr_a = SocketAddr::from(([127, 0, 0, 1], 0));
+        let socket_a = UdpSocket::bind(addr_a).await.unwrap();
+        let server_a = socket_a.local_addr().unwrap();
+
+        let addr_b = SocketAddr::from(([127, 0, 0, 1], 0));
+        let socket_b = UdpSocket::bind(addr_b).await.unwrap();
+        let server_b = socket_b.local_addr().unwrap();
+
+        let mapped_a = SocketAddr::from(([203, 0, 113, 7], 9876));
+        let mapped_b = SocketAddr::from(([203, 0, 113, 8], 1234));
+
+        tokio::spawn(async move {
+            let mut buf = [0u8; 1024];
+            let (len, from) = socket_a.recv_from(&mut buf).await.unwrap();
+            let tx_id = extract_tx_id(&buf[..len]);
+            socket_a.send_to(&build_test_response(tx_id, mapped_a, true), from).await.unwrap();
+        });
+
+        tokio::spawn(async move {
+            let mut buf = [0u8; 1024];
+            let (len, from) = socket_b.recv_from(&mut buf).await.unwrap();
+            let tx_id = extract_tx_id(&buf[..len]);
+            socket_b.send_to(&build_test_response(tx_id, mapped_b, true), from).await.unwrap();
+        });
+
+        let client = StunClient::with_servers(vec![
+            server_a.to_string(),
+            server_b.to_string(),
+        ]).with_timeout(Duration::from_secs(2));
+
+        let (nat_type, pub_addr) = client.detect_nat_type().await.unwrap();
+        assert_eq!(nat_type, NatType::Symmetric);
+        assert_eq!(pub_addr, Some(mapped_a));
+    }
+
+    #[tokio::test]
+    async fn test_detect_nat_type_mock_blocked() {
+        // Simulate blocked UDP: server does not respond
+        let addr_a = SocketAddr::from(([127, 0, 0, 1], 0));
+        let socket_a = UdpSocket::bind(addr_a).await.unwrap();
+        let server_a = socket_a.local_addr().unwrap();
+
+        // Bind server B but intentionally drop all packets
+        let addr_b = SocketAddr::from(([127, 0, 0, 1], 0));
+        let _socket_b = UdpSocket::bind(addr_b).await.unwrap();
+        let server_b = _socket_b.local_addr().unwrap();
+
+        // Server A: no response (just receive and drop)
+        tokio::spawn(async move {
+            let mut buf = [0u8; 1024];
+            let _ = socket_a.recv_from(&mut buf).await;
+            // Intentionally do not respond
+        });
+
+        let client = StunClient::with_servers(vec![
+            server_a.to_string(),
+            server_b.to_string(),
+        ])
+        .with_timeout(Duration::from_millis(500));
+
+        let (nat_type, pub_addr) = client.detect_nat_type().await.unwrap();
+        assert_eq!(nat_type, NatType::Blocked);
+        assert_eq!(pub_addr, None);
+    }
+
+    fn extract_tx_id(data: &[u8]) -> TxId {
+        let mut id = TxId::default();
+        id.copy_from_slice(&data[8..20]);
+        id
     }
 
     /// 辅助函数：构建测试用的 STUN Success Response

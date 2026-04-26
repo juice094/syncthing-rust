@@ -2,10 +2,11 @@
 //!
 //! Syncthing使用自定义的TLS配置进行设备认证
 
-use std::io::BufReader;
 use std::path::Path;
 use std::sync::{Arc, Once};
 use std::time::Duration;
+
+use rustls::pki_types::pem::PemObject;
 
 static CRYPTO_PROVIDER_INIT: Once = Once::new();
 
@@ -48,10 +49,8 @@ impl SyncthingTlsConfig {
     /// 从PEM文件加载证书和私钥
     pub fn from_pem(cert_pem: &[u8], key_pem: &[u8]) -> Result<Self> {
         // 解析证书
-        let mut cert_reader = BufReader::new(cert_pem);
-        let cert_chain: Vec<CertificateDer<'static>> = rustls_pemfile::certs(&mut cert_reader)
+        let cert_chain: Vec<CertificateDer<'static>> = CertificateDer::pem_slice_iter(cert_pem)
             .filter_map(|r| r.ok())
-            .map(|c| c.into_owned())
             .collect();
         
         if cert_chain.is_empty() {
@@ -59,12 +58,10 @@ impl SyncthingTlsConfig {
         }
         
         // 解析私钥
-        let mut key_reader = BufReader::new(key_pem);
-        let private_key = rustls_pemfile::pkcs8_private_keys(&mut key_reader)
+        let private_key = PrivateKeyDer::pem_slice_iter(key_pem)
             .next()
-            .ok_or_else(|| SyncthingError::Tls("no private key found".to_string()))??;
-        
-        let private_key = PrivateKeyDer::from(private_key);
+            .ok_or_else(|| SyncthingError::Tls("no private key found".to_string()))?
+            .map_err(|e| SyncthingError::Tls(format!("invalid private key: {}", e)))?;
         
         // 计算设备ID（从证书公钥的SHA-256）
         let device_id = Self::derive_device_id(&cert_chain[0])?;
