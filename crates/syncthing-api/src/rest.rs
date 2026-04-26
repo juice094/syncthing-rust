@@ -24,7 +24,7 @@ use serde::{Deserialize, Serialize};
 use tokio::net::TcpListener;
 use tower_http::cors::CorsLayer;
 use tower_http::trace::TraceLayer;
-use tracing::{error, info};
+use tracing::{error, info, warn};
 
 use syncthing_core::traits::{ConfigStore, SyncModel};
 use syncthing_core::types::{Config, FolderId, FolderSummary, VersioningConfig};
@@ -190,6 +190,15 @@ impl RestApi {
             .route("/rest/config", get(get_config).put(update_config))
             .route("/rest/config/folders", get(list_folders))
             .route("/rest/config/devices", get(list_devices))
+            // System operations — Go canonical paths
+            .route("/rest/system/config", post(system_config_post))
+            .route("/rest/system/restart", post(system_restart))
+            .route("/rest/system/shutdown", post(system_shutdown))
+            .route("/rest/system/pause", post(system_pause))
+            .route("/rest/system/resume", post(system_resume))
+            .route("/rest/db/scan", post(db_scan_post))
+            .route("/rest/db/override", post(db_override))
+            .route("/rest/db/revert", post(db_revert))
             // Health check
             .route("/rest/health", get(health_check))
             // WebSocket events
@@ -1178,22 +1187,176 @@ async fn update_config(
     State(state): State<ApiState>,
     Json(request): Json<UpdateConfigRequest>,
 ) -> impl IntoResponse {
-    // Load existing config
     let mut config = match state.config_store.load().await {
         Ok(c) => c,
         Err(e) => return Err((StatusCode::INTERNAL_SERVER_ERROR, format!("{}", e))),
     };
 
-    // Update version
     config.version = request.version as i32;
 
-    // Note: Full config update would merge folders and devices
-    // This is a simplified implementation
+    // Merge folders by id
+    for req_folder in request.folders {
+        if let Some(ref id) = req_folder.id {
+            if let Some(existing) = config.folders.iter_mut().find(|f| f.id == *id) {
+                if let Some(label) = req_folder.label {
+                    existing.label = Some(label);
+                }
+                if let Some(path) = req_folder.path {
+                    existing.path = path;
+                }
+                if let Some(interval) = req_folder.rescan_interval_secs {
+                    existing.rescan_interval_secs = interval as i32;
+                }
+            } else if let Some(path) = req_folder.path {
+                let mut new_folder = syncthing_core::types::Folder::new(id.clone(), path);
+                if let Some(label) = req_folder.label {
+                    new_folder.label = Some(label);
+                }
+                if let Some(interval) = req_folder.rescan_interval_secs {
+                    new_folder.rescan_interval_secs = interval as i32;
+                }
+                config.folders.push(new_folder);
+            }
+        }
+    }
+
+    // Merge devices by id
+    for req_device in request.devices {
+        let device_id = parse_device_id(&req_device.id);
+        if let Some(existing) = config.devices.iter_mut().find(|d| d.id == device_id) {
+            if !req_device.name.is_empty() {
+                existing.name = Some(req_device.name);
+            }
+            if !req_device.addresses.is_empty() {
+                existing.addresses = req_device.addresses.iter().map(parse_address).collect();
+            }
+            existing.introducer = req_device.introducer;
+        } else {
+            let device = syncthing_core::types::Device {
+                id: device_id,
+                name: if req_device.name.is_empty() { None } else { Some(req_device.name) },
+                addresses: req_device.addresses.iter().map(parse_address).collect(),
+                paused: false,
+                introducer: req_device.introducer,
+            };
+            config.devices.push(device);
+        }
+    }
 
     match state.config_store.save(&config).await {
         Ok(_) => Ok(Json(ConfigResponse::from(config))),
         Err(e) => Err((StatusCode::INTERNAL_SERVER_ERROR, format!("{}", e))),
     }
+}
+
+async fn system_config_post(
+    State(state): State<ApiState>,
+    Json(request): Json<UpdateConfigRequest>,
+) -> impl IntoResponse {
+    update_config(State(state), Json(request)).await
+}
+
+async fn system_restart() -> impl IntoResponse {
+    tokio::spawn(async {
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        std::process::exit(3);
+    });
+    Json(serde_json::json!({ "ok": "restarting" }))
+}
+
+async fn system_shutdown() -> impl IntoResponse {
+    tokio::spawn(async {
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        std::process::exit(0);
+    });
+    Json(serde_json::json!({ "ok": "shutting down" }))
+}
+
+#[derive(Debug, Deserialize)]
+#[allow(dead_code)]
+struct PauseResumeRequest {
+    #[serde(default)]
+    device: Vec<String>,
+    #[serde(default)]
+    folder: Vec<String>,
+}
+
+async fn system_pause(
+    State(state): State<ApiState>,
+    Json(request): Json<PauseResumeRequest>,
+) -> impl IntoResponse {
+    let mut paused = Vec::new();
+    if let Some(ref model) = state.sync_model {
+        for folder_id in &request.folder {
+            if let Err(e) = model.stop_folder(FolderId::new(folder_id)).await {
+                warn!("Failed to pause folder {}: {}", folder_id, e);
+            } else {
+                paused.push(folder_id.clone());
+            }
+        }
+    }
+    Json(serde_json::json!({ "paused": paused }))
+}
+
+async fn system_resume(
+    State(state): State<ApiState>,
+    Json(request): Json<PauseResumeRequest>,
+) -> impl IntoResponse {
+    let mut resumed = Vec::new();
+    if let Some(ref model) = state.sync_model {
+        for folder_id in &request.folder {
+            if let Err(e) = model.start_folder(FolderId::new(folder_id)).await {
+                warn!("Failed to resume folder {}: {}", folder_id, e);
+            } else {
+                resumed.push(folder_id.clone());
+            }
+        }
+    }
+    Json(serde_json::json!({ "resumed": resumed }))
+}
+
+#[derive(Debug, Deserialize)]
+#[allow(dead_code)]
+struct DbScanRequest {
+    folder: String,
+    #[serde(default)]
+    sub: Option<String>,
+}
+
+async fn db_scan_post(
+    State(state): State<ApiState>,
+    Json(request): Json<DbScanRequest>,
+) -> impl IntoResponse {
+    if let Some(ref model) = state.sync_model {
+        match model.scan_folder(&FolderId::new(&request.folder)).await {
+            Ok(_) => Ok(Json(serde_json::json!({ "ok": true }))),
+            Err(e) => Err((
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({ "error": format!("{}", e) })),
+            )),
+        }
+    } else {
+        Err((
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(serde_json::json!({ "error": "sync model not available" })),
+        ))
+    }
+}
+
+async fn db_override() -> impl IntoResponse {
+    (
+        StatusCode::NOT_IMPLEMENTED,
+        Json(serde_json::json!({ "error": "override not yet implemented" })),
+    )
+        .into_response()
+}
+
+async fn db_revert() -> impl IntoResponse {
+    (
+        StatusCode::NOT_IMPLEMENTED,
+        Json(serde_json::json!({ "error": "revert not yet implemented" })),
+    )
+        .into_response()
 }
 
 // Helper functions
@@ -1208,6 +1371,20 @@ fn parse_device_id(id: &str) -> DeviceId {
         bytes.copy_from_slice(&hash);
         DeviceId::from_bytes_array(bytes)
     })
+}
+
+fn parse_address(a: &String) -> syncthing_core::types::AddressType {
+    if let Some(stripped) = a.strip_prefix("tcp://") {
+        syncthing_core::types::AddressType::Tcp(stripped.to_string())
+    } else if let Some(stripped) = a.strip_prefix("quic://") {
+        syncthing_core::types::AddressType::Quic(stripped.to_string())
+    } else if let Some(stripped) = a.strip_prefix("relay://") {
+        syncthing_core::types::AddressType::Relay(stripped.to_string())
+    } else if a == "dynamic" {
+        syncthing_core::types::AddressType::Dynamic
+    } else {
+        syncthing_core::types::AddressType::Tcp(a.clone())
+    }
 }
 
 // Request/Response types
@@ -1232,6 +1409,9 @@ pub struct CreateFolderRequest {
 /// Request to update an existing folder
 #[derive(Debug, Deserialize)]
 pub struct UpdateFolderRequest {
+    /// Folder identifier (required when used inside UpdateConfigRequest)
+    #[serde(default)]
+    pub id: Option<String>,
     /// Human-readable label
     pub label: Option<String>,
     /// Local filesystem path
