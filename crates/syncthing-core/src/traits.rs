@@ -502,3 +502,53 @@ pub enum FolderStatus {
 }
 
 pub use crate::types::Config;
+
+/// Aggregate connection statistics (manager-level)
+#[derive(Debug, Clone, Default)]
+pub struct AggregateConnectionStats {
+    /// Total bytes sent across all connections
+    pub total_bytes_sent: u64,
+    /// Total bytes received across all connections
+    pub total_bytes_received: u64,
+}
+
+/// Connection information for a specific device
+#[derive(Debug, Clone)]
+pub struct ConnectionInfo {
+    /// Remote address of the connection
+    pub remote_addr: String,
+    /// Whether the connection is currently alive
+    pub is_alive: bool,
+}
+
+/// Connection manager abstraction
+///
+/// Implementors: syncthing-net crate.
+/// API layer must use this trait instead of syncthing-net concrete types.
+#[async_trait]
+pub trait ConnectionManager: Send + Sync {
+    /// Get list of currently connected device IDs
+    fn connected_devices(&self) -> Vec<DeviceId>;
+
+    /// Disconnect from a device with a reason
+    async fn disconnect(&self, device_id: &DeviceId, reason: &str) -> Result<()>;
+
+    /// Get aggregate connection statistics
+    fn connection_stats(&self) -> AggregateConnectionStats;
+
+    /// Check if a device has an active connection
+    fn has_connection(&self, device_id: &DeviceId) -> bool;
+
+    /// Get connection info for a device
+    fn get_connection_info(&self, device_id: &DeviceId) -> Option<ConnectionInfo>;
+}
+
+/// Folder database abstraction
+///
+/// Implementors: syncthing-sync crate.
+/// API layer must use this trait instead of syncthing-sync concrete types.
+#[async_trait]
+pub trait FolderDatabase: Send + Sync {
+    /// Get all files in a folder
+    async fn get_folder_files(&self, folder_id: &str) -> Result<Vec<FileInfo>>;
+}

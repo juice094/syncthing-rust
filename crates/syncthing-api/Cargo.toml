@@ -9,8 +9,6 @@ publish = false
 
 [dependencies]
 syncthing-core = { path = "../syncthing-core" }
-syncthing-net = { path = "../syncthing-net" }
-syncthing-sync = { path = "../syncthing-sync" }
 
 # 异步
 tokio = { workspace = true }

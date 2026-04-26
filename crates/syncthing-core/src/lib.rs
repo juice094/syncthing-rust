@@ -14,3 +14,4 @@ pub use device_id::DeviceId;
 pub use types::*;
 pub use identity::{Identity, DeviceIdentity};
 pub use traits::{Transport, TransportListener, TransportType, ReliablePipe, BoxedPipe, PathQuality};
+pub use traits::{ConnectionManager, AggregateConnectionStats, ConnectionInfo, FolderDatabase};

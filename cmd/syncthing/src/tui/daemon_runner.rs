@@ -7,37 +7,23 @@ use std::time::Duration;
 use anyhow::{Context, Result};
 use dashmap::DashMap;
 use tokio::task::JoinHandle;
-use tracing::{debug, info, warn};
+use tracing::{info, warn};
 
 use syncthing_core::types::Config;
 use syncthing_core::DeviceId;
-use syncthing_net::{BepSession, BepSessionEvent, BepSessionHandler, ConnectionManager, ConnectionManagerConfig, ConnectionManagerHandle, SyncthingTlsConfig};
+use syncthing_net::{BepSession, BepSessionEvent, ConnectionManager, ConnectionManagerConfig, ConnectionManagerHandle, SyncthingTlsConfig};
 use syncthing_net::protocol::MessageType;
-use syncthing_sync::{database::FileSystemDatabase, SyncService, SyncModel, events::SyncEvent};
+use syncthing_sync::{database::FileSystemDatabase, SyncService, SyncManager, events::SyncEvent};
 
 use crate::{ManagerBlockSource, load_config, save_config, CONFIG_FILE_NAME};
 
 use syncthing_core::traits::ConfigStore;
 use syncthing_api::config::JsonConfigStore;
 
-/// GlobalDiscovery 优雅退出 Drop guard
-pub(crate) struct GlobalDiscoveryShutdown {
-    tx: Option<tokio::sync::broadcast::Sender<()>>,
-}
-
-impl GlobalDiscoveryShutdown {
-    fn new(tx: tokio::sync::broadcast::Sender<()>) -> Self {
-        Self { tx: Some(tx) }
-    }
-}
-
-impl Drop for GlobalDiscoveryShutdown {
-    fn drop(&mut self) {
-        if let Some(tx) = self.tx.take() {
-            let _ = tx.send(());
-        }
-    }
-}
+use super::bep_handler::DaemonBepHandler;
+use super::discovery_tasks::{GlobalDiscoveryShutdown, init_and_spawn_global_discovery, spawn_local_discovery};
+use super::nat_tasks::{spawn_port_mapper, spawn_stun};
+use super::relay_listener::spawn_relay_listeners;
 
 /// Daemon 启动结果
 pub struct DaemonStartup {
@@ -198,7 +184,6 @@ pub async fn start_daemon(
                         match &event {
                             BepSessionEvent::ClusterConfigComplete { shared_folders, .. } => {
                                 info!("[{}] ClusterConfig complete, shared folders: {:?}", event_device_id, shared_folders);
-                                // 记录该设备的共享文件夹，用于后续 IndexUpdate 过滤
                                 shared_folders_map.insert(event_device_id, shared_folders.clone());
                             }
                             BepSessionEvent::IndexSent { folder, file_count, .. } => {
@@ -327,194 +312,26 @@ pub async fn start_daemon(
     let local_port = actual_addr.port();
     let public_addrs = Arc::new(tokio::sync::Mutex::new(Vec::<String>::new()));
 
-    // 预先创建 GlobalDiscovery，成功后共享给 STUN/PortMapper 用于触发 re-announce
     let cert_path = config_dir.join(syncthing_net::tls::CERT_FILE_NAME);
     let key_path = config_dir.join(syncthing_net::tls::KEY_FILE_NAME);
-    let global_discovery = match syncthing_net::GlobalDiscovery::from_cert_files(device_id, &cert_path, &key_path, None).await {
-        Ok(gd) => {
-            info!("GlobalDiscovery initialized for {}", device_id);
-            Some(Arc::new(gd))
-        }
-        Err(e) => {
-            warn!("GlobalDiscovery initialization failed: {}", e);
-            None
-        }
-    };
+    let (global_discovery, global_discovery_shutdown) = init_and_spawn_global_discovery(
+        device_id,
+        &cert_path,
+        &key_path,
+        Arc::clone(&public_addrs),
+        handle.clone(),
+        Arc::clone(&sync_service),
+        device_id,
+    ).await;
 
     // PortMapper background task（含自动续约）
-    let pm_public_addrs = Arc::clone(&public_addrs);
-    let pm_gd = global_discovery.clone();
-    tokio::spawn(async move {
-        let mut port_mapper = syncthing_net::PortMapper::new()
-            .with_local_addr(actual_addr);
-        match port_mapper.allocate_port(local_port).await {
-            Ok(mut mapping) => {
-                let mut current_ext = mapping.external_addr();
-                let ext_url = format!("tcp://{}", current_ext);
-                info!("PortMapper success: {} -> {}", actual_addr, ext_url);
-                pm_public_addrs.lock().await.push(ext_url);
-                if let Some(ref gd) = pm_gd {
-                    gd.trigger_reannounce();
-                }
-
-                // 自动续约循环（每 lifetime/2 续约一次）
-                loop {
-                    let now = std::time::Instant::now();
-                    let renew_after = mapping.renew_after();
-                    if renew_after <= now {
-                        warn!("PortMapper mapping expired before renewal");
-                        break;
-                    }
-                    let sleep_duration = renew_after.duration_since(now);
-                    tokio::time::sleep(sleep_duration).await;
-
-                    match port_mapper.allocate_port(local_port).await {
-                        Ok(new_mapping) => {
-                            let new_ext = new_mapping.external_addr();
-                            info!("PortMapper renewed: {} -> {}", actual_addr, new_ext);
-
-                            // 更新 public_addrs：替换旧的外部地址
-                            {
-                                let mut addrs = pm_public_addrs.lock().await;
-                                let old_url = format!("tcp://{}", current_ext);
-                                if let Some(pos) = addrs.iter().position(|a| a == &old_url) {
-                                    addrs.remove(pos);
-                                }
-                                addrs.push(format!("tcp://{}", new_ext));
-                            }
-
-                            if let Some(ref gd) = pm_gd {
-                                gd.trigger_reannounce();
-                            }
-
-                            current_ext = new_ext;
-                            mapping = new_mapping;
-                        }
-                        Err(e) => {
-                            warn!("PortMapper renewal failed: {}", e);
-                            break;
-                        }
-                    }
-                }
-            }
-            Err(e) => {
-                warn!("PortMapper failed (expected if router has no UPnP/NAT-PMP): {}", e);
-            }
-        }
-    });
+    spawn_port_mapper(actual_addr, local_port, Arc::clone(&public_addrs), global_discovery.clone());
 
     // STUN background task
-    let stun_public_addrs = Arc::clone(&public_addrs);
-    let stun_gd = global_discovery.clone();
-    tokio::spawn(async move {
-        let stun = syncthing_net::StunClient::new()
-            .with_local_port(local_port);
-        match stun.get_public_address().await {
-            Ok(pub_addr) => {
-                let pub_url = format!("tcp://{}", pub_addr);
-                info!("STUN public address: {}", pub_addr);
-                stun_public_addrs.lock().await.push(pub_url);
-                if let Some(gd) = stun_gd {
-                    gd.trigger_reannounce();
-                }
-            }
-            Err(e) => {
-                warn!("STUN detection failed (expected behind symmetric NAT/firewall): {}", e);
-            }
-        }
-    });
-
-    // 在移动 global_discovery 之前捕获 shutdown sender
-    let global_discovery_shutdown = global_discovery.as_ref().map(|gd| {
-        GlobalDiscoveryShutdown::new(gd.shutdown_sender())
-    });
-
-    // Global Discovery background task (announce)
-    let global_discovery_query = global_discovery.clone();
-    if let Some(gd) = global_discovery {
-        let global_addrs = Arc::clone(&public_addrs);
-        tokio::spawn(async move {
-            gd.run(global_addrs).await;
-        });
-    }
-
-    // Global Discovery periodic query task (Phase 5: feed peer addresses into ConnectionManager)
-    if let Some(gd) = global_discovery_query {
-        let query_handle = handle.clone();
-        let query_devices: Vec<syncthing_core::DeviceId> = sync_service.get_config().await
-            .unwrap_or_default()
-            .devices.into_iter()
-            .filter(|d| d.id != device_id)
-            .map(|d| d.id)
-            .collect();
-        tokio::spawn(async move {
-            let mut interval = tokio::time::interval(Duration::from_secs(300));
-            loop {
-                interval.tick().await;
-                for peer_id in &query_devices {
-                    match gd.query(*peer_id).await {
-                        Ok(urls) => {
-                            let tcp_addrs: Vec<SocketAddr> = urls.iter().filter_map(|u| {
-                                u.strip_prefix("tcp://").and_then(|s| s.parse().ok())
-                            }).collect();
-                            let relay_urls: Vec<String> = urls.iter().filter_map(|u| {
-                                if u.starts_with("relay://") { Some(u.clone()) } else { None }
-                            }).collect();
-                            if !tcp_addrs.is_empty() || !relay_urls.is_empty() {
-                                info!("Global discovery: updating {} with {} tcp + {} relay addr(s)", peer_id, tcp_addrs.len(), relay_urls.len());
-                                query_handle.update_addresses(*peer_id, tcp_addrs, relay_urls);
-                            }
-                        }
-                        Err(e) => {
-                            debug!("Global discovery query for {} failed: {}", peer_id, e);
-                        }
-                    }
-                }
-            }
-        });
-    }
+    spawn_stun(local_port, Arc::clone(&public_addrs), global_discovery.clone());
 
     // ── Local Discovery (Phase 0: 恢复连接能力) ──
-    let discovery_device_id = device_id;
-    let mut discovery_addrs = vec![format!("tcp://{}", actual_addr)];
-    // Append any already-known public addresses
-    {
-        let pa = public_addrs.lock().await;
-        discovery_addrs.extend(pa.iter().cloned());
-    }
-    let (discovery_tx, mut discovery_rx) = tokio::sync::mpsc::channel::<syncthing_net::DiscoveryEvent>(32);
-    let discovery_handle = handle.clone();
-    let discovery_config = sync_service.get_config().await.unwrap_or_default();
-    let known_device_ids: std::collections::HashSet<syncthing_core::DeviceId> =
-        discovery_config.devices.iter().map(|d| d.id).collect();
-
-    tokio::spawn(async move {
-        let discovery = syncthing_net::LocalDiscovery::new(discovery_device_id, discovery_addrs);
-        if let Err(e) = discovery.run(discovery_tx).await {
-            warn!("Local discovery error: {}", e);
-        }
-    });
-
-    tokio::spawn(async move {
-        while let Some(event) = discovery_rx.recv().await {
-            if let syncthing_net::DiscoveryEvent::DeviceDiscovered { device_id, addresses, .. } = event {
-                if known_device_ids.contains(&device_id) {
-                    let addrs: Vec<SocketAddr> = addresses.iter()
-                        .filter_map(|a| a.parse().ok())
-                        .collect();
-                    if !addrs.is_empty() {
-                        info!("Local discovery: discovered {} at {:?}, updating address pool", device_id, addrs);
-                        discovery_handle.update_addresses(device_id, addrs.clone(), vec![]);
-                        if discovery_handle.get_connection(&device_id).is_none() {
-                            if let Err(e) = discovery_handle.connect_to(device_id, addrs).await {
-                                warn!("Failed to auto-dial discovered device {}: {}", device_id, e);
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    });
+    spawn_local_discovery(device_id, actual_addr, Arc::clone(&public_addrs), handle.clone(), Arc::clone(&sync_service)).await;
 
     // 获取 relay pool（若启用），并进行分层健康检查
     let relay_pool_urls: Vec<String> = if config.options.relays_enabled {
@@ -524,9 +341,9 @@ pub async fn start_daemon(
                 // Stage 1: lightweight TCP connect (all relays)
                 let tcp_healthy = syncthing_net::relay::filter_healthy_relays(urls, 3).await;
                 info!("{} relay(s) passed TCP health check", tcp_healthy.len());
-                // Stage 2: deep TLS + JoinRelay on top 10, stop at 3 to reduce startup latency
+                // Stage 2: deep TLS + JoinRelay on top 10, stop at 10 to increase overlap probability
                 let to_check = tcp_healthy.into_iter().take(10).collect();
-                let healthy = syncthing_net::relay::filter_healthy_relays_tls(to_check, 3, tls_config_arc.as_ref(), 3).await;
+                let healthy = syncthing_net::relay::filter_healthy_relays_tls(to_check, 3, tls_config_arc.as_ref(), 10).await;
                 info!("{} relay(s) passed TLS health check", healthy.len());
                 healthy
             }
@@ -577,8 +394,7 @@ pub async fn start_daemon(
     });
 
     // ── Relay 被动监听（永久 mode）──
-    // 收集配置中的 relay 地址（去重），若不足 3 个用 pool 补齐，分别 spawn 监听任务
-    let mut relay_listen_urls: std::collections::HashSet<String> = {
+    let config_relay_urls: Vec<String> = {
         let cfg = sync_service.get_config().await.unwrap_or_default();
         cfg.devices.iter().filter_map(|d| {
             d.addresses.iter().find_map(|a| match a {
@@ -587,34 +403,14 @@ pub async fn start_daemon(
             })
         }).collect()
     };
-    for url in relay_pool_urls {
-        relay_listen_urls.insert(url);
-    }
-    let relay_listen_urls: Vec<String> = relay_listen_urls.into_iter().take(3).collect();
-    for relay_url in relay_listen_urls {
-        let relay_handle = handle.clone();
-        let relay_tls = Arc::clone(&tls_config_arc);
-        let relay_device_name = config.device_name.clone();
-        tokio::spawn(async move {
-            let mut backoff = Duration::from_secs(1);
-            const MAX_BACKOFF: Duration = Duration::from_secs(300);
-            const RESET_THRESHOLD: Duration = Duration::from_secs(60);
-            loop {
-                let start = std::time::Instant::now();
-                match run_relay_listener(&relay_url, device_id, &relay_tls, &relay_handle, &relay_device_name).await {
-                    Ok(()) => warn!("Relay listener for {} exited, reconnecting in {:?}", relay_url, backoff),
-                    Err(e) => warn!("Relay listener for {} error: {}, reconnecting in {:?}", relay_url, e, backoff),
-                }
-                tokio::time::sleep(backoff).await;
-                // Exponential backoff; reset if the listener ran successfully for a while
-                if start.elapsed() > RESET_THRESHOLD {
-                    backoff = Duration::from_secs(1);
-                } else {
-                    backoff = (backoff * 2).min(MAX_BACKOFF);
-                }
-            }
-        });
-    }
+    spawn_relay_listeners(
+        relay_pool_urls,
+        config_relay_urls,
+        Arc::clone(&tls_config_arc),
+        device_id,
+        config.device_name.clone(),
+        handle.clone(),
+    );
 
     let connection_handle = handle.clone();
     let session_handles_clone = Arc::clone(&session_handles);
@@ -667,192 +463,3 @@ pub async fn start_daemon(
         global_discovery_shutdown,
     })
 }
-
-/// Relay 永久 mode 监听循环
-///
-/// 连接到 relay 服务器，注册为可用节点，等待 SessionInvitation，
-/// 收到后建立 session mode 连接并完成 BEP TLS + Hello，注册到 ConnectionManager。
-async fn run_relay_listener(
-    relay_url: &str,
-    local_device_id: syncthing_core::DeviceId,
-    tls_config: &Arc<syncthing_net::SyncthingTlsConfig>,
-    handle: &syncthing_net::ConnectionManagerHandle,
-    device_name: &str,
-) -> syncthing_core::Result<()> {
-    use syncthing_core::{ConnectionState, ConnectionType, SyncthingError};
-    use syncthing_net::connection::{BepConnection, TcpBiStream};
-    use syncthing_net::handshaker::BepHandshaker;
-    use syncthing_net::tls::{accept_tls_stream, connect_tls_stream};
-    use tracing::info;
-
-    let (relay_addr, _) = syncthing_net::relay::dial::parse_relay_url(relay_url)?;
-    let rustls_config = tls_config
-        .relay_client_config()
-        .map_err(|e| SyncthingError::Tls(format!("relay config: {}", e)))?;
-    let rustls_config = std::sync::Arc::new(rustls_config);
-
-    let mut client = syncthing_net::relay::RelayProtocolClient::connect(relay_addr, &rustls_config)
-        .await?;
-    client.join_relay().await?;
-    info!("Relay listener joined {}", relay_addr);
-
-    loop {
-        let invitation = client.wait_invitation().await?;
-        info!("Relay invitation received from {:?}", invitation.from);
-
-        let session_addr = syncthing_net::relay::dial::resolve_session_addr(relay_addr, &invitation)?;
-        let session_stream = syncthing_net::relay::join_session(session_addr, &invitation.key).await?;
-
-        // BEP TLS + Hello + Connection 注册
-        // accept_tls_stream / connect_tls_stream 返回不同类型，必须在分支内完成全部操作
-        if invitation.server_socket {
-            let (mut tls_stream, peer_device) = accept_tls_stream(session_stream, tls_config).await?;
-            let _remote_hello = BepHandshaker::server_handshake(&mut tls_stream, device_name).await?;
-            let (event_tx, _event_rx) = tokio::sync::mpsc::unbounded_channel();
-            let conn = BepConnection::new(
-                Box::new(TcpBiStream::Server(tls_stream)),
-                ConnectionType::Incoming,
-                event_tx,
-            ).await?;
-            conn.set_device_id(peer_device);
-            conn.set_state(ConnectionState::ProtocolHandshakeComplete);
-            handle.register_connection(peer_device, conn).await?;
-            info!("Relay incoming (server) connection registered for {}", peer_device);
-        } else {
-            let (mut tls_stream, peer_device) = connect_tls_stream(session_stream, tls_config, Some(local_device_id)).await?;
-            let _remote_hello = BepHandshaker::client_handshake(&mut tls_stream, device_name).await?;
-            let (event_tx, _event_rx) = tokio::sync::mpsc::unbounded_channel();
-            let conn = BepConnection::new(
-                Box::new(TcpBiStream::Client(tls_stream)),
-                ConnectionType::Incoming,
-                event_tx,
-            ).await?;
-            conn.set_device_id(peer_device);
-            conn.set_state(ConnectionState::ProtocolHandshakeComplete);
-            handle.register_connection(peer_device, conn).await?;
-            info!("Relay incoming (client) connection registered for {}", peer_device);
-        }
-    }
-}
-
-struct DaemonBepHandler {
-    sync_service: Arc<SyncService>,
-}
-
-#[async_trait::async_trait]
-impl BepSessionHandler for DaemonBepHandler {
-    async fn generate_cluster_config(
-        &self,
-        device_id: DeviceId,
-    ) -> syncthing_core::Result<bep_protocol::messages::ClusterConfig> {
-        let config = self.sync_service.get_config().await.unwrap_or_default();
-        let local_id = config.local_device_id.unwrap_or_default();
-        let folders: Vec<bep_protocol::messages::WireFolder> = config
-            .folders
-            .iter()
-            .filter(|f| f.devices.contains(&device_id))
-            .map(|f| {
-                let mut devices: Vec<bep_protocol::messages::WireDevice> = f
-                    .devices
-                    .iter()
-                    .map(|d| bep_protocol::messages::WireDevice {
-                        id: d.as_bytes().to_vec(),
-                        name: String::new(),
-                        addresses: vec![],
-                        compression: bep_protocol::messages::Compression::Metadata as i32,
-                        cert_name: String::new(),
-                        max_sequence: 0,
-                        introducer: false,
-                        index_id: 0,
-                        skip_introduction_removals: false,
-                        encryption_password_token: Vec::new(),
-                    })
-                    .collect();
-                // BEP 协议要求 ClusterConfig 的 devices 列表必须包含本地设备
-                if !f.devices.contains(&local_id) {
-                    devices.push(bep_protocol::messages::WireDevice {
-                        id: local_id.as_bytes().to_vec(),
-                        name: String::new(),
-                        addresses: vec![],
-                        compression: bep_protocol::messages::Compression::Metadata as i32,
-                        cert_name: String::new(),
-                        max_sequence: 0,
-                        introducer: false,
-                        index_id: 0,
-                        skip_introduction_removals: false,
-                        encryption_password_token: Vec::new(),
-                    });
-                }
-                bep_protocol::messages::WireFolder {
-                    id: f.id.clone(),
-                    label: f.label.clone().unwrap_or_default(),
-                    r#type: bep_protocol::messages::FolderType::SendReceive as i32,
-                    stop_reason: bep_protocol::messages::FolderStopReason::Running as i32,
-                    devices,
-                }
-            })
-            .collect();
-
-        Ok(bep_protocol::messages::ClusterConfig {
-            folders,
-            secondary: false,
-        })
-    }
-
-    async fn generate_index(
-        &self,
-        folder_id: &str,
-        _device_id: DeviceId,
-    ) -> syncthing_core::Result<syncthing_core::types::Index> {
-        let mut files = self.sync_service.generate_index_update(folder_id, 0).await.map_err(|e| {
-            syncthing_core::SyncthingError::internal(format!("generate_index_update failed: {}", e))
-        })?;
-        // BEP protocol requires deleted files to have empty block lists
-        for file in &mut files {
-            if file.is_deleted() {
-                file.blocks.clear();
-            }
-        }
-        Ok(syncthing_core::types::Index {
-            folder: folder_id.to_string(),
-            files,
-        })
-    }
-
-    async fn on_index(
-        &self,
-        device_id: DeviceId,
-        index: syncthing_core::types::Index,
-    ) -> syncthing_core::Result<()> {
-        let folder = index.folder.clone();
-        self.sync_service.handle_index(&folder, device_id, index).await.map_err(|e| {
-            syncthing_core::SyncthingError::internal(format!("handle_index failed: {:?}", e))
-        })?;
-        Ok(())
-    }
-
-    async fn on_index_update(
-        &self,
-        device_id: DeviceId,
-        update: syncthing_core::types::IndexUpdate,
-    ) -> syncthing_core::Result<()> {
-        let folder = update.folder.clone();
-        self.sync_service
-            .handle_index_update(&folder, device_id, update)
-            .await
-            .map_err(|e| {
-                syncthing_core::SyncthingError::internal(format!("handle_index_update failed: {:?}", e))
-            })?;
-        Ok(())
-    }
-
-    async fn on_block_request(
-        &self,
-        _device_id: DeviceId,
-        req: bep_protocol::messages::Request,
-    ) -> std::result::Result<Vec<u8>, bep_protocol::messages::ErrorCode> {
-        self.sync_service.handle_block_request(&req).await.map_err(|e| e.error_code())
-    }
-}
-
-

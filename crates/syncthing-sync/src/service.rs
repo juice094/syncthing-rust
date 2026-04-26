@@ -8,7 +8,7 @@ use crate::error::{Result, SyncError};
 use crate::events::{EventPublisher, EventSubscriber, SyncEvent};
 use crate::folder_model::FolderModel;
 use crate::index_handler::IndexHandler;
-use crate::model::{SyncModel, SyncStats, FolderState};
+use crate::model::{SyncManager, SyncStats, FolderState};
 use crate::puller::BlockSource;
 use tokio::task::JoinHandle;
 use syncthing_core::DeviceId;
@@ -84,12 +84,12 @@ impl SyncService {
 
     /// 启动同步服务
     pub async fn start(&self) -> Result<()> {
-        <Self as SyncModel>::start(self).await
+        <Self as SyncManager>::start(self).await
     }
 
     /// 停止同步服务
     pub async fn stop(&self) -> Result<()> {
-        <Self as SyncModel>::stop(self).await
+        <Self as SyncManager>::stop(self).await
     }
 
     /// 运行同步服务直到收到关闭信号
@@ -216,7 +216,7 @@ impl SyncService {
 }
 
 #[async_trait::async_trait]
-impl SyncModel for SyncService {
+impl SyncManager for SyncService {
     async fn get_config(&self) -> Result<Config> {
         Ok(self.config.read().await.clone())
     }
@@ -510,17 +510,17 @@ impl syncthing_core::traits::SyncModel for SyncService {
     }
 
     async fn scan_folder(&self, folder: &syncthing_core::FolderId) -> syncthing_core::Result<()> {
-        crate::model::SyncModel::scan_folder(self, folder.as_str()).await
+        crate::model::SyncManager::scan_folder(self, folder.as_str()).await
             .map_err(|e| syncthing_core::SyncthingError::internal(e.to_string()))
     }
 
     async fn scan_folder_sub(&self, folder: &syncthing_core::FolderId, sub: &str) -> syncthing_core::Result<()> {
-        crate::model::SyncModel::scan_folder_sub(self, folder.as_str(), sub).await
+        crate::model::SyncManager::scan_folder_sub(self, folder.as_str(), sub).await
             .map_err(|e| syncthing_core::SyncthingError::internal(e.to_string()))
     }
 
     async fn pull(&self, folder: &syncthing_core::FolderId) -> syncthing_core::Result<syncthing_core::traits::SyncResult> {
-        crate::model::SyncModel::pull_folder(self, folder.as_str()).await
+        crate::model::SyncManager::pull_folder(self, folder.as_str()).await
             .map_err(|e| syncthing_core::SyncthingError::internal(e.to_string()))?;
         Ok(syncthing_core::traits::SyncResult {
             files_processed: 0,
