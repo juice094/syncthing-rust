@@ -26,7 +26,7 @@ pub mod ignore;
 pub use supervisor::{Supervisor, RestartConfig, RestartPolicy};
 
 pub use error::{SyncError, Result};
-pub use model::{SyncModel, FolderState};
+pub use model::{SyncManager, FolderState};
 pub use service::SyncService;
 pub use events::{SyncEvent, EventPublisher, EventSubscriber};
 pub use puller::BlockSource;

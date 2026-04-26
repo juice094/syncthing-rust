@@ -13,7 +13,7 @@ use syncthing_net::{
     identity::TlsIdentity,
     SyncthingTlsConfig,
 };
-use syncthing_sync::{database::MemoryDatabase, SyncModel, SyncService};
+use syncthing_sync::{database::MemoryDatabase, SyncManager, SyncService};
 
 /// 临时测试节点
 pub struct TestNode {

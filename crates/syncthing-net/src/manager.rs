@@ -225,6 +225,36 @@ impl ConnectionManagerHandle {
     }
 }
 
+#[async_trait::async_trait]
+impl syncthing_core::traits::ConnectionManager for ConnectionManagerHandle {
+    fn connected_devices(&self) -> Vec<syncthing_core::DeviceId> {
+        self.connected_devices()
+    }
+
+    async fn disconnect(&self, device_id: &syncthing_core::DeviceId, reason: &str) -> syncthing_core::Result<()> {
+        self.disconnect(device_id, reason).await
+    }
+
+    fn connection_stats(&self) -> syncthing_core::traits::AggregateConnectionStats {
+        let stats = self.stats();
+        syncthing_core::traits::AggregateConnectionStats {
+            total_bytes_sent: stats.total_bytes_sent,
+            total_bytes_received: stats.total_bytes_received,
+        }
+    }
+
+    fn has_connection(&self, device_id: &syncthing_core::DeviceId) -> bool {
+        self.get_connection(device_id).is_some()
+    }
+
+    fn get_connection_info(&self, device_id: &syncthing_core::DeviceId) -> Option<syncthing_core::traits::ConnectionInfo> {
+        self.get_connection(device_id).map(|conn| syncthing_core::traits::ConnectionInfo {
+            remote_addr: conn.remote_addr().to_string(),
+            is_alive: conn.is_alive(),
+        })
+    }
+}
+
 impl ConnectionManager {
     /// 创建新的连接管理器
     pub fn new(

@@ -26,7 +26,7 @@ use tower_http::cors::CorsLayer;
 use tower_http::trace::TraceLayer;
 use tracing::{error, info, warn};
 
-use syncthing_core::traits::{ConfigStore, SyncModel};
+use syncthing_core::traits::{ConfigStore, SyncModel, ConnectionManager, FolderDatabase};
 use syncthing_core::types::{Config, FolderId, FolderSummary, VersioningConfig};
 use syncthing_core::{DeviceId, Result, SyncthingError};
 use sha2::{Digest, Sha256};
@@ -51,9 +51,9 @@ pub struct ApiState {
     /// Server start time for uptime calculation
     pub start_time: std::time::Instant,
     /// Optional connection manager for connection enumeration
-    pub connection_manager: Option<syncthing_net::manager::ConnectionManagerHandle>,
+    pub connection_manager: Option<Arc<dyn ConnectionManager>>,
     /// Optional local database for folder statistics
-    pub db: Option<Arc<dyn syncthing_sync::database::LocalDatabase>>,
+    pub db: Option<Arc<dyn FolderDatabase>>,
 }
 
 impl ApiState {
@@ -170,7 +170,7 @@ impl RestApi {
             )
             // Device management
             .route("/rest/devices", get(list_devices).post(add_device))
-            .route("/rest/device/:id", get(get_device).delete(remove_device))
+            .route("/rest/device/:id", get(get_device).put(update_device).delete(remove_device))
             // Status queries - Go原版兼容
             .route("/rest/status", get(get_status))
             .route("/rest/system/status", get(get_system_status))
@@ -190,7 +190,8 @@ impl RestApi {
             .route("/rest/config", get(get_config).put(update_config))
             .route("/rest/config/folders", get(list_folders).post(create_folder))
             .route("/rest/config/folders/:id", get(get_folder).put(update_folder).delete(delete_folder))
-            .route("/rest/config/devices", get(list_devices))
+            .route("/rest/config/devices", get(list_devices).post(add_device))
+            .route("/rest/config/devices/:id", get(get_device).put(update_device).delete(remove_device))
             // System operations — Go canonical paths
             .route("/rest/system/config", post(system_config_post))
             .route("/rest/system/restart", post(system_restart))
@@ -652,6 +653,46 @@ async fn remove_device(
     }
 }
 
+async fn update_device(
+    State(state): State<ApiState>,
+    Path(id): Path<String>,
+    Json(request): Json<UpdateDeviceRequest>,
+) -> impl IntoResponse {
+    let mut config = match state.config_store.load().await {
+        Ok(c) => c,
+        Err(e) => return Err((StatusCode::INTERNAL_SERVER_ERROR, format!("{}", e))),
+    };
+
+    let device_id = parse_device_id(&id);
+    let request_id = parse_device_id(&request.id);
+
+    if device_id != request_id {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            format!("URL device ID '{}' does not match body device ID '{}'", id, request.id),
+        ));
+    }
+
+    let device = match config.devices.iter_mut().find(|d| d.id.to_string() == device_id.to_string()) {
+        Some(d) => d,
+        None => return Err((StatusCode::NOT_FOUND, format!("Device '{}' not found", id))),
+    };
+
+    device.name = Some(request.name);
+    device.addresses = request.addresses.into_iter().map(|a| match a.as_str() {
+        "dynamic" => syncthing_core::types::AddressType::Dynamic,
+        _ => syncthing_core::types::AddressType::Tcp(a),
+    }).collect();
+    device.introducer = request.introducer;
+
+    let updated_device = device.clone();
+
+    match state.config_store.save(&config).await {
+        Ok(_) => Ok(Json(DeviceResponse::from(updated_device))),
+        Err(e) => Err((StatusCode::INTERNAL_SERVER_ERROR, format!("{}", e))),
+    }
+}
+
 async fn get_status(State(state): State<ApiState>) -> impl IntoResponse {
     match state.config_store.load().await {
         Ok(config) => {
@@ -685,7 +726,7 @@ async fn get_system_status(State(state): State<ApiState>) -> impl IntoResponse {
 
             let (totup, totdown) = state.connection_manager.as_ref()
                 .map(|cm| {
-                    let stats = cm.stats();
+                    let stats = cm.connection_stats();
                     (stats.total_bytes_sent, stats.total_bytes_received)
                 })
                 .unwrap_or((0, 0));
@@ -840,10 +881,10 @@ async fn get_connections(State(state): State<ApiState>) -> Json<ConnectionStatus
         let connections: Vec<DeviceConnection> = devices
             .into_iter()
             .filter_map(|device_id| {
-                let conn = cm.get_connection(&device_id)?;
+                let conn = cm.get_connection_info(&device_id)?;
                 Some(DeviceConnection {
                     id: device_id.to_string(),
-                    address: conn.remote_addr().to_string(),
+                    address: conn.remote_addr,
                     conn_type: "tcp-server".to_string(),
                     connected_since: 0,
                 })
@@ -873,8 +914,8 @@ async fn get_system_connections(State(state): State<ApiState>) -> Json<SystemCon
         let total_out = 0u64;
 
         for device_id in devices {
-            if let Some(conn) = cm.get_connection(&device_id) {
-                let addr = conn.remote_addr().to_string();
+            if let Some(conn) = cm.get_connection_info(&device_id) {
+                let addr = conn.remote_addr;
                 connections.insert(
                     device_id.to_string(),
                     ConnectionStats {
@@ -1299,7 +1340,7 @@ async fn system_pause(
                         paused.push(device_id_str.clone());
                     }
                     if let Some(ref cm) = state.connection_manager {
-                        if cm.get_connection(&device_id).is_some() {
+                        if cm.has_connection(&device_id) {
                             if let Err(e) = cm.disconnect(&device_id, "paused by user").await {
                                 warn!("Failed to disconnect device {}: {}", device_id_str, e);
                             }

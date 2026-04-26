@@ -4,10 +4,21 @@ use std::net::SocketAddr;
 use std::path::Path;
 use std::sync::Arc;
 
-use syncthing_core::traits::ConfigStore;
+use async_trait::async_trait;
+use syncthing_core::traits::{ConfigStore, FolderDatabase};
 use syncthing_core::{DeviceId, Result, SyncthingError};
 use tokio::net::TcpListener;
 use tracing::{info, warn};
+
+#[derive(Clone)]
+struct DbAdapter(Arc<dyn syncthing_sync::database::LocalDatabase>);
+
+#[async_trait]
+impl FolderDatabase for DbAdapter {
+    async fn get_folder_files(&self, folder_id: &str) -> syncthing_core::Result<Vec<syncthing_core::types::FileInfo>> {
+        self.0.get_folder_files(folder_id).await.map_err(|e| syncthing_core::SyncthingError::Storage(e.to_string()))
+    }
+}
 
 // API Key 认证中间件
 // Middleware removed: API key checking will be done inside syncthing-api build_router
@@ -39,16 +50,15 @@ pub async fn start_api_server(
 
     let api_key = Arc::new(config.gui.api_key);
 
-    let db = Some(sync_service.db());
     let mut state = syncthing_api::rest::ApiState::new(
         config_store,
         syncthing_api::events::EventBus::new(),
-        Some(sync_service as Arc<dyn syncthing_core::traits::SyncModel>),
+        Some(sync_service.clone() as Arc<dyn syncthing_core::traits::SyncModel>),
     );
     state.my_id = Some(my_id);
     state.api_key = Some(api_key.to_string());
-    state.connection_manager = connection_handle;
-    state.db = db;
+    state.connection_manager = connection_handle.map(|h| Arc::new(h) as Arc<dyn syncthing_core::traits::ConnectionManager>);
+    state.db = Some(Arc::new(DbAdapter(sync_service.db())) as Arc<dyn FolderDatabase>);
 
     let router = syncthing_api::rest::RestApi::build_router(state);
 

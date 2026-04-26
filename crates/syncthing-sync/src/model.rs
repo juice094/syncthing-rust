@@ -9,7 +9,7 @@ use std::collections::HashMap;
 
 /// 同步模型 trait
 #[async_trait]
-pub trait SyncModel: Send + Sync {
+pub trait SyncManager: Send + Sync {
     /// 获取配置
     async fn get_config(&self) -> Result<Config>;
 

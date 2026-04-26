@@ -87,7 +87,7 @@ pub struct App {
     pub theme: Theme,
 
     /// 运行中的 sync_service 引用（用于配置变更通知）
-    pub sync_service: Option<Arc<dyn syncthing_sync::SyncModel>>,
+    pub sync_service: Option<Arc<dyn syncthing_sync::SyncManager>>,
 
     /// 文件夹实时状态缓存（来自 sync engine 事件）
     pub folder_states: HashMap<String, FolderStatus>,

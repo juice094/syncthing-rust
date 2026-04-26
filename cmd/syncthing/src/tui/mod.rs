@@ -1,6 +1,10 @@
 pub mod app;
+pub mod bep_handler;
 pub mod daemon_runner;
+pub mod discovery_tasks;
 pub mod events;
+pub mod nat_tasks;
+pub mod relay_listener;
 pub mod theme;
 pub mod ui;
 pub mod views;
