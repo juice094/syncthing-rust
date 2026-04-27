@@ -1,12 +1,14 @@
 # syncthing-rust
 
 [![Rust](https://img.shields.io/badge/rust-1.85%2B-orange?logo=rust)](https://www.rust-lang.org)
-[![Tests](https://img.shields.io/badge/tests-279%2B%20passed-brightgreen)]()
+[![Tests](https://img.shields.io/badge/tests-294%20passed-brightgreen)]()
 [![Clippy](https://img.shields.io/badge/clippy-0%20warnings-brightgreen)]()
 [![License](https://img.shields.io/badge/license-MIT-blue)](./LICENSE)
 
 A Rust implementation of the [Syncthing](https://syncthing.net/) protocol stack, designed for **zero-runtime-dependency** deployment and wire-compatible interoperability with the official Go Syncthing daemon.
 
+> **Current stage**: Functionally complete Beta. Core BEP messages, multi-path networking, REST API read-path, and TUI observation are operational. Pending long-term stability validation (72h stress test) and cross-version Rust interoperability verification.
+>
 > **Value proposition**: If you need a single static binary (< 10 MB) that speaks BEP over TLS and can sync folders with official Syncthing nodes — without Go runtime or CGO — this is it.
 
 ---
@@ -15,15 +17,19 @@ A Rust implementation of the [Syncthing](https://syncthing.net/) protocol stack,
 
 | Dimension | State |
 |-----------|-------|
-| BEP Protocol (TLS + Hello + ClusterConfig + Index + Request/Response) | ✅ Verified against Go Syncthing on Tailscale |
-| File Sync (Pull via BEP blocks, passive Push upload) | ✅ End-to-end tested |
-| Network Discovery (Local + Global + STUN + UPnP + Relay v1) | ✅ Core implementation complete; Relay now in parallel dialer |
-| REST API (read + write, Go-layout compatible) | ✅ Config merge, pause/resume, scan, restart/shutdown |
-| Tests | **279 passed, 1 ignored, 0 failed** |
+| BEP Protocol (TLS + Hello + ClusterConfig + Index + Request/Response) | ✅ Core messages implemented and handshake verified |
+| File Sync (Pull via BEP blocks, passive Push upload) | ✅ Pull verified; passive upload implemented |
+| Network Discovery (Local + Global + STUN + UPnP + Relay v1) | ✅ Core implementation complete; ParallelDialer with RTT scoring |
+| REST API (read + write, Go-layout compatible) | ✅ Read-path complete; write-path partial (override/revert stub) |
+| Tests | **294 passed, 3 ignored, 0 failed** |
 | Lint | **0 clippy warnings** |
+| Security audit | **3 unmaintained** upstream transitive deps (accepted debt, see `.cargo/audit.toml`) |
 | Binary size | ~8 MB (release, Windows x64) |
 
-> **Current limitation**: Cross-network auto-discovery without Tailscale is still in integration; see [Phase 5 Roadmap](#roadmap).
+> **Current limitations**:
+> - 72h long-term stability test not yet executed (pending).
+> - Cross-version Rust interoperability (new `main` ↔ old pre-fix build) pending格雷侧 network verification.
+> - Go Syncthing full file-sync interoperability not yet validated (handshake verified only).
 
 ---
 
@@ -70,11 +76,10 @@ curl http://127.0.0.1:8385/rest/system/status | ConvertFrom-Json
 - Hot-reload `config.json` changes without restart (notify-based watcher).
 
 **Doesn't (yet)**
-- Auto-dial across isolated networks without Tailscale or manual config (Phase 5).
 - Active Push scheduling (scanning triggers local index update, but does not proactively ask peers to pull).
-- `.stignore` pattern matching.
 - Web GUI (TUI only).
 - QUIC transport.
+- Production packaging (systemd service / MSI installer).
 
 ---
 
@@ -84,12 +89,19 @@ curl http://127.0.0.1:8385/rest/system/status | ConvertFrom-Json
 |-------|------|--------|
 | **Phase 1** | Core BEP protocol (TLS, Hello, ClusterConfig, Index) | ✅ Complete |
 | **Phase 2** | Network abstraction, watcher, REST API, dual-node coexistence | ✅ Complete |
-| **Phase 3** | BepSession observability, Push/Pull E2E with real Go node | ✅ Complete |
+| **Phase 3** | BepSession observability, Push/Pull E2E with remote peer | ✅ Complete (verified against格雷侧 pre-fix Rust build; Go node pending) |
 | **Phase 3.5** | Connection stability, config persistence | ✅ Complete |
 | **Phase 4** | TUI hardening (event bridge, live sync state, config hot-reload) | ✅ Complete |
 | **Phase 5** | Zero-Tailscale interconnection (discovery results → ConnectionManager address pool) | 🔵 Core integrated; field validation pending |
+| **Phase A** | Security debt acceptance (cargo audit) | ✅ Complete (`.cargo/audit.toml` created) |
+| **Phase B** | 72h stress test | ⏳ Infrastructure ready (`bin/stress_test.rs` exists); execution pending |
+| **Phase C** | REST API write-path closure | ⏳ Partial (override/revert still stub) |
 
 Phase 5 design: [`docs/design/NETWORK_DISCOVERY_DESIGN.md`](docs/design/NETWORK_DISCOVERY_DESIGN.md).
+
+Current roadmap: [`docs/plans/POST_V0_2_0_ROADMAP.md`](docs/plans/POST_V0_2_0_ROADMAP.md) — prioritized execution plan (P0~P5).
+Plan index: [`docs/plans/INDEX.md`](docs/plans/INDEX.md) — navigation across all plan documents.
+Plan audit: [`docs/plans/PLAN_AUDIT_2026-04-27.md`](docs/plans/PLAN_AUDIT_2026-04-27.md) — validity assessment of all historical plans.
 
 ---
 
@@ -125,6 +137,8 @@ docs/
 | [`docs/reports/IMPLEMENTATION_SUMMARY.md`](docs/reports/IMPLEMENTATION_SUMMARY.md) | Crate-level implementation status |
 | [`docs/reports/VERIFICATION_REPORT_BEP_2026-04-11.md`](docs/reports/VERIFICATION_REPORT_BEP_2026-04-11.md) | BEP interoperability test report |
 | [`docs/design/FEATURE_COMPARISON.md`](docs/design/FEATURE_COMPARISON.md) | Feature parity with Go Syncthing |
+| [`docs/plans/INDEX.md`](docs/plans/INDEX.md) | Plan document navigation and cross-references |
+| [`docs/plans/PLAN_AUDIT_2026-04-27.md`](docs/plans/PLAN_AUDIT_2026-04-27.md) | Plan validity audit and project stage recalibration |
 | [`docs/ai-protocol.md`](docs/ai-protocol.md) | Cross-session state anchor for AI agents |
 
 ---
