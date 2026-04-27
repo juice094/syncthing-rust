@@ -67,6 +67,10 @@ pub async fn connect_bep_via_relay(
     .await
     .map_err(|_| SyncthingError::timeout("relay session request timeout"))??;
 
+    // 显式关闭 protocol 连接，避免与 listener 竞争 relay 槽位。
+    // dialer 只需临时查询 invitation，不需要长期占用 protocol mode。
+    drop(protocol_client);
+
     info!(
         "Relay session invitation: {}:{} (server_socket={})",
         String::from_utf8_lossy(&invitation.address),
