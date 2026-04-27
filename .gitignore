@@ -18,6 +18,9 @@ Thumbs.db
 /protoc.zip
 
 # Test outputs
+stress-test-data/
+stress-test-*.csv
+stress-test-*.log
 *.log
 test_output.*
 
