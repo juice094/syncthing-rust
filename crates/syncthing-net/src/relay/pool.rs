@@ -169,12 +169,17 @@ pub async fn filter_healthy_relays_tls(
         };
 
         // JoinRelay，验证 relay 接受连接
-        match tokio::time::timeout(
+        let join_result = tokio::time::timeout(
             Duration::from_secs(timeout_secs),
             client.join_relay(),
         )
-        .await
-        {
+        .await;
+
+        // 无论 join_relay 成败，立即显式关闭 protocol 连接，
+        // 避免 relay 服务器因状态残留而拒绝后续 listener 注册。
+        drop(client);
+
+        match join_result {
             Ok(Ok(())) => {
                 debug!("Relay {} passed TLS + JoinRelay health check", url);
                 healthy.push(url);
@@ -186,8 +191,6 @@ pub async fn filter_healthy_relays_tls(
                 debug!("Relay {} JoinRelay timeout", url);
             }
         }
-
-        // 断开连接：client 在这里 drop，TLS 连接会优雅关闭
     }
     healthy
 }
