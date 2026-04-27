@@ -410,6 +410,8 @@ pub async fn start_daemon(
         device_id,
         config.device_name.clone(),
         handle.clone(),
+        Arc::clone(&public_addrs),
+        global_discovery.clone(),
     );
 
     let connection_handle = handle.clone();
