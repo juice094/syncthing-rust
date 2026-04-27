@@ -518,7 +518,8 @@ pub enum FolderStopReason {
 // ============================================
 
 pub fn encode_message<M: prost::Message>(msg: &M) -> crate::Result<bytes::Bytes> {
-    let mut buf = bytes::BytesMut::new();
+    let len = msg.encoded_len();
+    let mut buf = bytes::BytesMut::with_capacity(len);
     msg.encode(&mut buf)
         .map_err(|e| crate::SyncthingError::protocol(format!("encode failed: {}", e)))?;
     Ok(buf.freeze())
