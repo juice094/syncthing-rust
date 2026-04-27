@@ -28,6 +28,7 @@ pub struct Puller {
     db: Arc<dyn LocalDatabase>,
     events: EventPublisher,
     max_concurrent_downloads: usize,
+    max_concurrent_blocks: usize,
     block_source: Option<Arc<dyn BlockSource>>,
 }
 
@@ -38,13 +39,20 @@ impl Puller {
             db,
             events,
             max_concurrent_downloads: 4,
+            max_concurrent_blocks: 16,
             block_source: None,
         }
     }
 
-    /// 设置最大并发下载数
+    /// 设置最大并发下载数（文件级）
     pub fn with_max_concurrent(mut self, max: usize) -> Self {
         self.max_concurrent_downloads = max;
+        self
+    }
+
+    /// 设置单文件内最大并发块请求数
+    pub fn with_max_concurrent_blocks(mut self, max: usize) -> Self {
+        self.max_concurrent_blocks = max;
         self
     }
 
@@ -80,6 +88,7 @@ impl Puller {
             let folder_id = folder.id.clone();
             let folder_path = base_path.to_path_buf();
             let block_source = self.block_source.clone();
+            let max_concurrent_blocks = self.max_concurrent_blocks;
 
             let handle = tokio::spawn(async move {
                 let _permit = permit; // 持有直到任务完成
@@ -97,7 +106,7 @@ impl Puller {
                 let result = if file_info.is_deleted() {
                     Self::delete_file(&folder_path, &file_info, &*db, &folder_id).await
                 } else {
-                    Self::download_file(&folder_path, &file_info, &*db, &events, &folder_id, block_source).await
+                    Self::download_file(&folder_path, &file_info, &*db, &events, &folder_id, block_source, max_concurrent_blocks).await
                 };
 
                 match &result {
@@ -169,8 +178,9 @@ impl Puller {
         events: &EventPublisher,
         folder_id: &str,
         block_source: Option<Arc<dyn BlockSource>>,
+        max_concurrent_blocks: usize,
     ) -> Result<()> {
-        debug!(file = %file_info.name, size = file_info.size, "Downloading file");
+        debug!(file = %file_info.name, size = file_info.size, blocks = file_info.blocks.len(), max_concurrent = max_concurrent_blocks, "Downloading file");
 
         let file_path = folder_path.join(&file_info.name);
         let temp_path = file_path.with_extension(TEMP_SUFFIX);
@@ -189,34 +199,63 @@ impl Puller {
 
         let mut bytes_downloaded = 0u64;
 
-        // 下载每个块
-        for (idx, block) in file_info.blocks.iter().enumerate() {
-            trace!(file = %file_info.name, block = idx, offset = block.offset, size = block.size, "Downloading block");
+        // 块级并发：使用信号量限制并发请求数，JoinHandle 按顺序 await 保证写入顺序
+        let block_semaphore = Arc::new(tokio::sync::Semaphore::new(max_concurrent_blocks));
+        let mut handles = Vec::with_capacity(file_info.blocks.len());
 
-            let block_data = match &block_source {
-                Some(source) => {
-                    match source.request_block(folder_id, &file_info.name, block, idx).await {
-                        Ok(data) => data,
-                        Err(e) => {
-                            error!(
-                                file = %file_info.name,
-                                block = idx,
-                                offset = block.offset,
-                                size = block.size,
-                                error = %e,
-                                "Block request failed"
-                            );
-                            return Err(e);
-                        }
-                    }
-                }
-                None => return Err(SyncError::pull(file_info.name.clone(), "No block source configured".to_string())),
+        for (idx, block) in file_info.blocks.iter().enumerate() {
+            let permit = block_semaphore
+                .clone()
+                .acquire_owned()
+                .await
+                .map_err(|e| SyncError::pull(
+                    file_info.name.clone(),
+                    format!("Failed to acquire block permit: {}", e),
+                ))?;
+
+            let source = match &block_source {
+                Some(s) => s.clone(),
+                None => return Err(SyncError::pull(
+                    file_info.name.clone(),
+                    "No block source configured".to_string(),
+                )),
             };
+
+            let folder_id = folder_id.to_string();
+            let file_name = file_info.name.clone();
+            let block = block.clone();
+
+            let handle = tokio::spawn(async move {
+                let _permit = permit;
+                let data = source.request_block(&folder_id, &file_name, &block, idx).await?;
+                Ok::<_, SyncError>((idx, block.offset, data, block.hash))
+            });
+            handles.push(handle);
+        }
+
+        // 按顺序 await 并写入，保持文件块顺序
+        for handle in handles {
+            let (idx, offset, block_data, expected_hash) = match handle.await {
+                Ok(Ok(result)) => result,
+                Ok(Err(e)) => {
+                    error!(file = %file_info.name, error = %e, "Block download failed");
+                    return Err(e);
+                }
+                Err(e) => {
+                    error!(file = %file_info.name, error = %e, "Block download task panicked");
+                    return Err(SyncError::pull(
+                        file_info.name.clone(),
+                        format!("Block download task panicked: {}", e),
+                    ));
+                }
+            };
+
+            trace!(file = %file_info.name, block = idx, offset = offset, size = block_data.len(), "Writing block");
 
             // 验证块哈希
             let hash = sha2::Sha256::digest(&block_data);
-            if hash.as_slice() != block.hash.as_slice() {
-                return Err(SyncError::ChecksumMismatch { offset: block.offset });
+            if hash.as_slice() != expected_hash.as_slice() {
+                return Err(SyncError::ChecksumMismatch { offset });
             }
 
             // 写入文件
@@ -421,6 +460,7 @@ mod tests {
             &events,
             "test-folder",
             Some(mock_source),
+            16,
         ).await;
         
         assert!(result.is_ok());

@@ -8,6 +8,7 @@ use syncthing_net::tls::{accept_tls_stream, connect_tls_stream};
 use tokio::sync::Mutex;
 use tracing::{info, warn};
 
+#[allow(clippy::too_many_arguments)]
 pub fn spawn_relay_listeners(
     relay_pool_urls: Vec<String>,
     config_relay_urls: Vec<String>,
