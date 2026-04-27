@@ -1,7 +1,7 @@
 # syncthing-rust
 
 [![Rust](https://img.shields.io/badge/rust-1.85%2B-orange?logo=rust)](https://www.rust-lang.org)
-[![Tests](https://img.shields.io/badge/tests-294%20passed-brightgreen)]()
+[![Tests](https://img.shields.io/badge/tests-308%20passed-brightgreen)]()
 [![Clippy](https://img.shields.io/badge/clippy-0%20warnings-brightgreen)]()
 [![License](https://img.shields.io/badge/license-MIT-blue)](./LICENSE)
 
@@ -20,8 +20,8 @@ A Rust implementation of the [Syncthing](https://syncthing.net/) protocol stack,
 | BEP Protocol (TLS + Hello + ClusterConfig + Index + Request/Response) | ✅ Core messages implemented and handshake verified |
 | File Sync (Pull via BEP blocks, passive Push upload) | ✅ Pull verified; passive upload implemented |
 | Network Discovery (Local + Global + STUN + UPnP + Relay v1) | ✅ Core implementation complete; ParallelDialer with RTT scoring |
-| REST API (read + write, Go-layout compatible) | ✅ Read-path complete; write-path partial (override/revert stub) |
-| Tests | **294 passed, 3 ignored, 0 failed** |
+| REST API (read + write, Go-layout compatible) | ✅ Read + write complete (override/revert implemented) |
+| Tests | **308 passed, 3 ignored, 0 failed** |
 | Lint | **0 clippy warnings** |
 | Security audit | **3 unmaintained** upstream transitive deps (accepted debt, see `.cargo/audit.toml`) |
 | Binary size | ~8 MB (release, Windows x64) |
@@ -95,7 +95,7 @@ curl http://127.0.0.1:8385/rest/system/status | ConvertFrom-Json
 | **Phase 5** | Zero-Tailscale interconnection (discovery results → ConnectionManager address pool) | 🔵 Core integrated; field validation pending |
 | **Phase A** | Security debt acceptance (cargo audit) | ✅ Complete (`.cargo/audit.toml` created) |
 | **Phase B** | 72h stress test | ⏳ Infrastructure ready (`bin/stress_test.rs` exists); execution pending |
-| **Phase C** | REST API write-path closure | ⏳ Partial (override/revert still stub) |
+| **Phase C** | REST API write-path closure | ✅ Complete (override/revert implemented, scan `sub` supported, device pause/resume body active) |
 
 Phase 5 design: [`docs/design/NETWORK_DISCOVERY_DESIGN.md`](docs/design/NETWORK_DISCOVERY_DESIGN.md).
 
@@ -148,8 +148,12 @@ docs/
 See [`CONTRIBUTING.md`](./CONTRIBUTING.md). Short version:
 
 ```powershell
-cargo test --workspace          # must pass
+# Quick validation
+cargo test --workspace          # must pass: 308 passed
 cargo clippy --workspace --all-targets  # must be 0 warnings
+
+# Or run the local health check script (Windows)
+.\scripts\check-health.ps1
 ```
 
 ---
