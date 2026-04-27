@@ -7,6 +7,8 @@ use axum::{
 use serde::{Deserialize, Serialize};
 use tracing::error;
 
+use std::str::FromStr;
+
 use syncthing_core::types::{FolderId, FolderSummary, VersioningConfig};
 use syncthing_core::DeviceId;
 
@@ -84,7 +86,7 @@ pub(crate) async fn create_folder(
         devices: request
             .devices
             .into_iter()
-            .map(|d| DeviceId::from_bytes_array(d.try_into().unwrap_or([0u8; 32])))
+            .filter_map(|d| DeviceId::from_str(&d).ok())
             .collect(),
         ignore_patterns: Vec::new(),
         versioning: request.versioning.map(|v| match v.type_.as_str() {
@@ -227,8 +229,8 @@ pub struct CreateFolderRequest {
     pub label: Option<String>,
     /// Local filesystem path
     pub path: String,
-    /// Device IDs to share with
-    pub devices: Vec<Vec<u8>>,
+    /// Device IDs to share with (base32 strings like "W4NW6FB-...")
+    pub devices: Vec<String>,
     /// Rescan interval in seconds
     pub rescan_interval_secs: Option<u32>,
     /// Versioning configuration
