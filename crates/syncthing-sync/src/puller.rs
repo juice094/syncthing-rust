@@ -20,7 +20,7 @@ const TEMP_SUFFIX: &str = ".syncthing.tmp";
 /// 块数据源 trait
 #[async_trait::async_trait]
 pub trait BlockSource: Send + Sync {
-    async fn request_block(&self, folder: &str, file: &str, block: &BlockInfo) -> Result<Bytes>;
+    async fn request_block(&self, folder: &str, file: &str, block: &BlockInfo, block_no: usize) -> Result<Bytes>;
 }
 
 /// 文件拉取器
@@ -195,7 +195,7 @@ impl Puller {
 
             let block_data = match &block_source {
                 Some(source) => {
-                    match source.request_block(folder_id, &file_info.name, block).await {
+                    match source.request_block(folder_id, &file_info.name, block, idx).await {
                         Ok(data) => data,
                         Err(e) => {
                             error!(
@@ -364,7 +364,7 @@ mod tests {
 
     #[async_trait::async_trait]
     impl BlockSource for MockBlockSource {
-        async fn request_block(&self, _folder: &str, _file: &str, _block: &BlockInfo) -> Result<Bytes> {
+        async fn request_block(&self, _folder: &str, _file: &str, _block: &BlockInfo, _block_no: usize) -> Result<Bytes> {
             Ok(self.data.clone())
         }
     }
@@ -535,6 +535,7 @@ mod tests {
                 _folder: &str,
                 file: &str,
                 block: &BlockInfo,
+                block_no: usize,
             ) -> Result<Bytes> {
                 let req = bep_protocol::messages::Request {
                     id: 1,
@@ -544,7 +545,7 @@ mod tests {
                     size: block.size,
                     hash: block.hash.clone(),
                     from_temporary: false,
-                    block_no: 0,
+                    block_no: block_no as i32,
                 };
                 let data = crate::block_server::serve_block_request(&self.folder_root, &req)
                     .await
