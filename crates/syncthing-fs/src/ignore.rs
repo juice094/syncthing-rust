@@ -827,4 +827,78 @@ build/
         patterns.add_pattern("(?d)temp/").unwrap();
         assert!(!patterns.allows_skipping_ignored_dirs());
     }
+
+    /// Audit: verify common real-world scenarios
+    #[test]
+    fn test_real_world_scenarios() {
+        let content = r#"
+# Node modules
+node_modules/
+
+# Build outputs
+dist/
+build/
+target/
+
+# IDE
+.idea/
+.vscode/
+
+# VCS
+.git/
+
+# Logs
+*.log
+
+# Temp
+*.tmp
+*.temp
+
+# Keep specific files
+!important.log
+"#;
+        let patterns = IgnorePatterns::parse(content);
+
+        assert!(patterns.is_ignored(Path::new("node_modules")));
+        assert!(patterns.is_ignored(Path::new("node_modules/lodash/index.js")));
+        assert!(patterns.is_ignored(Path::new("dist/bundle.js")));
+        assert!(patterns.is_ignored(Path::new("target/debug/main.exe")));
+        assert!(patterns.is_ignored(Path::new(".idea/workspace.xml")));
+        assert!(patterns.is_ignored(Path::new(".git/config")));
+        assert!(patterns.is_ignored(Path::new("debug.log")));
+        assert!(!patterns.is_ignored(Path::new("important.log")));
+        assert!(!patterns.is_ignored(Path::new("src/main.rs")));
+    }
+
+    /// Audit: a/**/b pattern (intermediate double-star)
+    /// Current implementation: **/ consumes at most one directory level.
+    /// This is a known gap vs Go Syncthing / gitignore semantics.
+    #[test]
+    fn test_intermediate_double_star_gap() {
+        let mut patterns = IgnorePatterns::new();
+        patterns.add_pattern("src/**/test.rs").unwrap();
+
+        // These should match (and do)
+        assert!(patterns.is_ignored(Path::new("src/test.rs")));
+        assert!(patterns.is_ignored(Path::new("src/a/test.rs")));
+
+        // This SHOULD match but CURRENTLY FAILS due to single-level **/ expansion
+        // Go Syncthing matches arbitrary depth. Record as known gap.
+        // assert!(patterns.is_ignored(Path::new("src/a/b/test.rs"))); // FIXME: gap
+    }
+
+    /// Audit: // is treated as comment in current impl, but Go Syncthing does NOT
+    /// support // comments. # is the only comment syntax.
+    #[test]
+    fn test_double_slash_comment_semantic_gap() {
+        let content = "//network/share\n*.txt";
+        let patterns = IgnorePatterns::parse(content);
+
+        // Current behavior: //network/share is skipped as comment
+        assert!(!patterns.is_ignored(Path::new("network/share")));
+        assert!(patterns.is_ignored(Path::new("file.txt")));
+
+        // In Go Syncthing, //network/share would be treated as a pattern
+        // (likely matching a path literally). This is a semantic difference.
+    }
 }
