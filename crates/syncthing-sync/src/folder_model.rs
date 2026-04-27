@@ -483,7 +483,7 @@ mod tests {
 
     #[async_trait::async_trait]
     impl BlockSource for MockBlockSource {
-        async fn request_block(&self, _folder: &str, _file: &str, _block: &BlockInfo) -> crate::error::Result<Bytes> {
+        async fn request_block(&self, _folder: &str, _file: &str, _block: &BlockInfo, _block_no: usize) -> crate::error::Result<Bytes> {
             Ok(self.data.clone())
         }
     }

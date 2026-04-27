@@ -350,6 +350,24 @@ impl BepSession {
             }
         }
 
+        // 清理未完成的 pending responses，避免内存泄漏
+        let pending_count = self.pending_responses.len();
+        if pending_count > 0 {
+            warn!("Cleaning up {} pending response(s) for {}", pending_count, self.device_id);
+            while let Some(entry) = self.pending_responses.iter().next() {
+                let id = *entry.key();
+                drop(entry);
+                if let Some((_, tx)) = self.pending_responses.remove(&id) {
+                    let resp = bep_protocol::messages::Response {
+                        id,
+                        data: Vec::new(),
+                        code: bep_protocol::messages::ErrorCode::Generic as i32,
+                    };
+                    let _ = tx.send(resp);
+                }
+            }
+        }
+
         self.emit(BepSessionEvent::SessionEnded {
             device_id: self.device_id,
             reason: session_end_reason,

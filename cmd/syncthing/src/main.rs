@@ -250,6 +250,7 @@ impl ManagerBlockSource {
         folder: &str,
         file: &str,
         block: &syncthing_core::types::BlockInfo,
+        block_no: usize,
     ) -> syncthing_sync::Result<bytes::Bytes> {
         let id = self.next_id.fetch_add(1, Ordering::SeqCst);
 
@@ -261,7 +262,7 @@ impl ManagerBlockSource {
             size: block.size,
             hash: block.hash.clone(),
             from_temporary: false,
-            block_no: 0,
+            block_no: block_no as i32,
         };
 
         let payload = bep_protocol::messages::encode_message(&request)
@@ -278,16 +279,16 @@ impl ManagerBlockSource {
                 format!("Connection to {} not available", device_id),
             ))?;
 
+        // 注册等待响应（必须先注册，再发送，避免竞态）
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        self.pending_responses.insert(id, tx);
+
         conn.send_message(syncthing_net::protocol::MessageType::Request, payload)
             .await
             .map_err(|e| syncthing_sync::SyncError::pull(
                 file.to_string(),
                 format!("send request to {} failed: {}", device_id, e),
             ))?;
-
-        // 注册等待响应
-        let (tx, rx) = tokio::sync::oneshot::channel();
-        self.pending_responses.insert(id, tx);
 
         let response = tokio::time::timeout(std::time::Duration::from_secs(30), rx)
             .await
@@ -331,11 +332,12 @@ impl BlockSource for ManagerBlockSource {
         folder: &str,
         file: &str,
         block: &syncthing_core::types::BlockInfo,
+        block_no: usize,
     ) -> syncthing_sync::Result<bytes::Bytes> {
         let devices = self.manager.connected_devices();
         debug!(
-            "Requesting block {}/{} offset={} size={}: {} connected device(s)",
-            folder, file, block.offset, block.size, devices.len()
+            "Requesting block {}/{} offset={} size={} block_no={}: {} connected device(s)",
+            folder, file, block.offset, block.size, block_no, devices.len()
         );
         if devices.is_empty() {
             return Err(syncthing_sync::SyncError::pull(
@@ -347,7 +349,7 @@ impl BlockSource for ManagerBlockSource {
         let mut last_error = None;
 
         for device_id in devices {
-            match self.try_request_block_from_device(device_id, folder, file, block).await {
+            match self.try_request_block_from_device(device_id, folder, file, block, block_no).await {
                 Ok(data) => {
                     debug!("Block {}/{} offset={} served by {}", folder, file, block.offset, device_id);
                     return Ok(data);
