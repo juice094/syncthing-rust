@@ -330,7 +330,7 @@ impl BepSession {
                 }
                 _ = heartbeat.tick() => {
                     let idle = last_recv.elapsed();
-                    if idle > Duration::from_secs(270) {
+                    if idle > Duration::from_secs(600) {
                         warn!("Heartbeat timeout for {} (idle {:?})", self.device_id, idle);
                         self.metrics.heartbeat_timeouts.fetch_add(1, Ordering::Relaxed);
                         self.emit(BepSessionEvent::HeartbeatTimeout {

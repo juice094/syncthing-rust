@@ -114,7 +114,7 @@ pub async fn start_daemon(
     let manager_config = ConnectionManagerConfig {
         listen_addr,
         retry_config: syncthing_core::RetryConfig::default(),
-        heartbeat_interval: Duration::from_secs(90),
+        heartbeat_interval: Duration::from_secs(30),
         connection_timeout: Duration::from_secs(120),
         max_connections: 1000,
     };
