@@ -1,0 +1,44 @@
+name: Build Release Binary
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build-linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-unknown-linux-gnu
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Build release
+        run: cargo build --release -p syncthing --target x86_64-unknown-linux-gnu
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: syncthing-x86_64-linux
+          path: target/x86_64-unknown-linux-gnu/release/syncthing
+          retention-days: 30
+
+      - name: Show binary info
+        run: |
+          file target/x86_64-unknown-linux-gnu/release/syncthing
+          ls -lh target/x86_64-unknown-linux-gnu/release/syncthing
