@@ -71,6 +71,12 @@ impl Scanner {
                     for db_file in db_files {
                         let full_path = path.join(&db_file.name);
                         if !full_path.exists() && !db_file.is_deleted() {
+                            // FIX: 检查是否正在下载中（临时文件存在）
+                            let temp_path = full_path.with_extension(".syncthing.tmp");
+                            if temp_path.exists() {
+                                debug!(file = %db_file.name, "File is being downloaded, skipping deleted check");
+                                continue;
+                            }
                             debug!(file = %db_file.name, "File was deleted");
                             let mut deleted_info = db_file.clone();
                             deleted_info.deleted = Some(true);
@@ -395,7 +401,12 @@ impl Scanner {
                     }
                 }
                 Err(_) => {
-                    // 文件已被删除
+                    // 文件已被删除（但检查是否正在下载中）
+                    let temp_path = full_path.with_extension(".syncthing.tmp");
+                    if temp_path.exists() {
+                        debug!(file = %db_file.name, "File is being downloaded, skipping deleted check");
+                        continue;
+                    }
                     if !db_file.is_deleted() {
                         changed.push(db_file);
                     }
