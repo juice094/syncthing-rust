@@ -3,7 +3,28 @@
 > **制定日期**: 2026-04-27
 > **对侧环境**: 可运行 Go Syncthing / Rust syncthing-rust 双版本
 > **本机版本**: `main` @ `785bd5c`
-> **通信方式**: Tailscale (100.99.240.98)
+> **通信方式**: 校园网内网 / 公网直连 / Relay 中继（Tailscale 当前不可用）
+
+---
+
+## 零、⚠️ 磁盘安全警告（执行前必读）
+
+syncthing-rust 代码库中有 **430 个日志调用**分布在 50 个文件中。长期运行（72h stress test）时：
+
+| 日志级别 | 72h 估算 | 风险 |
+|----------|----------|------|
+| `info`（默认） | ~7 MB | ✅ 安全 |
+| `debug` | 72-360 MB | ⚠️ 谨慎 |
+| `trace` | >720 MB | ❌ 禁止用于长期测试 |
+
+**格雷侧启动时必须显式指定 `--log-level info`**。
+
+如果格雷侧虚拟机磁盘已紧张（如遇 `ENOSPC`），优先排查：
+1. Kimi Claw / 其他服务的日志累积
+2. systemd journal 体积（`journalctl --disk-usage`）
+3. Docker/container 日志
+
+**推荐**：使用 systemd 启动（`StandardOutput=journal`），由 journald 自动压缩轮转，避免裸日志文件无限增长。
 
 ---
 
@@ -17,7 +38,7 @@
 └─────────────────────────────────────────────────────────────┘
 ```
 
-**策略**: 先执行方案 A。若同版本互通成功 → 问题为旧版兼容性，需修 bug；若同版本也失败 → 问题为网络/防火墙/Tailscale ACL，与代码无关。
+**策略**: 先执行方案 A。若同版本互通成功 → 问题为旧版兼容性，需修 bug；若同版本也失败 → 问题为网络/防火墙/Discovery 配置，与代码无关。
 
 ---
 
@@ -45,27 +66,61 @@ mkdir C:\syncthing-test\sync-folder
 
 ```powershell
 # 启动守护进程（headless，无 TUI）
+# ⚠️ 必须指定 --log-level info 防止磁盘耗尽
 cd C:\syncthing-test
 C:\path\to\syncthing-rust\target\release\syncthing.exe run `
     --config C:\syncthing-test\config.json `
-    --gui-address 127.0.0.1:8385
+    --gui-address 127.0.0.1:8385 `
+    --log-level info
 ```
 
-**配置要求**（`config.json` 示例）：
+**配置要求**（`config.json` 示例）—— 根据网络路径二选一：
+
+**路径一：公网直连（格雷侧有公网 IP）**
 ```json
 {
+  "options": {
+    "global_announce_enabled": false,
+    "relays_enabled": false,
+    "listen_addr": "0.0.0.0:22000"
+  },
   "devices": [
     {
-      "deviceID": "<等待本机提供 DeviceID>",
+      "deviceID": "XQVFE6J-4JCJRXW-4PSMU25-ZKZ3AKB-52XN6KZ-W6TRN5Y-4PH45KZ-XK4V3A6",
       "name": "juice094-local",
-      "addresses": ["tcp://100.99.240.98:22000"]
+      "addresses": ["tcp://10.3.155.142:22001"]
     }
   ],
   "folders": [
     {
       "id": "test-folder",
       "path": "C:\\syncthing-test\\sync-folder",
-      "devices": [{"deviceID": "<等待本机提供 DeviceID>"}]
+      "devices": [{"deviceID": "XQVFE6J-4JCJRXW-4PSMU25-ZKZ3AKB-52XN6KZ-W6TRN5Y-4PH45KZ-XK4V3A6"}]
+    }
+  ]
+}
+```
+
+**路径二：Relay 中继（格雷侧无公网 IP）**
+```json
+{
+  "options": {
+    "global_announce_enabled": true,
+    "relays_enabled": true,
+    "listen_addr": "0.0.0.0:22000"
+  },
+  "devices": [
+    {
+      "deviceID": "XQVFE6J-4JCJRXW-4PSMU25-ZKZ3AKB-52XN6KZ-W6TRN5Y-4PH45KZ-XK4V3A6",
+      "name": "juice094-local",
+      "addresses": ["dynamic"]
+    }
+  ],
+  "folders": [
+    {
+      "id": "test-folder",
+      "path": "C:\\syncthing-test\\sync-folder",
+      "devices": [{"deviceID": "XQVFE6J-4JCJRXW-4PSMU25-ZKZ3AKB-52XN6KZ-W6TRN5Y-4PH45KZ-XK4V3A6"}]
     }
   ]
 }
@@ -78,13 +133,11 @@ C:\path\to\syncthing-rust\target\release\syncthing.exe run `
 netstat -an | findstr 22000
 # 预期输出: 0.0.0.0:22000 或 127.0.0.1:22000 处于 LISTENING 状态
 
-# 2. 确认 Tailscale 接口存在
-ipconfig | findstr "Tailscale"
-# 预期输出: 100.x.x.x 地址
+# 2. 确认本机端口可达性（若已知本机公网 IP）
+# Test-NetConnection <本机公网IP> -Port 22001
 
-# 3. 从格雷侧测试本机端口可达性（需本机先启动）
-Test-NetConnection 100.99.240.98 -Port 22000
-# 预期: TcpTestSucceeded : True
+# 3. 检查 Relay 连通性（若使用路径二）
+# 确认 global_announce_enabled 和 relays_enabled 均为 true
 
 # 4. 防火墙自查
 Get-NetFirewallRule | Where-Object { $_.DisplayName -like "*syncthing*" -or $_.DisplayName -like "*rust*" }
@@ -94,11 +147,41 @@ Get-NetFirewallRule | Where-Object { $_.DisplayName -like "*syncthing*" -or $_.D
 
 ### A4. 格雷侧日志收集要求
 
-启动时设置环境变量，捕获完整日志：
+**⚠️ 磁盘安全：日志重定向必须限制大小**
 
+方式一：systemd journal（推荐，自动轮转压缩）
 ```powershell
-$env:RUST_LOG = "info,syncthing_net=debug,syncthing_sync=debug"
+# 创建 systemd service 文件（Linux 虚拟机）
+sudo tee /etc/systemd/system/syncthing-rust.service << 'EOF'
+[Unit]
+Description=Syncthing Rust
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=/home/gray/syncthing-rust/target/release/syncthing run --config /home/gray/syncthing-test/config.json --log-level info
+Restart=on-failure
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=syncthing-rust
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+sudo systemctl daemon-reload
+sudo systemctl enable syncthing-rust
+sudo systemctl start syncthing-rust
+# 查看日志: sudo journalctl -u syncthing-rust -f
+```
+
+方式二：裸文件（不推荐，必须限制大小）
+```powershell
+# 仅 info 级别，禁止 debug/trace
+$env:RUST_LOG = "info"
 C:\path\to\syncthing-rust\target\release\syncthing.exe run > C:\syncthing-test\log.txt 2>&1
+# 启动后每小时检查文件大小，超过 50MB 立即轮转
 ```
 
 日志中需要关注的关键行：
@@ -132,7 +215,7 @@ cd C:\syncthing-test
 2. 添加共享文件夹
 3. **关键**: 在 Settings → Connections 中确认：
    - `Sync Protocol Listen Addresses`: `tcp://0.0.0.0:22000`
-   - `Global Discovery`: ON
+   - `Global Discovery`: ON（若走 Relay）/ OFF（若公网直连）
    - `Local Discovery`: ON
 
 ### B3. 格雷侧提供信息给本机
@@ -153,11 +236,11 @@ curl http://127.0.0.1:8384/rest/system/status | ConvertFrom-Json | Select-Object
 
 ### C1. 格雷侧保留旧版运行
 
-保持当前 pre-fix 构建不变，仅收集日志：
+保持当前 pre-fix 构建不变，仅收集日志（同样限制级别）：
 
 ```powershell
-$env:RUST_LOG = "info,syncthing_net=debug"
-<旧版二进制路径> run > C:\syncthing-test\old-version-log.txt 2>&1
+$env:RUST_LOG = "info"
+<旧版二进制路径> run --log-level info > C:\syncthing-test\old-version-log.txt 2>&1
 ```
 
 ### C2. 需要格雷侧提供的旧版信息
@@ -184,9 +267,10 @@ cat Cargo.lock | findstr "^name = \"rustls\"" -A 2
 | 信息 | 提供方 | 用途 |
 |------|--------|------|
 | Device ID | 双方互相提供 | 配置对方为可信设备 |
-| Tailscale IP | 双方已知 | 连接地址 |
-| 监听端口 | 双方确认 | 默认 22000 |
+| 公网 IP / 可达地址 | 格雷侧确认 | 连接地址（若公网直连） |
+| 监听端口 | 双方确认 | Rust 默认 22000，本机使用 22001 |
 | API 端口 | 双方确认 | Rust 默认 8385，Go 默认 8384 |
+| 网络路径 | 双方确认 | 公网直连 or Relay |
 | 日志文件 | 格雷侧 | 排查握手/连接失败原因 |
 | 防火墙状态 | 格雷侧 | 排除网络层阻塞 |
 
@@ -198,7 +282,17 @@ cat Cargo.lock | findstr "^name = \"rustls\"" -A 2
 格雷侧启动最新版 Rust
         │
         ▼
-Test-NetConnection 100.99.240.98:22000
+格雷侧有公网 IP 且端口放行？
+        │
+    ┌───┴───┐
+    ▼       ▼
+   是      否
+    │       │
+    ▼       ▼
+ 公网直连  启用 Relay
+    │       │
+    ▼       ▼
+Test-NetConnection 或 Relay 握手
         │
     ┌───┴───┐
     ▼       ▼
@@ -206,7 +300,7 @@ Test-NetConnection 100.99.240.98:22000
     │       │
     ▼       ▼
  本机启动  检查防火墙/
- 最新版    Tailscale ACL
+ 最新版    Discovery 配置
     │       │
     ▼       ▼
  双向连接?  修复网络
