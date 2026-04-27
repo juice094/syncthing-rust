@@ -116,8 +116,11 @@
 
 ### 阻塞项
 
-- **格雷端网络**：Go Syncthing 未监听 Tailscale IP (`100.99.240.98:22000`)，Rust 端 dial 被拒绝 (os error 10061)
-- **下一步**：格雷确认 Go 节点运行状态及监听地址，或提供可用地址
+- **格雷端网络**：Go Syncthing 已确认监听 `0.0.0.0:22000`（所有接口），但 Rust 端 dial Tailscale IP (`100.99.240.98:22000`) 仍被拒绝 (os error 10061)。根因待排查：
+  - Tailscale ACL 是否放行 22000
+  - 格雷侧 Windows 防火墙是否放行 syncthing.exe
+  - Rust 端是否实际走 tailscale0 网卡路由
+- **下一步**：格雷侧在 PowerShell 执行 `Test-NetConnection 100.99.240.98 -Port 22000`（从 Rust 端机器测试格雷端口可达性），并检查 Tailscale 控制台 ACL
 
 ## 当前粗粒度待办（2026-04-27 后）
 
