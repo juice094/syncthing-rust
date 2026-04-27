@@ -841,4 +841,32 @@ mod tests {
         assert_eq!(back.deleted, original.deleted);
         assert_eq!(back.sequence, original.sequence);
     }
+
+    #[test]
+    fn test_cluster_config_roundtrip() {
+        let cc = ClusterConfig {
+            folders: vec![WireFolder {
+                id: "default".to_string(),
+                label: "Default Folder".to_string(),
+                r#type: FolderType::SendReceive as i32,
+                stop_reason: FolderStopReason::Running as i32,
+                devices: vec![WireDevice {
+                    id: vec![0xab; 32],
+                    name: "test-device".to_string(),
+                    addresses: vec!["dynamic".to_string()],
+                    compression: Compression::Metadata as i32,
+                    cert_name: String::new(),
+                    max_sequence: 0,
+                    introducer: false,
+                    index_id: 0,
+                    skip_introduction_removals: false,
+                    encryption_password_token: Vec::new(),
+                }],
+            }],
+            secondary: false,
+        };
+        let encoded = encode_message(&cc).unwrap();
+        let decoded: ClusterConfig = decode_message(&encoded).unwrap();
+        assert_eq!(cc, decoded);
+    }
 }
