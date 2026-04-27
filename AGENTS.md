@@ -4,7 +4,7 @@
 
 `syncthing-rust` 是 P2P 文件同步的 Rust 替代实现，已与官方 Go Syncthing 完成 BEP 协议互操作验证。
 
-- **当前状态**：v0.2.0 Beta，279 tests，1 ignored，**0 clippy warnings**
+- **当前状态**：v0.2.0 Beta，294 tests，3 ignored，**0 clippy warnings**
 - **传输层**：TCP+TLS / HTTP CONNECT 代理 / SOCKS5 代理 / DERP 中继（自研协议）/ UPnP（PCP/NAT-PMP 骨架待实现）/ **Relay v1 并行拨号 ✅**
 - **发现层**：Local Discovery（UDP 广播骨架）⚠️ / STUN（公网 IP 查询）⚠️ / PortMapper（UPnP 主路径）⚠️ / **Global Discovery（HTTPS mTLS 客户端）✅** / **Relay Protocol v1（XDR + ParallelDialer 集成）✅**
 - **同步**：Pull 已验证；被动响应块请求（上传）已实现；主动 Push 调度待完善
@@ -88,12 +88,15 @@
 
 **实现策略**：手写 JSON-RPC 2.0 协议层（~200 行），不依赖第三方 MCP SDK，只使用工作区已有依赖（tokio/serde_json/reqwest），完全可控、零额外依赖风险。
 
-## 阶段性进展（2026-04-26 Session）
+## 阶段性进展（2026-04-26 ~ 2026-04-27 Session）
 
 ### 已完成
 
 | 模块 | 内容 | 状态 |
 |------|------|------|
+| Phase E1: rest.rs 拆分 | 1728 行 → `rest/{mod.rs,folder.rs,device.rs,system.rs,system_ops.rs,db.rs,config.rs}` | ✅ |
+| Phase E2: manager.rs 拆分 | 1126 行 → `manager/{mod.rs,config.rs,entry.rs,handle.rs,registry.rs,dialer.rs,events.rs,stats.rs}` | ✅ |
+| Phase E3: dead-code 清理 | 消除 `syncthing-api` 未使用字段警告 + `progress.rs` 警告抑制 | ✅ |
 | REST API Write | `PUT /rest/config`（merge），`POST /system/{restart,shutdown,pause,resume}`，`POST /db/scan` | ✅ |
 | TUI Event Bridge | `tokio::sync::mpsc` 桥接 `SyncEvent` → `TuiEvent`；250ms tick 消费 | ✅ |
 | TUI Folder State | Folders tab 实时显示 `Idle/Scanning/Pulling/Error` 状态 + 颜色编码 | ✅ |
@@ -116,7 +119,7 @@
 - **格雷端网络**：Go Syncthing 未监听 Tailscale IP (`100.99.240.98:22000`)，Rust 端 dial 被拒绝 (os error 10061)
 - **下一步**：格雷确认 Go 节点运行状态及监听地址，或提供可用地址
 
-## 当前粗粒度待办（接管修正，2026-04-26 Session 后）
+## 当前粗粒度待办（2026-04-27 后）
 
 1. 格雷端 BEP 互通验证（修复后的首次完整握手 + 文件同步）——阻塞于格雷端网络状态
 2. PortMapper PCP/NAT-PMP 骨架填充（L1-PM2）
@@ -124,6 +127,12 @@
 4. 输出 BEP 扩展的 `Verify` 消息类型草案
 5. 输出跨实例发现与握手流程图
 6. **阶段性冻结**：共识算法实现、信誉系统、加密信道重建。当前阶段投入产出比过低，待多实例生产验证后解冻。
+
+### 已结项（本轮修复完成）
+
+- ✅ Phase E 架构债务清理：`rest.rs` + `manager.rs` 拆分，dead-code 警告消除
+- ✅ `cargo clippy --all-targets`：workspace 0 warnings
+- ✅ `cargo test --workspace`：294 passed, 0 failed, 3 ignored
 
 ## 跨项目接口
 
