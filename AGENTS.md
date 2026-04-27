@@ -4,11 +4,11 @@
 
 `syncthing-rust` 是 P2P 文件同步的 Rust 替代实现。当前验证目标为 **Rust 新版 ↔ Rust 旧版（格雷侧）** 的 BEP 互通；Go Syncthing 互操作待后续验证。
 
-- **当前状态**：v0.2.0 Beta，294 tests，3 ignored，**0 clippy warnings**
+- **当前状态**：v0.2.0 Beta，294 passed / 3 ignored / 0 failed，**0 clippy warnings**，**cargo audit: 3 unmaintained**
 - **传输层**：TCP+TLS / HTTP CONNECT 代理 / SOCKS5 代理 / DERP 中继（自研协议）/ UPnP（PCP/NAT-PMP 骨架待实现）/ **Relay v1 并行拨号 ✅**
 - **发现层**：Local Discovery（UDP 广播骨架）⚠️ / STUN（公网 IP 查询）⚠️ / PortMapper（UPnP 主路径）⚠️ / **Global Discovery（HTTPS mTLS 客户端）✅** / **Relay Protocol v1（XDR + ParallelDialer 集成）✅**
 - **同步**：Pull 已验证；被动响应块请求（上传）已实现；主动 Push 调度待完善
-- **互操作**：与官方 Go Syncthing 的 BEP 核心消息（Hello/ClusterConfig/Index/Request/Response）在 Tailscale 环境下已验证
+- **互操作**：旧版 Rust syncthing-rust ↔ 新版 Rust 待验证（格雷侧为 pre-fix 构建）；Go Syncthing 互操作待后续验证
 - **观测**：REST API 读写端点（兼容 Go 布局）+ 文件系统 watcher(1s debounce) + **TUI 实时状态（event bridge）✅** + **配置热重载 ✅**
 
 ## 架构讨论摘要
@@ -88,24 +88,29 @@
 
 **实现策略**：手写 JSON-RPC 2.0 协议层（~200 行），不依赖第三方 MCP SDK，只使用工作区已有依赖（tokio/serde_json/reqwest），完全可控、零额外依赖风险。
 
-## 阶段性进展（2026-04-26 ~ 2026-04-27 Session）
+## 阶段性进展（截至 2026-04-27）
 
-### 已完成
+### 已完成（与计划对齐）
 
-| 模块 | 内容 | 状态 |
-|------|------|------|
-| Phase E1: rest.rs 拆分 | 1728 行 → `rest/{mod.rs,folder.rs,device.rs,system.rs,system_ops.rs,db.rs,config.rs}` | ✅ |
-| Phase E2: manager.rs 拆分 | 1126 行 → `manager/{mod.rs,config.rs,entry.rs,handle.rs,registry.rs,dialer.rs,events.rs,stats.rs}` | ✅ |
-| Phase E3: dead-code 清理 | 消除 `syncthing-api` 未使用字段警告 + `progress.rs` 警告抑制 | ✅ |
-| REST API Write | `PUT /rest/config`（merge），`POST /system/{restart,shutdown,pause,resume}`，`POST /db/scan` | ✅ |
-| TUI Event Bridge | `tokio::sync::mpsc` 桥接 `SyncEvent` → `TuiEvent`；250ms tick 消费 | ✅ |
-| TUI Folder State | Folders tab 实时显示 `Idle/Scanning/Pulling/Error` 状态 + 颜色编码 | ✅ |
-| TUI Overview Sync | 底部面板显示全局同步状态摘要 | ✅ |
-| Config Hot-reload | `notify` 监听 `config.json` → `sync_service.update_config()` + `TuiEvent::ConfigChanged` | ✅ |
-| E2E Test Harness | `TestNode` 临时目录 + 自签证书 + `SyncService` + `ConnectionManager` + REST API | ✅ |
-| E2E Handshake Test | `test_two_node_empty_folder_handshake`（TCP+TLS+BEP Hello）通过 | ✅ |
-| Phase 3-A Relay Dialer | `ParallelDialer::dial` 统一竞速 direct TCP + Relay URL；RTT 评分共享 | ✅ |
-| Phase 5 Discovery→CM | Global Discovery 周期性 query + Local Discovery 地址池更新 → `ConnectionManager::update_addresses` | ✅ |
+| 模块 | 内容 | 来源计划 | 状态 |
+|------|------|----------|------|
+| Phase 1~2 网络修复 | TCP+TLS+BEP Hello+帧解析；Daemon 启动；Puller 真实块请求 | MVP_RECOVERY | ✅ |
+| Phase 3 BepSession 硬化 | Observability/Events/Metrics；Peer Sync State；Push/Pull E2E | PHASE3_PLAN 3.1~3.3 | ✅ |
+| Phase 4 兼容性收尾 | 连接循环竞争解决；`.stignore`；配置持久化；身份层解耦 | PHASE4_PLAN 4.2 | ✅ |
+| Wave 3 网络基础设施 | NetMonitor 网络变更；ParallelDialer 竞速拨号；Supervisor 监督树 | WAVE3_PLAN | ✅ |
+| REST API 读写端点 | `PUT /rest/config`，`POST /system/{restart,shutdown,pause,resume}`，`POST /db/scan` | improvement-plan C1 | ✅ |
+| TUI Event Bridge + 热重载 | `SyncEvent` → `TuiEvent`；`notify` 监听 config.json | PHASE4_PLAN 4.1 | ✅ |
+| E2E Handshake Test | `test_two_node_empty_folder_handshake`（TCP+TLS+BEP Hello） | MVP_RECOVERY | ✅ |
+| Phase E 架构债务 | `rest.rs` 1728→7 模块；`manager.rs` 1126→8 模块；dead-code 清理 | *自发* | ✅ |
+
+### 未完成（计划内阻塞项）
+
+| 模块 | 内容 | 来源计划 | 状态 | 优先级 |
+|------|------|----------|------|--------|
+| cargo audit 清理 | fxhash/instant/paste 3 项 unmaintained | POST_V0_2_0 Phase A | ⏳ | **P0** |
+| 72h Stress Test | 长期运行稳定性验证（内存/连接/同步） | PHASE3_PLAN 3.4 / PHASE4_PLAN 4.3 | ⏳ | **P1** |
+| REST API sub-gaps | `device` pause/resume body、subpath scan、override/revert stub | POST_V0_2_0 Phase C | ⏳ | P2 |
+| Delta Index 验证 | `IndexID` + `Sequence` 长时间一致性 | PHASE4_PLAN 4.2 | ⏳ | P3 |
 
 ### 当前状态
 
@@ -116,27 +121,36 @@
 
 ### 阻塞项
 
-- **格雷端网络**：格雷侧运行 **健康修正前旧版 Rust syncthing**，已确认监听 `0.0.0.0:22000`。Rust 新版 dial Tailscale IP (`100.99.240.98:22000`) 被拒绝 (os error 10061)。根因待排查：
-  - Tailscale ACL 是否放行 22000
-  - 格雷侧 Windows 防火墙是否放行旧版 Rust 二进制
-  - 旧版 Rust 实现的 TLS/BEP 握手是否有兼容性问题导致连接层直接拒绝
-  - Rust 端是否实际走 tailscale0 网卡路由
-- **下一步**：格雷侧在 PowerShell 执行 `Test-NetConnection 100.99.240.98 -Port 22000`（从 Rust 端机器测试格雷端口可达性），并检查旧版日志是否有握手错误
+- **格雷端 BEP 互通验证**：格雷侧运行 **pre-fix Rust 构建**。新版 dial 旧版被拒绝 (os error 10061)。根因待格雷侧配合排查（ACL/防火墙/旧版日志）。
+- **策略**：按 `POST_V0_2_0_ROADMAP.md` 指令，**不占用开发带宽等待**。格雷验证与 Phase A/B/C 并行推进，验证解阻塞时立即冻结新功能。
 
-## 当前粗粒度待办（2026-04-27 后）
+### 本轮开发窗口（按路线图执行）
 
-1. 格雷端 BEP 互通验证（修复后的首次完整握手 + 文件同步）——阻塞于格雷端网络状态
-2. PortMapper PCP/NAT-PMP 骨架填充（L1-PM2）
-3. REST API 子功能补全：`device` pause/resume body 参数、subpath scan、conflict resolve
-4. 输出 BEP 扩展的 `Verify` 消息类型草案
-5. 输出跨实例发现与握手流程图
-6. **阶段性冻结**：共识算法实现、信誉系统、加密信道重建。当前阶段投入产出比过低，待多实例生产验证后解冻。
+**Phase A: 安全债务清理（P0，预计 1~2 天）**
+- A1 lru — Cargo.lock 已为 0.16.4，警告已自动消除 ✅
+- A2 paste — 路径：`netlink-packet-core` 0.8.1 → `netdev` 0.42.0。尝试升级 `netdev`
+- A3 instant + A4 fxhash — 共同路径：`sled` 0.34.7 → `parking_lot` 0.11.2。评估 `sled` 升级或记录为接受债务
 
-### 已结项（本轮修复完成）
+**Phase B: 72h Stress Test 基础设施（P1，预计 3~5 天）**
+- B1 测试方案设计：双 `TestNode` 实例，5min 文件注入 + 30min 网络断开 + 2h config reload
+- B2 基础设施：`cmd/syncthing/src/bin/stress_test.rs` 或 `tests/stress_72h.rs`，CSV 日志输出
+- B3 验收标准：72h 无 panic、RSS 增长 < 50%、文件最终一致、重连成功率 > 95%
+
+**Phase C: API & 兼容性补全（P2，预计 2~3 天）**
+- C1 L3-APIW sub-gaps：`device` pause/resume body、`sub` 参数、override/revert 从 stub 实现
+- C2 Delta Index 验证（P3，按需启动）
+
+## 已结项（本轮完成）
 
 - ✅ Phase E 架构债务清理：`rest.rs` + `manager.rs` 拆分，dead-code 警告消除
 - ✅ `cargo clippy --all-targets`：workspace 0 warnings
 - ✅ `cargo test --workspace`：294 passed, 0 failed, 3 ignored
+
+## 未来冻结项（明确不投入）
+
+- ❄️ BEP 扩展 `Verify` 消息族、跨实例共识、信誉系统、加密信道重建 —— 投入产出比过低，待多实例生产验证后解冻
+- ❄️ QUIC Transport、MagicSocket 抽象 —— 等 TCP+Relay 路径完全稳定后评估
+- ❄️ WebUI / GUI —— TUI 已覆盖 90% 核心操作，若未来确有需求基于 REST API 独立开发
 
 ## 跨项目接口
 
