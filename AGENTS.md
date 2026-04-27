@@ -2,7 +2,7 @@
 
 ## 项目定位
 
-`syncthing-rust` 是 P2P 文件同步的 Rust 替代实现，已与官方 Go Syncthing 完成 BEP 协议互操作验证。
+`syncthing-rust` 是 P2P 文件同步的 Rust 替代实现。当前验证目标为 **Rust 新版 ↔ Rust 旧版（格雷侧）** 的 BEP 互通；Go Syncthing 互操作待后续验证。
 
 - **当前状态**：v0.2.0 Beta，294 tests，3 ignored，**0 clippy warnings**
 - **传输层**：TCP+TLS / HTTP CONNECT 代理 / SOCKS5 代理 / DERP 中继（自研协议）/ UPnP（PCP/NAT-PMP 骨架待实现）/ **Relay v1 并行拨号 ✅**
@@ -116,11 +116,12 @@
 
 ### 阻塞项
 
-- **格雷端网络**：Go Syncthing 已确认监听 `0.0.0.0:22000`（所有接口），但 Rust 端 dial Tailscale IP (`100.99.240.98:22000`) 仍被拒绝 (os error 10061)。根因待排查：
+- **格雷端网络**：格雷侧运行 **健康修正前旧版 Rust syncthing**，已确认监听 `0.0.0.0:22000`。Rust 新版 dial Tailscale IP (`100.99.240.98:22000`) 被拒绝 (os error 10061)。根因待排查：
   - Tailscale ACL 是否放行 22000
-  - 格雷侧 Windows 防火墙是否放行 syncthing.exe
+  - 格雷侧 Windows 防火墙是否放行旧版 Rust 二进制
+  - 旧版 Rust 实现的 TLS/BEP 握手是否有兼容性问题导致连接层直接拒绝
   - Rust 端是否实际走 tailscale0 网卡路由
-- **下一步**：格雷侧在 PowerShell 执行 `Test-NetConnection 100.99.240.98 -Port 22000`（从 Rust 端机器测试格雷端口可达性），并检查 Tailscale 控制台 ACL
+- **下一步**：格雷侧在 PowerShell 执行 `Test-NetConnection 100.99.240.98 -Port 22000`（从 Rust 端机器测试格雷端口可达性），并检查旧版日志是否有握手错误
 
 ## 当前粗粒度待办（2026-04-27 后）
 
