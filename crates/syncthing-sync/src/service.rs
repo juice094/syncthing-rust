@@ -581,6 +581,26 @@ impl syncthing_core::traits::SyncModel for SyncService {
         };
         Ok(completion)
     }
+
+    async fn override_folder(&self, folder: &syncthing_core::FolderId) -> syncthing_core::Result<()> {
+        let folder_id = folder.as_str();
+        if let Some(folder_model) = self.folders.get(folder_id) {
+            folder_model.override_local_changes().await
+                .map_err(|e| syncthing_core::SyncthingError::internal(format!("override failed: {}", e)))
+        } else {
+            Err(syncthing_core::SyncthingError::internal(format!("folder not found: {}", folder_id)))
+        }
+    }
+
+    async fn revert_folder(&self, folder: &syncthing_core::FolderId) -> syncthing_core::Result<()> {
+        let folder_id = folder.as_str();
+        if let Some(folder_model) = self.folders.get(folder_id) {
+            folder_model.revert_local_changes().await
+                .map_err(|e| syncthing_core::SyncthingError::internal(format!("revert failed: {}", e)))
+        } else {
+            Err(syncthing_core::SyncthingError::internal(format!("folder not found: {}", folder_id)))
+        }
+    }
 }
 
 #[cfg(test)]

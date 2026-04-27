@@ -10,11 +10,11 @@ use crate::puller::{Puller, BlockSource};
 use crate::scanner::Scanner;
 use crate::watcher::FolderWatcher;
 use syncthing_core::DeviceId;
-use syncthing_core::types::{FileInfo, Folder, FolderStatus};
+use syncthing_core::types::{FileInfo, Folder, FolderStatus, FolderType};
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::RwLock;
-use tracing::{debug, error, info, trace};
+use tracing::{debug, error, info, trace, warn};
 
 /// 文件夹模型
 pub struct FolderModel {
@@ -466,6 +466,85 @@ impl FolderModel {
     /// 恢复文件夹
     pub async fn resume(&self) {
         info!(folder_id = %self.folder.id, "Folder resumed");
+    }
+
+    /// Override local changes for a ReceiveOnly folder.
+    /// Scans local files, increments version vectors, and updates the database
+    /// so local changes are treated as authoritative and broadcast to peers.
+    pub async fn override_local_changes(&self) -> Result<()> {
+        if !matches!(self.folder.folder_type, FolderType::ReceiveOnly) {
+            return Err(crate::SyncError::scan(
+                self.folder.id.clone(),
+                "override only applies to ReceiveOnly folders".to_string(),
+            ));
+        }
+
+        let changed = self.scan().await?;
+        if changed.is_empty() {
+            info!(folder_id = %self.folder.id, "No local changes to override");
+            return Ok(());
+        }
+
+        let count = changed.len();
+        let mut updated = Vec::with_capacity(count);
+        for mut file in changed {
+            file.version.increment(1);
+            updated.push(file);
+        }
+
+        self.db.update_files(&self.folder.id, updated).await
+            .map_err(|e| crate::SyncError::scan(self.folder.id.clone(), format!("db update failed: {}", e)))?;
+
+        info!(folder_id = %self.folder.id, count = count, "Override accepted local changes");
+        Ok(())
+    }
+
+    /// Revert local changes for a ReceiveOnly folder.
+    /// Deletes locally modified or added files and re-triggers pull from peers.
+    pub async fn revert_local_changes(&self) -> Result<()> {
+        if !matches!(self.folder.folder_type, FolderType::ReceiveOnly) {
+            return Err(crate::SyncError::scan(
+                self.folder.id.clone(),
+                "revert only applies to ReceiveOnly folders".to_string(),
+            ));
+        }
+
+        let base_path = std::path::Path::new(&self.folder.path);
+        let remote_files = self.db.get_folder_files(&self.folder.id).await?;
+
+        let mut deleted_count = 0;
+        for remote in &remote_files {
+            let local_path = base_path.join(&remote.name);
+            if !local_path.exists() {
+                continue;
+            }
+
+            let should_delete = if remote.is_deleted() {
+                true
+            } else {
+                match tokio::fs::metadata(&local_path).await {
+                    Ok(meta) => meta.len() != remote.size as u64,
+                    Err(_) => true,
+                }
+            };
+
+            if should_delete {
+                if let Err(e) = tokio::fs::remove_file(&local_path).await {
+                    warn!("Failed to delete {} for revert: {}", local_path.display(), e);
+                } else {
+                    deleted_count += 1;
+                }
+                if let Err(e) = self.db.delete_file(&self.folder.id, &remote.name).await {
+                    warn!("Failed to delete db record {}: {}", remote.name, e);
+                }
+            }
+        }
+
+        self.scan().await?;
+        self.pull().await?;
+
+        info!(folder_id = %self.folder.id, deleted = deleted_count, "Revert completed");
+        Ok(())
     }
 }
 

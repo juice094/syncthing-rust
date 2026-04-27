@@ -138,18 +138,52 @@ pub(crate) async fn db_scan_post(
     }
 }
 
-pub(crate) async fn db_override() -> impl IntoResponse {
-    (
-        StatusCode::NOT_IMPLEMENTED,
-        Json(serde_json::json!({ "error": "override not yet implemented" })),
-    )
-        .into_response()
+#[derive(Debug, Deserialize)]
+pub struct DbOverrideRequest {
+    pub folder: String,
 }
 
-pub(crate) async fn db_revert() -> impl IntoResponse {
-    (
-        StatusCode::NOT_IMPLEMENTED,
-        Json(serde_json::json!({ "error": "revert not yet implemented" })),
-    )
-        .into_response()
+#[derive(Debug, Deserialize)]
+pub struct DbRevertRequest {
+    pub folder: String,
+}
+
+pub(crate) async fn db_override(
+    State(state): State<ApiState>,
+    Json(request): Json<DbOverrideRequest>,
+) -> impl IntoResponse {
+    if let Some(ref sync_model) = state.sync_model {
+        match sync_model.override_folder(&FolderId::new(&request.folder)).await {
+            Ok(()) => Ok(Json(serde_json::json!({ "ok": true }))),
+            Err(e) => Err((
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({ "error": format!("{}", e) })),
+            )),
+        }
+    } else {
+        Err((
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(serde_json::json!({ "error": "sync model not available" })),
+        ))
+    }
+}
+
+pub(crate) async fn db_revert(
+    State(state): State<ApiState>,
+    Json(request): Json<DbRevertRequest>,
+) -> impl IntoResponse {
+    if let Some(ref sync_model) = state.sync_model {
+        match sync_model.revert_folder(&FolderId::new(&request.folder)).await {
+            Ok(()) => Ok(Json(serde_json::json!({ "ok": true }))),
+            Err(e) => Err((
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({ "error": format!("{}", e) })),
+            )),
+        }
+    } else {
+        Err((
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(serde_json::json!({ "error": "sync model not available" })),
+        ))
+    }
 }

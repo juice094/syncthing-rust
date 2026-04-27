@@ -12,7 +12,7 @@ use std::time::{Duration, Instant};
 
 use crate::error::Result;
 use crate::types::{BlockHash, FileInfo, FolderId};
-use crate::DeviceId;
+use crate::{DeviceId, SyncthingError};
 
 /// Transport type identifier for a connection path.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -472,6 +472,20 @@ pub trait SyncModel: Send + Sync {
     /// Default returns 100% (complete) if not implemented.
     async fn folder_completion(&self, _folder: &FolderId, _device: DeviceId) -> Result<u64> {
         Ok(100)
+    }
+
+    /// Override local changes for a ReceiveOnly folder.
+    /// Accepts local modifications and broadcasts them to peers.
+    /// Default returns not-implemented.
+    async fn override_folder(&self, _folder: &FolderId) -> Result<()> {
+        Err(SyncthingError::internal("override not yet implemented".to_string()))
+    }
+
+    /// Revert local changes for a ReceiveOnly folder.
+    /// Discards local modifications and re-downloads from peers.
+    /// Default returns not-implemented.
+    async fn revert_folder(&self, _folder: &FolderId) -> Result<()> {
+        Err(SyncthingError::internal("revert not yet implemented".to_string()))
     }
 }
 
