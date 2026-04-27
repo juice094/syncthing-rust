@@ -133,7 +133,8 @@
 
 **P0: 72h Stress Test 执行**
 - 已有 `cmd/syncthing/src/bin/stress_test.rs`（290 行）
-- 先本地短周期预验证（2~4h），无异常后移交格雷远程执行 72h
+- ✅ **本地 30min 短周期预验证通过（2026-04-27）**: 0 errors, 0 panics, 连接保持稳定
+- 下一步：移交格雷远程执行 72h 完整测试
 
 **P0: 跨版本 Rust 互通验证**
 - 新版 `main` ↔ 格雷侧 pre-fix Rust
