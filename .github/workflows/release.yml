@@ -5,6 +5,9 @@ on:
     branches: [main]
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 env:
   CARGO_TERM_COLOR: always
 
@@ -31,14 +34,21 @@ jobs:
       - name: Build release
         run: cargo build --release -p syncthing --target x86_64-unknown-linux-gnu
 
-      - name: Upload artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: syncthing-x86_64-linux
-          path: target/x86_64-unknown-linux-gnu/release/syncthing
-          retention-days: 30
-
-      - name: Show binary info
+      - name: Prepare artifact
         run: |
-          file target/x86_64-unknown-linux-gnu/release/syncthing
-          ls -lh target/x86_64-unknown-linux-gnu/release/syncthing
+          mkdir -p dist
+          cp target/x86_64-unknown-linux-gnu/release/syncthing dist/syncthing-x86_64-linux
+          strip dist/syncthing-x86_64-linux || true
+          file dist/syncthing-x86_64-linux
+          ls -lh dist/syncthing-x86_64-linux
+
+      - name: Upload to Release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: latest
+          name: "Latest Build"
+          body: "Auto-built from main branch"
+          prerelease: true
+          files: dist/syncthing-x86_64-linux
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
