@@ -1,5 +1,9 @@
 # Agent 环境指引 · syncthing-rust
 
+> 📋 **当前权威路线图**: [`docs/plans/POST_V0_2_0_ROADMAP.md`](./docs/plans/POST_V0_2_0_ROADMAP.md)
+> 📋 **计划索引**: [`docs/plans/INDEX.md`](./docs/plans/INDEX.md)
+> 📋 **审计报告**: [`docs/plans/PLAN_AUDIT_2026-04-27.md`](./docs/plans/PLAN_AUDIT_2026-04-27.md)
+
 ## 项目定位
 
 `syncthing-rust` 是 P2P 文件同步的 Rust 替代实现。当前验证目标为 **Rust 新版 ↔ Rust 旧版（格雷侧）** 的 BEP 互通；Go Syncthing 互操作待后续验证。

@@ -2,6 +2,9 @@
 
 > ⚠️ **勘误（2026-04-27）**：3.3 节"Cloud Go 节点双向验证"实际为**格雷侧远程节点**，当时误识别为 Go Syncthing，实际运行的是 pre-fix Rust 构建。验证结论"Push/Pull E2E 完成"对 Rust→Go 场景不具参考价值。
 >
+> 📋 **计划索引**：[`docs/plans/INDEX.md`](./INDEX.md) — 查看所有计划文件关系与跳转速查
+> 📋 **审计报告**：[`docs/plans/PLAN_AUDIT_2026-04-27.md`](./PLAN_AUDIT_2026-04-27.md) — 本计划勘误来源
+>
 > **基线**: Phase 2 已完成（`90776e7`），`ReliablePipe` + `BepSession` + `ConnectionManager` 多路径架构稳定。
 > **目标**: 将 BepSession 从"功能正确"推进到"生产可观测 + 长期稳定 + 上下游可集成"。
 
