@@ -117,12 +117,34 @@
 - **Local Discovery**：UDP 广播发送/接收、protobuf 编解码、auto-dial 已集成；地址发现后更新 `ConnectionManager` 地址池 ✅；缺少 IPv6 多播、网卡枚举、广播地址计算
 - **Global Discovery**：Announce + Query 双通路完整；每 5 分钟 query 配置中的 peers，结果注入 `ConnectionManager` 地址池 ✅
 - **STUN/PortMapper**：STUN 仅能查询公网映射地址，无 NAT 类型检测、无 hole punching；PortMapper 仅 UPnP 路径可用，PCP/NAT-PMP 未实现，daemon 中无自动续约
-- **BEP 互通**：`WireFolder.label` 和 `client_name` 兼容性修复已提交；此前仅在 Tailscale 环境下与 Go 节点验证通过；Phase 5 完成后无 Tailscale 跨网络互联能力已具备理论条件（需实际网络验证）
+- **BEP 互通**：`WireFolder.label` 和 `client_name` 兼容性修复已提交；与 Go Syncthing 的验证尚未完成；当前验证目标为新版 Rust ↔ 格雷侧旧版 Rust
 
 ### 阻塞项
 
 - **格雷端 BEP 互通验证**：格雷侧运行 **pre-fix Rust 构建**。新版 dial 旧版被拒绝 (os error 10061)。根因待格雷侧配合排查（ACL/防火墙/旧版日志）。
-- **策略**：按 `POST_V0_2_0_ROADMAP.md` 指令，**不占用开发带宽等待**。格雷验证与 Phase A/B/C 并行推进，验证解阻塞时立即冻结新功能。
+- **策略**：格雷验证与开发主路径**并行推进**，不阻塞。解阻塞时冻结新功能，全力修 bug。
+
+### 本轮开发窗口（按修正后路线图执行）
+
+**P0: 72h Stress Test 执行**
+- 已有 `cmd/syncthing/src/bin/stress_test.rs`（290 行）
+- 先本地短周期预验证（2~4h），无异常后移交格雷远程执行 72h
+
+**P0: 跨版本 Rust 互通验证**
+- 新版 `main` ↔ 格雷侧 pre-fix Rust
+- 解阻塞后冻结新功能，全力修兼容性问题
+
+**P1: REST API 写端闭环**
+- `POST /rest/db/override` / `revert` — 从 501 stub 实现
+- `POST /rest/system/pause` / `resume` — `device` body 参数生效
+- `POST /rest/db/scan` — `sub` 子路径参数支持
+
+**P2: .stignore 简化版审计**
+- 评估 `syncthing-sync/src/ignore.rs`（241 行）是否覆盖 90% 场景
+
+**P3: cargo audit 债务接受**
+- 创建 `.cargo/audit.toml`，显式接受 3 个 unmaintained 警告
+- 不再视为主动开发任务
 
 ### 本轮开发窗口（按路线图执行）
 

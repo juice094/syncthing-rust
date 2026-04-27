@@ -1,0 +1,28 @@
+# cargo audit 配置
+# 审计日期: 2026-04-27
+# 维护者: juice094
+#
+# 以下 3 个 unmaintained 警告均为上游传递依赖，无法从本项目通过 semver 升级消除。
+# 所有直接依赖（ratatui 0.30.0, netdev 0.42.0, sled 0.34.7）均已是最新稳定版。
+# 参见 docs/plans/PLAN_AUDIT_2026-04-27.md 完整评估。
+
+[advisories]
+ignore = [
+    # RUSTSEC-2024-0384: instant 0.1.13 unmaintained
+    # 路径: sled 0.34.7 → parking_lot 0.11.2 → parking_lot_core 0.8.6 → instant
+    # 风险: 可忽略。native 目标上 instant 是 std::time::Instant 的薄包装。
+    # 行动: 监控 sled 1.0 稳定版发布，届时评估迁移。
+    "RUSTSEC-2024-0384",
+
+    # RUSTSEC-2025-0057: fxhash 0.2.1 unmaintained
+    # 路径: sled 0.34.7 → fxhash
+    # 风险: 可忽略。fxhash 仅用于 sled 内部 hash table，无外部输入直接到达。
+    # 行动: 与 RUSTSEC-2024-0384 合并决策；sled 升级时同步解决。
+    "RUSTSEC-2025-0057",
+
+    # RUSTSEC-2024-0436: paste 1.0.15 unmaintained
+    # 路径: netdev 0.42.0 → netlink-packet-core 0.8.1 → paste
+    # 风险: 可忽略。paste 是编译期过程宏 crate，运行时暴露为零。
+    # 行动: 监控 netlink-packet-core 新版本，但 netdev 0.42.0 已是最新稳定版。
+    "RUSTSEC-2024-0436",
+]
