@@ -3,6 +3,8 @@
 //! Provides in-memory primitives for deterministic testing of the network
 //! and protocol layers without spawning real TCP sockets or processes.
 
+pub mod harness;
+
 use std::io;
 use std::net::SocketAddr;
 use std::pin::Pin;

@@ -6,6 +6,11 @@ edition = "2021"
 [dependencies]
 tokio = { workspace = true }
 syncthing-core = { path = "../syncthing-core" }
+syncthing-net = { path = "../syncthing-net" }
+syncthing-sync = { path = "../syncthing-sync" }
+anyhow = { workspace = true }
+rand = { workspace = true }
+serde_json = { workspace = true }
 
 [dev-dependencies]
 tokio-test = "0.4"

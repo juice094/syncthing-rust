@@ -8,6 +8,7 @@ pub mod types;
 pub mod traits;
 pub mod validation;
 pub mod identity;
+pub mod paths;
 
 pub use error::{SyncthingError, Result};
 pub use device_id::DeviceId;

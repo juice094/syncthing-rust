@@ -2,10 +2,10 @@
 name = "syncthing-fs"
 version = "0.2.0"
 edition = "2021"
-authors = ["Agent-B <UNVERIFIED>"]
-description = "Filesystem abstraction and monitoring - UNVERIFIED DELIVERY"
-license = "MPL-2.0"
-publish = false
+authors = ["juice094"]
+description = "Filesystem abstraction and monitoring for Syncthing Rust"
+license = "MIT"
+
 
 [dependencies]
 syncthing-core = { path = "../syncthing-core" }

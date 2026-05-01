@@ -4,6 +4,7 @@
 //! 以及 NAT 穿透功能（STUN/UPnP）
 
 pub mod connection;
+#[doc(hidden)]
 pub mod handshaker;
 pub mod manager;
 pub mod netmon;
@@ -18,10 +19,14 @@ pub mod portmapper;
 pub mod dialer;
 pub mod metrics;
 pub mod identity;
+#[doc(hidden)]
 pub mod transport;
+#[doc(hidden)]
 pub mod derp;
+#[doc(hidden)]
 pub mod relay;
 
+/// Stable public API exports.
 pub use connection::{BepConnection, ConnectionEvent, TcpBiStream};
 pub use session::{BepSession, BepSessionEvent, BepSessionHandler, BepSessionMetrics};
 pub use protocol::{HelloMessage, MessageType, BEP_MAGIC};
@@ -36,6 +41,9 @@ pub use discovery::{DiscoveryManager, DiscoveryConfig, AddressInfo, AddressSourc
 pub use discovery::{LocalDiscovery, DiscoveryEvent, DiscoverySource};
 pub use discovery::{GlobalDiscovery, DEFAULT_DISCOVERY_SERVER, ANNOUNCE_INTERVAL, RETRY_INTERVAL};
 pub use portmapper::{PortMapper, Mapping};
+pub use identity::TlsIdentity;
+pub use handshaker::BepHandshaker;
+pub use metrics::{global, MetricsCollector, MetricRecord};
 
 /// TLS 相关常量
 pub mod tls_constants {

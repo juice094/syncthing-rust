@@ -355,6 +355,7 @@ impl ConnectionManager {
         !reason.contains("manual disconnect")
             && !reason.contains("invalid device ID")
             && !reason.contains("unauthorized")
+            && !reason.contains("paused by user")
     }
 
     /// 安排重连
@@ -566,5 +567,36 @@ mod tests {
 
         // 清理
         manager.stop().await.expect("failed to stop");
+    }
+
+    #[test]
+    fn test_should_reconnect_reasons() {
+        let tls_config = Arc::new(
+            SyncthingTlsConfig::from_pem(b"", b"").unwrap_or_else(|_| {
+                let (cert, key) = crate::tls::generate_certificate("reconnect-test")
+                    .expect("failed to generate certificate");
+                SyncthingTlsConfig::from_pem(&cert, &key)
+                    .expect("failed to load generated certificate")
+            })
+        );
+        let identity = Arc::new(crate::identity::TlsIdentity::new(Arc::clone(&tls_config)));
+        let (manager, _handle) = ConnectionManager::new(
+            ConnectionManagerConfig::default(),
+            identity,
+            tls_config,
+        );
+
+        let device_id = DeviceId::default();
+
+        // 不应重连的情况
+        assert!(!manager.should_reconnect(&device_id, "manual disconnect"));
+        assert!(!manager.should_reconnect(&device_id, "invalid device ID"));
+        assert!(!manager.should_reconnect(&device_id, "unauthorized"));
+        assert!(!manager.should_reconnect(&device_id, "paused by user"));
+
+        // 应该重连的情况
+        assert!(manager.should_reconnect(&device_id, "connection reset"));
+        assert!(manager.should_reconnect(&device_id, "timed out"));
+        assert!(manager.should_reconnect(&device_id, ""));
     }
 }

@@ -86,8 +86,8 @@ async fn main() -> anyhow::Result<()> {
     let node_a_dir = args.data_dir.join("node-a");
     let node_b_dir = args.data_dir.join("node-b");
 
-    let node_a: syncthing::test_harness::TestNode = syncthing::test_harness::TestNode::new_with_dir("a", node_a_dir.clone()).await?;
-    let node_b: syncthing::test_harness::TestNode = syncthing::test_harness::TestNode::new_with_dir("b", node_b_dir.clone()).await?;
+    let node_a: syncthing_test_utils::harness::TestNode = syncthing_test_utils::harness::TestNode::new_with_dir("a", node_a_dir.clone()).await?;
+    let node_b: syncthing_test_utils::harness::TestNode = syncthing_test_utils::harness::TestNode::new_with_dir("b", node_b_dir.clone()).await?;
 
     let folder_id = "stress-folder";
     let folder_path_a = node_a_dir.join("sync");

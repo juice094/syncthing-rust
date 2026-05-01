@@ -8,7 +8,7 @@
 
 `syncthing-rust` 是 P2P 文件同步的 Rust 替代实现。当前验证目标为 **Rust 新版 ↔ Rust 旧版（格雷侧）** 的 BEP 互通；Go Syncthing 互操作待后续验证。
 
-- **当前状态**：v0.2.0 Beta，294 passed / 3 ignored / 0 failed，**0 clippy warnings**，**cargo audit: 3 unmaintained**
+- **当前状态**：v0.2.0 Beta，308 passed / 3 ignored / 0 failed，**0 clippy warnings**，**cargo audit: 3 unmaintained（已接受）**
 - **传输层**：TCP+TLS / HTTP CONNECT 代理 / SOCKS5 代理 / DERP 中继（自研协议）/ UPnP（PCP/NAT-PMP 骨架待实现）/ **Relay v1 并行拨号 ✅**
 - **发现层**：Local Discovery（UDP 广播骨架）⚠️ / STUN（公网 IP 查询）⚠️ / PortMapper（UPnP 主路径）⚠️ / **Global Discovery（HTTPS mTLS 客户端）✅** / **Relay Protocol v1（XDR + ParallelDialer 集成）✅**
 - **同步**：Pull 已验证；被动响应块请求（上传）已实现；主动 Push 调度待完善
@@ -106,15 +106,19 @@
 | TUI Event Bridge + 热重载 | `SyncEvent` → `TuiEvent`；`notify` 监听 config.json | PHASE4_PLAN 4.1 | ✅ |
 | E2E Handshake Test | `test_two_node_empty_folder_handshake`（TCP+TLS+BEP Hello） | MVP_RECOVERY | ✅ |
 | Phase E 架构债务 | `rest.rs` 1728→7 模块；`manager.rs` 1126→8 模块；dead-code 清理 | *自发* | ✅ |
+| 组件分发拆分 | `syncthing-bench` / `syncthing-cli` 从 `cmd/syncthing` 提取为独立二进制 | POST_V0_2_0 | ✅ |
+| 解耦工作 | 元数据统一、`test_harness` 归位、E2E 测试外迁、`syncthing-net` API 收敛 | *自发* | ✅ |
 
 ### 未完成（计划内阻塞项）
 
 | 模块 | 内容 | 来源计划 | 状态 | 优先级 |
 |------|------|----------|------|--------|
-| cargo audit 清理 | fxhash/instant/paste 3 项 unmaintained | POST_V0_2_0 Phase A | ⏳ | **P0** |
-| 72h Stress Test | 长期运行稳定性验证（内存/连接/同步） | PHASE3_PLAN 3.4 / PHASE4_PLAN 4.3 | ⏳ | **P1** |
-| REST API sub-gaps | `device` pause/resume body、subpath scan、override/revert stub | POST_V0_2_0 Phase C | ⏳ | P2 |
+| 72h Stress Test | 长期运行稳定性验证（内存/连接/同步） | PHASE3_PLAN 3.4 / PHASE4_PLAN 4.3 | ⏳ | **P0** |
+| 跨版本 Rust 互通验证 | 新版 main ↔ 格雷侧 pre-fix Rust（os error 10061 待排查） | POST_V0_2_0 | ⏳ | **P0** |
+| REST API `device` pause/resume body | `POST /rest/system/pause` / `resume` 的 device body 参数生效 | POST_V0_2_0 Phase C | ✅ | P1 |
+| .stignore 简化版审计 | 评估 `syncthing-sync/src/ignore.rs` 是否覆盖 90% 场景 | POST_V0_2_0 Phase C | ⏳ | P2 |
 | Delta Index 验证 | `IndexID` + `Sequence` 长时间一致性 | PHASE4_PLAN 4.2 | ⏳ | P3 |
+| PCP/NAT-PMP | PortMapper UPnP 的 fallback 路径 | POST_V0_2_0 Phase D | ⏳ | P3 |
 
 ### 当前状态
 
@@ -206,7 +210,7 @@
 
 ### 2. 上帝对象与文件规模
 
-- `daemon_runner.rs` 当前 858 行，**禁止继续膨胀**。新增网络组件（如 DERP、WebSocket proxy）时，必须拆分为独立模块（如 `discovery_task.rs`、`relay_task.rs`、`dial_task.rs`）。
+- `daemon_runner.rs` 当前 421 行，**禁止继续膨胀**。新增网络组件（如 DERP、WebSocket proxy）时，必须拆分为独立模块（如 `discovery_task.rs`、`relay_task.rs`、`dial_task.rs`）。
 - 单文件软上限：**600 行**。超过需拆分时，应在 Plan 阶段明确拆分方案。
 
 ### 3. Trait 唯一性

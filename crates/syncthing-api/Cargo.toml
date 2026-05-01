@@ -2,10 +2,10 @@
 name = "syncthing-api"
 version = "0.2.0"
 edition = "2021"
-authors = ["Agent-F <UNVERIFIED>"]
-description = "REST API and configuration - UNVERIFIED DELIVERY"
-license = "MPL-2.0"
-publish = false
+authors = ["juice094"]
+description = "REST API and configuration for Syncthing Rust"
+license = "MIT"
+
 
 [dependencies]
 syncthing-core = { path = "../syncthing-core" }

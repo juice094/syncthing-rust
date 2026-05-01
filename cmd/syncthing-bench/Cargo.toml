@@ -1,0 +1,24 @@
+[package]
+name = "syncthing-bench"
+version = "0.2.0"
+edition = "2021"
+description = "Syncthing sync benchmark tool — generates test datasets and verifies sync correctness"
+license = "MIT"
+publish = false
+
+[[bin]]
+name = "syncthing-bench"
+path = "src/main.rs"
+
+[dependencies]
+anyhow = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+sha2 = { workspace = true }
+rand = { workspace = true }
+hex = { workspace = true }
+walkdir = { workspace = true }
+clap = { version = "4.5", features = ["derive"] }
+tokio = { workspace = true }

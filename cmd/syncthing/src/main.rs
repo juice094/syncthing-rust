@@ -8,11 +8,11 @@ use std::sync::atomic::{AtomicI32, Ordering};
 
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
-use tracing::{debug, info, warn, Level};
+use tracing::{debug, warn, Level};
 use tracing_subscriber::{layer::SubscriberExt, Layer as _, FmtSubscriber};
 
 use syncthing_core::types::Config;
-use syncthing_net::SyncthingTlsConfig;
+
 use syncthing_sync::BlockSource;
 
 /// Syncthing 命令行参数
@@ -58,52 +58,9 @@ enum Commands {
         device_name: String,
     },
 
-    /// 生成新的设备证书
-    GenerateCert {
-        /// 设备名称
-        #[arg(short, long, default_value = "syncthing-rust")]
-        device_name: String,
 
-        /// 强制覆盖现有证书
-        #[arg(short, long)]
-        force: bool,
-    },
-
-    /// 显示设备ID
-    ShowId,
-
-    /// 运行同步基准测试
-    Syncbench {
-        /// 测试场景
-        #[arg(value_enum)]
-        scenario: syncbench::Scenario,
-
-        /// 源目录（生成测试数据）
-        #[arg(long)]
-        source_dir: Option<PathBuf>,
-
-        /// 目标目录（验证同步结果）
-        #[arg(long)]
-        target_dir: Option<PathBuf>,
-    },
-
-    /// Flush collected metrics to CSV
-    MetricsFlush {
-        /// Output CSV path
-        #[arg(default_value = "syncthing_metrics.csv")]
-        output: PathBuf,
-    },
 }
 
-/// 获取默认配置目录
-///
-/// Windows: %LOCALAPPDATA%/syncthing-rust
-/// Linux/macOS: ~/.local/share/syncthing-rust
-fn default_config_dir() -> PathBuf {
-    dirs::data_local_dir()
-        .map(|d| d.join("syncthing-rust"))
-        .unwrap_or_else(|| PathBuf::from(".syncthing-rust"))
-}
 
 /// 配置文件名
 const CONFIG_FILE_NAME: &str = "config.json";
@@ -128,7 +85,6 @@ fn save_config(path: &PathBuf, config: &Config) -> anyhow::Result<()> {
 
 mod tui;
 mod logging_buffer;
-mod syncbench;
 use syncthing::api_server;
 
 /// Resolve listen/device_name from config file, overridden by CLI args.
@@ -172,7 +128,7 @@ async fn main() -> Result<()> {
     let cli = Cli::parse();
 
     // 确定配置目录
-    let config_dir = cli.config_dir.unwrap_or_else(default_config_dir);
+    let config_dir = cli.config_dir.unwrap_or_else(syncthing_core::paths::default_config_dir);
     let log_level = cli
         .log_level
         .parse::<Level>()
@@ -216,19 +172,7 @@ async fn main() -> Result<()> {
             let (listen, device_name) = resolve_daemon_config(&config_dir, listen, device_name)?;
             cmd_tui(&config_dir, &listen, &device_name, memory_buffer).await?;
         }
-        Commands::GenerateCert { device_name, force } => {
-            cmd_generate_cert(&config_dir, &device_name, force).await?;
-        }
-        Commands::ShowId => {
-            cmd_show_id(&config_dir).await?;
-        }
-        Commands::Syncbench { scenario, source_dir, target_dir } => {
-            syncbench::cmd_syncbench(scenario, source_dir, target_dir).await?;
-        }
-        Commands::MetricsFlush { output } => {
-            syncthing_net::metrics::global().flush_to_csv(&output)?;
-            println!("Metrics flushed to {:?}", output);
-        }
+
     }
 
     Ok(())
@@ -384,95 +328,11 @@ async fn cmd_tui(
     .await
 }
 
-/// 生成新的设备证书
-async fn cmd_generate_cert(config_dir: &PathBuf, device_name: &str, force: bool) -> Result<()> {
-    info!("Generating new device certificate...");
-    info!("Config directory: {:?}", config_dir);
-    info!("Device name: {}", device_name);
-
-    // 确保证书目录存在
-    if !config_dir.exists() {
-        tokio::fs::create_dir_all(config_dir).await?;
-    }
-
-    let cert_path = config_dir.join(syncthing_net::tls::CERT_FILE_NAME);
-    let key_path = config_dir.join(syncthing_net::tls::KEY_FILE_NAME);
-
-    // 检查是否已存在
-    if cert_path.exists() || key_path.exists() {
-        if force {
-            warn!("Existing certificates will be overwritten");
-        } else {
-            anyhow::bail!(
-                "Certificates already exist. Use --force to overwrite, or use 'show-id' command to view the current device ID"
-            );
-        }
-    }
-
-    // 删除现有证书（如果存在）
-    if cert_path.exists() {
-        tokio::fs::remove_file(&cert_path).await?;
-    }
-    if key_path.exists() {
-        tokio::fs::remove_file(&key_path).await?;
-    }
-
-    // 生成新证书（使用 load_or_generate 会生成并保存）
-    let tls_config = SyncthingTlsConfig::load_or_generate(config_dir)
-        .await
-        .context("failed to generate certificate")?;
-
-    let device_id = tls_config.device_id();
-
-    println!("✅ 证书生成成功！");
-    println!();
-    println!("设备ID: {}", device_id);
-    println!("证书路径: {:?}", cert_path);
-    println!("私钥路径: {:?}", key_path);
-    println!();
-    println!("请妥善保管您的私钥文件！");
-
-    Ok(())
-}
-
-/// 显示设备ID
-async fn cmd_show_id(config_dir: &Path) -> Result<()> {
-    let cert_path = config_dir.join(syncthing_net::tls::CERT_FILE_NAME);
-    let key_path = config_dir.join(syncthing_net::tls::KEY_FILE_NAME);
-
-    if !cert_path.exists() || !key_path.exists() {
-        println!("❌ 未找到证书文件。请先运行 'generate-cert' 命令生成证书。");
-        println!();
-        println!("预期路径:");
-        println!("  证书: {:?}", cert_path);
-        println!("  私钥: {:?}", key_path);
-        return Ok(());
-    }
-
-    // 加载现有证书
-    let tls_config = SyncthingTlsConfig::load_or_generate(config_dir)
-        .await
-        .context("failed to load certificate")?;
-
-    let device_id = tls_config.device_id();
-
-    println!("设备ID: {}", device_id);
-    println!("短ID:   {}", device_id.short_id());
-    println!();
-    println!("证书路径: {:?}", cert_path);
-    println!("私钥路径: {:?}", key_path);
-
-    Ok(())
-}
-
-#[cfg(test)]
-use syncthing::test_harness;
-
 #[cfg(test)]
 mod tests {
     use std::sync::Arc;
     use super::*;
-    use syncthing_net::{ConnectionManager, ConnectionManagerConfig};
+    use syncthing_net::{ConnectionManager, ConnectionManagerConfig, SyncthingTlsConfig};
     use syncthing_sync::{SyncService, database::MemoryDatabase};
 
     #[tokio::test]
@@ -605,36 +465,4 @@ mod tests {
         let _ = std::fs::remove_dir_all(&tmp_dir);
     }
 
-    #[tokio::test]
-    async fn test_two_node_empty_folder_handshake() {
-        let node_a = test_harness::TestNode::new("a").await.expect("create node a");
-        let node_b = test_harness::TestNode::new("b").await.expect("create node b");
-
-        // 创建共享文件夹
-        let folder_a_path = node_a.config_dir.join("sync");
-        let folder_b_path = node_b.config_dir.join("sync");
-        let mut folder_a = syncthing_core::types::Folder::new("default", folder_a_path.to_str().unwrap());
-        folder_a.devices.push(node_b.device_id);
-        node_a.add_folder(folder_a).await.expect("a add folder");
-
-        let mut folder_b = syncthing_core::types::Folder::new("default", folder_b_path.to_str().unwrap());
-        folder_b.devices.push(node_a.device_id);
-        node_b.add_folder(folder_b).await.expect("b add folder");
-
-        // 互相配置对端并发起连接
-        node_a.connect_to(&node_b).await.expect("a connect to b");
-        node_b.connect_to(&node_a).await.expect("b connect to a");
-
-        // 等待连接建立
-        node_a.wait_for_connection(node_b.device_id, std::time::Duration::from_secs(15))
-            .await
-            .expect("a wait for b");
-        node_b.wait_for_connection(node_a.device_id, std::time::Duration::from_secs(15))
-            .await
-            .expect("b wait for a");
-
-        // 清理
-        node_a.shutdown().await;
-        node_b.shutdown().await;
-    }
 }

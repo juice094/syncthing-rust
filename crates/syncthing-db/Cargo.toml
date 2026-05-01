@@ -2,10 +2,10 @@
 name = "syncthing-db"
 version = "0.2.0"
 edition = "2021"
-authors = ["Agent-E <UNVERIFIED>"]
-description = "Block and metadata storage - UNVERIFIED DELIVERY"
-license = "MPL-2.0"
-publish = false
+authors = ["juice094"]
+description = "Block and metadata storage for Syncthing Rust"
+license = "MIT"
+
 
 [dependencies]
 syncthing-core = { path = "../syncthing-core" }
