@@ -14,7 +14,7 @@
 | 维度 | 状态 |
 |------|------|
 | 功能完成度 | Phase 1~5 核心集成完成（BEP / Network / Sync / TUI / Discovery→CM） |
-| 测试 | 294 passed, 3 ignored, 0 failed |
+| 测试 | 308 passed, 3 ignored, 0 failed |
 | 静态检查 | 0 clippy warnings |
 | 安全审计 | **3 unmaintained warnings**（paste/instant/fxhash），均为上游传递依赖，无漏洞。`lru` 已自动消除（0.16.4）。 |
 | 外部阻塞 | 格雷端 BEP 互通验证（等待格雷确认网络状态） — 不阻塞开发主路径 |
@@ -50,7 +50,7 @@
 |------|----------|--------|--------|----------|
 | **72h stress test 执行** | 🔴 高（稳定性未知） | 大 | **P0** | 无法宣称"Beta 可信"直到通过长时间验证；已有 `bin/stress_test.rs`，只需执行 |
 | **跨版本 Rust 互通验证** | 🔴 高（当前阻塞） | 中 | **P0** | 新版 `main` ↔ 格雷侧 pre-fix Rust 的实际连通性；解阻塞后冻结新功能修 bug |
-| **L3-APIW sub-gaps** | 🟡 中（功能缺口） | 小 | **P1** | YAGNI 的反面：已有 API 接口但行为不完整，属于"未完成的工作" |
+| **L3-APIW sub-gaps** | 🟡 中（功能缺口） | 小 | **P1** | `device` pause/resume body 已修复（`should_reconnect` 排除 paused 原因）；`sub` scan / override / revert 已完成 |
 | **cargo audit 债务接受** | 🟢 低（unmaintained ≠ vulnerable，无 actionable 路径） | 小 | **P3** | 所有直接依赖均已最新稳定版；3 个警告位于 sled/netlink-packet-core 上游，无法从本项目消除 |
 | **.stignore pattern matching** | 🟡 中（兼容性缺口） | 中 | **P2** | `syncthing-sync/src/ignore.rs` 简化版已可用；`syncthing-fs` 完整版标为 unverified，按需激活 |
 | **L1-PM2 PCP/NAT-PMP** | 🟢 低（UPnP 已覆盖多数场景） | 中 | **P3** | 增量优化，非阻塞；家用路由器 UPnP 普及率 >80% |
@@ -179,6 +179,8 @@
 - [x] 审计全部 6 份计划书，识别过时/虚假声明
 - [x] 归档 4 份过时计划（MVP_RECOVERY / PHASE4 / WAVE3 / improvement-plan）
 - [x] 修正 PHASE3 勘误（Go 节点 → 格雷侧旧版 Rust）
-- [ ] 创建 `.cargo/audit.toml`，接受 3 个 unmaintained 警告
-- [ ] 本地执行 `bin/stress_test` 短周期预验证（2~4h）
-- [ ] 更新 AGENTS.md 修正 `daemon_runner.rs` 行数等错误信息
+- [x] 创建 `.cargo/audit.toml`，接受 3 个 unmaintained 警告
+- [x] 本地执行 `bin/stress_test` 短周期预验证（2~4h）
+- [x] 更新 AGENTS.md 修正 `daemon_runner.rs` 行数等错误信息
+- [x] 组件分发拆分（`syncthing-bench` / `syncthing-cli`）
+- [x] 解耦工作（元数据统一 / `test_harness` 归位 / E2E 测试外迁 / API 收敛）

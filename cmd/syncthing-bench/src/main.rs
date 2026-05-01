@@ -1,39 +1,44 @@
+//! Syncthing sync benchmark tool
+//!
+//! Generates test datasets and verifies sync correctness via SHA-256 manifests.
+
 use anyhow::{Context, Result};
+use clap::Parser;
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use tracing::{info, warn};
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct SyncBenchReport {
-    pub scenario: String,
-    pub source_dir: String,
-    pub target_dir: String,
-    pub files_total: usize,
-    pub files_matched: usize,
-    pub files_missing: Vec<String>,
-    pub files_mismatch: Vec<String>,
-    pub duration_ms: u64,
-    pub success: bool,
+struct SyncBenchReport {
+    scenario: String,
+    source_dir: String,
+    target_dir: String,
+    files_total: usize,
+    files_matched: usize,
+    files_missing: Vec<String>,
+    files_mismatch: Vec<String>,
+    duration_ms: u64,
+    success: bool,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct FileManifest {
-    pub path: String,
-    pub size: u64,
-    pub sha256: String,
+struct FileManifest {
+    path: String,
+    size: u64,
+    sha256: String,
 }
 
 #[derive(Debug, Clone, Copy, clap::ValueEnum)]
-pub enum Scenario {
-    Small,   // 4 KB single file
-    Medium,  // 10 MB single file
-    Large,   // 1 GB single file
-    Mixed,   // 1000 files, varying sizes
+enum Scenario {
+    Small,
+    Medium,
+    Large,
+    Mixed,
 }
 
 impl Scenario {
-    pub fn generate(&self, root: &Path) -> Result<Vec<FileManifest>> {
+    fn generate(&self, root: &Path) -> Result<Vec<FileManifest>> {
         let _ = std::fs::remove_dir_all(root);
         std::fs::create_dir_all(root)?;
 
@@ -81,7 +86,7 @@ fn write_random_file(dir: &Path, name: &str, size: usize) -> Result<FileManifest
     })
 }
 
-pub fn compute_manifest(dir: &Path) -> Result<Vec<FileManifest>> {
+fn compute_manifest(dir: &Path) -> Result<Vec<FileManifest>> {
     let mut manifests = Vec::new();
     if !dir.exists() {
         return Ok(manifests);
@@ -102,10 +107,9 @@ pub fn compute_manifest(dir: &Path) -> Result<Vec<FileManifest>> {
     Ok(manifests)
 }
 
-pub fn run(scenario: Scenario, source: &Path, target: &Path) -> Result<SyncBenchReport> {
+fn run(scenario: Scenario, source: &Path, target: &Path) -> Result<SyncBenchReport> {
     let start = std::time::Instant::now();
 
-    // Generate source dataset if source dir is empty or --regenerate semantics are implied
     let source_manifests = if source.exists() && std::fs::read_dir(source)?.next().is_some() {
         info!("Using existing source dataset at {:?}", source);
         compute_manifest(source)?
@@ -180,10 +184,10 @@ pub fn run(scenario: Scenario, source: &Path, target: &Path) -> Result<SyncBench
     info!("Report written to {:?}", report_path);
 
     if success {
-        info!("✅ Syncbench PASSED: all {} files matched", files_matched);
+        info!("Syncbench PASSED: all {} files matched", files_matched);
     } else {
         warn!(
-            "❌ Syncbench FAILED: matched={}, missing={}, mismatch={}",
+            "Syncbench FAILED: matched={}, missing={}, mismatch={}",
             files_matched,
             report.files_missing.len(),
             report.files_mismatch.len()
@@ -193,19 +197,37 @@ pub fn run(scenario: Scenario, source: &Path, target: &Path) -> Result<SyncBench
     Ok(report)
 }
 
-pub async fn cmd_syncbench(
+#[derive(Parser, Debug)]
+#[command(name = "syncthing-bench")]
+#[command(about = "Syncthing sync benchmark tool")]
+struct Cli {
+    /// Benchmark scenario
+    #[arg(value_enum)]
     scenario: Scenario,
+
+    /// Source directory (test data generated here if empty)
+    #[arg(long)]
     source_dir: Option<PathBuf>,
+
+    /// Target directory (verify sync result)
+    #[arg(long)]
     target_dir: Option<PathBuf>,
-) -> Result<()> {
-    let source = source_dir.unwrap_or_else(|| {
+}
+
+#[tokio::main]
+async fn main() -> Result<()> {
+    tracing_subscriber::fmt::init();
+
+    let cli = Cli::parse();
+
+    let source = cli.source_dir.unwrap_or_else(|| {
         std::env::temp_dir().join(format!("syncthing_bench_source_{}", std::process::id()))
     });
-    let target = target_dir.unwrap_or_else(|| {
+    let target = cli.target_dir.unwrap_or_else(|| {
         std::env::temp_dir().join(format!("syncthing_bench_target_{}", std::process::id()))
     });
 
-    let report = run(scenario, &source, &target)?;
+    let report = run(cli.scenario, &source, &target)?;
     println!("{}", serde_json::to_string_pretty(&report)?);
     Ok(())
 }

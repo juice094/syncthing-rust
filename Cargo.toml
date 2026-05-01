@@ -12,6 +12,8 @@ members = [
     "crates/bep-protocol",
     "cmd/syncthing",
     "cmd/syncthing-mcp-bridge",
+    "cmd/syncthing-bench",
+    "cmd/syncthing-cli",
 ]
 
 [workspace.dependencies]

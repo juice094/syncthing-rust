@@ -13,6 +13,7 @@ syncthing-net = { path = "../../crates/syncthing-net" }
 syncthing-sync = { path = "../../crates/syncthing-sync" }
 syncthing-api = { path = "../../crates/syncthing-api" }
 bep-protocol = { path = "../../crates/bep-protocol" }
+syncthing-test-utils = { path = "../../crates/syncthing-test-utils" }
 
 tokio = { workspace = true }
 tracing = { workspace = true }
@@ -23,15 +24,14 @@ anyhow = "1.0"
 bytes = { workspace = true }
 async-trait = { workspace = true }
 serde = { workspace = true }
-serde_json = { workspace = true }
-sha2 = { workspace = true }
 rand = { workspace = true }
+serde_json = { workspace = true }
+
 ratatui = "0.30"
 crossterm = "0.28"
 rustls = { workspace = true, features = ["ring"] }
 dashmap = { workspace = true }
 parking_lot = { workspace = true }
-walkdir = { workspace = true }
-hex = { workspace = true }
+
 axum = "0.7"
 arboard = "3.6.1"
