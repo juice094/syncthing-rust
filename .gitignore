@@ -45,3 +45,6 @@ test_gray_folder/
 stress-test-*.csv
 stress-test-data/
 
+
+.devbase/
+
