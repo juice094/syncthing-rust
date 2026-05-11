@@ -1,6 +1,6 @@
 [package]
 name = "syncthing-cli"
-version = "0.2.2"
+version = "0.2.3"
 edition = "2021"
 description = "Syncthing command-line utilities: generate-cert, show-id, metrics-flush"
 license = "MIT"

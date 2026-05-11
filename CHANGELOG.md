@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.2.3] — 2026-05-11
+
+### Infrastructure & Quality
+
+- **CI Full Green**: Fixed workspace-wide `cargo fmt` and `cargo clippy` violations (118 files, 10 clippy auto-fixes). All 7 CI jobs now pass on `ubuntu-latest` and `windows-latest`.
+
 ## [0.2.2] — 2026-05-11
 
 ### Infrastructure & Quality
