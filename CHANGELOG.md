@@ -1,5 +1,19 @@
 # Changelog
 
+## [Unreleased]
+
+### Infrastructure & Quality
+
+- **72h Stress Test Launched**: `stress_test` binary now runs with Windows Scheduled Task auto-resume (fault injection every 30 min, file injection every 5 min). See `scripts/register-stress-task.ps1`.
+- **GitHub Community Health**: Added `.github/ISSUE_TEMPLATE/`, `.github/PULL_REQUEST_TEMPLATE.md`, `.github/workflows/ci.yml`, and `CODE_OF_CONDUCT.md`.
+- **README Maintenance**: Fixed stale "72h not started" status, removed encoding artifacts (`格雷侧`), added Stress Test quick-start block.
+
+### Documentation
+
+- Tuning plan published: `docs/plans/TUNING_PLAN_2026-05-11.md` — cross-cut performance/stability/architecture-debt roadmap.
+
+---
+
 ## [0.2.0] — 2026-04-26
 
 ### Overview
