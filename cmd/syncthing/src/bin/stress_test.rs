@@ -186,9 +186,16 @@ async fn main() -> anyhow::Result<()> {
     let monitor_task = tokio::spawn(async move {
         let tick_secs = if duration.as_secs() < 600 { 10 } else { 600 };
         let mut ticker = interval_at(tokio::time::Instant::now() + Duration::from_secs(5), Duration::from_secs(tick_secs));
-        let mut sys = System::new_with_specifics(
-            RefreshKind::new().with_processes(ProcessRefreshKind::new()),
-        );
+        // T-F1: memory sampling via spawn_blocking to avoid freezing tokio worker on Windows
+        let sysinfo_task = move || {
+            let mut sys = System::new_with_specifics(
+                RefreshKind::new().with_processes(ProcessRefreshKind::new()),
+            );
+            sys.refresh_processes_specifics(ProcessRefreshKind::new());
+            sys.processes_by_exact_name("syncthing".as_ref())
+                .map(|p| p.memory() / 1024 / 1024)
+                .sum::<u64>()
+        };
         // T-A3: metrics CSV header
         {
             let hdr = "timestamp,elapsed_secs,connected_a_b,connected_b_a,folder_state_a,folder_state_b,files_a,files_b,errors,rss_mb\n";
@@ -217,11 +224,10 @@ async fn main() -> anyhow::Result<()> {
             let files_b = count_files(&monitor_fb).await;
             let errors = monitor_errors.load(Ordering::Relaxed);
 
-            // Memory sampling (T-F1)
-            sys.refresh_processes_specifics(ProcessRefreshKind::new());
-            let rss_mb = sys.processes_by_exact_name("syncthing".as_ref())
-                .map(|p| p.memory() / 1024 / 1024)
-                .sum::<u64>();
+            // Memory sampling (T-F1) - spawn_blocking for Windows stability
+            let rss_mb = tokio::task::spawn_blocking(sysinfo_task.clone())
+                .await
+                .unwrap_or(0);
 
             let ts = fmt_system_time(SystemTime::now());
             let line = format!(
@@ -363,9 +369,12 @@ async fn count_files(path: &PathBuf) -> usize {
 
 async fn append_to_file(path: &PathBuf, line: String) -> anyhow::Result<()> {
     let mut file = tokio::fs::OpenOptions::new()
+        .create(true)
         .append(true)
+        .write(true)
         .open(path)
         .await?;
     file.write_all(line.as_bytes()).await?;
+    file.flush().await?;
     Ok(())
 }
