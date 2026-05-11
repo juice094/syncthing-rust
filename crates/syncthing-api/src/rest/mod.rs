@@ -25,26 +25,34 @@ use tower_http::cors::CorsLayer;
 use tower_http::trace::TraceLayer;
 use tracing::info;
 
-use syncthing_core::traits::{ConfigStore, SyncModel, ConnectionManager, FolderDatabase};
-use syncthing_core::{DeviceId, Result, SyncthingError};
 use sha2::{Digest, Sha256};
+use syncthing_core::traits::{ConfigStore, ConnectionManager, FolderDatabase, SyncModel};
+use syncthing_core::{DeviceId, Result, SyncthingError};
 
 use crate::events::EventBus;
 use crate::handlers;
 
-mod folder;
-mod device;
-mod system;
-mod system_ops;
 mod config;
 mod db;
+mod device;
+mod folder;
+mod system;
+mod system_ops;
 
-use folder::{list_folders, get_folder, create_folder, update_folder, delete_folder, get_folder_status};
-use device::{list_devices, get_device, add_device, remove_device, update_device};
-use system::{get_status, get_system_status, get_db_status, get_db_completion, get_connections, get_system_connections};
-use system_ops::{pause_all, pause_folder, resume_all, resume_folder, system_config_post, system_restart, system_shutdown, system_pause, system_resume};
 use config::{get_config, update_config};
-use db::{trigger_scan, trigger_folder_scan, db_scan_post, db_override, db_revert};
+use db::{db_override, db_revert, db_scan_post, trigger_folder_scan, trigger_scan};
+use device::{add_device, get_device, list_devices, remove_device, update_device};
+use folder::{
+    create_folder, delete_folder, get_folder, get_folder_status, list_folders, update_folder,
+};
+use system::{
+    get_connections, get_db_completion, get_db_status, get_status, get_system_connections,
+    get_system_status,
+};
+use system_ops::{
+    pause_all, pause_folder, resume_all, resume_folder, system_config_post, system_pause,
+    system_restart, system_resume, system_shutdown,
+};
 
 /// API server state shared across handlers
 #[derive(Clone)]
@@ -109,15 +117,11 @@ async fn api_key_middleware(
         if key.is_empty() {
             return Ok(next.run(req).await);
         }
-        let header = req
-            .headers()
-            .get("x-api-key")
-            .and_then(|v| v.to_str().ok());
+        let header = req.headers().get("x-api-key").and_then(|v| v.to_str().ok());
         let query = req.uri().query().and_then(|q| {
             q.split('&').find_map(|pair| {
                 let (k, v) = pair.split_once('=')?;
-                
-                
+
                 if k.eq_ignore_ascii_case("X-API-Key") {
                     Some(v)
                 } else {
@@ -181,7 +185,10 @@ impl RestApi {
             )
             // Device management
             .route("/rest/devices", get(list_devices).post(add_device))
-            .route("/rest/device/:id", get(get_device).put(update_device).delete(remove_device))
+            .route(
+                "/rest/device/:id",
+                get(get_device).put(update_device).delete(remove_device),
+            )
             // Status queries - Go原版兼容
             .route("/rest/status", get(get_status))
             .route("/rest/system/status", get(get_system_status))
@@ -199,10 +206,19 @@ impl RestApi {
             .route("/rest/resume/:id", post(resume_folder))
             // Config
             .route("/rest/config", get(get_config).put(update_config))
-            .route("/rest/config/folders", get(list_folders).post(create_folder))
-            .route("/rest/config/folders/:id", get(get_folder).put(update_folder).delete(delete_folder))
+            .route(
+                "/rest/config/folders",
+                get(list_folders).post(create_folder),
+            )
+            .route(
+                "/rest/config/folders/:id",
+                get(get_folder).put(update_folder).delete(delete_folder),
+            )
             .route("/rest/config/devices", get(list_devices).post(add_device))
-            .route("/rest/config/devices/:id", get(get_device).put(update_device).delete(remove_device))
+            .route(
+                "/rest/config/devices/:id",
+                get(get_device).put(update_device).delete(remove_device),
+            )
             // System operations — Go canonical paths
             .route("/rest/system/config", post(system_config_post))
             .route("/rest/system/restart", post(system_restart))
@@ -308,14 +324,14 @@ pub(crate) fn parse_address(a: &String) -> syncthing_core::types::AddressType {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
-    use axum::extract::{Path, State};
-    use axum::Json;
-    use crate::config::MemoryConfigStore;
-    use crate::events::EventBus;
-    use super::ApiState;
     use super::health_check;
     use super::parse_device_id;
+    use super::ApiState;
+    use crate::config::MemoryConfigStore;
+    use crate::events::EventBus;
+    use axum::extract::{Path, State};
+    use axum::Json;
+    use std::sync::Arc;
 
     fn create_test_state() -> ApiState {
         let config_store = Arc::new(MemoryConfigStore::new());
@@ -350,11 +366,13 @@ mod tests {
             versioning: None,
         };
 
-        let _create_result = super::folder::create_folder(State(state.clone()), Json(create_request)).await;
+        let _create_result =
+            super::folder::create_folder(State(state.clone()), Json(create_request)).await;
         // Handler returns impl IntoResponse
 
         // Get folder
-        let _get_result = super::folder::get_folder(State(state), Path("test-folder".to_string())).await;
+        let _get_result =
+            super::folder::get_folder(State(state), Path("test-folder".to_string())).await;
         // Handler returns impl IntoResponse
     }
 
@@ -375,10 +393,12 @@ mod tests {
         super::folder::create_folder(State(state.clone()), Json(create_request)).await;
 
         // Delete folder
-        let _delete_result = super::folder::delete_folder(State(state.clone()), Path("delete-me".to_string())).await;
+        let _delete_result =
+            super::folder::delete_folder(State(state.clone()), Path("delete-me".to_string())).await;
 
         // Verify it's gone - this would need proper response inspection
-        let _get_result = super::folder::get_folder(State(state), Path("delete-me".to_string())).await;
+        let _get_result =
+            super::folder::get_folder(State(state), Path("delete-me".to_string())).await;
     }
 
     #[test]

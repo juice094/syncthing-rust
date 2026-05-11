@@ -90,10 +90,7 @@ impl FolderWatcher {
     /// # Ok(())
     /// # }
     /// ```
-    pub async fn new(
-        path: &Path,
-        callback: impl Fn(FsEvent) + Send + 'static,
-    ) -> Result<Self> {
+    pub async fn new(path: &Path, callback: impl Fn(FsEvent) + Send + 'static) -> Result<Self> {
         let path = path.to_path_buf();
 
         // Create channel for notify events
@@ -279,9 +276,8 @@ impl EventCollector {
         match &event {
             FsEvent::Created(path) => {
                 // Remove any previous removed event for the same path
-                self.events.retain(|e| {
-                    !matches!(e, FsEvent::Removed(p) if p == path)
-                });
+                self.events
+                    .retain(|e| !matches!(e, FsEvent::Removed(p) if p == path));
             }
             FsEvent::Removed(path) => {
                 // Remove any previous events for this path
@@ -319,7 +315,9 @@ impl Default for EventCollector {
 ///
 /// Useful when you want to poll for events rather than
 /// receive them via callback.
-pub async fn create_buffer_watcher(path: &Path) -> Result<(FolderWatcher, Arc<tokio::sync::Mutex<Vec<FsEvent>>>)> {
+pub async fn create_buffer_watcher(
+    path: &Path,
+) -> Result<(FolderWatcher, Arc<tokio::sync::Mutex<Vec<FsEvent>>>)> {
     let buffer = Arc::new(tokio::sync::Mutex::new(Vec::new()));
     let buffer_clone = buffer.clone();
 

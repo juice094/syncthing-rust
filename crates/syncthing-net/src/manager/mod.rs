@@ -102,29 +102,27 @@ impl ConnectionManager {
             "syncthing-rust".to_string(),
         ));
 
-        let manager = Arc::new_cyclic(|weak| {
-            Self {
-                config,
-                identity,
-                local_device_id,
-                connections: DashMap::new(),
-                conn_id_index: DashMap::new(),
-                pending_connections: TokioRwLock::new(HashMap::new()),
-                device_addresses: DashMap::new(),
-                device_relay_urls: DashMap::new(),
-                event_tx,
-                event_rx: RwLock::new(Some(event_rx)),
-                running: RwLock::new(false),
-                maintenance_handle: RwLock::new(None),
-                netmon_handle: RwLock::new(None),
-                on_connected: RwLock::new(None),
-                on_disconnected: RwLock::new(None),
-                self_weak: RwLock::new(Some(weak.clone())),
-                parallel_dialer,
-                tls_config,
-                transport_registry: RwLock::new(None),
-                listen_addr: RwLock::new(None),
-            }
+        let manager = Arc::new_cyclic(|weak| Self {
+            config,
+            identity,
+            local_device_id,
+            connections: DashMap::new(),
+            conn_id_index: DashMap::new(),
+            pending_connections: TokioRwLock::new(HashMap::new()),
+            device_addresses: DashMap::new(),
+            device_relay_urls: DashMap::new(),
+            event_tx,
+            event_rx: RwLock::new(Some(event_rx)),
+            running: RwLock::new(false),
+            maintenance_handle: RwLock::new(None),
+            netmon_handle: RwLock::new(None),
+            on_connected: RwLock::new(None),
+            on_disconnected: RwLock::new(None),
+            self_weak: RwLock::new(Some(weak.clone())),
+            parallel_dialer,
+            tls_config,
+            transport_registry: RwLock::new(None),
+            listen_addr: RwLock::new(None),
         });
 
         let handle = ConnectionManagerHandle {
@@ -154,11 +152,16 @@ impl ConnectionManager {
     pub fn set_transport_registry(&self, registry: Arc<TransportRegistry>) {
         // 若注册表包含默认传输，同步更新 ParallelDialer 的连接器
         if let Some(transport) = registry.default_transport() {
-            let connector = Arc::new(crate::transport::bep_adapter::TransportBepConnector::new(transport));
+            let connector = Arc::new(crate::transport::bep_adapter::TransportBepConnector::new(
+                transport,
+            ));
             self.parallel_dialer.set_connector(connector);
         }
         *self.transport_registry.write() = Some(registry);
-        info!("Transport registry set with schemes: {:?}", self.transport_registry.read().as_ref().unwrap().schemes());
+        info!(
+            "Transport registry set with schemes: {:?}",
+            self.transport_registry.read().as_ref().unwrap().schemes()
+        );
     }
 
     /// 启动连接管理器
@@ -169,10 +172,15 @@ impl ConnectionManager {
 
         info!("Starting connection manager...");
 
-        let self_weak = self.self_weak.read().clone()
-            .ok_or_else(|| SyncthingError::config("connection manager not properly initialized"))?;
-        let handle = ConnectionManagerHandle { inner: self_weak.upgrade()
-            .ok_or_else(|| SyncthingError::config("connection manager dropped"))? };
+        let self_weak =
+            self.self_weak.read().clone().ok_or_else(|| {
+                SyncthingError::config("connection manager not properly initialized")
+            })?;
+        let handle = ConnectionManagerHandle {
+            inner: self_weak
+                .upgrade()
+                .ok_or_else(|| SyncthingError::config("connection manager dropped"))?,
+        };
 
         // Phase 2：优先使用 TransportRegistry，否则回退到旧式 TcpTransport
         let default_transport = {
@@ -188,10 +196,15 @@ impl ConnectionManager {
                 self.local_device_id,
                 "syncthing-rust".to_string(),
                 Arc::clone(&self.tls_config),
-            ).await {
+            )
+            .await
+            {
                 Ok(addr) => addr,
                 Err(e) if self.config.listen_addr.port() != 0 => {
-                    warn!("Transport listener failed to bind to {}, trying random port: {}", self.config.listen_addr, e);
+                    warn!(
+                        "Transport listener failed to bind to {}, trying random port: {}",
+                        self.config.listen_addr, e
+                    );
                     let fallback_addr = "0.0.0.0:0".to_string();
                     crate::transport::bep_adapter::BepTransportListener::start(
                         transport,
@@ -200,7 +213,8 @@ impl ConnectionManager {
                         self.local_device_id,
                         "syncthing-rust".to_string(),
                         Arc::clone(&self.tls_config),
-                    ).await?
+                    )
+                    .await?
                 }
                 Err(e) => return Err(e),
             }
@@ -217,7 +231,10 @@ impl ConnectionManager {
             match tcp_transport.start().await {
                 Ok(addr) => addr,
                 Err(e) if self.config.listen_addr.port() != 0 => {
-                    warn!("Failed to bind TCP listener to {}, trying random port: {}", self.config.listen_addr, e);
+                    warn!(
+                        "Failed to bind TCP listener to {}, trying random port: {}",
+                        self.config.listen_addr, e
+                    );
                     let fallback_addr: SocketAddr = "0.0.0.0:0".parse().unwrap();
                     let mut tcp_transport_fallback = TcpTransport::new(
                         fallback_addr,
@@ -272,21 +289,20 @@ impl ConnectionManager {
 
     /// 获取连接（返回首个存活连接）
     pub(crate) fn get_connection(&self, device_id: &DeviceId) -> Option<Arc<BepConnection>> {
-        self.connections
-            .get(device_id)
-            .and_then(|nested| {
-                nested.iter()
-                    .find(|e| e.value().conn.is_alive())
-                    .map(|e| Arc::clone(&e.value().conn))
-            })
+        self.connections.get(device_id).and_then(|nested| {
+            nested
+                .iter()
+                .find(|e| e.value().conn.is_alive())
+                .map(|e| Arc::clone(&e.value().conn))
+        })
     }
 
     /// 按连接ID获取连接
     pub(crate) fn get_connection_by_id(&self, conn_id: &uuid::Uuid) -> Option<Arc<BepConnection>> {
         self.conn_id_index.get(conn_id).and_then(|device_id| {
-            self.connections.get(&*device_id).and_then(|nested| {
-                nested.get(conn_id).map(|e| Arc::clone(&e.conn))
-            })
+            self.connections
+                .get(&*device_id)
+                .and_then(|nested| nested.get(conn_id).map(|e| Arc::clone(&e.conn)))
         })
     }
 
@@ -325,23 +341,29 @@ impl ConnectionManager {
 
         self.cleanup_stale_connections().await;
 
-        let devices: Vec<DeviceId> = self.device_addresses
+        let devices: Vec<DeviceId> = self
+            .device_addresses
             .iter()
             .map(|entry| *entry.key())
             .collect();
 
         for device_id in devices {
             if !self.is_connected(&device_id) {
-                let addresses = self.device_addresses
+                let addresses = self
+                    .device_addresses
                     .get(&device_id)
                     .map(|e| e.clone())
                     .unwrap_or_default();
-                let relay_urls = self.device_relay_urls
+                let relay_urls = self
+                    .device_relay_urls
                     .get(&device_id)
                     .map(|e| e.clone())
                     .unwrap_or_default();
                 if !addresses.is_empty() || !relay_urls.is_empty() {
-                    if let Err(e) = self.connect_to_with_relay(device_id, addresses, relay_urls).await {
+                    if let Err(e) = self
+                        .connect_to_with_relay(device_id, addresses, relay_urls)
+                        .await
+                    {
                         warn!("Rebind redial to {} failed: {}", device_id, e);
                     }
                 }
@@ -361,17 +383,22 @@ impl ConnectionManager {
     /// 安排重连
     pub(crate) async fn schedule_reconnect(&self, device_id: DeviceId) {
         // 获取地址
-        let addresses = self.device_addresses
+        let addresses = self
+            .device_addresses
             .get(&device_id)
             .map(|e| e.clone())
             .unwrap_or_default();
-        let relay_urls = self.device_relay_urls
+        let relay_urls = self
+            .device_relay_urls
             .get(&device_id)
             .map(|e| e.clone())
             .unwrap_or_default();
 
         if addresses.is_empty() && relay_urls.is_empty() {
-            warn!("No addresses available for device {}, skipping reconnect", device_id);
+            warn!(
+                "No addresses available for device {}, skipping reconnect",
+                device_id
+            );
             return;
         }
 
@@ -382,14 +409,17 @@ impl ConnectionManager {
                 p.retry_count += 1;
                 p.retry_count
             } else {
-                pending.insert(device_id, PendingConnection {
+                pending.insert(
                     device_id,
-                    addresses: addresses.clone(),
-                    relay_urls: relay_urls.clone(),
-                    retry_count: 1,
-                    last_attempt: Some(Instant::now()),
-                    _cancel_tx: None,
-                });
+                    PendingConnection {
+                        device_id,
+                        addresses: addresses.clone(),
+                        relay_urls: relay_urls.clone(),
+                        retry_count: 1,
+                        last_attempt: Some(Instant::now()),
+                        _cancel_tx: None,
+                    },
+                );
                 1
             }
         };
@@ -397,7 +427,10 @@ impl ConnectionManager {
         // 计算退避时间
         let backoff = self.config.retry_config.backoff_duration(retry_count);
 
-        info!("Scheduling reconnect to {} in {:?} (retry_count={})", device_id, backoff, retry_count);
+        info!(
+            "Scheduling reconnect to {} in {:?} (retry_count={})",
+            device_id, backoff, retry_count
+        );
 
         // 延迟后重连
         let weak = self.self_weak.read().clone().unwrap();
@@ -407,7 +440,10 @@ impl ConnectionManager {
             if let Some(manager) = weak.upgrade() {
                 // 清除 pending 状态，否则 connect_to 会因"already pending"而直接返回
                 manager.pending_connections.write().await.remove(&device_id);
-                if let Err(e) = manager.connect_to_with_relay(device_id, addresses, relay_urls).await {
+                if let Err(e) = manager
+                    .connect_to_with_relay(device_id, addresses, relay_urls)
+                    .await
+                {
                     warn!("Scheduled reconnect to {} failed: {}", device_id, e);
                 }
             }
@@ -429,7 +465,10 @@ impl ConnectionManager {
         }
 
         for conn_id in stale_conns {
-            if let Err(e) = self.disconnect_connection(&conn_id, "stale connection").await {
+            if let Err(e) = self
+                .disconnect_connection(&conn_id, "stale connection")
+                .await
+            {
                 warn!("Error disconnecting stale connection {}: {}", conn_id, e);
             }
         }
@@ -510,20 +549,14 @@ mod tests {
 
     #[tokio::test]
     async fn test_rebind_triggers_redial() {
-        let tls_config = Arc::new(
-            SyncthingTlsConfig::from_pem(b"", b"").unwrap_or_else(|_| {
-                let (cert, key) = crate::tls::generate_certificate("syncthing-rust-test")
-                    .expect("failed to generate certificate");
-                SyncthingTlsConfig::from_pem(&cert, &key)
-                    .expect("failed to load generated certificate")
-            })
-        );
+        let tls_config = Arc::new(SyncthingTlsConfig::from_pem(b"", b"").unwrap_or_else(|_| {
+            let (cert, key) = crate::tls::generate_certificate("syncthing-rust-test")
+                .expect("failed to generate certificate");
+            SyncthingTlsConfig::from_pem(&cert, &key).expect("failed to load generated certificate")
+        }));
         let identity = Arc::new(crate::identity::TlsIdentity::new(Arc::clone(&tls_config)));
-        let (manager, _handle) = ConnectionManager::new(
-            ConnectionManagerConfig::default(),
-            identity,
-            tls_config,
-        );
+        let (manager, _handle) =
+            ConnectionManager::new(ConnectionManagerConfig::default(), identity, tls_config);
 
         // Register a device address but don't connect
         let device_id = DeviceId::default();
@@ -531,7 +564,9 @@ mod tests {
         manager.device_addresses.insert(device_id, vec![addr]);
 
         // Manually trigger network change handling
-        manager.handle_net_change(NetChangeEvent::InterfacesChanged).await;
+        manager
+            .handle_net_change(NetChangeEvent::InterfacesChanged)
+            .await;
 
         // Verify pending connection was created
         let pending = manager.pending_connections.read().await;
@@ -541,14 +576,11 @@ mod tests {
     #[tokio::test]
     async fn test_transport_registry_start_listen() {
         // Phase 2 验证：ConnectionManager 通过 TransportRegistry 启动监听
-        let tls_config = Arc::new(
-            SyncthingTlsConfig::from_pem(b"", b"").unwrap_or_else(|_| {
-                let (cert, key) = crate::tls::generate_certificate("transport-registry-test")
-                    .expect("failed to generate certificate");
-                SyncthingTlsConfig::from_pem(&cert, &key)
-                    .expect("failed to load generated certificate")
-            })
-        );
+        let tls_config = Arc::new(SyncthingTlsConfig::from_pem(b"", b"").unwrap_or_else(|_| {
+            let (cert, key) = crate::tls::generate_certificate("transport-registry-test")
+                .expect("failed to generate certificate");
+            SyncthingTlsConfig::from_pem(&cert, &key).expect("failed to load generated certificate")
+        }));
         let identity = Arc::new(crate::identity::TlsIdentity::new(Arc::clone(&tls_config)));
         let config = ConnectionManagerConfig {
             listen_addr: "127.0.0.1:0".parse().unwrap(),
@@ -562,7 +594,10 @@ mod tests {
         manager.set_transport_registry(Arc::new(registry));
 
         // 启动监听
-        let addr = manager.start().await.expect("failed to start with TransportRegistry");
+        let addr = manager
+            .start()
+            .await
+            .expect("failed to start with TransportRegistry");
         assert!(addr.port() > 0, "should bind to a random port");
 
         // 清理
@@ -571,20 +606,14 @@ mod tests {
 
     #[test]
     fn test_should_reconnect_reasons() {
-        let tls_config = Arc::new(
-            SyncthingTlsConfig::from_pem(b"", b"").unwrap_or_else(|_| {
-                let (cert, key) = crate::tls::generate_certificate("reconnect-test")
-                    .expect("failed to generate certificate");
-                SyncthingTlsConfig::from_pem(&cert, &key)
-                    .expect("failed to load generated certificate")
-            })
-        );
+        let tls_config = Arc::new(SyncthingTlsConfig::from_pem(b"", b"").unwrap_or_else(|_| {
+            let (cert, key) = crate::tls::generate_certificate("reconnect-test")
+                .expect("failed to generate certificate");
+            SyncthingTlsConfig::from_pem(&cert, &key).expect("failed to load generated certificate")
+        }));
         let identity = Arc::new(crate::identity::TlsIdentity::new(Arc::clone(&tls_config)));
-        let (manager, _handle) = ConnectionManager::new(
-            ConnectionManagerConfig::default(),
-            identity,
-            tls_config,
-        );
+        let (manager, _handle) =
+            ConnectionManager::new(ConnectionManagerConfig::default(), identity, tls_config);
 
         let device_id = DeviceId::default();
 

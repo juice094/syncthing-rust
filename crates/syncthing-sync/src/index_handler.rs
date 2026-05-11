@@ -1,14 +1,14 @@
 //! 索引处理器
-//! 
+//!
 //! 处理接收到的远程索引和索引更新消息
 
 use crate::conflict_resolver::{ConflictResolver, VersionComparison};
 use crate::database::LocalDatabase;
 use crate::error::{Result, SyncError};
 use crate::events::{EventPublisher, SyncEvent};
-use syncthing_core::types::{FileInfo, Index, IndexUpdate, Folder};
 use std::path::Path;
 use std::sync::Arc;
+use syncthing_core::types::{FileInfo, Folder, Index, IndexUpdate};
 use tracing::{debug, info, trace};
 
 /// 索引处理器
@@ -76,7 +76,9 @@ impl IndexHandler {
         }
 
         // 处理更新的文件
-        let needed = self.process_files(folder, device, &update.files, false).await?;
+        let needed = self
+            .process_files(folder, device, &update.files, false)
+            .await?;
 
         // 发布事件
         self.events.publish(SyncEvent::RemoteIndexReceived {
@@ -107,20 +109,22 @@ impl IndexHandler {
                     match self.needs_update(&local_file, remote_file).await? {
                         UpdateDecision::Update => {
                             debug!(file = %remote_file.name, "File needs update");
-                            
+
                             // 检查冲突
                             if self.conflict_resolver.is_conflict(&local_file, remote_file) {
                                 let folder_path = Path::new(&folder.path);
-                                self.conflict_resolver.resolve_conflict(
-                                    &folder.id,
-                                    &local_file,
-                                    remote_file,
-                                    folder_path,
-                                ).await?;
+                                self.conflict_resolver
+                                    .resolve_conflict(
+                                        &folder.id,
+                                        &local_file,
+                                        remote_file,
+                                        folder_path,
+                                    )
+                                    .await?;
                             } else {
                                 // 无冲突，直接更新
                                 self.db.update_file(&folder.id, remote_file.clone()).await?;
-                                
+
                                 // 检查是否需要下载
                                 if !remote_file.is_deleted() {
                                     needed_files.push(remote_file.clone());
@@ -133,12 +137,9 @@ impl IndexHandler {
                         UpdateDecision::Conflict => {
                             debug!(file = %remote_file.name, "Conflict detected");
                             let folder_path = Path::new(&folder.path);
-                            self.conflict_resolver.resolve_conflict(
-                                &folder.id,
-                                &local_file,
-                                remote_file,
-                                folder_path,
-                            ).await?;
+                            self.conflict_resolver
+                                .resolve_conflict(&folder.id, &local_file, remote_file, folder_path)
+                                .await?;
                         }
                     }
                 }
@@ -176,7 +177,10 @@ impl IndexHandler {
     /// 判断是否需要更新
     async fn needs_update(&self, local: &FileInfo, remote: &FileInfo) -> Result<UpdateDecision> {
         // 比较版本向量
-        match self.conflict_resolver.compare_versions(&local.version, &remote.version) {
+        match self
+            .conflict_resolver
+            .compare_versions(&local.version, &remote.version)
+        {
             VersionComparison::Equal => {
                 // 版本相同，检查其他属性
                 if local.size != remote.size
@@ -205,8 +209,13 @@ impl IndexHandler {
     }
 
     /// 计算索引差异
-    pub async fn calculate_diff(&self, folder: &str, remote_files: &[FileInfo]) -> Result<IndexDiff> {
-        let local_files: Vec<syncthing_core::types::FileInfo> = self.db.get_folder_files(folder).await?;
+    pub async fn calculate_diff(
+        &self,
+        folder: &str,
+        remote_files: &[FileInfo],
+    ) -> Result<IndexDiff> {
+        let local_files: Vec<syncthing_core::types::FileInfo> =
+            self.db.get_folder_files(folder).await?;
         let mut diff = IndexDiff::default();
 
         // 检查远程有哪些本地没有的或更新的文件
@@ -245,7 +254,11 @@ impl IndexHandler {
     }
 
     /// 生成本地索引更新
-    pub async fn generate_index_update(&self, folder: &str, since_sequence: u64) -> Result<Vec<FileInfo>> {
+    pub async fn generate_index_update(
+        &self,
+        folder: &str,
+        since_sequence: u64,
+    ) -> Result<Vec<FileInfo>> {
         let needed_files = self.db.get_needed_files(folder, since_sequence).await?;
         Ok(needed_files)
     }
@@ -310,7 +323,7 @@ pub struct IndexDiff {
 mod tests {
     use super::*;
     use crate::database::MemoryDatabase;
-    use syncthing_core::types::{Vector, FileType};
+    use syncthing_core::types::{FileType, Vector};
 
     fn create_test_file(name: &str, version: Vector) -> FileInfo {
         FileInfo {
@@ -339,7 +352,7 @@ mod tests {
         let device = syncthing_core::DeviceId::random();
 
         let remote_file = create_test_file("test.txt", Vector::new().with_counter(1, 5));
-        
+
         let index = Index {
             folder: "test".to_string(),
             files: vec![remote_file.clone()],
@@ -370,7 +383,10 @@ mod tests {
             files: vec![remote_file],
         };
 
-        let needed = handler.handle_index_update(&folder, device, update).await.unwrap();
+        let needed = handler
+            .handle_index_update(&folder, device, update)
+            .await
+            .unwrap();
         assert_eq!(needed.len(), 1);
     }
 
@@ -394,7 +410,10 @@ mod tests {
             files: vec![remote_file],
         };
 
-        let needed = handler.handle_index_update(&folder, device, update).await.unwrap();
+        let needed = handler
+            .handle_index_update(&folder, device, update)
+            .await
+            .unwrap();
         assert!(needed.is_empty());
     }
 }

@@ -5,8 +5,8 @@
 use bytes::Bytes;
 use serde::Serialize;
 
-use syncthing_core::DeviceId;
 use bep_protocol::messages::Hello as BepHello;
+use syncthing_core::DeviceId;
 
 /// BEP Magic 数字 (0x2EA7D90B)
 pub const BEP_MAGIC: u32 = 0x2EA7D90B;
@@ -79,7 +79,7 @@ impl MessageHeader {
             },
         }
     }
-    
+
     /// 从 BEP Header protobuf 构造
     pub fn from_bep_header(header: &bep_protocol::messages::Header) -> Option<Self> {
         let msg_type = match header.r#type {
@@ -96,7 +96,8 @@ impl MessageHeader {
         Some(Self {
             message_type: msg_type,
             message_id: 0,
-            compressed: header.compression == bep_protocol::messages::MessageCompression::Lz4 as i32,
+            compressed: header.compression
+                == bep_protocol::messages::MessageCompression::Lz4 as i32,
         })
     }
 }
@@ -127,7 +128,7 @@ impl HelloMessage {
             protocols: vec!["bep/1.0".to_string()],
         }
     }
-    
+
     /// 编码为protobuf Hello字节
     /// 格式: [magic: u32 = 0x2EA7D90B][length: u16][protobuf Hello bytes]
     pub fn encode(&self) -> std::result::Result<Bytes, String> {
@@ -141,7 +142,7 @@ impl HelloMessage {
                 .unwrap_or_default()
                 .as_millis() as i64,
         };
-        
+
         let msg_bytes = bep_hello.encode_to_vec();
         if msg_bytes.len() > bep_protocol::handshake::MAX_HELLO_SIZE {
             return Err(format!(
@@ -150,22 +151,22 @@ impl HelloMessage {
                 bep_protocol::handshake::MAX_HELLO_SIZE
             ));
         }
-        
+
         let mut buf = Vec::with_capacity(6 + msg_bytes.len());
         buf.extend_from_slice(&bep_protocol::handshake::HELLO_MAGIC.to_be_bytes());
         buf.extend_from_slice(&(msg_bytes.len() as u16).to_be_bytes());
         buf.extend_from_slice(&msg_bytes);
-        
+
         Ok(Bytes::from(buf))
     }
-    
+
     /// 从protobuf Hello字节解码
     /// 格式: [magic: u32 = 0x2EA7D90B][length: u16][protobuf Hello bytes]
     pub fn decode(data: &[u8]) -> std::result::Result<Self, String> {
         if data.len() < 6 {
             return Err("Hello data too short".to_string());
         }
-        
+
         let magic = u32::from_be_bytes([data[0], data[1], data[2], data[3]]);
         if magic != bep_protocol::handshake::HELLO_MAGIC {
             return Err(format!(
@@ -174,15 +175,15 @@ impl HelloMessage {
                 magic
             ));
         }
-        
+
         let len = u16::from_be_bytes([data[4], data[5]]) as usize;
         if data.len() < 6 + len {
             return Err("truncated hello data".to_string());
         }
-        
+
         let bep_hello = BepHello::decode(&data[6..6 + len])
             .map_err(|e| format!("failed to decode hello: {}", e))?;
-        
+
         Ok(Self {
             device_id: DeviceId::default(),
             device_name: bep_hello.device_name,
@@ -221,7 +222,7 @@ pub struct ResponseMessage {
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+
     #[test]
     fn test_message_header_bep_roundtrip() {
         let header = MessageHeader {
@@ -246,11 +247,14 @@ mod tests {
         };
 
         let bep = header.to_bep_header();
-        assert_eq!(bep.compression, bep_protocol::messages::MessageCompression::Lz4 as i32);
+        assert_eq!(
+            bep.compression,
+            bep_protocol::messages::MessageCompression::Lz4 as i32
+        );
         let decoded = MessageHeader::from_bep_header(&bep).unwrap();
         assert!(decoded.compressed);
     }
-    
+
     #[test]
     fn test_hello_message_encode_decode() {
         let hello = HelloMessage {
@@ -260,13 +264,13 @@ mod tests {
             client_version: "0.1.0".to_string(),
             protocols: vec!["bep/1.0".to_string()],
         };
-        
+
         let encoded = hello.encode().unwrap();
         // Should start with magic (4 bytes) + length (2 bytes)
         assert!(encoded.len() >= 6);
         let magic = u32::from_be_bytes([encoded[0], encoded[1], encoded[2], encoded[3]]);
         assert_eq!(magic, bep_protocol::handshake::HELLO_MAGIC);
-        
+
         let decoded = HelloMessage::decode(&encoded).unwrap();
         assert_eq!(decoded.device_name, "test-device");
         assert_eq!(decoded.client_name, "syncthing-rust");

@@ -8,8 +8,7 @@ use std::collections::HashMap;
 use std::fmt;
 
 /// 连接状态
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub enum ConnectionState {
     /// 初始状态
     #[default]
@@ -43,7 +42,7 @@ impl ConnectionState {
                 | ConnectionState::ClusterConfigComplete
         )
     }
-    
+
     /// 是否可以发送消息
     pub fn can_send(&self) -> bool {
         matches!(
@@ -51,16 +50,12 @@ impl ConnectionState {
             ConnectionState::ProtocolHandshakeComplete | ConnectionState::ClusterConfigComplete
         )
     }
-    
+
     /// 是否已终止
     pub fn is_terminated(&self) -> bool {
-        matches!(
-            self,
-            ConnectionState::Disconnected | ConnectionState::Error
-        )
+        matches!(self, ConnectionState::Disconnected | ConnectionState::Error)
     }
 }
-
 
 /// 地址类型
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -113,8 +108,7 @@ pub struct ConnectionStats {
 }
 
 /// 连接优先级
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-#[derive(Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
 pub enum ConnectionPriority {
     /// 最低优先级
     Lowest = 0,
@@ -128,7 +122,6 @@ pub enum ConnectionPriority {
     /// 最高优先级
     Highest = 4,
 }
-
 
 /// 连接类型
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -169,15 +162,15 @@ impl RetryConfig {
         if attempt == 0 {
             return std::time::Duration::from_millis(self.initial_backoff_ms);
         }
-        
+
         let multiplier = self.backoff_multiplier.powi(attempt as i32);
         let backoff_ms = (self.initial_backoff_ms as f64 * multiplier) as u64;
         let backoff_ms = backoff_ms.min(self.max_backoff_ms);
-        
+
         // 添加抖动（±25%）
         let jitter = rand::random::<f64>() * 0.5 - 0.25;
         let jittered_ms = (backoff_ms as f64 * (1.0 + jitter)) as u64;
-        
+
         std::time::Duration::from_millis(jittered_ms.max(100))
     }
 }
@@ -245,11 +238,8 @@ impl Vector {
         let mut has_less = false;
 
         // 检查所有设备
-        let all_devices: std::collections::HashSet<_> = self
-            .counters
-            .keys()
-            .chain(other.counters.keys())
-            .collect();
+        let all_devices: std::collections::HashSet<_> =
+            self.counters.keys().chain(other.counters.keys()).collect();
 
         for device in all_devices {
             let self_count = self.get(*device);
@@ -274,11 +264,8 @@ impl Vector {
     /// 如果对于所有设备，此版本的计数器都 >= 另一个版本的计数器，则支配
     pub fn dominates(&self, other: &Vector) -> bool {
         // 检查所有设备
-        let all_devices: std::collections::HashSet<_> = self
-            .counters
-            .keys()
-            .chain(other.counters.keys())
-            .collect();
+        let all_devices: std::collections::HashSet<_> =
+            self.counters.keys().chain(other.counters.keys()).collect();
 
         for device in all_devices {
             let self_count = self.get(*device);
@@ -303,8 +290,7 @@ pub enum VersionComparison {
 }
 
 /// 索引ID（8字节随机值）
-#[derive(Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
 pub struct IndexID(pub [u8; 8]);
 
 impl IndexID {
@@ -331,7 +317,6 @@ impl fmt::Debug for IndexID {
         write!(f, "IndexID({:016x})", self.as_u64())
     }
 }
-
 
 /// 索引增量
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -520,11 +505,16 @@ pub struct Options {
 pub enum VersioningConfig {
     #[default]
     None,
-    Simple { params: HashMap<String, String> },
-    Staggered { params: HashMap<String, String> },
-    External { params: HashMap<String, String> },
+    Simple {
+        params: HashMap<String, String>,
+    },
+    Staggered {
+        params: HashMap<String, String>,
+    },
+    External {
+        params: HashMap<String, String>,
+    },
 }
-
 
 /// 文件夹配置
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -606,8 +596,12 @@ pub struct Config {
     pub options: Options,
 }
 
-fn default_listen() -> String { "0.0.0.0:22001".to_string() }
-fn default_device_name() -> String { "syncthing-rust".to_string() }
+fn default_listen() -> String {
+    "0.0.0.0:22001".to_string()
+}
+fn default_device_name() -> String {
+    "syncthing-rust".to_string()
+}
 
 impl Config {
     /// 创建新的空配置

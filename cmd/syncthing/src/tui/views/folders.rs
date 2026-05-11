@@ -43,7 +43,10 @@ pub fn draw(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
                 Cell::from(Span::styled(fo.id.clone(), theme.style_header)),
                 Cell::from(Span::styled(fo.path.clone(), theme.style_idle)),
                 Cell::from(Span::styled(devs, theme.style_idle)),
-                Cell::from(Span::styled(status_label, ratatui::style::Style::default().fg(status_color))),
+                Cell::from(Span::styled(
+                    status_label,
+                    ratatui::style::Style::default().fg(status_color),
+                )),
             ])
         })
         .collect();
@@ -66,7 +69,11 @@ pub fn draw(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
         ])
         .style(Modifier::BOLD),
     )
-    .block(Block::default().borders(Borders::ALL).title("Folders (a: add, d: delete)"))
+    .block(
+        Block::default()
+            .borders(Borders::ALL)
+            .title("Folders (a: add, d: delete)"),
+    )
     .row_highlight_style(theme.style_header.add_modifier(Modifier::REVERSED));
 
     let mut state = ratatui::widgets::TableState::default();

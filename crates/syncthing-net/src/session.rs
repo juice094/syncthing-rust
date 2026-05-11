@@ -58,15 +58,9 @@ pub enum BepSessionEvent {
         last_recv_age: Duration,
     },
     /// Peer index changed; completion state should be re-queried.
-    PeerSyncState {
-        device_id: DeviceId,
-        folder: String,
-    },
+    PeerSyncState { device_id: DeviceId, folder: String },
     /// Session ended (clean close or error).
-    SessionEnded {
-        device_id: DeviceId,
-                        reason: String,
-    },
+    SessionEnded { device_id: DeviceId, reason: String },
 }
 
 /// Per-session counters for observability.
@@ -101,10 +95,18 @@ pub trait BepSessionHandler: Send + Sync {
     ) -> Result<bep_protocol::messages::ClusterConfig>;
 
     /// Generate the initial Index for `folder_id` when talking to `device_id`.
-    async fn generate_index(&self, folder_id: &str, device_id: DeviceId) -> Result<syncthing_core::types::Index>;
+    async fn generate_index(
+        &self,
+        folder_id: &str,
+        device_id: DeviceId,
+    ) -> Result<syncthing_core::types::Index>;
 
     /// Remote peer sent a full Index.
-    async fn on_index(&self, device_id: DeviceId, index: syncthing_core::types::Index) -> Result<()>;
+    async fn on_index(
+        &self,
+        device_id: DeviceId,
+        index: syncthing_core::types::Index,
+    ) -> Result<()>;
 
     /// Remote peer sent an IndexUpdate.
     async fn on_index_update(
@@ -130,7 +132,8 @@ pub struct BepSession {
     device_id: DeviceId,
     conn: Arc<BepConnection>,
     handler: Arc<dyn BepSessionHandler>,
-    pending_responses: Arc<DashMap<i32, tokio::sync::oneshot::Sender<bep_protocol::messages::Response>>>,
+    pending_responses:
+        Arc<DashMap<i32, tokio::sync::oneshot::Sender<bep_protocol::messages::Response>>>,
     event_tx: Option<tokio::sync::mpsc::UnboundedSender<BepSessionEvent>>,
     metrics: Arc<BepSessionMetrics>,
     remote_shared_folders: Option<Vec<String>>,
@@ -142,7 +145,9 @@ impl BepSession {
         identity: Arc<dyn Identity>,
         conn: Arc<BepConnection>,
         handler: Arc<dyn BepSessionHandler>,
-        pending_responses: Arc<DashMap<i32, tokio::sync::oneshot::Sender<bep_protocol::messages::Response>>>,
+        pending_responses: Arc<
+            DashMap<i32, tokio::sync::oneshot::Sender<bep_protocol::messages::Response>>,
+        >,
     ) -> Self {
         let device_id = identity.device_id();
         Self {
@@ -162,7 +167,9 @@ impl BepSession {
         identity: Arc<dyn Identity>,
         conn: Arc<BepConnection>,
         handler: Arc<dyn BepSessionHandler>,
-        pending_responses: Arc<DashMap<i32, tokio::sync::oneshot::Sender<bep_protocol::messages::Response>>>,
+        pending_responses: Arc<
+            DashMap<i32, tokio::sync::oneshot::Sender<bep_protocol::messages::Response>>,
+        >,
         event_tx: tokio::sync::mpsc::UnboundedSender<BepSessionEvent>,
     ) -> Self {
         let device_id = identity.device_id();
@@ -220,7 +227,8 @@ impl BepSession {
                                         remote_cc.folders.len()
                                     );
                                     self.conn.set_state(ConnectionState::ClusterConfigComplete);
-                                    let remote_shared: Vec<String> = remote_cc.folders.into_iter().map(|f| f.id).collect();
+                                    let remote_shared: Vec<String> =
+                                        remote_cc.folders.into_iter().map(|f| f.id).collect();
                                     self.emit(BepSessionEvent::ClusterConfigComplete {
                                         device_id: self.device_id,
                                         shared_folders: remote_shared.clone(),
@@ -258,9 +266,7 @@ impl BepSession {
                 }
                 Err(_) => {
                     warn!("Timeout waiting for ClusterConfig from {}", self.device_id);
-                    return Err(SyncthingError::timeout(
-                        "remote ClusterConfig not received",
-                    ));
+                    return Err(SyncthingError::timeout("remote ClusterConfig not received"));
                 }
             }
         }
@@ -268,7 +274,10 @@ impl BepSession {
         // 3. Send Index for each folder shared by BOTH sides
         let my_folder_ids: Vec<String> = cc.folders.into_iter().map(|f| f.id).collect();
         let shared_folder_ids: Vec<String> = match &self.remote_shared_folders {
-            Some(remote) => my_folder_ids.into_iter().filter(|id| remote.contains(id)).collect(),
+            Some(remote) => my_folder_ids
+                .into_iter()
+                .filter(|id| remote.contains(id))
+                .collect(),
             None => my_folder_ids,
         };
         for folder_id in &shared_folder_ids {
@@ -359,7 +368,10 @@ impl BepSession {
         // 清理未完成的 pending responses，避免内存泄漏
         let pending_count = self.pending_responses.len();
         if pending_count > 0 {
-            warn!("Cleaning up {} pending response(s) for {}", pending_count, self.device_id);
+            warn!(
+                "Cleaning up {} pending response(s) for {}",
+                pending_count, self.device_id
+            );
             while let Some(entry) = self.pending_responses.iter().next() {
                 let id = *entry.key();
                 drop(entry);
@@ -389,8 +401,9 @@ impl BepSession {
                 self.metrics.messages_sent.fetch_add(1, Ordering::Relaxed);
             }
             MessageType::Index => {
-                match bep_protocol::messages::decode_message::<bep_protocol::messages::Index>(&payload)
-                {
+                match bep_protocol::messages::decode_message::<bep_protocol::messages::Index>(
+                    &payload,
+                ) {
                     Ok(wire_index) => {
                         self.metrics.index_received.fetch_add(1, Ordering::Relaxed);
                         let file_count = wire_index.files.len();
@@ -417,12 +430,13 @@ impl BepSession {
                 }
             }
             MessageType::IndexUpdate => {
-                match bep_protocol::messages::decode_message::<
-                    bep_protocol::messages::IndexUpdate,
-                >(&payload)
-                {
+                match bep_protocol::messages::decode_message::<bep_protocol::messages::IndexUpdate>(
+                    &payload,
+                ) {
                     Ok(wire_update) => {
-                        self.metrics.index_update_received.fetch_add(1, Ordering::Relaxed);
+                        self.metrics
+                            .index_update_received
+                            .fetch_add(1, Ordering::Relaxed);
                         let file_count = wire_update.files.len();
                         let folder = wire_update.folder.clone();
                         let update: syncthing_core::types::IndexUpdate = wire_update.into();
@@ -453,13 +467,16 @@ impl BepSession {
                 }
             }
             MessageType::Request => {
-                match bep_protocol::messages::decode_message::<
-                    bep_protocol::messages::Request,
-                >(&payload)
-                {
+                match bep_protocol::messages::decode_message::<bep_protocol::messages::Request>(
+                    &payload,
+                ) {
                     Ok(req) => {
-                        self.metrics.requests_received.fetch_add(1, Ordering::Relaxed);
-                        self.metrics.blocks_requested.fetch_add(1, Ordering::Relaxed);
+                        self.metrics
+                            .requests_received
+                            .fetch_add(1, Ordering::Relaxed);
+                        self.metrics
+                            .blocks_requested
+                            .fetch_add(1, Ordering::Relaxed);
                         self.emit(BepSessionEvent::BlockRequested {
                             device_id: self.device_id,
                             folder: req.folder.clone(),
@@ -467,7 +484,11 @@ impl BepSession {
                             offset: req.offset,
                             size: req.size,
                         });
-                        match self.handler.on_block_request(self.device_id, req.clone()).await {
+                        match self
+                            .handler
+                            .on_block_request(self.device_id, req.clone())
+                            .await
+                        {
                             Ok(data) => {
                                 let resp = bep_protocol::messages::Response {
                                     id: req.id,
@@ -488,9 +509,15 @@ impl BepSession {
                                             );
                                             self.metrics.errors.fetch_add(1, Ordering::Relaxed);
                                         } else {
-                                            self.metrics.messages_sent.fetch_add(1, Ordering::Relaxed);
-                                            self.metrics.bytes_sent.fetch_add(payload_len, Ordering::Relaxed);
-                                            self.metrics.blocks_served.fetch_add(1, Ordering::Relaxed);
+                                            self.metrics
+                                                .messages_sent
+                                                .fetch_add(1, Ordering::Relaxed);
+                                            self.metrics
+                                                .bytes_sent
+                                                .fetch_add(payload_len, Ordering::Relaxed);
+                                            self.metrics
+                                                .blocks_served
+                                                .fetch_add(1, Ordering::Relaxed);
                                         }
                                     }
                                     Err(e) => {
@@ -509,15 +536,15 @@ impl BepSession {
                                     data: vec![],
                                     code: code as i32,
                                 };
-                                if let Ok(payload) = bep_protocol::messages::encode_message(&resp)
-                                {
-                                    if let Err(e) = self
-                                        .conn
-                                        .send_message(MessageType::Response, payload)
-                                        .await
+                                if let Ok(payload) = bep_protocol::messages::encode_message(&resp) {
+                                    if let Err(e) =
+                                        self.conn.send_message(MessageType::Response, payload).await
                                     {
                                         self.metrics.errors.fetch_add(1, Ordering::Relaxed);
-                                        warn!("Failed to send error Response to {}: {}", self.device_id, e);
+                                        warn!(
+                                            "Failed to send error Response to {}: {}",
+                                            self.device_id, e
+                                        );
                                     } else {
                                         self.metrics.messages_sent.fetch_add(1, Ordering::Relaxed);
                                     }
@@ -534,12 +561,13 @@ impl BepSession {
                 }
             }
             MessageType::Response => {
-                match bep_protocol::messages::decode_message::<
-                    bep_protocol::messages::Response,
-                >(&payload)
-                {
+                match bep_protocol::messages::decode_message::<bep_protocol::messages::Response>(
+                    &payload,
+                ) {
                     Ok(resp) => {
-                        self.metrics.responses_received.fetch_add(1, Ordering::Relaxed);
+                        self.metrics
+                            .responses_received
+                            .fetch_add(1, Ordering::Relaxed);
                         info!(
                             "Received Response id={} code={} data_len={} from {}",
                             resp.id,
@@ -614,7 +642,10 @@ mod tests {
             folder_id: &str,
             device_id: DeviceId,
         ) -> Result<syncthing_core::types::Index> {
-            self.index_calls.lock().await.push((folder_id.to_string(), device_id));
+            self.index_calls
+                .lock()
+                .await
+                .push((folder_id.to_string(), device_id));
             Ok(syncthing_core::types::Index {
                 folder: folder_id.to_string(),
                 files: vec![],
@@ -661,10 +692,16 @@ mod tests {
 
         let device_id = DeviceId::default();
         let handler = Arc::new(MockHandler::new());
-        let pending: Arc<DashMap<i32, tokio::sync::oneshot::Sender<bep_protocol::messages::Response>>> =
-            Arc::new(DashMap::new());
+        let pending: Arc<
+            DashMap<i32, tokio::sync::oneshot::Sender<bep_protocol::messages::Response>>,
+        > = Arc::new(DashMap::new());
 
-        let session = BepSession::new(Arc::new(syncthing_core::DeviceIdentity::new(device_id)), Arc::clone(&conn_a), handler, pending);
+        let session = BepSession::new(
+            Arc::new(syncthing_core::DeviceIdentity::new(device_id)),
+            Arc::clone(&conn_a),
+            handler,
+            pending,
+        );
         let handle = tokio::spawn(session.run());
 
         // Wait for ClusterConfig from session side
@@ -683,7 +720,10 @@ mod tests {
             secondary: false,
         };
         let payload = bep_protocol::messages::encode_message(&reply_cc).unwrap();
-        conn_b.send_message(MessageType::ClusterConfig, payload).await.unwrap();
+        conn_b
+            .send_message(MessageType::ClusterConfig, payload)
+            .await
+            .unwrap();
 
         // Wait for Index
         let (msg_type, _) = conn_b.recv_message().await.unwrap();
@@ -716,10 +756,16 @@ mod tests {
 
         let device_id = DeviceId::default();
         let handler = Arc::new(MockHandler::new());
-        let pending: Arc<DashMap<i32, tokio::sync::oneshot::Sender<bep_protocol::messages::Response>>> =
-            Arc::new(DashMap::new());
+        let pending: Arc<
+            DashMap<i32, tokio::sync::oneshot::Sender<bep_protocol::messages::Response>>,
+        > = Arc::new(DashMap::new());
 
-        let session = BepSession::new(Arc::new(syncthing_core::DeviceIdentity::new(device_id)), Arc::clone(&conn_a), handler, Arc::clone(&pending));
+        let session = BepSession::new(
+            Arc::new(syncthing_core::DeviceIdentity::new(device_id)),
+            Arc::clone(&conn_a),
+            handler,
+            Arc::clone(&pending),
+        );
         let handle = tokio::spawn(session.run());
 
         // Handshake: ClusterConfig -> ClusterConfig -> Index
@@ -737,7 +783,10 @@ mod tests {
             secondary: false,
         };
         let payload = bep_protocol::messages::encode_message(&reply_cc).unwrap();
-        conn_b.send_message(MessageType::ClusterConfig, payload).await.unwrap();
+        conn_b
+            .send_message(MessageType::ClusterConfig, payload)
+            .await
+            .unwrap();
 
         let (msg_type, _) = conn_b.recv_message().await.unwrap();
         assert_eq!(msg_type, MessageType::Index);
@@ -754,14 +803,17 @@ mod tests {
             block_no: 0,
         };
         let req_payload = bep_protocol::messages::encode_message(&req).unwrap();
-        conn_b.send_message(MessageType::Request, req_payload).await.unwrap();
+        conn_b
+            .send_message(MessageType::Request, req_payload)
+            .await
+            .unwrap();
 
         // Should receive Response with mock data [1, 2, 3]
         let (msg_type, resp_payload) = conn_b.recv_message().await.unwrap();
         assert_eq!(msg_type, MessageType::Response);
-        let resp = bep_protocol::messages::decode_message::<
-            bep_protocol::messages::Response,
-        >(&resp_payload)
+        let resp = bep_protocol::messages::decode_message::<bep_protocol::messages::Response>(
+            &resp_payload,
+        )
         .unwrap();
         assert_eq!(resp.id, 42);
         assert_eq!(resp.data, vec![1, 2, 3]);
@@ -786,11 +838,18 @@ mod tests {
 
         let device_id = DeviceId::default();
         let handler = Arc::new(MockHandler::new());
-        let pending: Arc<DashMap<i32, tokio::sync::oneshot::Sender<bep_protocol::messages::Response>>> =
-            Arc::new(DashMap::new());
+        let pending: Arc<
+            DashMap<i32, tokio::sync::oneshot::Sender<bep_protocol::messages::Response>>,
+        > = Arc::new(DashMap::new());
 
         let (event_tx, mut event_rx) = tokio::sync::mpsc::unbounded_channel::<BepSessionEvent>();
-        let session = BepSession::with_events(Arc::new(syncthing_core::DeviceIdentity::new(device_id)), Arc::clone(&conn_a), handler, Arc::clone(&pending), event_tx);
+        let session = BepSession::with_events(
+            Arc::new(syncthing_core::DeviceIdentity::new(device_id)),
+            Arc::clone(&conn_a),
+            handler,
+            Arc::clone(&pending),
+            event_tx,
+        );
         let metrics = session.metrics();
         let handle = tokio::spawn(session.run());
 
@@ -810,19 +869,33 @@ mod tests {
             secondary: false,
         };
         let payload = bep_protocol::messages::encode_message(&reply_cc).unwrap();
-        conn_b.send_message(MessageType::ClusterConfig, payload).await.unwrap();
+        conn_b
+            .send_message(MessageType::ClusterConfig, payload)
+            .await
+            .unwrap();
 
         // Wait for ClusterConfigComplete event
-        let event = tokio::time::timeout(Duration::from_secs(2), event_rx.recv()).await.unwrap().unwrap();
-        assert!(matches!(event, BepSessionEvent::ClusterConfigComplete { .. }));
+        let event = tokio::time::timeout(Duration::from_secs(2), event_rx.recv())
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(matches!(
+            event,
+            BepSessionEvent::ClusterConfigComplete { .. }
+        ));
 
         // 3. Expect Index from session side
         let (msg_type, _) = conn_b.recv_message().await.unwrap();
         assert_eq!(msg_type, MessageType::Index);
 
         // Wait for IndexSent event
-        let event = tokio::time::timeout(Duration::from_secs(2), event_rx.recv()).await.unwrap().unwrap();
-        assert!(matches!(event, BepSessionEvent::IndexSent { folder, .. } if folder == "test-folder"));
+        let event = tokio::time::timeout(Duration::from_secs(2), event_rx.recv())
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(
+            matches!(event, BepSessionEvent::IndexSent { folder, .. } if folder == "test-folder")
+        );
 
         // 4. Send an Index from B side -> should trigger IndexReceived
         let index = bep_protocol::messages::Index {
@@ -834,14 +907,27 @@ mod tests {
             last_sequence: 0,
         };
         let idx_payload = bep_protocol::messages::encode_message(&index).unwrap();
-        conn_b.send_message(MessageType::Index, idx_payload).await.unwrap();
+        conn_b
+            .send_message(MessageType::Index, idx_payload)
+            .await
+            .unwrap();
 
-        let event = tokio::time::timeout(Duration::from_secs(2), event_rx.recv()).await.unwrap().unwrap();
-        assert!(matches!(event, BepSessionEvent::IndexReceived { folder, file_count: 1, .. } if folder == "test-folder"));
+        let event = tokio::time::timeout(Duration::from_secs(2), event_rx.recv())
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(
+            matches!(event, BepSessionEvent::IndexReceived { folder, file_count: 1, .. } if folder == "test-folder")
+        );
 
         // Consume the PeerSyncState event emitted right after IndexReceived
-        let event = tokio::time::timeout(Duration::from_secs(2), event_rx.recv()).await.unwrap().unwrap();
-        assert!(matches!(event, BepSessionEvent::PeerSyncState { folder, .. } if folder == "test-folder"));
+        let event = tokio::time::timeout(Duration::from_secs(2), event_rx.recv())
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(
+            matches!(event, BepSessionEvent::PeerSyncState { folder, .. } if folder == "test-folder")
+        );
 
         // 5. Send a Request -> should trigger BlockRequested + Response
         let req = bep_protocol::messages::Request {
@@ -855,11 +941,19 @@ mod tests {
             block_no: 0,
         };
         let req_payload = bep_protocol::messages::encode_message(&req).unwrap();
-        conn_b.send_message(MessageType::Request, req_payload).await.unwrap();
+        conn_b
+            .send_message(MessageType::Request, req_payload)
+            .await
+            .unwrap();
 
-        let event = tokio::time::timeout(Duration::from_secs(2), event_rx.recv()).await.unwrap().unwrap();
-        assert!(matches!(event, BepSessionEvent::BlockRequested { folder, name, size: 3, .. }
-            if folder == "test-folder" && name == "hello.txt"));
+        let event = tokio::time::timeout(Duration::from_secs(2), event_rx.recv())
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(
+            matches!(event, BepSessionEvent::BlockRequested { folder, name, size: 3, .. }
+            if folder == "test-folder" && name == "hello.txt")
+        );
 
         // Receive Response (skip stray Ping messages that may arrive from heartbeat)
         let (msg_type, _) = loop {

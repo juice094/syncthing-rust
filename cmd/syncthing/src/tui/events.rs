@@ -1,4 +1,3 @@
-
 use crossterm::event::{Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 
 use std::str::FromStr;
@@ -7,8 +6,8 @@ use std::sync::Arc;
 use syncthing_core::types::{AddressType, Device, Folder};
 use syncthing_core::DeviceId;
 
-use crate::tui::app::{App, FormState, Popup, Tab};
 use crate::save_config;
+use crate::tui::app::{App, FormState, Popup, Tab};
 
 pub fn handle_event(app: &mut App, event: Event) -> bool {
     match event {
@@ -50,74 +49,54 @@ fn handle_key(app: &mut App, key: KeyEvent) -> bool {
     match key.code {
         KeyCode::Right | KeyCode::Tab => app.tab = app.tab.next(),
         KeyCode::Left | KeyCode::BackTab => app.tab = app.tab.prev(),
-        KeyCode::Char('a') => {
-            match app.tab {
-                Tab::Devices => {
-                    app.device_form = FormState::new(vec![String::new(), String::new(), String::new()]);
-                    app.popup = Popup::AddDevice;
-                }
-                Tab::Folders => {
-                    app.folder_form = FormState::new(vec![String::new(), String::new()]);
-                    app.resize_form();
-                    app.popup = Popup::AddFolder;
-                }
-                _ => {}
+        KeyCode::Char('a') => match app.tab {
+            Tab::Devices => {
+                app.device_form = FormState::new(vec![String::new(), String::new(), String::new()]);
+                app.popup = Popup::AddDevice;
             }
-        }
-        KeyCode::Char('d') => {
-            match app.tab {
-                Tab::Devices => {
-                    if !app.config.devices.is_empty() {
-                        let id = app.config.devices[app.device_selected].id;
-                        app.config.devices.retain(|d| d.id != id);
-                        if app.device_selected >= app.config.devices.len() && app.device_selected > 0 {
-                            app.device_selected -= 1;
-                        }
-                        save_and_log(app);
-                    }
-                }
-                Tab::Folders => {
-                    if !app.config.folders.is_empty() {
-                        app.config.folders.remove(app.folder_selected);
-                        if app.folder_selected >= app.config.folders.len() && app.folder_selected > 0 {
-                            app.folder_selected -= 1;
-                        }
-                        save_and_log(app);
-                    }
-                }
-                _ => {}
+            Tab::Folders => {
+                app.folder_form = FormState::new(vec![String::new(), String::new()]);
+                app.resize_form();
+                app.popup = Popup::AddFolder;
             }
-        }
-        KeyCode::Down => {
-            match app.tab {
-                Tab::Devices => {
-                    if app.device_selected + 1 < app.config.devices.len() {
-                        app.device_selected += 1;
-                    }
+            _ => {}
+        },
+        KeyCode::Char('d') => match app.tab {
+            Tab::Devices if !app.config.devices.is_empty() => {
+                let id = app.config.devices[app.device_selected].id;
+                app.config.devices.retain(|d| d.id != id);
+                if app.device_selected >= app.config.devices.len() && app.device_selected > 0 {
+                    app.device_selected -= 1;
                 }
-                Tab::Folders => {
-                    if app.folder_selected + 1 < app.config.folders.len() {
-                        app.folder_selected += 1;
-                    }
-                }
-                _ => {}
+                save_and_log(app);
             }
-        }
-        KeyCode::Up => {
-            match app.tab {
-                Tab::Devices => {
-                    if app.device_selected > 0 {
-                        app.device_selected -= 1;
-                    }
+            Tab::Folders if !app.config.folders.is_empty() => {
+                app.config.folders.remove(app.folder_selected);
+                if app.folder_selected >= app.config.folders.len() && app.folder_selected > 0 {
+                    app.folder_selected -= 1;
                 }
-                Tab::Folders => {
-                    if app.folder_selected > 0 {
-                        app.folder_selected -= 1;
-                    }
-                }
-                _ => {}
+                save_and_log(app);
             }
-        }
+            _ => {}
+        },
+        KeyCode::Down => match app.tab {
+            Tab::Devices if app.device_selected + 1 < app.config.devices.len() => {
+                app.device_selected += 1;
+            }
+            Tab::Folders if app.folder_selected + 1 < app.config.folders.len() => {
+                app.folder_selected += 1;
+            }
+            _ => {}
+        },
+        KeyCode::Up => match app.tab {
+            Tab::Devices if app.device_selected > 0 => {
+                app.device_selected -= 1;
+            }
+            Tab::Folders if app.folder_selected > 0 => {
+                app.folder_selected -= 1;
+            }
+            _ => {}
+        },
         _ => {}
     }
 
@@ -175,7 +154,11 @@ fn handle_add_device_key(app: &mut App, key: KeyEvent) -> bool {
                     };
                     app.config.devices.push(Device {
                         id,
-                        name: if name.is_empty() { None } else { Some(name.to_string()) },
+                        name: if name.is_empty() {
+                            None
+                        } else {
+                            Some(name.to_string())
+                        },
                         addresses,
                         paused: false,
                         introducer: false,
@@ -207,7 +190,8 @@ fn handle_add_folder_key(app: &mut App, key: KeyEvent) -> bool {
     match key.code {
         KeyCode::Esc => app.popup = Popup::None,
         KeyCode::Tab => {
-            app.folder_form.focus = (app.folder_form.focus + 1) % (app.folder_form.fields.len() + 1);
+            app.folder_form.focus =
+                (app.folder_form.focus + 1) % (app.folder_form.fields.len() + 1);
         }
         KeyCode::BackTab => {
             let len = app.folder_form.fields.len() + 1;
@@ -252,25 +236,24 @@ fn handle_add_folder_key(app: &mut App, key: KeyEvent) -> bool {
             app.popup = Popup::None;
             save_and_log(app);
         }
-        KeyCode::Down => {
+        KeyCode::Down
             if app.folder_form.focus == app.folder_form.fields.len()
-                && app.folder_device_selected + 1 < app.config.devices.len()
-            {
-                app.folder_device_selected += 1;
-            }
+                && app.folder_device_selected + 1 < app.config.devices.len() =>
+        {
+            app.folder_device_selected += 1;
         }
-        KeyCode::Up => {
+        KeyCode::Up
             if app.folder_form.focus == app.folder_form.fields.len()
-                && app.folder_device_selected > 0
-            {
-                app.folder_device_selected -= 1;
-            }
+                && app.folder_device_selected > 0 =>
+        {
+            app.folder_device_selected -= 1;
         }
-        KeyCode::Char(' ') => {
-            if app.folder_form.focus == app.folder_form.fields.len() {
-                if let Some(selected) = app.folder_device_selection.get_mut(app.folder_device_selected) {
-                    *selected = !*selected;
-                }
+        KeyCode::Char(' ') if app.folder_form.focus == app.folder_form.fields.len() => {
+            if let Some(selected) = app
+                .folder_device_selection
+                .get_mut(app.folder_device_selected)
+            {
+                *selected = !*selected;
             }
         }
         KeyCode::Char(c) => {

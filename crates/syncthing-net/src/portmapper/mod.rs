@@ -26,11 +26,9 @@ pub(crate) const PORT_MAP_SERVICE_TIMEOUT: Duration = Duration::from_millis(250)
 
 /// 通过 netdev 发现默认网关的 IPv4 地址
 async fn discover_gateway() -> Option<Ipv4Addr> {
-    tokio::task::spawn_blocking(|| {
-        match netdev::get_default_gateway() {
-            Ok(gw) => gw.ipv4.into_iter().next(),
-            Err(_) => None,
-        }
+    tokio::task::spawn_blocking(|| match netdev::get_default_gateway() {
+        Ok(gw) => gw.ipv4.into_iter().next(),
+        Err(_) => None,
     })
     .await
     .ok()
@@ -74,12 +72,8 @@ impl Mapping {
     pub async fn release(&self) -> Result<()> {
         match &self.inner {
             MappingInner::Upnp(state) => upnp::release_mapping(state).await,
-            MappingInner::Pmp(state) => {
-                release_pmp_mapping(state).await
-            }
-            MappingInner::Pcp(state) => {
-                release_pcp_mapping(state).await
-            }
+            MappingInner::Pmp(state) => release_pmp_mapping(state).await,
+            MappingInner::Pcp(state) => release_pcp_mapping(state).await,
         }
     }
 }
@@ -89,11 +83,12 @@ async fn release_pmp_mapping(state: &pmp::PmpMappingState) -> Result<()> {
     let pkt = pmp::build_pmp_request_mapping_packet(state.internal_port, state.external_port, 0);
     let socket = tokio::net::UdpSocket::bind("0.0.0.0:0")
         .await
-        .map_err(|e| syncthing_core::SyncthingError::connection(format!("PMP release bind failed: {}", e)))?;
-    socket
-        .send_to(&pkt, state.gateway)
-        .await
-        .map_err(|e| syncthing_core::SyncthingError::connection(format!("PMP release send failed: {}", e)))?;
+        .map_err(|e| {
+            syncthing_core::SyncthingError::connection(format!("PMP release bind failed: {}", e))
+        })?;
+    socket.send_to(&pkt, state.gateway).await.map_err(|e| {
+        syncthing_core::SyncthingError::connection(format!("PMP release send failed: {}", e))
+    })?;
     Ok(())
 }
 
@@ -108,11 +103,12 @@ async fn release_pcp_mapping(state: &pcp::PcpMappingState) -> Result<()> {
     );
     let socket = tokio::net::UdpSocket::bind("0.0.0.0:0")
         .await
-        .map_err(|e| syncthing_core::SyncthingError::connection(format!("PCP release bind failed: {}", e)))?;
-    socket
-        .send_to(&pkt, state.gateway)
-        .await
-        .map_err(|e| syncthing_core::SyncthingError::connection(format!("PCP release send failed: {}", e)))?;
+        .map_err(|e| {
+            syncthing_core::SyncthingError::connection(format!("PCP release bind failed: {}", e))
+        })?;
+    socket.send_to(&pkt, state.gateway).await.map_err(|e| {
+        syncthing_core::SyncthingError::connection(format!("PCP release send failed: {}", e))
+    })?;
     Ok(())
 }
 
@@ -177,7 +173,10 @@ impl PortMapper {
             if pmp::probe_gateway(pmp_gw).await {
                 match pmp::allocate_port(pmp_gw, local_port).await {
                     Ok((external, state)) => {
-                        info!("NAT-PMP port mapping succeeded: {} -> {}", local_port, external);
+                        info!(
+                            "NAT-PMP port mapping succeeded: {} -> {}",
+                            local_port, external
+                        );
                         let lifetime = Duration::from_secs(pmp::PMP_MAP_LIFETIME_SEC as u64);
                         let now = Instant::now();
                         let mapping = Mapping {
@@ -200,7 +199,10 @@ impl PortMapper {
 
     async fn allocate_upnp(&mut self, local_port: u16) -> Result<Mapping> {
         let (external, state) = upnp::allocate_port(self.local_addr, local_port).await?;
-        info!("UPnP port mapping succeeded: {} -> {}", local_port, external);
+        info!(
+            "UPnP port mapping succeeded: {} -> {}",
+            local_port, external
+        );
         let now = Instant::now();
         let lifetime = Duration::from_secs(PORT_MAP_LIFETIME_SEC as u64);
         let mapping = Mapping {
@@ -222,11 +224,9 @@ impl PortMapper {
             }
         }
         // 否则通过 netdev 获取默认接口的 IPv4
-        tokio::task::spawn_blocking(|| {
-            match netdev::get_default_interface() {
-                Ok(iface) => iface.ipv4_addrs().into_iter().next(),
-                Err(_) => None,
-            }
+        tokio::task::spawn_blocking(|| match netdev::get_default_interface() {
+            Ok(iface) => iface.ipv4_addrs().into_iter().next(),
+            Err(_) => None,
         })
         .await
         .ok()

@@ -13,14 +13,16 @@ use bytes::Bytes;
 use parking_lot::RwLock;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
-use tokio_rustls::client::TlsStream as ClientTlsStream;
-use tokio_rustls::server::TlsStream as ServerTlsStream;
 use tokio::sync::{mpsc, oneshot, Mutex};
 use tokio::time::timeout;
+use tokio_rustls::client::TlsStream as ClientTlsStream;
+use tokio_rustls::server::TlsStream as ServerTlsStream;
 use tracing::{debug, error, info, warn};
 
-use syncthing_core::{ConnectionState, ConnectionStats, ConnectionType, DeviceId, Result, SyncthingError};
 use crate::protocol::{MessageHeader, MessageType};
+use syncthing_core::{
+    ConnectionState, ConnectionStats, ConnectionType, DeviceId, Result, SyncthingError,
+};
 
 /// 默认消息超时
 pub const DEFAULT_MESSAGE_TIMEOUT: Duration = Duration::from_secs(60);
@@ -45,7 +47,10 @@ pub enum ConnectionEvent {
     /// 握手完成
     HandshakeComplete { device_id: DeviceId },
     /// 消息收到
-    MessageReceived { device_id: DeviceId, msg_type: MessageType },
+    MessageReceived {
+        device_id: DeviceId,
+        msg_type: MessageType,
+    },
     /// 连接断开
     Disconnected { reason: String },
     /// 错误
@@ -131,7 +136,10 @@ impl tokio::io::AsyncWrite for TcpBiStream {
         }
     }
 
-    fn poll_flush(mut self: std::pin::Pin<&mut Self>, cx: &mut std::task::Context<'_>) -> std::task::Poll<std::io::Result<()>> {
+    fn poll_flush(
+        mut self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<std::io::Result<()>> {
         match &mut *self {
             TcpBiStream::Plain(s) => std::pin::Pin::new(s).poll_flush(cx),
             TcpBiStream::Client(s) => std::pin::Pin::new(s).poll_flush(cx),
@@ -139,7 +147,10 @@ impl tokio::io::AsyncWrite for TcpBiStream {
         }
     }
 
-    fn poll_shutdown(mut self: std::pin::Pin<&mut Self>, cx: &mut std::task::Context<'_>) -> std::task::Poll<std::io::Result<()>> {
+    fn poll_shutdown(
+        mut self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<std::io::Result<()>> {
         match &mut *self {
             TcpBiStream::Plain(s) => std::pin::Pin::new(s).poll_shutdown(cx),
             TcpBiStream::Client(s) => std::pin::Pin::new(s).poll_shutdown(cx),
@@ -198,19 +209,21 @@ impl BepConnection {
         conn_type: ConnectionType,
         event_tx: mpsc::UnboundedSender<ConnectionEvent>,
     ) -> Result<Arc<Self>> {
-        let remote_addr = pipe.peer_addr()
+        let remote_addr = pipe
+            .peer_addr()
             .unwrap_or_else(|| "0.0.0.0:0".parse().unwrap());
-        let local_addr = pipe.local_addr()
+        let local_addr = pipe
+            .local_addr()
             .unwrap_or_else(|| "0.0.0.0:0".parse().unwrap());
-        
+
         let (message_tx, message_rx) = mpsc::unbounded_channel();
         let (incoming_tx, incoming_rx) = mpsc::unbounded_channel();
         let (shutdown_tx, shutdown_rx) = oneshot::channel();
-        
+
         let id = uuid::Uuid::new_v4();
-        
+
         let (read_half, write_half) = tokio::io::split(pipe);
-        
+
         let conn = Arc::new(Self {
             inner: Arc::new(ConnectionInner {
                 id,
@@ -234,7 +247,7 @@ impl BepConnection {
             incoming_tx,
             incoming_rx: Arc::new(Mutex::new(incoming_rx)),
         });
-        
+
         // 启动连接处理任务
         let conn_clone = Arc::clone(&conn);
         let message_rx = Arc::new(Mutex::new(message_rx));
@@ -243,55 +256,53 @@ impl BepConnection {
                 error!("Connection {} error: {}", id, e);
             }
         });
-        
+
         Ok(conn)
     }
-    
+
     /// 获取连接ID
     pub fn id(&self) -> uuid::Uuid {
         self.inner.id
     }
-    
+
     /// 获取远程地址
     pub fn remote_addr(&self) -> SocketAddr {
         self.inner.remote_addr
     }
-    
+
     /// 获取本地地址
     pub fn local_addr(&self) -> SocketAddr {
         self.inner.local_addr
     }
-    
+
     /// 获取当前状态
     pub fn state(&self) -> ConnectionState {
         *self.inner.state.read()
     }
-    
+
     /// 设置状态
     pub fn set_state(&self, state: ConnectionState) {
         *self.inner.state.write() = state;
     }
-    
+
     /// 获取设备ID
     pub fn device_id(&self) -> Option<DeviceId> {
         *self.inner.device_id.read()
     }
-    
+
     /// 设置设备ID
     pub fn set_device_id(&self, device_id: DeviceId) {
         *self.inner.device_id.write() = Some(device_id);
-        
+
         // 通知连接建立
-        let _ = self.event_tx.send(ConnectionEvent::Connected {
-            device_id,
-        });
+        let _ = self.event_tx.send(ConnectionEvent::Connected { device_id });
     }
-    
+
     /// 获取连接类型
     pub fn connection_type(&self) -> ConnectionType {
         self.inner.conn_type
     }
-    
+
     /// 获取统计信息
     pub fn stats(&self) -> ConnectionStats {
         self.inner.stats.read().clone()
@@ -306,7 +317,7 @@ impl BepConnection {
                 .unwrap_or(Duration::from_secs(0))
         })
     }
-    
+
     /// 更新统计信息
     fn update_stats<F>(&self, f: F)
     where
@@ -315,7 +326,7 @@ impl BepConnection {
         let mut stats = self.inner.stats.write();
         f(&mut stats);
     }
-    
+
     /// 发送消息
     pub async fn send_message(&self, msg_type: MessageType, payload: Bytes) -> Result<()> {
         let header = MessageHeader {
@@ -323,31 +334,34 @@ impl BepConnection {
             message_id: 0,
             compressed: false,
         };
-        
+
         let msg = Message { header, payload };
         self.message_tx
             .send(msg)
             .map_err(|_| SyncthingError::ConnectionClosed)?;
-        
+
         self.update_stats(|s| {
             s.messages_sent += 1;
             s.last_activity = Some(chrono::Utc::now());
         });
-        
+
         Ok(())
     }
-    
+
     /// 发送Ping（BEP 没有独立的 Pong，收到 Ping 后通常回一个 Ping）
     pub async fn send_ping(&self) -> Result<()> {
         self.send_message(MessageType::Ping, Bytes::new()).await
     }
-    
+
     /// 发送Pong（兼容旧调用，实际发送 Ping）
     pub async fn send_pong(&self) -> Result<()> {
         self.send_message(MessageType::Ping, Bytes::new()).await
     }
 
-    pub async fn send_cluster_config(&self, cc: &bep_protocol::messages::ClusterConfig) -> Result<()> {
+    pub async fn send_cluster_config(
+        &self,
+        cc: &bep_protocol::messages::ClusterConfig,
+    ) -> Result<()> {
         let payload = bep_protocol::messages::encode_message(cc)
             .map_err(|e| SyncthingError::Serialization(e.to_string()))?;
         self.send_message(MessageType::ClusterConfig, payload).await
@@ -366,28 +380,28 @@ impl BepConnection {
             .map_err(|e| SyncthingError::Serialization(e.to_string()))?;
         self.send_message(MessageType::IndexUpdate, payload).await
     }
-    
+
     /// 关闭连接
     pub async fn close(&self) -> Result<()> {
         info!("Closing connection {}", self.id());
-        
+
         self.set_state(ConnectionState::Disconnecting);
-        
+
         // 触发关闭信号
         if let Some(tx) = self.shutdown_tx.write().take() {
             let _ = tx.send(());
         }
-        
+
         self.set_state(ConnectionState::Disconnected);
-        
+
         // 发送断开事件
         let _ = self.event_tx.send(ConnectionEvent::Disconnected {
             reason: "connection closed".to_string(),
         });
-        
+
         Ok(())
     }
-    
+
     /// 接收 BEP 消息（带超时，避免连接断开后永远卡住）
     pub async fn recv_message(&self) -> Result<(MessageType, Bytes)> {
         let mut rx = self.incoming_rx.lock().await;
@@ -397,7 +411,7 @@ impl BepConnection {
             Err(_) => Err(SyncthingError::timeout("message receive timeout")),
         }
     }
-    
+
     /// 主运行循环
     async fn run(
         &self,
@@ -406,13 +420,13 @@ impl BepConnection {
     ) -> Result<()> {
         // 启动读取任务
         let read_handle = self.spawn_read_task();
-        
+
         // 启动写入任务
         let write_handle = self.spawn_write_task(message_rx);
-        
+
         // 启动心跳任务
         let heartbeat_handle = self.spawn_heartbeat_task();
-        
+
         // 等待关闭信号
         tokio::select! {
             _ = &mut shutdown_rx => {
@@ -429,12 +443,12 @@ impl BepConnection {
                 debug!("Connection {} write task ended", self.id());
             }
         }
-        
+
         heartbeat_handle.abort();
-        
+
         Ok(())
     }
-    
+
     /// 启动读取任务
     fn spawn_read_task(&self) -> tokio::task::JoinHandle<Result<()>> {
         let read_half = Arc::clone(&self.read_half);
@@ -443,11 +457,20 @@ impl BepConnection {
         let inner = Arc::clone(&self.inner);
 
         tokio::spawn(async move {
-            let mut read_half = read_half.lock().await.take().expect("read_half already taken");
+            let mut read_half = read_half
+                .lock()
+                .await
+                .take()
+                .expect("read_half already taken");
             loop {
                 // 读取 2 字节 header length
                 let mut hdr_len_buf = [0u8; 2];
-                match timeout(DEFAULT_MESSAGE_TIMEOUT, read_half.read_exact(&mut hdr_len_buf)).await {
+                match timeout(
+                    DEFAULT_MESSAGE_TIMEOUT,
+                    read_half.read_exact(&mut hdr_len_buf),
+                )
+                .await
+                {
                     Ok(Ok(_)) => {}
                     Ok(Err(e)) => return Err(SyncthingError::Io(e)),
                     Err(_) => {
@@ -457,7 +480,8 @@ impl BepConnection {
                 let hdr_len = u16::from_be_bytes(hdr_len_buf) as usize;
                 if hdr_len > MAX_BEP_HEADER_SIZE {
                     return Err(SyncthingError::protocol(format!(
-                        "BEP header too large: {} > {}", hdr_len, MAX_BEP_HEADER_SIZE
+                        "BEP header too large: {} > {}",
+                        hdr_len, MAX_BEP_HEADER_SIZE
                     )));
                 }
 
@@ -471,7 +495,12 @@ impl BepConnection {
 
                 // 读取 4 字节 message length
                 let mut msg_len_buf = [0u8; 4];
-                match timeout(DEFAULT_MESSAGE_TIMEOUT, read_half.read_exact(&mut msg_len_buf)).await {
+                match timeout(
+                    DEFAULT_MESSAGE_TIMEOUT,
+                    read_half.read_exact(&mut msg_len_buf),
+                )
+                .await
+                {
                     Ok(Ok(_)) => {}
                     Ok(Err(e)) => return Err(SyncthingError::Io(e)),
                     Err(_) => return Err(SyncthingError::timeout("message length read timeout")),
@@ -479,7 +508,8 @@ impl BepConnection {
                 let msg_len = u32::from_be_bytes(msg_len_buf) as usize;
                 if msg_len > MAX_BEP_MESSAGE_SIZE {
                     return Err(SyncthingError::protocol(format!(
-                        "BEP message too large: {} > {}", msg_len, MAX_BEP_MESSAGE_SIZE
+                        "BEP message too large: {} > {}",
+                        msg_len, MAX_BEP_MESSAGE_SIZE
                     )));
                 }
 
@@ -499,25 +529,46 @@ impl BepConnection {
                 drop(stats);
 
                 // 解码 BEP Header
-                let bep_header = match <bep_protocol::messages::Header as prost::Message>::decode(&hdr_buf[..]) {
+                let bep_header = match <bep_protocol::messages::Header as prost::Message>::decode(
+                    &hdr_buf[..],
+                ) {
                     Ok(h) => h,
-                    Err(e) => return Err(SyncthingError::protocol(format!("decode header failed: {}", e))),
+                    Err(e) => {
+                        return Err(SyncthingError::protocol(format!(
+                            "decode header failed: {}",
+                            e
+                        )))
+                    }
                 };
 
                 let header = match MessageHeader::from_bep_header(&bep_header) {
                     Some(h) => h,
-                    None => return Err(SyncthingError::protocol(format!("unknown message type: {}", bep_header.r#type))),
+                    None => {
+                        return Err(SyncthingError::protocol(format!(
+                            "unknown message type: {}",
+                            bep_header.r#type
+                        )))
+                    }
                 };
 
                 // 处理 LZ4 压缩
                 let msg_buf = if header.compressed {
                     if msg_buf.len() < 4 {
-                        return Err(SyncthingError::protocol("compressed message too short".to_string()));
+                        return Err(SyncthingError::protocol(
+                            "compressed message too short".to_string(),
+                        ));
                     }
-                    let uncompressed_size = u32::from_be_bytes([msg_buf[0], msg_buf[1], msg_buf[2], msg_buf[3]]) as usize;
+                    let uncompressed_size =
+                        u32::from_be_bytes([msg_buf[0], msg_buf[1], msg_buf[2], msg_buf[3]])
+                            as usize;
                     match lz4::block::decompress(&msg_buf[4..], Some(uncompressed_size as i32)) {
                         Ok(decompressed) => decompressed,
-                        Err(e) => return Err(SyncthingError::protocol(format!("lz4 decompress failed: {}", e))),
+                        Err(e) => {
+                            return Err(SyncthingError::protocol(format!(
+                                "lz4 decompress failed: {}",
+                                e
+                            )))
+                        }
                     }
                 } else {
                     msg_buf
@@ -546,13 +597,20 @@ impl BepConnection {
         let inner = Arc::clone(&self.inner);
 
         tokio::spawn(async move {
-            let mut write_half = write_half.lock().await.take().expect("write_half already taken");
+            let mut write_half = write_half
+                .lock()
+                .await
+                .take()
+                .expect("write_half already taken");
             let mut rx = message_rx.lock().await;
 
             while let Some(msg) = rx.recv().await {
                 let bep_header = msg.header.to_bep_header();
                 let mut hdr_buf = Vec::new();
-                if let Err(e) = <bep_protocol::messages::Header as prost::Message>::encode(&bep_header, &mut hdr_buf) {
+                if let Err(e) = <bep_protocol::messages::Header as prost::Message>::encode(
+                    &bep_header,
+                    &mut hdr_buf,
+                ) {
                     return Err(SyncthingError::Serialization(e.to_string()));
                 }
                 let hdr_len = hdr_buf.len();
@@ -589,17 +647,17 @@ impl BepConnection {
             Ok(())
         })
     }
-    
+
     /// 启动心跳任务
     fn spawn_heartbeat_task(&self) -> tokio::task::JoinHandle<()> {
         let inner = Arc::clone(&self.inner);
-        
+
         tokio::spawn(async move {
             let mut interval = tokio::time::interval(HEARTBEAT_INTERVAL);
-            
+
             loop {
                 interval.tick().await;
-                
+
                 let last_pong = *inner.last_pong.read();
                 if last_pong.elapsed() > HEARTBEAT_INTERVAL * 3 {
                     // 心跳超时，应该断开连接
@@ -609,7 +667,7 @@ impl BepConnection {
             }
         })
     }
-    
+
     /// 检查连接是否活跃
     pub fn is_alive(&self) -> bool {
         matches!(
@@ -636,8 +694,7 @@ impl Drop for BepConnection {
 #[cfg(test)]
 mod tests {
     use super::*;
-    
-    
+
     #[test]
     fn test_message_header_bep_roundtrip() {
         let header = MessageHeader {
@@ -662,7 +719,10 @@ mod tests {
         };
 
         let bep = header.to_bep_header();
-        assert_eq!(bep.compression, bep_protocol::messages::MessageCompression::Lz4 as i32);
+        assert_eq!(
+            bep.compression,
+            bep_protocol::messages::MessageCompression::Lz4 as i32
+        );
         let decoded = MessageHeader::from_bep_header(&bep).unwrap();
         assert!(decoded.compressed);
     }
@@ -671,8 +731,10 @@ mod tests {
     async fn test_split_boxed_pipe() {
         use tokio::io::{AsyncReadExt, AsyncWriteExt};
         let (pipe_a, pipe_b) = syncthing_test_utils::memory_pipe_pair(1024);
-        let (_read_half, mut write_half) = tokio::io::split(Box::new(pipe_a) as syncthing_core::traits::BoxedPipe);
-        let (mut read_half_b, _write_half_b) = tokio::io::split(Box::new(pipe_b) as syncthing_core::traits::BoxedPipe);
+        let (_read_half, mut write_half) =
+            tokio::io::split(Box::new(pipe_a) as syncthing_core::traits::BoxedPipe);
+        let (mut read_half_b, _write_half_b) =
+            tokio::io::split(Box::new(pipe_b) as syncthing_core::traits::BoxedPipe);
 
         write_half.write_all(b"hello").await.unwrap();
         write_half.flush().await.unwrap();
@@ -689,17 +751,13 @@ mod tests {
         let (tx_a, _rx_a) = mpsc::unbounded_channel();
         let (tx_b, _rx_b) = mpsc::unbounded_channel();
 
-        let conn_a = BepConnection::new(
-            Box::new(pipe_a),
-            ConnectionType::Outgoing,
-            tx_a,
-        ).await.unwrap();
+        let conn_a = BepConnection::new(Box::new(pipe_a), ConnectionType::Outgoing, tx_a)
+            .await
+            .unwrap();
 
-        let conn_b = BepConnection::new(
-            Box::new(pipe_b),
-            ConnectionType::Incoming,
-            tx_b,
-        ).await.unwrap();
+        let conn_b = BepConnection::new(Box::new(pipe_b), ConnectionType::Incoming, tx_b)
+            .await
+            .unwrap();
 
         // Send a Ping from A
         conn_a.send_ping().await.unwrap();

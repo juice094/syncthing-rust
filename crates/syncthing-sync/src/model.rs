@@ -2,10 +2,10 @@
 
 use crate::error::Result;
 use crate::events::EventSubscriber;
-use syncthing_core::DeviceId;
-use syncthing_core::types::{Config, Folder, FolderStatus};
 use async_trait::async_trait;
 use std::collections::HashMap;
+use syncthing_core::types::{Config, Folder, FolderStatus};
+use syncthing_core::DeviceId;
 
 /// 同步模型 trait
 #[async_trait]
@@ -160,8 +160,11 @@ impl FolderConfigState {
         if self.config.paused {
             return false;
         }
-        
-        matches!(self.state.status, FolderStatus::Idle | FolderStatus::SyncWaiting)
+
+        matches!(
+            self.state.status,
+            FolderStatus::Idle | FolderStatus::SyncWaiting
+        )
     }
 
     /// 检查是否应该拉取
@@ -169,12 +172,15 @@ impl FolderConfigState {
         if self.config.paused {
             return false;
         }
-        
+
         // 只有发送接收和仅接收文件夹可以拉取
         if !self.config.folder_type.can_sync() {
             return false;
         }
 
-        matches!(self.state.status, FolderStatus::Idle | FolderStatus::ScanWaiting | FolderStatus::SyncWaiting)
+        matches!(
+            self.state.status,
+            FolderStatus::Idle | FolderStatus::ScanWaiting | FolderStatus::SyncWaiting
+        )
     }
 }

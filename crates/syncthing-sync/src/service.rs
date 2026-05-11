@@ -1,5 +1,5 @@
 //! 同步服务
-//! 
+//!
 //! 主服务实现，管理所有文件夹模型和同步循环
 
 use crate::block_server;
@@ -8,14 +8,14 @@ use crate::error::{Result, SyncError};
 use crate::events::{EventPublisher, EventSubscriber, SyncEvent};
 use crate::folder_model::FolderModel;
 use crate::index_handler::IndexHandler;
-use crate::model::{SyncManager, SyncStats, FolderState};
+use crate::model::{FolderState, SyncManager, SyncStats};
 use crate::puller::BlockSource;
-use tokio::task::JoinHandle;
-use syncthing_core::DeviceId;
-use syncthing_core::types::{Config, FileInfo, Folder, Index, IndexUpdate};
 use dashmap::DashMap;
 use std::sync::Arc;
+use syncthing_core::types::{Config, FileInfo, Folder, Index, IndexUpdate};
+use syncthing_core::DeviceId;
 use tokio::sync::RwLock;
+use tokio::task::JoinHandle;
 use tracing::{info, warn};
 
 /// 同步服务
@@ -117,7 +117,7 @@ impl SyncService {
     /// 初始化文件夹
     async fn init_folders(&self) -> Result<()> {
         let config = self.config.read().await;
-        
+
         for folder_config in &config.folders {
             self.add_folder_internal(folder_config.clone()).await?;
         }
@@ -129,7 +129,7 @@ impl SyncService {
     /// 内部添加文件夹
     async fn add_folder_internal(&self, folder: Folder) -> Result<()> {
         let folder_id = folder.id.clone();
-        
+
         // 检查是否已存在
         if self.folders.contains_key(&folder_id) {
             warn!(folder_id = %folder_id, "Folder already exists");
@@ -167,7 +167,9 @@ impl SyncService {
     /// 内部启动单个文件夹循环
     async fn start_folder_internal(&self, folder_id: &str) -> Result<()> {
         // 检查 folder 是否存在
-        let folder_model = self.folders.get(folder_id)
+        let folder_model = self
+            .folders
+            .get(folder_id)
             .ok_or_else(|| SyncError::FolderNotFound(folder_id.to_string()))?;
 
         // 如果已经在运行，直接返回
@@ -203,12 +205,15 @@ impl SyncService {
             }
         });
 
-        self.folder_tasks.insert(folder_id.to_string(), FolderTaskHandles {
-            shutdown_tx,
-            scan_handle,
-            pull_handle,
-            watcher_handle,
-        });
+        self.folder_tasks.insert(
+            folder_id.to_string(),
+            FolderTaskHandles {
+                shutdown_tx,
+                scan_handle,
+                pull_handle,
+                watcher_handle,
+            },
+        );
 
         info!(folder_id = %folder_id, "Folder loops started");
         Ok(())
@@ -351,12 +356,17 @@ impl SyncManager for SyncService {
     }
 
     async fn get_connected_devices(&self) -> Result<Vec<DeviceId>> {
-        Ok(self.connected_devices.iter().map(|e: dashmap::mapref::multiple::RefMulti<'_, DeviceId, ()>| *e.key()).collect())
+        Ok(self
+            .connected_devices
+            .iter()
+            .map(|e: dashmap::mapref::multiple::RefMulti<'_, DeviceId, ()>| *e.key())
+            .collect())
     }
 
     async fn connect_device(&self, device_id: DeviceId) -> Result<()> {
         self.connected_devices.insert(device_id, ());
-        self.events.publish(SyncEvent::DeviceConnected { device: device_id });
+        self.events
+            .publish(SyncEvent::DeviceConnected { device: device_id });
         info!(device = %device_id.short_id(), "Device connected");
         Ok(())
     }
@@ -381,16 +391,24 @@ impl SyncManager for SyncService {
         for entry in self.folders.iter() {
             let folder = entry.value();
             let state = folder.state().await;
-            
+
             if let Ok(files) = self.db.get_folder_files(folder.id()).await {
                 let folder_stats = crate::model::FolderStats {
                     files: state.local_files,
-                    directories: files.iter().filter(|f| matches!(f.file_type, syncthing_core::types::FileType::Directory)).count(),
-                    symlinks: files.iter().filter(|f| matches!(f.file_type, syncthing_core::types::FileType::Symlink)).count(),
+                    directories: files
+                        .iter()
+                        .filter(|f| {
+                            matches!(f.file_type, syncthing_core::types::FileType::Directory)
+                        })
+                        .count(),
+                    symlinks: files
+                        .iter()
+                        .filter(|f| matches!(f.file_type, syncthing_core::types::FileType::Symlink))
+                        .count(),
                     total_bytes: files.iter().map(|f| f.size as u64).sum(),
                     deleted: files.iter().filter(|f| f.is_deleted()).count(),
                 };
-                
+
                 let files_count = folder_stats.files;
                 let bytes_count = folder_stats.total_bytes;
                 stats.folders.insert(folder.id().to_string(), folder_stats);
@@ -405,36 +423,60 @@ impl SyncManager for SyncService {
 
 impl SyncService {
     /// 处理接收到的索引消息（供网络层调用）
-    pub async fn handle_index(&self, folder_id: &str, device: DeviceId, index: Index) -> Result<Vec<FileInfo>> {
-        let folder_model = self.folders.get(folder_id)
+    pub async fn handle_index(
+        &self,
+        folder_id: &str,
+        device: DeviceId,
+        index: Index,
+    ) -> Result<Vec<FileInfo>> {
+        let folder_model = self
+            .folders
+            .get(folder_id)
             .ok_or_else(|| SyncError::FolderNotFound(folder_id.to_string()))?;
 
-        let needed: Vec<syncthing_core::types::FileInfo> = self.index_handler.handle_index(folder_model.config(), device, index).await?;
-        
+        let needed: Vec<syncthing_core::types::FileInfo> = self
+            .index_handler
+            .handle_index(folder_model.config(), device, index)
+            .await?;
+
         // 触发文件夹的远程索引处理
-        folder_model.handle_remote_index(device, needed.clone()).await?;
-        
+        folder_model
+            .handle_remote_index(device, needed.clone())
+            .await?;
+
         // Update peer sync state for completion tracking
         let key = (device, folder_id.to_string());
         self.peer_sync_states.insert(key, needed.len());
-        
+
         Ok(needed)
     }
 
     /// 处理接收到的索引更新（供网络层调用）
-    pub async fn handle_index_update(&self, folder_id: &str, device: DeviceId, update: IndexUpdate) -> Result<Vec<FileInfo>> {
-        let folder_model = self.folders.get(folder_id)
+    pub async fn handle_index_update(
+        &self,
+        folder_id: &str,
+        device: DeviceId,
+        update: IndexUpdate,
+    ) -> Result<Vec<FileInfo>> {
+        let folder_model = self
+            .folders
+            .get(folder_id)
             .ok_or_else(|| SyncError::FolderNotFound(folder_id.to_string()))?;
 
-        let needed: Vec<syncthing_core::types::FileInfo> = self.index_handler.handle_index_update(folder_model.config(), device, update).await?;
-        
+        let needed: Vec<syncthing_core::types::FileInfo> = self
+            .index_handler
+            .handle_index_update(folder_model.config(), device, update)
+            .await?;
+
         // 触发文件夹的远程索引处理
-        folder_model.handle_remote_index(device, needed.clone()).await?;
-        
+        folder_model
+            .handle_remote_index(device, needed.clone())
+            .await?;
+
         // Update peer sync state for completion tracking
         let key = (device, folder_id.to_string());
         self.peer_sync_states.insert(key, needed.len());
-        
+
         Ok(needed)
     }
 
@@ -454,8 +496,14 @@ impl SyncService {
     }
 
     /// 生成索引更新（供网络层调用）
-    pub async fn generate_index_update(&self, folder_id: &str, since_sequence: u64) -> Result<Vec<FileInfo>> {
-        self.index_handler.generate_index_update(folder_id, since_sequence).await
+    pub async fn generate_index_update(
+        &self,
+        folder_id: &str,
+        since_sequence: u64,
+    ) -> Result<Vec<FileInfo>> {
+        self.index_handler
+            .generate_index_update(folder_id, since_sequence)
+            .await
     }
 
     /// 获取所有文件夹ID
@@ -481,7 +529,8 @@ impl SyncService {
 impl syncthing_core::traits::SyncModel for SyncService {
     async fn start_folder(&self, folder: syncthing_core::FolderId) -> syncthing_core::Result<()> {
         let folder_id = folder.as_str();
-        self.start_folder_internal(folder_id).await
+        self.start_folder_internal(folder_id)
+            .await
             .map_err(|e| syncthing_core::SyncthingError::internal(e.to_string()))
     }
 
@@ -489,10 +538,9 @@ impl syncthing_core::traits::SyncModel for SyncService {
         let folder_id = folder.as_str();
 
         // 检查是否在运行
-        let handles = self.folder_tasks.get(folder_id)
-            .ok_or_else(|| syncthing_core::SyncthingError::internal(
-                format!("Folder not running: {}", folder_id)
-            ))?;
+        let handles = self.folder_tasks.get(folder_id).ok_or_else(|| {
+            syncthing_core::SyncthingError::internal(format!("Folder not running: {}", folder_id))
+        })?;
 
         // 发送停止信号
         handles.shutdown_tx.send(true).ok();
@@ -510,17 +558,27 @@ impl syncthing_core::traits::SyncModel for SyncService {
     }
 
     async fn scan_folder(&self, folder: &syncthing_core::FolderId) -> syncthing_core::Result<()> {
-        crate::model::SyncManager::scan_folder(self, folder.as_str()).await
+        crate::model::SyncManager::scan_folder(self, folder.as_str())
+            .await
             .map_err(|e| syncthing_core::SyncthingError::internal(e.to_string()))
     }
 
-    async fn scan_folder_sub(&self, folder: &syncthing_core::FolderId, sub: &str) -> syncthing_core::Result<()> {
-        crate::model::SyncManager::scan_folder_sub(self, folder.as_str(), sub).await
+    async fn scan_folder_sub(
+        &self,
+        folder: &syncthing_core::FolderId,
+        sub: &str,
+    ) -> syncthing_core::Result<()> {
+        crate::model::SyncManager::scan_folder_sub(self, folder.as_str(), sub)
+            .await
             .map_err(|e| syncthing_core::SyncthingError::internal(e.to_string()))
     }
 
-    async fn pull(&self, folder: &syncthing_core::FolderId) -> syncthing_core::Result<syncthing_core::traits::SyncResult> {
-        crate::model::SyncManager::pull_folder(self, folder.as_str()).await
+    async fn pull(
+        &self,
+        folder: &syncthing_core::FolderId,
+    ) -> syncthing_core::Result<syncthing_core::traits::SyncResult> {
+        crate::model::SyncManager::pull_folder(self, folder.as_str())
+            .await
             .map_err(|e| syncthing_core::SyncthingError::internal(e.to_string()))?;
         Ok(syncthing_core::traits::SyncResult {
             files_processed: 0,
@@ -529,7 +587,10 @@ impl syncthing_core::traits::SyncModel for SyncService {
         })
     }
 
-    async fn folder_status(&self, folder: &syncthing_core::FolderId) -> syncthing_core::Result<syncthing_core::traits::FolderStatus> {
+    async fn folder_status(
+        &self,
+        folder: &syncthing_core::FolderId,
+    ) -> syncthing_core::Result<syncthing_core::traits::FolderStatus> {
         match self.get_folder(folder.as_str()) {
             Some(folder_model) => {
                 let state = folder_model.state().await;
@@ -572,8 +633,13 @@ impl syncthing_core::traits::SyncModel for SyncService {
     ) -> syncthing_core::Result<u64> {
         let needed = self.get_folder_completion(device, folder.as_str());
         // Simple completion: 100% if needed == 0, else heuristic based on total files
-        let total_files = self.db.get_folder_files(folder.as_str()).await
-            .map(|v| v.len()).unwrap_or(0).max(needed);
+        let total_files = self
+            .db
+            .get_folder_files(folder.as_str())
+            .await
+            .map(|v| v.len())
+            .unwrap_or(0)
+            .max(needed);
         let completion = if total_files == 0 {
             100
         } else {
@@ -582,23 +648,34 @@ impl syncthing_core::traits::SyncModel for SyncService {
         Ok(completion)
     }
 
-    async fn override_folder(&self, folder: &syncthing_core::FolderId) -> syncthing_core::Result<()> {
+    async fn override_folder(
+        &self,
+        folder: &syncthing_core::FolderId,
+    ) -> syncthing_core::Result<()> {
         let folder_id = folder.as_str();
         if let Some(folder_model) = self.folders.get(folder_id) {
-            folder_model.override_local_changes().await
-                .map_err(|e| syncthing_core::SyncthingError::internal(format!("override failed: {}", e)))
+            folder_model.override_local_changes().await.map_err(|e| {
+                syncthing_core::SyncthingError::internal(format!("override failed: {}", e))
+            })
         } else {
-            Err(syncthing_core::SyncthingError::internal(format!("folder not found: {}", folder_id)))
+            Err(syncthing_core::SyncthingError::internal(format!(
+                "folder not found: {}",
+                folder_id
+            )))
         }
     }
 
     async fn revert_folder(&self, folder: &syncthing_core::FolderId) -> syncthing_core::Result<()> {
         let folder_id = folder.as_str();
         if let Some(folder_model) = self.folders.get(folder_id) {
-            folder_model.revert_local_changes().await
-                .map_err(|e| syncthing_core::SyncthingError::internal(format!("revert failed: {}", e)))
+            folder_model.revert_local_changes().await.map_err(|e| {
+                syncthing_core::SyncthingError::internal(format!("revert failed: {}", e))
+            })
         } else {
-            Err(syncthing_core::SyncthingError::internal(format!("folder not found: {}", folder_id)))
+            Err(syncthing_core::SyncthingError::internal(format!(
+                "folder not found: {}",
+                folder_id
+            )))
         }
     }
 }
@@ -612,7 +689,7 @@ mod tests {
     async fn test_service_creation() {
         let db = MemoryDatabase::new();
         let service = SyncService::new(db);
-        
+
         assert!(service.get_folder_ids().is_empty());
     }
 
@@ -620,10 +697,10 @@ mod tests {
     async fn test_add_folder() {
         let db = MemoryDatabase::new();
         let service = SyncService::new(db);
-        
+
         let folder = Folder::new("test", "/tmp/test");
         service.add_folder(folder).await.unwrap();
-        
+
         assert_eq!(service.get_folder_ids().len(), 1);
     }
 
@@ -631,7 +708,7 @@ mod tests {
     async fn test_folder_not_found() {
         let db = MemoryDatabase::new();
         let service = SyncService::new(db);
-        
+
         let result = service.get_folder_state("nonexistent").await;
         assert!(matches!(result, Err(SyncError::FolderNotFound(_))));
     }

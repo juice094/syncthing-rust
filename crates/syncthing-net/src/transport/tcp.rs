@@ -7,10 +7,10 @@ use std::net::SocketAddr;
 use tokio::net::{TcpListener, TcpStream};
 use tracing::{debug, info};
 
+use syncthing_core::traits::ReliablePipe;
 use syncthing_core::{
     BoxedPipe, Result, SyncthingError, Transport, TransportListener, TransportType,
 };
-use syncthing_core::traits::ReliablePipe;
 
 /// 原始 TCP 传输（不做 TLS，不做 BEP Hello）。
 ///
@@ -59,9 +59,9 @@ impl Transport for RawTcpTransport {
         stream
             .set_nodelay(true)
             .map_err(|e| SyncthingError::connection(format!("TCP set_nodelay failed: {}", e)))?;
-        let peer_addr = stream.peer_addr().map_err(|e| {
-            SyncthingError::connection(format!("TCP peer_addr failed: {}", e))
-        })?;
+        let peer_addr = stream
+            .peer_addr()
+            .map_err(|e| SyncthingError::connection(format!("TCP peer_addr failed: {}", e)))?;
         debug!("RawTcpTransport connected to {}", peer_addr);
         Ok(Box::new(RawTcpStream { stream }))
     }
@@ -77,9 +77,11 @@ pub struct RawTcpListener {
 #[async_trait::async_trait]
 impl TransportListener for RawTcpListener {
     async fn accept(&self) -> Result<(BoxedPipe, SocketAddr)> {
-        let (stream, addr) = self.listener.accept().await.map_err(|e| {
-            SyncthingError::connection(format!("TCP accept failed: {}", e))
-        })?;
+        let (stream, addr) = self
+            .listener
+            .accept()
+            .await
+            .map_err(|e| SyncthingError::connection(format!("TCP accept failed: {}", e)))?;
         stream
             .set_nodelay(true)
             .map_err(|e| SyncthingError::connection(format!("TCP set_nodelay failed: {}", e)))?;

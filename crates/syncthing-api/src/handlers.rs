@@ -12,8 +12,7 @@
 use axum::{
     extract::{
         ws::{Message, WebSocket, WebSocketUpgrade},
-        Query,
-        State,
+        Query, State,
     },
     response::Response,
 };
@@ -88,9 +87,10 @@ async fn handle_websocket(socket: WebSocket, state: ApiState, query: EventsQuery
         connection_id, query.events, query.since, query.limit
     );
 
-    let event_filter: Option<Vec<String>> = query.events.as_ref().map(|e| {
-        e.split(',').map(|s| s.trim().to_string()).collect()
-    });
+    let event_filter: Option<Vec<String>> = query
+        .events
+        .as_ref()
+        .map(|e| e.split(',').map(|s| s.trim().to_string()).collect());
 
     let (mut ws_tx, mut ws_rx) = socket.split();
 
@@ -98,7 +98,11 @@ async fn handle_websocket(socket: WebSocket, state: ApiState, query: EventsQuery
     let (event_tx, mut event_rx) = mpsc::channel::<Event>(100);
 
     // Register connection with event bus
-    if let Err(e) = state.event_bus.register_connection(connection_id.clone(), event_tx).await {
+    if let Err(e) = state
+        .event_bus
+        .register_connection(connection_id.clone(), event_tx)
+        .await
+    {
         error!("Failed to register WebSocket connection: {}", e);
         return;
     }
@@ -138,7 +142,10 @@ async fn handle_websocket(socket: WebSocket, state: ApiState, query: EventsQuery
     while let Some(msg) = ws_rx.next().await {
         match msg {
             Ok(Message::Text(text)) => {
-                debug!("Received WebSocket message from {}: {}", connection_id, text);
+                debug!(
+                    "Received WebSocket message from {}: {}",
+                    connection_id, text
+                );
                 // Handle client messages (ping, subscription changes, etc.)
                 handle_client_message(&connection_id, &text, &state).await;
             }
@@ -174,11 +181,7 @@ async fn handle_websocket(socket: WebSocket, state: ApiState, query: EventsQuery
 }
 
 /// Handle a message from the WebSocket client
-async fn handle_client_message(
-    _connection_id: &str,
-    text: &str,
-    _state: &ApiState,
-) {
+async fn handle_client_message(_connection_id: &str, text: &str, _state: &ApiState) {
     // Parse client message
     match serde_json::from_str::<ClientMessage>(text) {
         Ok(msg) => {

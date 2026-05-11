@@ -17,9 +17,9 @@ use tracing::{debug, info};
 use syncthing_core::{DeviceId, SyncthingError};
 
 use crate::connection::BepConnection;
+use crate::relay::dial::parse_relay_url;
 use crate::tcp_transport::connect_bep;
 use crate::tls::SyncthingTlsConfig;
-use crate::relay::dial::parse_relay_url;
 
 /// Result type for a dial task.
 pub type DialResult = Result<(Arc<BepConnection>, SocketAddr, Duration), SyncthingError>;
@@ -271,7 +271,8 @@ impl ParallelDialer {
         // Relay candidates
         for url in &relay_urls {
             if let Ok((relay_addr, _)) = parse_relay_url(url) {
-                let score = self.scores
+                let score = self
+                    .scores
                     .entry(relay_addr)
                     .or_insert_with(|| AddressScore {
                         address: relay_addr,
@@ -290,14 +291,17 @@ impl ParallelDialer {
         candidates.sort_by_key(|(_, _, _, s)| Reverse(s.score()));
 
         // 最多并发 3 个
-        let top: Vec<(bool, SocketAddr, Option<String>, AddressScore)> = candidates.into_iter().take(3).collect();
+        let top: Vec<(bool, SocketAddr, Option<String>, AddressScore)> =
+            candidates.into_iter().take(3).collect();
 
         info!(
             "Parallel dialing {} with {} direct + {} relay candidates (top 3: {:?})",
             device_id,
             addresses.len(),
             relay_urls.len(),
-            top.iter().map(|(_, addr, _, s)| (*addr, s.score())).collect::<Vec<_>>()
+            top.iter()
+                .map(|(_, addr, _, s)| (*addr, s.score()))
+                .collect::<Vec<_>>()
         );
 
         // 启动并发拨号任务
@@ -317,7 +321,16 @@ impl ParallelDialer {
 
                 let handle: JoinHandle<DialResult> = tokio::spawn(async move {
                     let start = Instant::now();
-                    match relay_connector.connect_via_relay(&url, device_id, local_device_id, &device_name, &tls_config).await {
+                    match relay_connector
+                        .connect_via_relay(
+                            &url,
+                            device_id,
+                            local_device_id,
+                            &device_name,
+                            &tls_config,
+                        )
+                        .await
+                    {
                         Ok(conn) => {
                             let rtt = start.elapsed();
                             debug!("Relay dial via {} succeeded in {:?}", url, rtt);
@@ -340,7 +353,10 @@ impl ParallelDialer {
 
                 let handle: JoinHandle<DialResult> = tokio::spawn(async move {
                     let start = Instant::now();
-                    match connector.connect(addr, device_id, local_device_id, &device_name, &tls_config).await {
+                    match connector
+                        .connect(addr, device_id, local_device_id, &device_name, &tls_config)
+                        .await
+                    {
                         Ok(conn) => {
                             let rtt = start.elapsed();
                             debug!("Dial to {} succeeded in {:?}", addr, rtt);
@@ -385,9 +401,8 @@ impl ParallelDialer {
             self.record_failure(*addr);
         }
 
-        Err(last_error.unwrap_or_else(|| {
-            SyncthingError::connection("all parallel dial attempts failed")
-        }))
+        Err(last_error
+            .unwrap_or_else(|| SyncthingError::connection("all parallel dial attempts failed")))
     }
 
     /// 获取内部评分表引用（供管理器查询）
@@ -447,9 +462,13 @@ mod tests {
         });
         let stream = tokio::net::TcpStream::connect(addr).await.unwrap();
         let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
-        BepConnection::new(Box::new(crate::connection::TcpBiStream::Plain(stream)), ConnectionType::Outgoing, tx)
-            .await
-            .unwrap()
+        BepConnection::new(
+            Box::new(crate::connection::TcpBiStream::Plain(stream)),
+            ConnectionType::Outgoing,
+            tx,
+        )
+        .await
+        .unwrap()
     }
 
     struct MockConnector {
@@ -495,15 +514,19 @@ mod tests {
         mock.delays.insert(slow, Duration::from_millis(100));
 
         let dialer = ParallelDialer::new(local_id, "test".to_string(), mock.clone());
-        let tls = Arc::new(
-            SyncthingTlsConfig::from_pem(b"", b"").unwrap_or_else(|_| {
-                let (cert, key) = crate::tls::generate_certificate("test").unwrap();
-                SyncthingTlsConfig::from_pem(&cert, &key).unwrap()
-            }),
-        );
+        let tls = Arc::new(SyncthingTlsConfig::from_pem(b"", b"").unwrap_or_else(|_| {
+            let (cert, key) = crate::tls::generate_certificate("test").unwrap();
+            SyncthingTlsConfig::from_pem(&cert, &key).unwrap()
+        }));
 
         let result = dialer
-            .dial(DeviceId::default(), vec![fast, medium, slow], vec![], &tls, &local_id)
+            .dial(
+                DeviceId::default(),
+                vec![fast, medium, slow],
+                vec![],
+                &tls,
+                &local_id,
+            )
             .await;
 
         assert!(result.is_ok());
@@ -532,7 +555,10 @@ mod tests {
             address_type: AddressTypePreference::Wan,
         };
 
-        assert!(lan.score() > wan.score(), "LAN should score higher than WAN");
+        assert!(
+            lan.score() > wan.score(),
+            "LAN should score higher than WAN"
+        );
     }
 
     #[tokio::test]
@@ -551,16 +577,20 @@ mod tests {
         mock.delays.insert(slow, Duration::from_secs(100));
 
         let dialer = ParallelDialer::new(local_id, "test".to_string(), mock.clone());
-        let tls = Arc::new(
-            SyncthingTlsConfig::from_pem(b"", b"").unwrap_or_else(|_| {
-                let (cert, key) = crate::tls::generate_certificate("test").unwrap();
-                SyncthingTlsConfig::from_pem(&cert, &key).unwrap()
-            }),
-        );
+        let tls = Arc::new(SyncthingTlsConfig::from_pem(b"", b"").unwrap_or_else(|_| {
+            let (cert, key) = crate::tls::generate_certificate("test").unwrap();
+            SyncthingTlsConfig::from_pem(&cert, &key).unwrap()
+        }));
 
         let start = Instant::now();
         let result = dialer
-            .dial(DeviceId::default(), vec![fast, slow], vec![], &tls, &local_id)
+            .dial(
+                DeviceId::default(),
+                vec![fast, slow],
+                vec![],
+                &tls,
+                &local_id,
+            )
             .await;
         let elapsed = start.elapsed();
 

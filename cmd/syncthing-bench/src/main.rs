@@ -68,7 +68,11 @@ impl Scenario {
                 }
             }
         }
-        info!("Generated {} files for scenario {:?}", manifests.len(), self);
+        info!(
+            "Generated {} files for scenario {:?}",
+            manifests.len(),
+            self
+        );
         Ok(manifests)
     }
 }
@@ -91,11 +95,13 @@ fn compute_manifest(dir: &Path) -> Result<Vec<FileManifest>> {
     if !dir.exists() {
         return Ok(manifests);
     }
-    for entry in walkdir::WalkDir::new(dir).into_iter().filter_map(|e| e.ok()) {
+    for entry in walkdir::WalkDir::new(dir)
+        .into_iter()
+        .filter_map(|e| e.ok())
+    {
         if entry.file_type().is_file() {
             let path = entry.path();
-            let data = std::fs::read(path)
-                .with_context(|| format!("read {:?}", path))?;
+            let data = std::fs::read(path).with_context(|| format!("read {:?}", path))?;
             let hash = hex::encode(Sha256::digest(&data));
             manifests.push(FileManifest {
                 path: path.to_string_lossy().to_string(),
@@ -154,7 +160,10 @@ fn run(scenario: Scenario, source: &Path, target: &Path) -> Result<SyncBenchRepo
                 if src.sha256 == tgt.sha256 && src.size == tgt.size {
                     files_matched += 1;
                 } else {
-                    warn!("Mismatch: {} (src {} vs tgt {})", rel, src.sha256, tgt.sha256);
+                    warn!(
+                        "Mismatch: {} (src {} vs tgt {})",
+                        rel, src.sha256, tgt.sha256
+                    );
                     files_mismatch.push(rel.clone());
                 }
             }
@@ -165,7 +174,8 @@ fn run(scenario: Scenario, source: &Path, target: &Path) -> Result<SyncBenchRepo
         }
     }
 
-    let success = files_missing.is_empty() && files_mismatch.is_empty() && files_matched == source_map.len();
+    let success =
+        files_missing.is_empty() && files_mismatch.is_empty() && files_matched == source_map.len();
     let report = SyncBenchReport {
         scenario: format!("{:?}", scenario),
         source_dir: source.to_string_lossy().to_string(),

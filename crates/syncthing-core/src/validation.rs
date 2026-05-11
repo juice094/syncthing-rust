@@ -7,16 +7,22 @@ use crate::SyncthingError;
 /// 验证文件夹 ID
 pub fn validate_folder_id(id: &str) -> Result<(), SyncthingError> {
     if id.is_empty() {
-        return Err(SyncthingError::Validation("Folder ID cannot be empty".to_string()));
+        return Err(SyncthingError::Validation(
+            "Folder ID cannot be empty".to_string(),
+        ));
     }
     if id.len() > 64 {
         return Err(SyncthingError::Validation(
             "Folder ID cannot exceed 64 characters".to_string(),
         ));
     }
-    if !id.chars().all(|c| c.is_alphanumeric() || c == '-' || c == '_') {
+    if !id
+        .chars()
+        .all(|c| c.is_alphanumeric() || c == '-' || c == '_')
+    {
         return Err(SyncthingError::Validation(
-            "Folder ID can only contain alphanumeric characters, hyphens, and underscores".to_string(),
+            "Folder ID can only contain alphanumeric characters, hyphens, and underscores"
+                .to_string(),
         ));
     }
     Ok(())
@@ -25,10 +31,15 @@ pub fn validate_folder_id(id: &str) -> Result<(), SyncthingError> {
 /// 验证设备 ID 字符串格式
 pub fn validate_device_id(id: &str) -> Result<(), SyncthingError> {
     if id.is_empty() {
-        return Err(SyncthingError::Validation("Device ID cannot be empty".to_string()));
+        return Err(SyncthingError::Validation(
+            "Device ID cannot be empty".to_string(),
+        ));
     }
     if let Err(e) = id.parse::<crate::DeviceId>() {
-        return Err(SyncthingError::Validation(format!("Invalid device ID: {}", e)));
+        return Err(SyncthingError::Validation(format!(
+            "Invalid device ID: {}",
+            e
+        )));
     }
     Ok(())
 }
@@ -36,7 +47,9 @@ pub fn validate_device_id(id: &str) -> Result<(), SyncthingError> {
 /// 验证路径字符串
 pub fn validate_path(path: &str) -> Result<(), SyncthingError> {
     if path.is_empty() {
-        return Err(SyncthingError::Validation("Path cannot be empty".to_string()));
+        return Err(SyncthingError::Validation(
+            "Path cannot be empty".to_string(),
+        ));
     }
     if path.contains("..") {
         return Err(SyncthingError::Validation(
@@ -47,7 +60,10 @@ pub fn validate_path(path: &str) -> Result<(), SyncthingError> {
 }
 
 /// 验证设备 ID 不是本机设备 ID
-pub fn validate_device_id_not_local(id: &str, local: &crate::DeviceId) -> Result<(), SyncthingError> {
+pub fn validate_device_id_not_local(
+    id: &str,
+    local: &crate::DeviceId,
+) -> Result<(), SyncthingError> {
     if let Ok(device_id) = id.parse::<crate::DeviceId>() {
         if device_id == *local {
             return Err(SyncthingError::Validation(

@@ -5,45 +5,49 @@
 
 pub mod connection;
 #[doc(hidden)]
-pub mod handshaker;
-pub mod manager;
-pub mod netmon;
-pub mod session;
-pub mod tcp_transport;
-pub mod tls;
-pub mod protocol;
-pub mod stun;
-pub mod upnp;
-pub mod discovery;
-pub mod portmapper;
-pub mod dialer;
-pub mod metrics;
-pub mod identity;
-#[doc(hidden)]
-pub mod transport;
-#[doc(hidden)]
 pub mod derp;
+pub mod dialer;
+pub mod discovery;
+#[doc(hidden)]
+pub mod handshaker;
+pub mod identity;
+pub mod manager;
+pub mod metrics;
+pub mod netmon;
+pub mod portmapper;
+pub mod protocol;
 #[doc(hidden)]
 pub mod relay;
+pub mod session;
+pub mod stun;
+pub mod tcp_transport;
+pub mod tls;
+#[doc(hidden)]
+pub mod transport;
+pub mod upnp;
 
 /// Stable public API exports.
 pub use connection::{BepConnection, ConnectionEvent, TcpBiStream};
-pub use session::{BepSession, BepSessionEvent, BepSessionHandler, BepSessionMetrics};
-pub use protocol::{HelloMessage, MessageType, BEP_MAGIC};
-pub use manager::{ConnectionManager, ConnectionManagerConfig, ConnectionManagerHandle, ManagerStats};
-pub use netmon::{NetMonitor, NetChangeEvent};
-pub use tcp_transport::{TcpTransport, TcpDialer, DEFAULT_TCP_PORT};
-pub use dialer::{ParallelDialer, AddressScore, AddressTypePreference, DialConnector, TcpBepConnector};
-pub use tls::{SyncthingTlsConfig, accept_tls, connect_tls, generate_certificate};
-pub use stun::{query, StunClient, StunRefresher, DEFAULT_STUN_SERVERS};
-pub use upnp::{UpnpClient, UpnpMappingManager, discover_upnp, DEFAULT_MAPPING_DURATION};
-pub use discovery::{DiscoveryManager, DiscoveryConfig, AddressInfo, AddressSource};
-pub use discovery::{LocalDiscovery, DiscoveryEvent, DiscoverySource};
-pub use discovery::{GlobalDiscovery, DEFAULT_DISCOVERY_SERVER, ANNOUNCE_INTERVAL, RETRY_INTERVAL};
-pub use portmapper::{PortMapper, Mapping};
-pub use identity::TlsIdentity;
+pub use dialer::{
+    AddressScore, AddressTypePreference, DialConnector, ParallelDialer, TcpBepConnector,
+};
+pub use discovery::{AddressInfo, AddressSource, DiscoveryConfig, DiscoveryManager};
+pub use discovery::{DiscoveryEvent, DiscoverySource, LocalDiscovery};
+pub use discovery::{GlobalDiscovery, ANNOUNCE_INTERVAL, DEFAULT_DISCOVERY_SERVER, RETRY_INTERVAL};
 pub use handshaker::BepHandshaker;
-pub use metrics::{global, MetricsCollector, MetricRecord};
+pub use identity::TlsIdentity;
+pub use manager::{
+    ConnectionManager, ConnectionManagerConfig, ConnectionManagerHandle, ManagerStats,
+};
+pub use metrics::{global, MetricRecord, MetricsCollector};
+pub use netmon::{NetChangeEvent, NetMonitor};
+pub use portmapper::{Mapping, PortMapper};
+pub use protocol::{HelloMessage, MessageType, BEP_MAGIC};
+pub use session::{BepSession, BepSessionEvent, BepSessionHandler, BepSessionMetrics};
+pub use stun::{query, StunClient, StunRefresher, DEFAULT_STUN_SERVERS};
+pub use tcp_transport::{TcpDialer, TcpTransport, DEFAULT_TCP_PORT};
+pub use tls::{accept_tls, connect_tls, generate_certificate, SyncthingTlsConfig};
+pub use upnp::{discover_upnp, UpnpClient, UpnpMappingManager, DEFAULT_MAPPING_DURATION};
 
 /// TLS 相关常量
 pub mod tls_constants {

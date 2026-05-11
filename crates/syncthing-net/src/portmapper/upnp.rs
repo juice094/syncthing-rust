@@ -59,11 +59,26 @@ pub fn parse_upnp_disco_response(body: &[u8]) -> Option<UpnpDiscoResponse> {
     for line in text.lines() {
         let lower = line.to_lowercase();
         if lower.starts_with("location:") {
-            location = line.split_once(':').map(|x| x.1).unwrap_or("").trim().to_string();
+            location = line
+                .split_once(':')
+                .map(|x| x.1)
+                .unwrap_or("")
+                .trim()
+                .to_string();
         } else if lower.starts_with("server:") {
-            server = line.split_once(':').map(|x| x.1).unwrap_or("").trim().to_string();
+            server = line
+                .split_once(':')
+                .map(|x| x.1)
+                .unwrap_or("")
+                .trim()
+                .to_string();
         } else if lower.starts_with("usn:") {
-            usn = line.split_once(':').map(|x| x.1).unwrap_or("").trim().to_string();
+            usn = line
+                .split_once(':')
+                .map(|x| x.1)
+                .unwrap_or("")
+                .trim()
+                .to_string();
         }
     }
 
@@ -71,7 +86,11 @@ pub fn parse_upnp_disco_response(body: &[u8]) -> Option<UpnpDiscoResponse> {
         return None;
     }
 
-    Some(UpnpDiscoResponse { location, server, usn })
+    Some(UpnpDiscoResponse {
+        location,
+        server,
+        usn,
+    })
 }
 
 /// 构建 AddPortMapping SOAP 请求体
@@ -123,7 +142,10 @@ pub fn build_delete_port_mapping_soap(external_port: u16, protocol: &str) -> Str
 /// 使用 `igd` 库进行网关发现 (SSDP) 和端口映射 (SOAP)。
 /// 原始 SSDP/SOAP 实现需要：UDP 多播、HTTP client、XML 解析。
 /// 当前 `igd` 库稳定可靠，替换收益/成本比低，保留作为长期方案。
-pub(crate) async fn allocate_port(local_addr: SocketAddr, local_port: u16) -> Result<(SocketAddr, UpnpMappingState)> {
+pub(crate) async fn allocate_port(
+    local_addr: SocketAddr,
+    local_port: u16,
+) -> Result<(SocketAddr, UpnpMappingState)> {
     let options = SearchOptions {
         timeout: Some(Duration::from_secs(5)),
         ..Default::default()
@@ -154,10 +176,9 @@ pub(crate) async fn allocate_port(local_addr: SocketAddr, local_port: u16) -> Re
         .await
         .map_err(|e| SyncthingError::connection(format!("UPnP AddPortMapping failed: {}", e)))?;
 
-    let external_ip = gateway
-        .get_external_ip()
-        .await
-        .map_err(|e| SyncthingError::connection(format!("UPnP GetExternalIPAddress failed: {}", e)))?;
+    let external_ip = gateway.get_external_ip().await.map_err(|e| {
+        SyncthingError::connection(format!("UPnP GetExternalIPAddress failed: {}", e))
+    })?;
 
     let external = SocketAddr::from((std::net::IpAddr::from(external_ip), external_port));
     let state = UpnpMappingState {
@@ -213,7 +234,10 @@ USN: uuid:abc::urn:schemas-upnp-org:device:InternetGatewayDevice:1\r\n\r\n";
         let res = parse_upnp_disco_response(body).unwrap();
         assert_eq!(res.location, "http://192.168.1.1:5000/rootDesc.xml");
         assert_eq!(res.server, "MiniUPnPd/2.2.1");
-        assert_eq!(res.usn, "uuid:abc::urn:schemas-upnp-org:device:InternetGatewayDevice:1");
+        assert_eq!(
+            res.usn,
+            "uuid:abc::urn:schemas-upnp-org:device:InternetGatewayDevice:1"
+        );
     }
 
     #[test]
@@ -244,7 +268,9 @@ USN: uuid:abc::urn:schemas-upnp-org:device:InternetGatewayDevice:1\r\n\r\n";
         assert!(soap.contains("<NewInternalClient>192.168.1.100</NewInternalClient>"));
         assert!(soap.contains("<NewProtocol>UDP</NewProtocol>"));
         assert!(soap.contains("<NewLeaseDuration>7200</NewLeaseDuration>"));
-        assert!(soap.contains("<NewPortMappingDescription>syncthing-portmapper</NewPortMappingDescription>"));
+        assert!(soap.contains(
+            "<NewPortMappingDescription>syncthing-portmapper</NewPortMappingDescription>"
+        ));
     }
 
     #[test]

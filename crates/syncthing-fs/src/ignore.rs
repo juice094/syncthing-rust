@@ -409,7 +409,8 @@ impl Pattern {
         }
 
         // Compile to regex
-        let regex = Self::compile_regex(&pattern_str, is_root_only, is_directory, case_insensitive)?;
+        let regex =
+            Self::compile_regex(&pattern_str, is_root_only, is_directory, case_insensitive)?;
 
         Ok(Self {
             pattern: pattern_str,
@@ -481,9 +482,8 @@ impl Pattern {
 
         regex_str.push('$');
 
-        regex::Regex::new(&regex_str).map_err(|e| {
-            SyncthingError::config(format!("Invalid pattern '{}': {}", pattern, e))
-        })
+        regex::Regex::new(&regex_str)
+            .map_err(|e| SyncthingError::config(format!("Invalid pattern '{}': {}", pattern, e)))
     }
 
     /// Check if this pattern matches a path

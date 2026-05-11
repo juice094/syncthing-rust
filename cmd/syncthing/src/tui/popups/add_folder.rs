@@ -40,18 +40,28 @@ pub fn draw(f: &mut Frame, app: &App, theme: &Theme) {
     let id_focused = app.folder_form.focus == 0;
     let id_text = format!(
         "Folder ID: {}",
-        app.folder_form.fields.first().map(|s| s.as_str()).unwrap_or("")
+        app.folder_form
+            .fields
+            .first()
+            .map(|s| s.as_str())
+            .unwrap_or("")
     );
     let id_para = Paragraph::new(id_text)
         .style(if id_focused {
-            Style::default().fg(theme.text_primary).add_modifier(Modifier::BOLD)
+            Style::default()
+                .fg(theme.text_primary)
+                .add_modifier(Modifier::BOLD)
         } else {
             Style::default().fg(theme.text_secondary)
         })
         .block(
             Block::default()
                 .borders(Borders::ALL)
-                .border_style(if id_focused { theme.border_focused } else { theme.border }),
+                .border_style(if id_focused {
+                    theme.border_focused
+                } else {
+                    theme.border
+                }),
         );
     f.render_widget(id_para, chunks[0]);
 
@@ -59,28 +69,44 @@ pub fn draw(f: &mut Frame, app: &App, theme: &Theme) {
     let path_focused = app.folder_form.focus == 1;
     let path_text = format!(
         "Path: {}",
-        app.folder_form.fields.get(1).map(|s| s.as_str()).unwrap_or("")
+        app.folder_form
+            .fields
+            .get(1)
+            .map(|s| s.as_str())
+            .unwrap_or("")
     );
     let path_para = Paragraph::new(path_text)
         .style(if path_focused {
-            Style::default().fg(theme.text_primary).add_modifier(Modifier::BOLD)
+            Style::default()
+                .fg(theme.text_primary)
+                .add_modifier(Modifier::BOLD)
         } else {
             Style::default().fg(theme.text_secondary)
         })
         .block(
             Block::default()
                 .borders(Borders::ALL)
-                .border_style(if path_focused { theme.border_focused } else { theme.border }),
+                .border_style(if path_focused {
+                    theme.border_focused
+                } else {
+                    theme.border
+                }),
         );
     f.render_widget(path_para, chunks[1]);
 
     // Hint
     let in_device_list = app.folder_form.focus == app.folder_form.fields.len();
     if id_focused {
-        let hint = Paragraph::new(Span::styled("Unique identifier for this folder", theme.style_idle));
+        let hint = Paragraph::new(Span::styled(
+            "Unique identifier for this folder",
+            theme.style_idle,
+        ));
         f.render_widget(hint, chunks[2]);
     } else if path_focused {
-        let hint = Paragraph::new(Span::styled("Absolute path to the local directory", theme.style_idle));
+        let hint = Paragraph::new(Span::styled(
+            "Absolute path to the local directory",
+            theme.style_idle,
+        ));
         f.render_widget(hint, chunks[2]);
     }
 
@@ -97,7 +123,9 @@ pub fn draw(f: &mut Frame, app: &App, theme: &Theme) {
             let name = d.name.as_deref().unwrap_or("Unnamed");
             let is_highlighted = list_focused && app.folder_device_selected == i;
             let style = if is_highlighted {
-                Style::default().fg(theme.primary).add_modifier(Modifier::BOLD)
+                Style::default()
+                    .fg(theme.primary)
+                    .add_modifier(Modifier::BOLD)
             } else {
                 Style::default().fg(theme.text_secondary)
             };
@@ -108,7 +136,11 @@ pub fn draw(f: &mut Frame, app: &App, theme: &Theme) {
     let list = List::new(items).block(
         Block::default()
             .borders(Borders::ALL)
-            .border_style(if list_focused { theme.border_focused } else { theme.border })
+            .border_style(if list_focused {
+                theme.border_focused
+            } else {
+                theme.border
+            })
             .title(Span::styled(" Shared with devices ", theme.style_header)),
     );
     f.render_widget(list, chunks[3]);

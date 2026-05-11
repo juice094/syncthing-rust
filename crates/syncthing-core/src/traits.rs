@@ -138,7 +138,10 @@ pub type FileSystemRef = Arc<dyn FileSystem>;
 /// connection model that does not match the current `Arc<BepConnection>` +
 /// `BepSessionHandler` architecture.
 #[allow(deprecated)]
-#[deprecated(since = "0.1.0", note = "Use syncthing_net::BepSession with ReliablePipe instead")]
+#[deprecated(
+    since = "0.1.0",
+    note = "Use syncthing_net::BepSession with ReliablePipe instead"
+)]
 #[async_trait]
 pub trait BepConnection: Send + Sync {
     /// Get remote device ID
@@ -177,7 +180,10 @@ pub trait BepConnection: Send + Sync {
 /// Messages that can be received over BEP
 ///
 /// ⚠️ DEPRECATED: Used only by the deprecated `BepConnection` trait.
-#[deprecated(since = "0.1.0", note = "Use syncthing_net::BepSession with prost messages instead")]
+#[deprecated(
+    since = "0.1.0",
+    note = "Use syncthing_net::BepSession with prost messages instead"
+)]
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum BepMessage {
@@ -255,11 +261,7 @@ pub trait BlockStore: Send + Sync {
     async fn update_index(&self, folder: &FolderId, files: Vec<FileInfo>) -> Result<()>;
 
     /// Update index with delta
-    async fn update_index_delta(
-        &self,
-        folder: &FolderId,
-        files: Vec<FileInfo>,
-    ) -> Result<()>;
+    async fn update_index_delta(&self, folder: &FolderId, files: Vec<FileInfo>) -> Result<()>;
 
     /// Get folder statistics
     async fn folder_stats(&self, folder: &FolderId) -> Result<FolderStats>;
@@ -478,14 +480,18 @@ pub trait SyncModel: Send + Sync {
     /// Accepts local modifications and broadcasts them to peers.
     /// Default returns not-implemented.
     async fn override_folder(&self, _folder: &FolderId) -> Result<()> {
-        Err(SyncthingError::internal("override not yet implemented".to_string()))
+        Err(SyncthingError::internal(
+            "override not yet implemented".to_string(),
+        ))
     }
 
     /// Revert local changes for a ReceiveOnly folder.
     /// Discards local modifications and re-downloads from peers.
     /// Default returns not-implemented.
     async fn revert_folder(&self, _folder: &FolderId) -> Result<()> {
-        Err(SyncthingError::internal("revert not yet implemented".to_string()))
+        Err(SyncthingError::internal(
+            "revert not yet implemented".to_string(),
+        ))
     }
 }
 

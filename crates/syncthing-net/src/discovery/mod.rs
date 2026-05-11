@@ -21,8 +21,8 @@
 //! ```
 
 pub mod events;
-pub mod local;
 pub mod global;
+pub mod local;
 
 use std::net::SocketAddr;
 use tracing::{debug, info, warn};
@@ -33,8 +33,8 @@ use crate::stun::StunClient;
 use crate::upnp::UpnpClient;
 
 pub use events::{DiscoveryEvent, DiscoverySource};
+pub use global::{GlobalDiscovery, ANNOUNCE_INTERVAL, DEFAULT_DISCOVERY_SERVER, RETRY_INTERVAL};
 pub use local::{Announce, LocalDiscovery, LOCAL_DISCOVERY_MAGIC, LOCAL_DISCOVERY_PORT};
-pub use global::{GlobalDiscovery, DEFAULT_DISCOVERY_SERVER, ANNOUNCE_INTERVAL, RETRY_INTERVAL};
 
 /// 发现管理器配置
 #[derive(Debug, Clone)]
@@ -64,7 +64,7 @@ impl Default for DiscoveryConfig {
 }
 
 /// 发现管理器
-/// 
+///
 /// 管理本地地址发现、公网地址获取和端口映射
 pub struct DiscoveryManager {
     /// 本地监听地址
@@ -108,14 +108,17 @@ impl DiscoveryManager {
     }
 
     /// 初始化并启动发现服务
-    /// 
+    ///
     /// 配置 UPnP 端口映射等
     pub async fn init(&mut self) -> Result<()> {
         // 尝试设置 UPnP 端口映射
         if self.config.enable_upnp {
             if let Some(ref client) = self.upnp_client {
                 let port = self.local_addr.port();
-                match client.add_tcp_mapping(port, self.config.upnp_duration).await {
+                match client
+                    .add_tcp_mapping(port, self.config.upnp_duration)
+                    .await
+                {
                     Ok(_) => {
                         info!("UPnP TCP port mapping configured: {} -> {}", port, port);
                     }
@@ -125,7 +128,10 @@ impl DiscoveryManager {
                 }
 
                 // 同时映射 UDP（用于未来扩展）
-                match client.add_udp_mapping(port, self.config.upnp_duration).await {
+                match client
+                    .add_udp_mapping(port, self.config.upnp_duration)
+                    .await
+                {
                     Ok(_) => {
                         info!("UPnP UDP port mapping configured: {} -> {}", port, port);
                     }
@@ -140,7 +146,7 @@ impl DiscoveryManager {
     }
 
     /// 获取公网地址列表
-    /// 
+    ///
     /// 返回可用于公网发现的地址列表
     pub async fn get_public_addresses(&self) -> Vec<String> {
         let mut addrs = vec![];
@@ -186,7 +192,7 @@ impl DiscoveryManager {
     }
 
     /// 关闭发现服务
-    /// 
+    ///
     /// 清理 UPnP 端口映射等
     pub async fn shutdown(&mut self) -> Result<()> {
         if let Some(ref client) = self.upnp_client {

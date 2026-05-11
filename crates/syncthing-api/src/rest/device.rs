@@ -1,3 +1,4 @@
+use crate::handlers::validation;
 use axum::{
     extract::{Path, State},
     http::StatusCode,
@@ -5,10 +6,9 @@ use axum::{
     Json,
 };
 use serde::{Deserialize, Serialize};
-use crate::handlers::validation;
 
-use super::ApiState;
 use super::parse_device_id;
+use super::ApiState;
 
 pub(crate) async fn list_devices(State(state): State<ApiState>) -> impl IntoResponse {
     match state.config_store.load().await {
@@ -32,12 +32,13 @@ pub(crate) async fn get_device(
         Ok(config) => {
             // Parse device ID from string
             let device_id = parse_device_id(&id);
-            match config.devices.iter().find(|d| d.id.to_string() == device_id.to_string()) {
+            match config
+                .devices
+                .iter()
+                .find(|d| d.id.to_string() == device_id.to_string())
+            {
                 Some(device) => Ok(Json(DeviceResponse::from(device.clone()))),
-                None => Err((
-                    StatusCode::NOT_FOUND,
-                    format!("Device '{}' not found", id),
-                )),
+                None => Err((StatusCode::NOT_FOUND, format!("Device '{}' not found", id))),
             }
         }
         Err(e) => Err((StatusCode::INTERNAL_SERVER_ERROR, format!("{}", e))),
@@ -60,7 +61,11 @@ pub(crate) async fn add_device(
     let device_id = parse_device_id(&request.id);
 
     // Check if device already exists
-    if config.devices.iter().any(|d| d.id.to_string() == device_id.to_string()) {
+    if config
+        .devices
+        .iter()
+        .any(|d| d.id.to_string() == device_id.to_string())
+    {
         return Err((
             StatusCode::CONFLICT,
             format!("Device '{}' already exists", request.id),
@@ -86,7 +91,10 @@ pub(crate) async fn add_device(
     config.devices.push(device);
 
     match state.config_store.save(&config).await {
-        Ok(_) => Ok((StatusCode::CREATED, Json(DeviceResponse::from(config.devices.last().unwrap().clone())))),
+        Ok(_) => Ok((
+            StatusCode::CREATED,
+            Json(DeviceResponse::from(config.devices.last().unwrap().clone())),
+        )),
         Err(e) => Err((StatusCode::INTERNAL_SERVER_ERROR, format!("{}", e))),
     }
 }
@@ -102,7 +110,9 @@ pub(crate) async fn remove_device(
 
     let device_id = parse_device_id(&id);
     let original_len = config.devices.len();
-    config.devices.retain(|d| d.id.to_string() != device_id.to_string());
+    config
+        .devices
+        .retain(|d| d.id.to_string() != device_id.to_string());
 
     if config.devices.len() == original_len {
         return Err((StatusCode::NOT_FOUND, format!("Device '{}' not found", id)));
@@ -130,20 +140,31 @@ pub(crate) async fn update_device(
     if device_id != request_id {
         return Err((
             StatusCode::BAD_REQUEST,
-            format!("URL device ID '{}' does not match body device ID '{}'", id, request.id),
+            format!(
+                "URL device ID '{}' does not match body device ID '{}'",
+                id, request.id
+            ),
         ));
     }
 
-    let device = match config.devices.iter_mut().find(|d| d.id.to_string() == device_id.to_string()) {
+    let device = match config
+        .devices
+        .iter_mut()
+        .find(|d| d.id.to_string() == device_id.to_string())
+    {
         Some(d) => d,
         None => return Err((StatusCode::NOT_FOUND, format!("Device '{}' not found", id))),
     };
 
     device.name = Some(request.name);
-    device.addresses = request.addresses.into_iter().map(|a| match a.as_str() {
-        "dynamic" => syncthing_core::types::AddressType::Dynamic,
-        _ => syncthing_core::types::AddressType::Tcp(a),
-    }).collect();
+    device.addresses = request
+        .addresses
+        .into_iter()
+        .map(|a| match a.as_str() {
+            "dynamic" => syncthing_core::types::AddressType::Dynamic,
+            _ => syncthing_core::types::AddressType::Tcp(a),
+        })
+        .collect();
     device.introducer = request.introducer;
 
     let updated_device = device.clone();
@@ -185,7 +206,11 @@ impl From<syncthing_core::types::Device> for DeviceResponse {
         Self {
             id: device.id.to_string(),
             name: device.name.unwrap_or_default(),
-            addresses: device.addresses.iter().map(|a| a.as_str().to_string()).collect(),
+            addresses: device
+                .addresses
+                .iter()
+                .map(|a| a.as_str().to_string())
+                .collect(),
             introducer: device.introducer,
         }
     }

@@ -23,11 +23,7 @@ pub struct MemoryPipe {
 }
 
 impl MemoryPipe {
-    fn new(
-        inner: tokio::io::DuplexStream,
-        local_addr: SocketAddr,
-        peer_addr: SocketAddr,
-    ) -> Self {
+    fn new(inner: tokio::io::DuplexStream, local_addr: SocketAddr, peer_addr: SocketAddr) -> Self {
         Self {
             inner,
             local_addr,

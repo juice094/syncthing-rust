@@ -44,7 +44,6 @@ enum Commands {
         /// 设备名称
         #[arg(short, long, default_value = "syncthing-rust")]
         device_name: String,
-
     },
 
     /// 启动 TUI 配置管理器
@@ -57,10 +56,7 @@ enum Commands {
         #[arg(short, long, default_value = "syncthing-rust")]
         device_name: String,
     },
-
-
 }
-
 
 /// 配置文件名
 const CONFIG_FILE_NAME: &str = "config.json";
@@ -76,15 +72,14 @@ fn load_config(path: &PathBuf) -> anyhow::Result<Config> {
 
 /// 保存配置到文件
 fn save_config(path: &PathBuf, config: &Config) -> anyhow::Result<()> {
-    let content = serde_json::to_string_pretty(config)
-        .context("failed to serialize config")?;
+    let content = serde_json::to_string_pretty(config).context("failed to serialize config")?;
     std::fs::write(path, content)
         .with_context(|| format!("failed to write config to {:?}", path))?;
     Ok(())
 }
 
-mod tui;
 mod logging_buffer;
+mod tui;
 use syncthing::api_server;
 
 /// Resolve listen/device_name from config file, overridden by CLI args.
@@ -128,14 +123,19 @@ async fn main() -> Result<()> {
     let cli = Cli::parse();
 
     // 确定配置目录
-    let config_dir = cli.config_dir.unwrap_or_else(syncthing_core::paths::default_config_dir);
+    let config_dir = cli
+        .config_dir
+        .unwrap_or_else(syncthing_core::paths::default_config_dir);
     let log_level = cli
         .log_level
         .parse::<Level>()
         .context("invalid log level")?;
 
     match cli.command {
-        Commands::Run { listen, device_name } => {
+        Commands::Run {
+            listen,
+            device_name,
+        } => {
             // T-F3: 日志滚动切片（默认 7 天 / 100 MB）
             let logs_dir = config_dir.join("logs");
             if let Err(e) = std::fs::create_dir_all(&logs_dir) {
@@ -148,23 +148,34 @@ async fn main() -> Result<()> {
                 .filename_suffix("log")
                 .build(&logs_dir)
                 .unwrap_or_else(|e| {
-                    eprintln!("Warning: cannot create rolling file appender: {}. Falling back to stdout.", e);
+                    eprintln!(
+                        "Warning: cannot create rolling file appender: {}. Falling back to stdout.",
+                        e
+                    );
                     tracing_appender::rolling::daily(std::env::temp_dir(), "syncthing-fallback")
                 });
             let (non_blocking, _guard) = tracing_appender::non_blocking(file_appender);
-            let subscriber = tracing_subscriber::registry()
-                .with(
-                    tracing_subscriber::fmt::layer()
-                        .with_writer(non_blocking)
-                        .with_filter(tracing_subscriber::filter::LevelFilter::from_level(log_level))
-                );
+            let subscriber = tracing_subscriber::registry().with(
+                tracing_subscriber::fmt::layer()
+                    .with_writer(non_blocking)
+                    .with_filter(tracing_subscriber::filter::LevelFilter::from_level(
+                        log_level,
+                    )),
+            );
             tracing::subscriber::set_global_default(subscriber)
                 .map_err(|e| anyhow::anyhow!("Failed to set subscriber: {}", e))?;
             let (listen, device_name) = resolve_daemon_config(&config_dir, listen, device_name)?;
             match tui::daemon_runner::start_daemon(config_dir.clone(), listen, device_name).await {
                 Ok(startup) => {
                     // 启动 REST API 服务器
-                    let (api_handle, _api_addr) = match api_server::start_api_server(&config_dir, startup.sync_service.clone(), startup.device_id, Some(startup.connection_handle.clone())).await {
+                    let (api_handle, _api_addr) = match api_server::start_api_server(
+                        &config_dir,
+                        startup.sync_service.clone(),
+                        startup.device_id,
+                        Some(startup.connection_handle.clone()),
+                    )
+                    .await
+                    {
                         Ok(h) => h,
                         Err(e) => {
                             warn!("Failed to start REST API server: {}", e);
@@ -181,20 +192,24 @@ async fn main() -> Result<()> {
                 }
             }
         }
-        Commands::Tui { listen, device_name } => {
+        Commands::Tui {
+            listen,
+            device_name,
+        } => {
             let memory_buffer = logging_buffer::MemoryBuffer::new(100);
             let memory_layer = logging_buffer::MemoryLayer::new(memory_buffer.clone());
             // TUI 模式下丢弃 stdout 输出，避免日志穿透到 TUI 外侧
-            let fmt_layer = tracing_subscriber::fmt::layer()
-                .with_writer(std::io::sink);
-            let subscriber = tracing_subscriber::registry()
-                .with(fmt_layer.with_filter(tracing_subscriber::filter::LevelFilter::from_level(log_level)))
-                .with(memory_layer);
+            let fmt_layer = tracing_subscriber::fmt::layer().with_writer(std::io::sink);
+            let subscriber =
+                tracing_subscriber::registry()
+                    .with(fmt_layer.with_filter(
+                        tracing_subscriber::filter::LevelFilter::from_level(log_level),
+                    ))
+                    .with(memory_layer);
             tracing::subscriber::set_global_default(subscriber)?;
             let (listen, device_name) = resolve_daemon_config(&config_dir, listen, device_name)?;
             cmd_tui(&config_dir, &listen, &device_name, memory_buffer).await?;
         }
-
     }
 
     Ok(())
@@ -204,7 +219,9 @@ async fn main() -> Result<()> {
 pub(crate) struct ManagerBlockSource {
     manager: syncthing_net::ConnectionManagerHandle,
     next_id: AtomicI32,
-    pending_responses: std::sync::Arc<dashmap::DashMap<i32, tokio::sync::oneshot::Sender<bep_protocol::messages::Response>>>,
+    pending_responses: std::sync::Arc<
+        dashmap::DashMap<i32, tokio::sync::oneshot::Sender<bep_protocol::messages::Response>>,
+    >,
 }
 
 impl ManagerBlockSource {
@@ -231,19 +248,19 @@ impl ManagerBlockSource {
             block_no: block_no as i32,
         };
 
-        let payload = bep_protocol::messages::encode_message(&request)
-            .map_err(|e| syncthing_sync::SyncError::pull(
+        let payload = bep_protocol::messages::encode_message(&request).map_err(|e| {
+            syncthing_sync::SyncError::pull(
                 file.to_string(),
                 format!("encode request failed: {}", e),
-            ))?;
+            )
+        })?;
 
-        let conn = self
-            .manager
-            .get_connection(&device_id)
-            .ok_or_else(|| syncthing_sync::SyncError::pull(
+        let conn = self.manager.get_connection(&device_id).ok_or_else(|| {
+            syncthing_sync::SyncError::pull(
                 file.to_string(),
                 format!("Connection to {} not available", device_id),
-            ))?;
+            )
+        })?;
 
         // 注册等待响应（必须先注册，再发送，避免竞态）
         let (tx, rx) = tokio::sync::oneshot::channel();
@@ -251,25 +268,34 @@ impl ManagerBlockSource {
 
         conn.send_message(syncthing_net::protocol::MessageType::Request, payload)
             .await
-            .map_err(|e| syncthing_sync::SyncError::pull(
-                file.to_string(),
-                format!("send request to {} failed: {}", device_id, e),
-            ))?;
+            .map_err(|e| {
+                syncthing_sync::SyncError::pull(
+                    file.to_string(),
+                    format!("send request to {} failed: {}", device_id, e),
+                )
+            })?;
 
         let response = tokio::time::timeout(std::time::Duration::from_secs(30), rx)
             .await
-            .map_err(|_| syncthing_sync::SyncError::pull(
-                file.to_string(),
-                format!("response timeout from {}", device_id),
-            ))?
-            .map_err(|_| syncthing_sync::SyncError::pull(
-                file.to_string(),
-                format!("response channel closed for {}", device_id),
-            ))?;
+            .map_err(|_| {
+                syncthing_sync::SyncError::pull(
+                    file.to_string(),
+                    format!("response timeout from {}", device_id),
+                )
+            })?
+            .map_err(|_| {
+                syncthing_sync::SyncError::pull(
+                    file.to_string(),
+                    format!("response channel closed for {}", device_id),
+                )
+            })?;
 
         debug!(
             "Block response from {}: code={} data_len={} (requested size={})",
-            device_id, response.code, response.data.len(), block.size
+            device_id,
+            response.code,
+            response.data.len(),
+            block.size
         );
 
         if response.code != bep_protocol::messages::ErrorCode::NoError as i32 {
@@ -283,7 +309,9 @@ impl ManagerBlockSource {
                 file.to_string(),
                 format!(
                     "block size mismatch from {}: expected {} got {}",
-                    device_id, block.size, response.data.len()
+                    device_id,
+                    block.size,
+                    response.data.len()
                 ),
             ));
         }
@@ -303,7 +331,12 @@ impl BlockSource for ManagerBlockSource {
         let devices = self.manager.connected_devices();
         debug!(
             "Requesting block {}/{} offset={} size={} block_no={}: {} connected device(s)",
-            folder, file, block.offset, block.size, block_no, devices.len()
+            folder,
+            file,
+            block.offset,
+            block.size,
+            block_no,
+            devices.len()
         );
         if devices.is_empty() {
             return Err(syncthing_sync::SyncError::pull(
@@ -315,9 +348,15 @@ impl BlockSource for ManagerBlockSource {
         let mut last_error = None;
 
         for device_id in devices {
-            match self.try_request_block_from_device(device_id, folder, file, block, block_no).await {
+            match self
+                .try_request_block_from_device(device_id, folder, file, block, block_no)
+                .await
+            {
                 Ok(data) => {
-                    debug!("Block {}/{} offset={} served by {}", folder, file, block.offset, device_id);
+                    debug!(
+                        "Block {}/{} offset={} served by {}",
+                        folder, file, block.offset, device_id
+                    );
                     return Ok(data);
                 }
                 Err(e) => {
@@ -327,10 +366,12 @@ impl BlockSource for ManagerBlockSource {
             }
         }
 
-        Err(last_error.unwrap_or_else(|| syncthing_sync::SyncError::pull(
-            file.to_string(),
-            "All connected devices failed to serve block".to_string(),
-        )))
+        Err(last_error.unwrap_or_else(|| {
+            syncthing_sync::SyncError::pull(
+                file.to_string(),
+                "All connected devices failed to serve block".to_string(),
+            )
+        }))
     }
 }
 
@@ -352,17 +393,15 @@ async fn cmd_tui(
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
     use super::*;
+    use std::sync::Arc;
     use syncthing_net::{ConnectionManager, ConnectionManagerConfig, SyncthingTlsConfig};
-    use syncthing_sync::{SyncService, database::MemoryDatabase};
+    use syncthing_sync::{database::MemoryDatabase, SyncService};
 
     #[tokio::test]
     async fn test_daemon_start_stop() {
-        let config_dir = std::env::temp_dir().join(format!(
-            "syncthing-test-{}",
-            std::process::id()
-        ));
+        let config_dir =
+            std::env::temp_dir().join(format!("syncthing-test-{}", std::process::id()));
 
         // 清理旧数据
         let _ = tokio::fs::remove_dir_all(&config_dir).await;
@@ -380,7 +419,9 @@ mod tests {
             listen_addr: "127.0.0.1:0".parse().unwrap(),
             ..Default::default()
         };
-        let identity = Arc::new(syncthing_net::identity::TlsIdentity::new(Arc::clone(&tls_config_arc)));
+        let identity = Arc::new(syncthing_net::identity::TlsIdentity::new(Arc::clone(
+            &tls_config_arc,
+        )));
         let (manager, _handle) =
             ConnectionManager::new(manager_config, identity, Arc::clone(&tls_config_arc));
 
@@ -393,13 +434,25 @@ mod tests {
         });
 
         // 启动服务
-        sync_service.start().await.expect("failed to start sync service");
-        let addr = manager.start().await.expect("failed to start connection manager");
+        sync_service
+            .start()
+            .await
+            .expect("failed to start sync service");
+        let addr = manager
+            .start()
+            .await
+            .expect("failed to start connection manager");
         assert!(addr.port() > 0);
 
         // 停止服务
-        sync_service.stop().await.expect("failed to stop sync service");
-        manager.stop().await.expect("failed to stop connection manager");
+        sync_service
+            .stop()
+            .await
+            .expect("failed to stop sync service");
+        manager
+            .stop()
+            .await
+            .expect("failed to stop connection manager");
 
         // 清理
         let _ = tokio::fs::remove_dir_all(&config_dir).await;
@@ -407,7 +460,8 @@ mod tests {
 
     #[test]
     fn test_config_save_load() {
-        let tmp_dir = std::env::temp_dir().join(format!("syncthing-config-test-{}", std::process::id()));
+        let tmp_dir =
+            std::env::temp_dir().join(format!("syncthing-config-test-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&tmp_dir);
         std::fs::create_dir_all(&tmp_dir).unwrap();
 
@@ -418,11 +472,16 @@ mod tests {
         config.devices.push(syncthing_core::types::Device {
             id: syncthing_core::DeviceId::default(),
             name: Some("test-device".to_string()),
-            addresses: vec![syncthing_core::types::AddressType::Tcp("127.0.0.1:22001".to_string())],
+            addresses: vec![syncthing_core::types::AddressType::Tcp(
+                "127.0.0.1:22001".to_string(),
+            )],
             paused: false,
             introducer: false,
         });
-        config.folders.push(syncthing_core::types::Folder::new("test-folder", "/tmp/test"));
+        config.folders.push(syncthing_core::types::Folder::new(
+            "test-folder",
+            "/tmp/test",
+        ));
         save_config(&path, &config).expect("failed to save config");
 
         // 加载并验证
@@ -438,7 +497,10 @@ mod tests {
 
     #[test]
     fn test_cli_override_does_not_persist() {
-        let tmp_dir = std::env::temp_dir().join(format!("syncthing-cli-override-test-{}", std::process::id()));
+        let tmp_dir = std::env::temp_dir().join(format!(
+            "syncthing-cli-override-test-{}",
+            std::process::id()
+        ));
         let _ = std::fs::remove_dir_all(&tmp_dir);
         std::fs::create_dir_all(&tmp_dir).unwrap();
 
@@ -453,7 +515,8 @@ mod tests {
             &tmp_dir,
             "0.0.0.0:9999".to_string(),
             "custom-name".to_string(),
-        ).expect("failed to resolve config");
+        )
+        .expect("failed to resolve config");
         assert_eq!(listen, "0.0.0.0:9999");
         assert_eq!(device_name, "custom-name");
 
@@ -467,7 +530,10 @@ mod tests {
 
     #[test]
     fn test_port_migration_persists() {
-        let tmp_dir = std::env::temp_dir().join(format!("syncthing-port-migration-test-{}", std::process::id()));
+        let tmp_dir = std::env::temp_dir().join(format!(
+            "syncthing-port-migration-test-{}",
+            std::process::id()
+        ));
         let _ = std::fs::remove_dir_all(&tmp_dir);
         std::fs::create_dir_all(&tmp_dir).unwrap();
 
@@ -479,12 +545,15 @@ mod tests {
 
         // resolve_daemon_config does NOT migrate; migration happens in daemon_runner.
         // For this test we verify that resolve_daemon_config does not break the old port.
-        let (listen, _) = resolve_daemon_config(&tmp_dir, "0.0.0.0:22001".to_string(), "syncthing-rust".to_string())
-            .expect("failed to resolve config");
+        let (listen, _) = resolve_daemon_config(
+            &tmp_dir,
+            "0.0.0.0:22001".to_string(),
+            "syncthing-rust".to_string(),
+        )
+        .expect("failed to resolve config");
         // Because CLI arg equals default, it falls back to config value (the old 22000)
         assert_eq!(listen, "0.0.0.0:22000");
 
         let _ = std::fs::remove_dir_all(&tmp_dir);
     }
-
 }

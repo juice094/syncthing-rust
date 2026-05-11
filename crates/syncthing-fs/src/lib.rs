@@ -53,7 +53,9 @@ pub mod watcher;
 // Re-export main types for convenience
 pub use filesystem::{atomic_write, NativeFileSystem};
 pub use ignore::{default_ignore_patterns, IgnorePatterns};
-pub use scanner::{hash_block, optimal_block_size, quick_scan, scan_directory, scan_file, verify_file};
+pub use scanner::{
+    hash_block, optimal_block_size, quick_scan, scan_directory, scan_file, verify_file,
+};
 pub use watcher::{create_buffer_watcher, EventCollector, FolderWatcher, FsEvent};
 
 /// Default block size for file operations (128 KB)
@@ -64,8 +66,6 @@ pub const MIN_BLOCK_SIZE: usize = 4 * 1024;
 
 /// Maximum block size (16 MB)
 pub const MAX_BLOCK_SIZE: usize = 16 * 1024 * 1024;
-
-
 
 /// Utility function to check if a file should be ignored
 ///

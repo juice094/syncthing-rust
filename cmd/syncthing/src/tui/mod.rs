@@ -4,21 +4,31 @@ pub mod daemon_runner;
 pub mod discovery_tasks;
 pub mod events;
 pub mod nat_tasks;
+pub mod popups;
 pub mod relay_listener;
 pub mod theme;
 pub mod ui;
 pub mod views;
-pub mod popups;
 pub mod widgets;
 
 /// Sync engine → TUI 事件
 #[derive(Debug, Clone)]
 pub enum TuiEvent {
-    FolderStateChanged { folder: String, status: syncthing_core::types::FolderStatus },
-    DeviceConnected { device_id: syncthing_core::DeviceId },
-    DeviceDisconnected { device_id: syncthing_core::DeviceId },
+    FolderStateChanged {
+        folder: String,
+        status: syncthing_core::types::FolderStatus,
+    },
+    DeviceConnected {
+        device_id: syncthing_core::DeviceId,
+    },
+    DeviceDisconnected {
+        device_id: syncthing_core::DeviceId,
+    },
     #[allow(dead_code)]
-    SyncProgress { folder: String, progress: f64 },
+    SyncProgress {
+        folder: String,
+        progress: f64,
+    },
 }
 
 use std::io;
@@ -36,8 +46,8 @@ use ratatui::{
 };
 use tracing::warn;
 
-use app::App;
 use crate::logging_buffer::MemoryBuffer;
+use app::App;
 
 /// TUI 入口
 pub async fn run_tui(
@@ -96,12 +106,16 @@ async fn run_app<B: Backend>(
     let mut last_tick = tokio::time::Instant::now();
     let tick_rate = Duration::from_millis(250);
 
-    let mut daemon_future: Option<std::pin::Pin<Box<dyn std::future::Future<Output = anyhow::Result<()>> + Send>>> = None;
+    let mut daemon_future: Option<
+        std::pin::Pin<Box<dyn std::future::Future<Output = anyhow::Result<()>> + Send>>,
+    > = None;
     let mut daemon_handle: Option<syncthing_net::ConnectionManagerHandle> = None;
     let mut event_tx: Option<tokio::sync::mpsc::Sender<TuiEvent>> = None;
 
     loop {
-        terminal.draw(|f| ui::draw(f, app)).map_err(|e| io::Error::other(format!("{}", e)))?;
+        terminal
+            .draw(|f| ui::draw(f, app))
+            .map_err(|e| io::Error::other(format!("{}", e)))?;
 
         let timeout = tick_rate
             .checked_sub(last_tick.elapsed())
@@ -167,7 +181,10 @@ async fn run_app<B: Backend>(
                     }
                 }
                 if app.daemon_running {
-                    app.daemon_status = format!("Running | {} devices connected", app.connected_devices.len());
+                    app.daemon_status = format!(
+                        "Running | {} devices connected",
+                        app.connected_devices.len()
+                    );
                 }
             }
             // 从内存日志缓冲区拉取新日志
@@ -186,7 +203,9 @@ async fn run_app<B: Backend>(
 
 async fn toggle_daemon(
     app: &mut App,
-    daemon_future: &mut Option<std::pin::Pin<Box<dyn std::future::Future<Output = anyhow::Result<()>> + Send>>>,
+    daemon_future: &mut Option<
+        std::pin::Pin<Box<dyn std::future::Future<Output = anyhow::Result<()>> + Send>>,
+    >,
     daemon_handle: &mut Option<syncthing_net::ConnectionManagerHandle>,
     event_tx: &mut Option<tokio::sync::mpsc::Sender<TuiEvent>>,
 ) {
@@ -219,16 +238,21 @@ async fn toggle_daemon(
                     let mut subscriber = sync_service.events().subscribe();
                     while let Some(event) = subscriber.recv().await {
                         let tui_event = match event {
-                            syncthing_sync::SyncEvent::FolderStateChanged { folder, to, .. } => {
-                                Some(TuiEvent::FolderStateChanged { folder, status: to })
-                            }
+                            syncthing_sync::SyncEvent::FolderStateChanged {
+                                folder, to, ..
+                            } => Some(TuiEvent::FolderStateChanged { folder, status: to }),
                             syncthing_sync::SyncEvent::DeviceConnected { device } => {
                                 Some(TuiEvent::DeviceConnected { device_id: device })
                             }
                             syncthing_sync::SyncEvent::DeviceDisconnected { device, .. } => {
                                 Some(TuiEvent::DeviceDisconnected { device_id: device })
                             }
-                            syncthing_sync::SyncEvent::DownloadProgress { folder, file: _, bytes_done, bytes_total } => {
+                            syncthing_sync::SyncEvent::DownloadProgress {
+                                folder,
+                                file: _,
+                                bytes_done,
+                                bytes_total,
+                            } => {
                                 let progress = if bytes_total > 0 {
                                     bytes_done as f64 / bytes_total as f64
                                 } else {

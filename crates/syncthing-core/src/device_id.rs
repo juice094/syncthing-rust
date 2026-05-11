@@ -1,5 +1,5 @@
 //! 设备ID处理
-//! 
+//!
 //! 实现 Syncthing 设备ID的生成、解析和验证
 //! 使用 Base32 (RFC4648) + Luhn-32 校验位
 
@@ -11,17 +11,14 @@ use std::str::FromStr;
 const BASE32_ALPHABET: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
 
 /// 设备ID (SHA-256 哈希的 32 字节)
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-#[derive(Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub struct DeviceId(pub [u8; 32]);
 
 impl DeviceId {
     /// 从字节数组创建
     pub fn from_bytes(bytes: &[u8]) -> crate::Result<Self> {
         if bytes.len() != 32 {
-            return Err(crate::SyncthingError::device_id(
-                "Invalid device ID length",
-            ));
+            return Err(crate::SyncthingError::device_id("Invalid device ID length"));
         }
         let mut arr = [0u8; 32];
         arr.copy_from_slice(bytes);
@@ -60,12 +57,12 @@ impl DeviceId {
     pub fn is_valid(&self) -> bool {
         let id_str = self.to_string();
         let cleaned: String = id_str.chars().filter(|c| c.is_alphanumeric()).collect();
-        
+
         // 验证长度
         if cleaned.len() != 56 {
             return false;
         }
-        
+
         // 验证校验位
         Self::verify_luhn32_checksum(&cleaned)
     }
@@ -75,20 +72,20 @@ impl DeviceId {
         if s.len() != 56 {
             return false;
         }
-        
+
         // 分成4组，每组14字符（13数据 + 1校验位）
         for i in 0..4 {
             let start = i * 14;
             let end = start + 13;
             let group = &s[start..end];
             let check_char = s.chars().nth(end).unwrap();
-            
+
             let expected_check = luhn32_char(group);
             if check_char != expected_check {
                 return false;
             }
         }
-        
+
         true
     }
 }
@@ -97,23 +94,24 @@ impl fmt::Display for DeviceId {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         // 1. Base32 编码32字节
         let base32 = to_base32(&self.0);
-        
+
         // 2. 截断到52字符（如果更长）或填充（如果更短）
         let data = if base32.len() >= 52 {
             base32[..52].to_string()
         } else {
             format!("{:0<52}", base32) // 右填充0（即'A'在Base32中）
         };
-        
+
         // 3. 添加 Luhn-32 校验位（4个）
         let with_luhn = luhnify(&data);
-        
+
         // 4. 格式化为 XXXXXXX-XXXXXXX-... 格式（8组×7字符）
-        let parts: Vec<&str> = with_luhn.as_bytes()
+        let parts: Vec<&str> = with_luhn
+            .as_bytes()
             .chunks(7)
             .map(|chunk| std::str::from_utf8(chunk).unwrap())
             .collect();
-        
+
         write!(f, "{}", parts.join("-"))
     }
 }
@@ -124,7 +122,7 @@ impl FromStr for DeviceId {
     fn from_str(s: &str) -> crate::Result<Self> {
         // 移除分隔符和空白
         let cleaned: String = s.chars().filter(|c| c.is_alphanumeric()).collect();
-        
+
         if cleaned.len() == 64 {
             // 旧格式：hex编码
             let bytes = hex::decode(cleaned).map_err(|e| {
@@ -140,14 +138,12 @@ impl FromStr for DeviceId {
                 let end = start + 13;
                 base32_data.push_str(&cleaned[start..end]);
             }
-            
+
             // 验证校验位
             if !DeviceId::verify_luhn32_checksum(&cleaned) {
-                return Err(crate::SyncthingError::device_id(
-                    "Invalid Luhn-32 checksum"
-                ));
+                return Err(crate::SyncthingError::device_id("Invalid Luhn-32 checksum"));
             }
-            
+
             // Base32解码
             let bytes = from_base32(&base32_data)?;
             Self::from_bytes(&bytes)
@@ -178,30 +174,29 @@ impl<'de> Deserialize<'de> for DeviceId {
     }
 }
 
-
 /// 字节数组转 Base32（无填充）
 fn to_base32(bytes: &[u8]) -> String {
     let mut result = String::new();
     let mut buffer = 0u32;
     let mut bits_left = 0;
-    
+
     for &byte in bytes {
         buffer = (buffer << 8) | byte as u32;
         bits_left += 8;
-        
+
         while bits_left >= 5 {
             let index = ((buffer >> (bits_left - 5)) & 0x1F) as usize;
             result.push(BASE32_ALPHABET[index] as char);
             bits_left -= 5;
         }
     }
-    
+
     // 处理剩余位
     if bits_left > 0 {
         let index = ((buffer << (5 - bits_left)) & 0x1F) as usize;
         result.push(BASE32_ALPHABET[index] as char);
     }
-    
+
     result
 }
 
@@ -210,25 +205,25 @@ fn from_base32(s: &str) -> crate::Result<Vec<u8>> {
     let mut result = Vec::new();
     let mut buffer = 0u32;
     let mut bits_left = 0;
-    
+
     for c in s.chars() {
         let c = c.to_ascii_uppercase();
         let index = BASE32_ALPHABET
             .iter()
             .position(|&b| b as char == c)
-            .ok_or_else(|| crate::SyncthingError::device_id(
-                format!("Invalid Base32 character: {}", c)
-            ))?;
-        
+            .ok_or_else(|| {
+                crate::SyncthingError::device_id(format!("Invalid Base32 character: {}", c))
+            })?;
+
         buffer = (buffer << 5) | index as u32;
         bits_left += 5;
-        
+
         while bits_left >= 8 {
             result.push(((buffer >> (bits_left - 8)) & 0xFF) as u8);
             bits_left -= 8;
         }
     }
-    
+
     Ok(result)
 }
 
@@ -238,7 +233,7 @@ fn luhn32_char(s: &str) -> char {
     let n = 32u32;
     let mut factor = 1u32;
     let mut sum = 0u32;
-    
+
     for c in s.chars() {
         let code = base32_char_to_value(c);
         let mut addend = factor * code;
@@ -246,7 +241,7 @@ fn luhn32_char(s: &str) -> char {
         addend = (addend / n) + (addend % n);
         sum += addend;
     }
-    
+
     let remainder = sum % n;
     let check = (n - remainder) % n;
     BASE32_ALPHABET[check as usize] as char
@@ -266,7 +261,7 @@ fn base32_char_to_value(c: char) -> u32 {
 /// 将52个字符分成4组，每组13个，每组计算 Luhn-32 校验位并追加
 fn luhnify(s: &str) -> String {
     let mut result = s.to_string();
-    
+
     // 从后往前处理，确保插入位置正确
     for i in (0..4).rev() {
         let start = i * 13;
@@ -275,7 +270,7 @@ fn luhnify(s: &str) -> String {
         let check_char = luhn32_char(group);
         result.insert(end, check_char);
     }
-    
+
     result
 }
 
@@ -321,11 +316,11 @@ mod tests {
         let bytes = [0u8; 32]; // 测试用全0
         let device_id = DeviceId::from_bytes_array(bytes);
         let s = device_id.to_string();
-        
+
         // 检查格式: 8组，每组7字符，用-连接
         assert_eq!(s.len(), 7 * 8 + 7); // 56字符 + 7个连字符
         assert_eq!(s.matches('-').count(), 7);
-        
+
         // 检查只包含合法字符 (A-Z, 2-7，以及-)
         for c in s.chars() {
             if c != '-' {
@@ -343,7 +338,7 @@ mod tests {
         // 生成一个有效的设备ID
         let id = DeviceId::from_bytes_array([0u8; 32]);
         let id_str = id.to_string();
-        
+
         // 解析应该成功
         let parsed = DeviceId::from_str(&id_str).unwrap();
         assert_eq!(id.0, parsed.0);
@@ -377,14 +372,15 @@ mod tests {
         let bytes = [0u8; 32];
         let id = DeviceId::from_bytes_array(bytes);
         let s = id.to_string();
-        
+
         // 检查只包含合法字符 (A-Z 除了 O,I, 以及 2-7 和 -)
         for c in s.chars() {
             if c != '-' {
                 assert!(
                     (c.is_ascii_uppercase() && !"OI".contains(c)) || // A-Z 除了 O,I
                     ('2'..='7').contains(&c),
-                    "非法字符: {}", c
+                    "非法字符: {}",
+                    c
                 );
             }
         }

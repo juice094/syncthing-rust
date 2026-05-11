@@ -21,21 +21,36 @@ pub fn draw(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
                 .map(|a| a.as_str().to_string())
                 .unwrap_or_else(|| "dynamic".to_string());
             let connected = app.connected_devices.contains(&d.id);
-            let status = if connected { "● Online" } else { "○ Offline" };
+            let status = if connected {
+                "● Online"
+            } else {
+                "○ Offline"
+            };
             let line = Line::from(vec![
                 Span::raw(format!("{} ", d.name.as_deref().unwrap_or("Unnamed"))),
                 Span::styled(id_short, theme.style_idle),
                 Span::raw(" "),
                 Span::styled(addr, theme.style_idle),
                 Span::raw(" "),
-                Span::styled(status, if connected { theme.style_online } else { theme.style_offline }),
+                Span::styled(
+                    status,
+                    if connected {
+                        theme.style_online
+                    } else {
+                        theme.style_offline
+                    },
+                ),
             ]);
             ListItem::new(line)
         })
         .collect();
 
     let list = List::new(items)
-        .block(Block::default().borders(Borders::ALL).title("Devices (a: add, d: delete)"))
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .title("Devices (a: add, d: delete)"),
+        )
         .highlight_style(theme.style_header.add_modifier(Modifier::REVERSED))
         .highlight_spacing(HighlightSpacing::Always)
         .scroll_padding(1);

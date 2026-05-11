@@ -12,42 +12,55 @@ pub fn draw(f: &mut Frame, theme: &Theme) {
     let area = centered_rect(70, 80, f.area());
 
     // Dim background
-    let dim = ratatui::widgets::Block::default().style(Style::default().bg(ratatui::style::Color::Rgb(20, 20, 25)));
+    let dim = ratatui::widgets::Block::default()
+        .style(Style::default().bg(ratatui::style::Color::Rgb(20, 20, 25)));
     f.render_widget(dim, f.area());
 
     f.render_widget(Clear, area);
 
     let shortcuts = vec![
-        ("Global", vec![
-            ("F5", "Start / Stop daemon"),
-            ("Tab / ← →", "Switch tab"),
-            ("q", "Quit TUI"),
-            ("?", "Show this help"),
-        ]),
-        ("Navigation", vec![
-            ("↑ ↓", "Select item in list"),
-            ("Enter", "Open detail view (when available)"),
-        ]),
-        ("Devices Tab", vec![
-            ("a", "Add new device"),
-            ("d", "Delete selected device"),
-        ]),
-        ("Folders Tab", vec![
-            ("a", "Add new folder"),
-            ("d", "Delete selected folder"),
-        ]),
-        ("Forms (Add Device / Folder)", vec![
-            ("Tab", "Next field"),
-            ("Shift+Tab", "Previous field"),
-            ("↑ ↓", "Navigate device list (folder form)"),
-            ("Space", "Toggle device checkbox"),
-            ("Enter", "Save"),
-            ("Esc", "Cancel"),
-        ]),
+        (
+            "Global",
+            vec![
+                ("F5", "Start / Stop daemon"),
+                ("Tab / ← →", "Switch tab"),
+                ("q", "Quit TUI"),
+                ("?", "Show this help"),
+            ],
+        ),
+        (
+            "Navigation",
+            vec![
+                ("↑ ↓", "Select item in list"),
+                ("Enter", "Open detail view (when available)"),
+            ],
+        ),
+        (
+            "Devices Tab",
+            vec![("a", "Add new device"), ("d", "Delete selected device")],
+        ),
+        (
+            "Folders Tab",
+            vec![("a", "Add new folder"), ("d", "Delete selected folder")],
+        ),
+        (
+            "Forms (Add Device / Folder)",
+            vec![
+                ("Tab", "Next field"),
+                ("Shift+Tab", "Previous field"),
+                ("↑ ↓", "Navigate device list (folder form)"),
+                ("Space", "Toggle device checkbox"),
+                ("Enter", "Save"),
+                ("Esc", "Cancel"),
+            ],
+        ),
     ];
 
     let mut lines: Vec<Line> = vec![
-        Line::from(Span::styled("Keyboard Shortcuts", theme.style_header.add_modifier(Modifier::BOLD))),
+        Line::from(Span::styled(
+            "Keyboard Shortcuts",
+            theme.style_header.add_modifier(Modifier::BOLD),
+        )),
         Line::raw(""),
     ];
 

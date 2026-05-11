@@ -53,7 +53,10 @@ pub(crate) async fn trigger_scan(
             match state.config_store.load().await {
                 Ok(config) => {
                     for folder in &config.folders {
-                        if let Err(e) = sync_model.scan_folder(&FolderId::new(folder.id.clone())).await {
+                        if let Err(e) = sync_model
+                            .scan_folder(&FolderId::new(folder.id.clone()))
+                            .await
+                        {
                             return (
                                 StatusCode::INTERNAL_SERVER_ERROR,
                                 Json(ErrorResponse {
@@ -119,7 +122,9 @@ pub(crate) async fn db_scan_post(
     if let Some(ref model) = state.sync_model {
         let result = match request.sub {
             Some(ref sub) if !sub.is_empty() => {
-                model.scan_folder_sub(&FolderId::new(&request.folder), sub).await
+                model
+                    .scan_folder_sub(&FolderId::new(&request.folder), sub)
+                    .await
             }
             _ => model.scan_folder(&FolderId::new(&request.folder)).await,
         };
@@ -153,7 +158,10 @@ pub(crate) async fn db_override(
     Json(request): Json<DbOverrideRequest>,
 ) -> impl IntoResponse {
     if let Some(ref sync_model) = state.sync_model {
-        match sync_model.override_folder(&FolderId::new(&request.folder)).await {
+        match sync_model
+            .override_folder(&FolderId::new(&request.folder))
+            .await
+        {
             Ok(()) => Ok(Json(serde_json::json!({ "ok": true }))),
             Err(e) => Err((
                 StatusCode::INTERNAL_SERVER_ERROR,
@@ -173,7 +181,10 @@ pub(crate) async fn db_revert(
     Json(request): Json<DbRevertRequest>,
 ) -> impl IntoResponse {
     if let Some(ref sync_model) = state.sync_model {
-        match sync_model.revert_folder(&FolderId::new(&request.folder)).await {
+        match sync_model
+            .revert_folder(&FolderId::new(&request.folder))
+            .await
+        {
             Ok(()) => Ok(Json(serde_json::json!({ "ok": true }))),
             Err(e) => Err((
                 StatusCode::INTERNAL_SERVER_ERROR,

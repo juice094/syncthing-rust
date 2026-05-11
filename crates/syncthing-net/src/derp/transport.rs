@@ -57,27 +57,20 @@ impl DerpTransport {
             version: PROTOCOL_VERSION,
         };
         let encoded = client_info.encode();
-        stream
-            .write_all(&encoded)
-            .await
-            .map_err(|e| SyncthingError::connection(format!("DERP ClientInfo send failed: {}", e)))?;
+        stream.write_all(&encoded).await.map_err(|e| {
+            SyncthingError::connection(format!("DERP ClientInfo send failed: {}", e))
+        })?;
 
         // 读取 ServerInfo
         let mut len_buf = [0u8; 4];
-        stream
-            .read_exact(&mut len_buf)
-            .await
-            .map_err(|e| {
-                SyncthingError::connection(format!("DERP ServerInfo read failed: {}", e))
-            })?;
+        stream.read_exact(&mut len_buf).await.map_err(|e| {
+            SyncthingError::connection(format!("DERP ServerInfo read failed: {}", e))
+        })?;
         let payload_len = u32::from_be_bytes(len_buf) as usize;
         let mut payload_buf = vec![0u8; payload_len];
-        stream
-            .read_exact(&mut payload_buf)
-            .await
-            .map_err(|e| {
-                SyncthingError::connection(format!("DERP ServerInfo payload read failed: {}", e))
-            })?;
+        stream.read_exact(&mut payload_buf).await.map_err(|e| {
+            SyncthingError::connection(format!("DERP ServerInfo payload read failed: {}", e))
+        })?;
 
         let mut combined = bytes::BytesMut::from(&len_buf[..]);
         combined.extend_from_slice(&payload_buf);
@@ -148,11 +141,7 @@ impl Transport for DerpTransport {
     /// 向指定设备拨号，通过 DERP 中继。
     ///
     /// `addr` 是 DERP 服务器地址，`device_id` 是目标设备。
-    async fn dial_device(
-        &self,
-        addr: SocketAddr,
-        device_id: &DeviceId,
-    ) -> CoreResult<BoxedPipe> {
+    async fn dial_device(&self, addr: SocketAddr, device_id: &DeviceId) -> CoreResult<BoxedPipe> {
         let stream = self.connect_server(addr).await?;
         let pipe = DerpPipe::new(stream, *device_id, self.local_device_id);
         Ok(Box::new(pipe))

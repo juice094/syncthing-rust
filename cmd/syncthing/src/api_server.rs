@@ -15,8 +15,14 @@ struct DbAdapter(Arc<dyn syncthing_sync::database::LocalDatabase>);
 
 #[async_trait]
 impl FolderDatabase for DbAdapter {
-    async fn get_folder_files(&self, folder_id: &str) -> syncthing_core::Result<Vec<syncthing_core::types::FileInfo>> {
-        self.0.get_folder_files(folder_id).await.map_err(|e| syncthing_core::SyncthingError::Storage(e.to_string()))
+    async fn get_folder_files(
+        &self,
+        folder_id: &str,
+    ) -> syncthing_core::Result<Vec<syncthing_core::types::FileInfo>> {
+        self.0
+            .get_folder_files(folder_id)
+            .await
+            .map_err(|e| syncthing_core::SyncthingError::Storage(e.to_string()))
     }
 }
 
@@ -57,7 +63,8 @@ pub async fn start_api_server(
     );
     state.my_id = Some(my_id);
     state.api_key = Some(api_key.to_string());
-    state.connection_manager = connection_handle.map(|h| Arc::new(h) as Arc<dyn syncthing_core::traits::ConnectionManager>);
+    state.connection_manager = connection_handle
+        .map(|h| Arc::new(h) as Arc<dyn syncthing_core::traits::ConnectionManager>);
     state.db = Some(Arc::new(DbAdapter(sync_service.db())) as Arc<dyn FolderDatabase>);
 
     let router = syncthing_api::rest::RestApi::build_router(state);
@@ -69,16 +76,29 @@ pub async fn start_api_server(
         }
         Err(e) if addr.port() != 0 => {
             let fallback: SocketAddr = SocketAddr::from(([0, 0, 0, 0], 0));
-            warn!("Failed to bind REST API to {}, trying random port: {}", addr, e);
-            let l = TcpListener::bind(fallback).await
-                .map_err(|e2| SyncthingError::Network(format!("failed to bind REST API fallback: {}", e2)))?;
-            info!("REST API server listening on fallback {}", l.local_addr().unwrap_or(fallback));
+            warn!(
+                "Failed to bind REST API to {}, trying random port: {}",
+                addr, e
+            );
+            let l = TcpListener::bind(fallback).await.map_err(|e2| {
+                SyncthingError::Network(format!("failed to bind REST API fallback: {}", e2))
+            })?;
+            info!(
+                "REST API server listening on fallback {}",
+                l.local_addr().unwrap_or(fallback)
+            );
             l
         }
-        Err(e) => return Err(SyncthingError::Network(format!("failed to bind REST API: {}", e))),
+        Err(e) => {
+            return Err(SyncthingError::Network(format!(
+                "failed to bind REST API: {}",
+                e
+            )))
+        }
     };
 
-    let addr = listener.local_addr()
+    let addr = listener
+        .local_addr()
         .map_err(|e| SyncthingError::Network(format!("failed to get local addr: {}", e)))?;
 
     let handle = tokio::spawn(async move {

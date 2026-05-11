@@ -13,14 +13,14 @@
 //! - `client`: DERP 客户端（连接 relay，发送/接收数据包）
 //! - `server`: DERP 服务器（接受连接，按 device_id 转发）
 
-pub mod protocol;
 pub mod client;
-pub mod server;
 pub mod pipe;
+pub mod protocol;
+pub mod server;
 pub mod transport;
 
-pub use protocol::{Frame, FrameType, PROTOCOL_VERSION, MAX_FRAME_SIZE};
 pub use client::{DerpClient, DerpClientConfig, DerpClientState};
-pub use server::{DerpServer, DerpServerConfig};
 pub use pipe::DerpPipe;
+pub use protocol::{Frame, FrameType, MAX_FRAME_SIZE, PROTOCOL_VERSION};
+pub use server::{DerpServer, DerpServerConfig};
 pub use transport::DerpTransport;

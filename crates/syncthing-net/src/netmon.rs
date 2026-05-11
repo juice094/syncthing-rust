@@ -49,7 +49,10 @@ impl NetMonitor {
         self.subscribe_with_interval(Duration::from_secs(5))
     }
 
-    fn subscribe_with_interval(&self, interval_duration: Duration) -> mpsc::Receiver<NetChangeEvent> {
+    fn subscribe_with_interval(
+        &self,
+        interval_duration: Duration,
+    ) -> mpsc::Receiver<NetChangeEvent> {
         let (tx, rx) = mpsc::channel(16);
         let source = Arc::clone(&self.interface_source);
         tokio::spawn(async move {
@@ -116,11 +119,17 @@ mod tests {
         // First tick: last_interfaces is None, so we should get an event
         let event = tokio::time::timeout(Duration::from_secs(1), rx.recv()).await;
         assert!(event.is_ok());
-        assert!(matches!(event.unwrap(), Some(NetChangeEvent::InterfacesChanged)));
+        assert!(matches!(
+            event.unwrap(),
+            Some(NetChangeEvent::InterfacesChanged)
+        ));
 
         // Second tick: interfaces changed, so we should get another event
         let event = tokio::time::timeout(Duration::from_secs(1), rx.recv()).await;
         assert!(event.is_ok());
-        assert!(matches!(event.unwrap(), Some(NetChangeEvent::InterfacesChanged)));
+        assert!(matches!(
+            event.unwrap(),
+            Some(NetChangeEvent::InterfacesChanged)
+        ));
     }
 }

@@ -26,11 +26,11 @@ use tokio_tungstenite::{accept_async, connect_async, tungstenite::Message};
 use tracing::{debug, info, warn};
 
 #[cfg(feature = "websocket")]
+use syncthing_core::traits::ReliablePipe;
+#[cfg(feature = "websocket")]
 use syncthing_core::{
     BoxedPipe, Result, SyncthingError, Transport, TransportListener, TransportType,
 };
-#[cfg(feature = "websocket")]
-use syncthing_core::traits::ReliablePipe;
 
 /// WebSocket 传输层。
 ///
@@ -122,14 +122,22 @@ struct MergedPipe {
 
 #[cfg(feature = "websocket")]
 impl AsyncRead for MergedPipe {
-    fn poll_read(mut self: Pin<&mut Self>, cx: &mut Context<'_>, buf: &mut ReadBuf<'_>) -> Poll<std::io::Result<()>> {
+    fn poll_read(
+        mut self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+        buf: &mut ReadBuf<'_>,
+    ) -> Poll<std::io::Result<()>> {
         Pin::new(&mut self.read).poll_read(cx, buf)
     }
 }
 
 #[cfg(feature = "websocket")]
 impl AsyncWrite for MergedPipe {
-    fn poll_write(mut self: Pin<&mut Self>, cx: &mut Context<'_>, buf: &[u8]) -> Poll<std::io::Result<usize>> {
+    fn poll_write(
+        mut self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+        buf: &[u8],
+    ) -> Poll<std::io::Result<usize>> {
         Pin::new(&mut self.write).poll_write(cx, buf)
     }
 
@@ -196,7 +204,11 @@ impl WebSocketPipe {
                     match ws_write.read(&mut buf).await {
                         Ok(0) => break,
                         Ok(n) => {
-                            if ws_tx.send(Message::Binary(buf[..n].to_vec())).await.is_err() {
+                            if ws_tx
+                                .send(Message::Binary(buf[..n].to_vec()))
+                                .await
+                                .is_err()
+                            {
                                 break;
                             }
                         }
@@ -224,14 +236,22 @@ impl WebSocketPipe {
 
 #[cfg(feature = "websocket")]
 impl AsyncRead for WebSocketPipe {
-    fn poll_read(mut self: Pin<&mut Self>, cx: &mut Context<'_>, buf: &mut ReadBuf<'_>) -> Poll<std::io::Result<()>> {
+    fn poll_read(
+        mut self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+        buf: &mut ReadBuf<'_>,
+    ) -> Poll<std::io::Result<()>> {
         Pin::new(&mut self.inner).poll_read(cx, buf)
     }
 }
 
 #[cfg(feature = "websocket")]
 impl AsyncWrite for WebSocketPipe {
-    fn poll_write(mut self: Pin<&mut Self>, cx: &mut Context<'_>, buf: &[u8]) -> Poll<std::io::Result<usize>> {
+    fn poll_write(
+        mut self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+        buf: &[u8],
+    ) -> Poll<std::io::Result<usize>> {
         Pin::new(&mut self.inner).poll_write(cx, buf)
     }
 

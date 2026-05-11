@@ -1,5 +1,5 @@
 //! 同步事件系统
-//! 
+//!
 //! 提供事件发布和订阅机制，用于通知状态变更
 
 use syncthing_core::types::{FileInfo, Folder, Vector};
@@ -13,33 +13,30 @@ pub enum SyncEvent {
         folder: String,
         files: Vec<FileInfo>,
     },
-    
+
     /// 远程索引接收
     RemoteIndexReceived {
         folder: String,
         device: syncthing_core::DeviceId,
         files: Vec<FileInfo>,
     },
-    
+
     /// 文件夹扫描完成
     FolderScanCompleted {
         folder: String,
         files_changed: usize,
     },
-    
+
     /// 文件夹扫描失败
-    FolderScanFailed {
-        folder: String,
-        error: String,
-    },
-    
+    FolderScanFailed { folder: String, error: String },
+
     /// 项目开始处理
     ItemStarted {
         folder: String,
         item: String,
         action: ItemAction,
     },
-    
+
     /// 项目完成处理
     ItemFinished {
         folder: String,
@@ -47,7 +44,7 @@ pub enum SyncEvent {
         action: ItemAction,
         error: Option<String>,
     },
-    
+
     /// 冲突检测
     ConflictDetected {
         folder: String,
@@ -55,14 +52,14 @@ pub enum SyncEvent {
         local_version: Vector,
         remote_version: Vector,
     },
-    
+
     /// 冲突解决
     ConflictResolved {
         folder: String,
         item: String,
         resolution: ConflictResolution,
     },
-    
+
     /// 下载进度
     DownloadProgress {
         folder: String,
@@ -70,7 +67,7 @@ pub enum SyncEvent {
         bytes_done: u64,
         bytes_total: u64,
     },
-    
+
     /// 上传进度
     UploadProgress {
         folder: String,
@@ -78,35 +75,28 @@ pub enum SyncEvent {
         bytes_done: u64,
         bytes_total: u64,
     },
-    
+
     /// 文件夹状态变更
     FolderStateChanged {
         folder: String,
         from: syncthing_core::types::FolderStatus,
         to: syncthing_core::types::FolderStatus,
     },
-    
+
     /// 文件夹配置更新
-    FolderConfigUpdated {
-        folder: Folder,
-    },
-    
+    FolderConfigUpdated { folder: Folder },
+
     /// 连接设备
-    DeviceConnected {
-        device: syncthing_core::DeviceId,
-    },
-    
+    DeviceConnected { device: syncthing_core::DeviceId },
+
     /// 断开设备
     DeviceDisconnected {
         device: syncthing_core::DeviceId,
         reason: String,
     },
-    
+
     /// 同步完成
-    SyncComplete {
-        folder: String,
-        stats: SyncStats,
-    },
+    SyncComplete { folder: String, stats: SyncStats },
 }
 
 /// 项目动作

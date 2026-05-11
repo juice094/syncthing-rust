@@ -119,13 +119,13 @@ fn serve_block_request_sync(
     };
 
     // 3. 二次确认实际路径在 folder_root 下（防御目录穿越的绝对路径或符号链接攻击）
-    let canonical_root = std::fs::canonicalize(folder_root)
-        .unwrap_or_else(|_| folder_root.to_path_buf());
+    let canonical_root =
+        std::fs::canonicalize(folder_root).unwrap_or_else(|_| folder_root.to_path_buf());
     let canonical_file = match std::fs::canonicalize(&file_path) {
         Ok(p) => p,
         Err(_) => {
             // 如果文件不存在，canonicalize 会失败。此时我们退而用规范化后的绝对路径比较前缀
-            
+
             if file_path.is_absolute() {
                 file_path.clone()
             } else {
@@ -141,11 +141,10 @@ fn serve_block_request_sync(
     }
 
     // 4. 打开文件
-    let mut file = std::fs::File::open(&canonical_file)
-        .map_err(|e| match e.kind() {
-            std::io::ErrorKind::NotFound => BlockRequestError::FileNotFound,
-            _ => BlockRequestError::IoError(e.to_string()),
-        })?;
+    let mut file = std::fs::File::open(&canonical_file).map_err(|e| match e.kind() {
+        std::io::ErrorKind::NotFound => BlockRequestError::FileNotFound,
+        _ => BlockRequestError::IoError(e.to_string()),
+    })?;
 
     // 5. Seek
     use std::io::{Read, Seek};

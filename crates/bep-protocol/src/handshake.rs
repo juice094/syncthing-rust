@@ -28,10 +28,7 @@ const OLD_MAGIC_2: u32 = 0x00010001;
 /// [2 bytes]  Length (big-endian)
 /// [N bytes]  Protobuf encoded Hello message
 /// ```
-pub async fn send_hello<W: AsyncWrite + Unpin>(
-    writer: &mut W,
-    hello: &Hello,
-) -> Result<()> {
+pub async fn send_hello<W: AsyncWrite + Unpin>(writer: &mut W, hello: &Hello) -> Result<()> {
     // 编码Hello消息
     let msg_bytes = hello.encode_to_vec();
 
@@ -78,7 +75,7 @@ pub async fn recv_hello<R: AsyncRead + Unpin>(reader: &mut R) -> Result<Hello> {
     if magic != HELLO_MAGIC {
         if magic == OLD_MAGIC_1 || magic == OLD_MAGIC_2 {
             return Err(SyncthingError::protocol(
-                "the remote device speaks an older version of the protocol".to_string()
+                "the remote device speaks an older version of the protocol".to_string(),
             ));
         }
         return Err(SyncthingError::protocol(format!(
@@ -106,8 +103,11 @@ pub async fn recv_hello<R: AsyncRead + Unpin>(reader: &mut R) -> Result<Hello> {
 
     info!(
         "Hello received: device={} client={}/{} num_connections={} timestamp={}",
-        hello.device_name, hello.client_name, hello.client_version,
-        hello.num_connections, hello.timestamp
+        hello.device_name,
+        hello.client_name,
+        hello.client_version,
+        hello.num_connections,
+        hello.timestamp
     );
 
     Ok(hello)
@@ -158,7 +158,6 @@ pub async fn exchange_hello_server<S: AsyncRead + AsyncWrite + Unpin>(
 #[cfg(test)]
 mod tests {
     use super::*;
-
 
     #[tokio::test]
     async fn test_hello_roundtrip() {
@@ -245,11 +244,15 @@ mod tests {
         // 旧版本协议Magic Number应该返回特定错误
         let mut buf = Vec::new();
         buf.extend_from_slice(&0x00010000u32.to_be_bytes());
-        
+
         let result = recv_hello(&mut &buf[..]).await;
         assert!(result.is_err());
         let err_msg = result.unwrap_err().to_string();
-        assert!(err_msg.contains("older version"), "Error should mention older version: {}", err_msg);
+        assert!(
+            err_msg.contains("older version"),
+            "Error should mention older version: {}",
+            err_msg
+        );
     }
 
     #[tokio::test]

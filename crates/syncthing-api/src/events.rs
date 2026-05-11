@@ -119,11 +119,7 @@ impl EventBus {
     /// # Arguments
     /// * `id` - Unique connection identifier
     /// * `sender` - Channel sender for sending events to the connection
-    pub async fn register_connection(
-        &self,
-        id: String,
-        sender: mpsc::Sender<Event>,
-    ) -> Result<()> {
+    pub async fn register_connection(&self, id: String, sender: mpsc::Sender<Event>) -> Result<()> {
         let mut connections = self.connections.write().await;
         connections.insert(id.clone(), sender);
         debug!("Registered WebSocket connection: {}", id);
@@ -233,9 +229,7 @@ impl FilteredSubscriber {
                 }
                 Err(broadcast::error::TryRecvError::Empty) => return Ok(None),
                 Err(broadcast::error::TryRecvError::Closed) => {
-                    return Err(SyncthingError::internal(
-                        "Event channel closed".to_string(),
-                    ))
+                    return Err(SyncthingError::internal("Event channel closed".to_string()))
                 }
                 Err(broadcast::error::TryRecvError::Lagged(n)) => {
                     warn!("Event subscriber lagged by {} events", n);
@@ -332,11 +326,7 @@ impl InstrumentedEventBus {
     }
 
     /// Register a WebSocket connection
-    pub async fn register_connection(
-        &self,
-        id: String,
-        sender: mpsc::Sender<Event>,
-    ) -> Result<()> {
+    pub async fn register_connection(&self, id: String, sender: mpsc::Sender<Event>) -> Result<()> {
         self.inner.register_connection(id, sender).await
     }
 
@@ -434,7 +424,9 @@ mod tests {
         let (tx, mut rx) = mpsc::channel(10);
 
         // Register connection
-        bus.register_connection("conn1".to_string(), tx).await.unwrap();
+        bus.register_connection("conn1".to_string(), tx)
+            .await
+            .unwrap();
         assert_eq!(bus.connection_count().await, 1);
 
         // Publish event

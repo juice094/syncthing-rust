@@ -1,13 +1,13 @@
 //! 本地数据库接口
-//! 
+//!
 //! 提供文件元数据的本地存储和查询
 
 use crate::error::{Result, SyncError};
-use syncthing_core::types::{FileInfo, Folder, IndexID};
 use dashmap::DashMap;
 use std::path::Path;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
+use syncthing_core::types::{FileInfo, Folder, IndexID};
 
 /// 本地数据库 trait
 #[async_trait::async_trait]
@@ -52,7 +52,12 @@ pub trait LocalDatabase: Send + Sync {
     async fn get_folder_index_meta(&self, folder: &str) -> Result<Option<(IndexID, u64)>>;
 
     /// 更新文件夹索引元数据
-    async fn update_folder_index_meta(&self, folder: &str, index_id: IndexID, max_sequence: u64) -> Result<()>;
+    async fn update_folder_index_meta(
+        &self,
+        folder: &str,
+        index_id: IndexID,
+        max_sequence: u64,
+    ) -> Result<()>;
 }
 
 /// 内存数据库实现（用于测试）
@@ -73,10 +78,11 @@ impl MemoryDatabase {
 #[async_trait::async_trait]
 impl LocalDatabase for MemoryDatabase {
     async fn get_file(&self, folder: &str, name: &str) -> Result<Option<FileInfo>> {
-        Ok(self
-            .files
-            .get(folder)
-            .and_then(|files: dashmap::mapref::one::Ref<'_, String, Vec<FileInfo>>| files.iter().find(|f| f.name == name).cloned()))
+        Ok(self.files.get(folder).and_then(
+            |files: dashmap::mapref::one::Ref<'_, String, Vec<FileInfo>>| {
+                files.iter().find(|f| f.name == name).cloned()
+            },
+        ))
     }
 
     async fn get_folder_files(&self, folder: &str) -> Result<Vec<FileInfo>> {
@@ -117,7 +123,10 @@ impl LocalDatabase for MemoryDatabase {
     }
 
     async fn get_folder(&self, folder_id: &str) -> Result<Option<Folder>> {
-        Ok(self.folders.get(folder_id).map(|f: dashmap::mapref::one::Ref<'_, String, Folder>| f.clone()))
+        Ok(self
+            .folders
+            .get(folder_id)
+            .map(|f: dashmap::mapref::one::Ref<'_, String, Folder>| f.clone()))
     }
 
     async fn update_folder(&self, folder: Folder) -> Result<()> {
@@ -154,8 +163,14 @@ impl LocalDatabase for MemoryDatabase {
         Ok(self.index_metas.get(folder).map(|m| *m))
     }
 
-    async fn update_folder_index_meta(&self, folder: &str, index_id: IndexID, max_sequence: u64) -> Result<()> {
-        self.index_metas.insert(folder.to_string(), (index_id, max_sequence));
+    async fn update_folder_index_meta(
+        &self,
+        folder: &str,
+        index_id: IndexID,
+        max_sequence: u64,
+    ) -> Result<()> {
+        self.index_metas
+            .insert(folder.to_string(), (index_id, max_sequence));
         Ok(())
     }
 }
@@ -200,7 +215,8 @@ impl FileSystemDatabase {
     }
 
     fn file_path(&self, folder: &str, name: &str) -> std::path::PathBuf {
-        self.folder_path(folder).join(format!("{}.json", name.replace('/', "_")))
+        self.folder_path(folder)
+            .join(format!("{}.json", name.replace('/', "_")))
     }
 }
 
@@ -223,7 +239,7 @@ impl LocalDatabase for FileSystemDatabase {
         let content = tokio::fs::read_to_string(&path).await?;
         let file: FileInfo = serde_json::from_str(&content)
             .map_err(|e| SyncError::database(format!("Failed to parse file info: {}", e)))?;
-        
+
         Ok(Some(file))
     }
 
@@ -235,7 +251,7 @@ impl LocalDatabase for FileSystemDatabase {
 
         let mut files = Vec::new();
         let mut entries = tokio::fs::read_dir(&folder_path).await?;
-        
+
         while let Some(entry) = entries.next_entry().await? {
             let path = entry.path();
             if path.extension().map(|e| e == "json").unwrap_or(false) {
@@ -256,9 +272,9 @@ impl LocalDatabase for FileSystemDatabase {
         let path = self.file_path(folder, &info.name);
         let content = serde_json::to_string_pretty(&info)
             .map_err(|e| SyncError::database(format!("Failed to serialize file info: {}", e)))?;
-        
+
         tokio::fs::write(&path, content).await?;
-        
+
         // 更新缓存（T-C3: 带上限驱逐）
         let mut cache = self.cache.entry(folder.to_string()).or_default();
         let is_new = if let Some(idx) = cache.iter().position(|f| f.name == info.name) {
@@ -284,9 +300,7 @@ impl LocalDatabase for FileSystemDatabase {
         for file in files {
             let this = self.clone();
             let folder = folder.to_string();
-            set.spawn(async move {
-                this.update_file(&folder, file).await
-            });
+            set.spawn(async move { this.update_file(&folder, file).await });
         }
         while let Some(res) = set.join_next().await {
             res.map_err(|e| SyncError::database(format!("update_files task: {}", e)))??;
@@ -327,17 +341,17 @@ impl LocalDatabase for FileSystemDatabase {
         let content = tokio::fs::read_to_string(&path).await?;
         let folder: Folder = serde_json::from_str(&content)
             .map_err(|e| SyncError::database(format!("Failed to parse folder config: {}", e)))?;
-        
+
         Ok(Some(folder))
     }
 
     async fn update_folder(&self, folder: Folder) -> Result<()> {
         let path = self.base_path.join(format!("folder_{}.json", folder.id));
         tokio::fs::create_dir_all(&self.base_path).await?;
-        
+
         let content = serde_json::to_string_pretty(&folder)
             .map_err(|e| SyncError::database(format!("Failed to serialize folder: {}", e)))?;
-        
+
         tokio::fs::write(&path, content).await?;
         Ok(())
     }
@@ -363,7 +377,9 @@ impl LocalDatabase for FileSystemDatabase {
         }
 
         let content = tokio::fs::read_to_string(&path).await?;
-        content.parse::<u64>().map_err(|e| SyncError::database(format!("Invalid sequence: {}", e)))
+        content
+            .parse::<u64>()
+            .map_err(|e| SyncError::database(format!("Invalid sequence: {}", e)))
     }
 
     async fn increment_sequence(&self, folder: &str) -> Result<u64> {
@@ -385,7 +401,12 @@ impl LocalDatabase for FileSystemDatabase {
         Ok(Some(meta))
     }
 
-    async fn update_folder_index_meta(&self, folder: &str, index_id: IndexID, max_sequence: u64) -> Result<()> {
+    async fn update_folder_index_meta(
+        &self,
+        folder: &str,
+        index_id: IndexID,
+        max_sequence: u64,
+    ) -> Result<()> {
         let path = self.base_path.join(format!("index_meta_{}.json", folder));
         tokio::fs::create_dir_all(&self.base_path).await?;
         let content = serde_json::to_string_pretty(&(index_id, max_sequence))
@@ -402,7 +423,7 @@ mod tests {
     #[tokio::test]
     async fn test_memory_database() {
         let db = MemoryDatabase::new();
-        
+
         let file = FileInfo {
             name: "test.txt".to_string(),
             file_type: syncthing_core::types::FileType::File,
@@ -419,7 +440,7 @@ mod tests {
         };
 
         db.update_file("test-folder", file.clone()).await.unwrap();
-        
+
         let retrieved = db.get_file("test-folder", "test.txt").await.unwrap();
         assert!(retrieved.is_some());
         assert_eq!(retrieved.unwrap().name, "test.txt");

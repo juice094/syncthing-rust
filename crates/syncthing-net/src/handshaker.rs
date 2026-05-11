@@ -96,10 +96,9 @@ mod tests {
                 .unwrap()
         });
 
-        let client_result =
-            BepHandshaker::client_handshake(&mut client_pipe, "client-device")
-                .await
-                .unwrap();
+        let client_result = BepHandshaker::client_handshake(&mut client_pipe, "client-device")
+            .await
+            .unwrap();
 
         let server_result = server_handle.await.unwrap();
 

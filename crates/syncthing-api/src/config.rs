@@ -172,9 +172,8 @@ impl ConfigStore for JsonConfigStore {
             .await
             .map_err(SyncthingError::Io)?;
 
-        let config: Config = serde_json::from_str(&content).map_err(|e| {
-            SyncthingError::config(format!("Failed to parse JSON config: {}", e))
-        })?;
+        let config: Config = serde_json::from_str(&content)
+            .map_err(|e| SyncthingError::config(format!("Failed to parse JSON config: {}", e)))?;
 
         let mut cache = self.cache.write().await;
         *cache = Some(config.clone());
@@ -207,17 +206,15 @@ impl ConfigStore for JsonConfigStore {
         let cache = self.cache.clone();
 
         let mut watcher = RecommendedWatcher::new(
-            move |res: std::result::Result<Event, notify::Error>| {
-                match res {
-                    Ok(event) => {
-                        if event.paths.iter().any(|p| p == &path) {
-                            debug!("JSON configuration file changed: {:?}", event);
-                            let _ = tx.try_send(());
-                        }
+            move |res: std::result::Result<Event, notify::Error>| match res {
+                Ok(event) => {
+                    if event.paths.iter().any(|p| p == &path) {
+                        debug!("JSON configuration file changed: {:?}", event);
+                        let _ = tx.try_send(());
                     }
-                    Err(e) => {
-                        error!("Watch error: {}", e);
-                    }
+                }
+                Err(e) => {
+                    error!("Watch error: {}", e);
                 }
             },
             NotifyConfig::default(),

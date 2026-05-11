@@ -16,12 +16,15 @@ fn ensure_crypto_provider() {
     });
 }
 
+use rustls::pki_types::{CertificateDer, PrivateKeyDer, ServerName};
 use tokio::fs;
 use tokio::net::TcpStream;
 use tokio::time::timeout;
 use tokio_rustls::rustls::{self, ClientConfig, ServerConfig};
-use tokio_rustls::{TlsAcceptor, TlsConnector, client::TlsStream as ClientTlsStream, server::TlsStream as ServerTlsStream};
-use rustls::pki_types::{CertificateDer, PrivateKeyDer, ServerName};
+use tokio_rustls::{
+    client::TlsStream as ClientTlsStream, server::TlsStream as ServerTlsStream, TlsAcceptor,
+    TlsConnector,
+};
 use tracing::{debug, info, warn};
 
 use syncthing_core::{DeviceId, Result, SyncthingError};
@@ -52,87 +55,98 @@ impl SyncthingTlsConfig {
         let cert_chain: Vec<CertificateDer<'static>> = CertificateDer::pem_slice_iter(cert_pem)
             .filter_map(|r| r.ok())
             .collect();
-        
+
         if cert_chain.is_empty() {
             return Err(SyncthingError::Tls("no certificates found".to_string()));
         }
-        
+
         // 解析私钥
         let private_key = PrivateKeyDer::pem_slice_iter(key_pem)
             .next()
             .ok_or_else(|| SyncthingError::Tls("no private key found".to_string()))?
             .map_err(|e| SyncthingError::Tls(format!("invalid private key: {}", e)))?;
-        
+
         // 计算设备ID（从证书公钥的SHA-256）
         let device_id = Self::derive_device_id(&cert_chain[0])?;
-        
+
         Ok(Self {
             cert_chain,
             private_key,
             device_id,
         })
     }
-    
+
     /// 从证书派生设备ID
     pub fn derive_device_id(cert: &CertificateDer) -> Result<DeviceId> {
-        use sha2::{Sha256, Digest};
-        
+        use sha2::{Digest, Sha256};
+
         // 计算证书DER编码的SHA-256
         let hash = Sha256::digest(cert);
-        
+
         DeviceId::from_bytes(&hash)
     }
-    
+
     /// 加载或生成证书
-    /// 
+    ///
     /// 如果证书文件已存在，则加载现有证书；否则生成新证书并保存
     pub async fn load_or_generate(config_dir: &Path) -> Result<Self> {
         let cert_path = config_dir.join(CERT_FILE_NAME);
         let key_path = config_dir.join(KEY_FILE_NAME);
-        
+
         // 确保证书目录存在
         if !config_dir.exists() {
-            fs::create_dir_all(config_dir).await
-                .map_err(|e| SyncthingError::config(format!("failed to create config directory: {}", e)))?;
+            fs::create_dir_all(config_dir).await.map_err(|e| {
+                SyncthingError::config(format!("failed to create config directory: {}", e))
+            })?;
         }
-        
+
         if cert_path.exists() && key_path.exists() {
             // 加载现有证书
             info!("Loading existing certificate from {:?}", cert_path);
-            
-            let cert_pem = fs::read(&cert_path).await
+
+            let cert_pem = fs::read(&cert_path)
+                .await
                 .map_err(|e| SyncthingError::Tls(format!("failed to read cert file: {}", e)))?;
-            let key_pem = fs::read(&key_path).await
+            let key_pem = fs::read(&key_path)
+                .await
                 .map_err(|e| SyncthingError::Tls(format!("failed to read key file: {}", e)))?;
-            
+
             match Self::from_pem(&cert_pem, &key_pem) {
                 Ok(config) => {
-                    info!("Successfully loaded existing certificate, device ID: {}", config.device_id);
+                    info!(
+                        "Successfully loaded existing certificate, device ID: {}",
+                        config.device_id
+                    );
                     return Ok(config);
                 }
                 Err(e) => {
-                    warn!("Failed to load existing certificate: {}. Generating new one...", e);
+                    warn!(
+                        "Failed to load existing certificate: {}. Generating new one...",
+                        e
+                    );
                     // 继续生成新证书
                 }
             }
         }
-        
+
         // 生成新证书
         info!("Generating new certificate...");
         let (cert_pem, key_pem) = generate_self_signed_cert()?;
-        
+
         // 保存证书
-        fs::write(&cert_path, &cert_pem).await
+        fs::write(&cert_path, &cert_pem)
+            .await
             .map_err(|e| SyncthingError::Tls(format!("failed to write cert file: {}", e)))?;
-        fs::write(&key_path, &key_pem).await
+        fs::write(&key_path, &key_pem)
+            .await
             .map_err(|e| SyncthingError::Tls(format!("failed to write key file: {}", e)))?;
-        
+
         info!("New certificate saved to {:?}", cert_path);
-        
+
         // 加载刚保存的证书
         Self::from_pem(&cert_pem, &key_pem)
     }
-    
+
     /// 创建服务器配置
     pub fn server_config(&self) -> std::result::Result<ServerConfig, rustls::Error> {
         let mut config = ServerConfig::builder()
@@ -141,7 +155,7 @@ impl SyncthingTlsConfig {
         config.alpn_protocols = vec![b"bep/1.0".to_vec()];
         Ok(config)
     }
-    
+
     /// 创建客户端配置
     pub fn client_config(&self) -> std::result::Result<ClientConfig, rustls::Error> {
         let mut config = ClientConfig::builder()
@@ -161,16 +175,16 @@ impl SyncthingTlsConfig {
         config.alpn_protocols = vec![b"bep-relay".to_vec()];
         Ok(config)
     }
-    
+
     /// 获取设备ID
     pub fn device_id(&self) -> DeviceId {
         self.device_id
     }
-    
+
     /// 获取证书PEM内容
     pub fn cert_pem(&self) -> Vec<u8> {
-        use base64::{Engine as _, engine::general_purpose::STANDARD};
-        
+        use base64::{engine::general_purpose::STANDARD, Engine as _};
+
         // 将证书链转换为PEM格式
         let mut pem = Vec::new();
         for cert in &self.cert_chain {
@@ -185,11 +199,11 @@ impl SyncthingTlsConfig {
         }
         pem
     }
-    
+
     /// 获取私钥PEM内容
     pub fn key_pem(&self) -> Vec<u8> {
-        use base64::{Engine as _, engine::general_purpose::STANDARD};
-        
+        use base64::{engine::general_purpose::STANDARD, Engine as _};
+
         // 将私钥转换为PKCS8 PEM格式
         match &self.private_key {
             PrivateKeyDer::Pkcs8(pkcs8) => {
@@ -283,7 +297,7 @@ impl rustls::client::danger::ServerCertVerifier for SyncthingCertVerifier {
         // TLS层接受任何证书
         Ok(rustls::client::danger::ServerCertVerified::assertion())
     }
-    
+
     fn verify_tls12_signature(
         &self,
         _message: &[u8],
@@ -292,7 +306,7 @@ impl rustls::client::danger::ServerCertVerifier for SyncthingCertVerifier {
     ) -> std::result::Result<rustls::client::danger::HandshakeSignatureValid, rustls::Error> {
         Ok(rustls::client::danger::HandshakeSignatureValid::assertion())
     }
-    
+
     fn verify_tls13_signature(
         &self,
         _message: &[u8],
@@ -301,7 +315,7 @@ impl rustls::client::danger::ServerCertVerifier for SyncthingCertVerifier {
     ) -> std::result::Result<rustls::client::danger::HandshakeSignatureValid, rustls::Error> {
         Ok(rustls::client::danger::HandshakeSignatureValid::assertion())
     }
-    
+
     fn supported_verify_schemes(&self) -> Vec<rustls::SignatureScheme> {
         vec![
             rustls::SignatureScheme::ED25519,
@@ -318,43 +332,36 @@ impl rustls::client::danger::ServerCertVerifier for SyncthingCertVerifier {
 }
 
 /// 生成自签名证书
-/// 
+///
 /// 使用rcgen库生成与Syncthing兼容的自签名证书
 fn generate_self_signed_cert() -> Result<(Vec<u8>, Vec<u8>)> {
     use chrono::Datelike;
     use rcgen::{CertificateParams, KeyPair};
-    
+
     // 生成密钥对（使用系统默认算法）
     let key_pair = KeyPair::generate()
         .map_err(|e| SyncthingError::Tls(format!("failed to generate key pair: {}", e)))?;
-    
+
     // 创建证书参数
     let mut params = CertificateParams::new(vec!["syncthing".to_string()])
         .map_err(|e| SyncthingError::Tls(format!("failed to create cert params: {}", e)))?;
-    
+
     // 设置证书有效期（约20年，与Syncthing默认相同）
     let now = chrono::Utc::now();
     // 使用 rcgen 的时间格式
-    params.not_before = rcgen::date_time_ymd(
-        now.year(),
-        now.month() as u8,
-        now.day() as u8
-    );
+    params.not_before = rcgen::date_time_ymd(now.year(), now.month() as u8, now.day() as u8);
     let end = now + chrono::Duration::days(365 * 20);
-    params.not_after = rcgen::date_time_ymd(
-        end.year(),
-        end.month() as u8,
-        end.day() as u8
-    );
-    
+    params.not_after = rcgen::date_time_ymd(end.year(), end.month() as u8, end.day() as u8);
+
     // 使用密钥对生成证书
-    let cert = params.self_signed(&key_pair)
+    let cert = params
+        .self_signed(&key_pair)
         .map_err(|e| SyncthingError::Tls(format!("failed to create certificate: {}", e)))?;
-    
+
     // 导出PEM格式
     let cert_pem = cert.pem();
     let key_pem = key_pair.serialize_pem();
-    
+
     Ok((cert_pem.into_bytes(), key_pem.into_bytes()))
 }
 
@@ -364,18 +371,16 @@ pub async fn accept_tls(
     config: ServerConfig,
 ) -> Result<ServerTlsStream<TcpStream>> {
     debug!("Starting server TLS handshake");
-    
+
     let acceptor = TlsAcceptor::from(Arc::new(config));
-    
-    let tls_stream = timeout(
-        TLS_HANDSHAKE_TIMEOUT,
-        acceptor.accept(stream)
-    ).await
+
+    let tls_stream = timeout(TLS_HANDSHAKE_TIMEOUT, acceptor.accept(stream))
+        .await
         .map_err(|_| SyncthingError::timeout("TLS handshake timeout"))?
         .map_err(|e| SyncthingError::Tls(format!("TLS handshake failed: {}", e)))?;
-    
+
     info!("Server TLS handshake completed");
-    
+
     Ok(tls_stream)
 }
 
@@ -386,50 +391,55 @@ pub async fn connect_tls(
     server_name: &'static str,
 ) -> Result<ClientTlsStream<TcpStream>> {
     debug!("Starting client TLS handshake");
-    
+
     let connector = TlsConnector::from(Arc::new(config));
-    
+
     let server_name = ServerName::try_from(server_name)
         .map_err(|_| SyncthingError::Tls("invalid server name".to_string()))?;
-    
+
     let tls_stream = timeout(
         TLS_HANDSHAKE_TIMEOUT,
-        connector.connect(server_name, stream)
-    ).await
-        .map_err(|_| SyncthingError::timeout("TLS handshake timeout"))?
-        .map_err(|e| SyncthingError::Tls(format!("TLS handshake failed: {}", e)))?;
-    
+        connector.connect(server_name, stream),
+    )
+    .await
+    .map_err(|_| SyncthingError::timeout("TLS handshake timeout"))?
+    .map_err(|e| SyncthingError::Tls(format!("TLS handshake failed: {}", e)))?;
+
     info!("Client TLS handshake completed");
-    
+
     Ok(tls_stream)
 }
 
 /// 从TLS流中提取对端设备ID
-fn peer_device_id_from_stream<S>(tls_stream: &tokio_rustls::server::TlsStream<S>) -> Result<DeviceId> {
+fn peer_device_id_from_stream<S>(
+    tls_stream: &tokio_rustls::server::TlsStream<S>,
+) -> Result<DeviceId> {
     let peer_certs = tls_stream
         .get_ref()
         .1
         .peer_certificates()
         .ok_or_else(|| SyncthingError::Tls("no peer certificate".to_string()))?;
-    
+
     let peer_cert = peer_certs
         .first()
         .ok_or_else(|| SyncthingError::Tls("empty peer certificate chain".to_string()))?;
-    
+
     SyncthingTlsConfig::derive_device_id(peer_cert)
 }
 
-fn peer_device_id_from_client_stream<S>(tls_stream: &tokio_rustls::client::TlsStream<S>) -> Result<DeviceId> {
+fn peer_device_id_from_client_stream<S>(
+    tls_stream: &tokio_rustls::client::TlsStream<S>,
+) -> Result<DeviceId> {
     let peer_certs = tls_stream
         .get_ref()
         .1
         .peer_certificates()
         .ok_or_else(|| SyncthingError::Tls("no peer certificate".to_string()))?;
-    
+
     let peer_cert = peer_certs
         .first()
         .ok_or_else(|| SyncthingError::Tls("empty peer certificate chain".to_string()))?;
-    
+
     SyncthingTlsConfig::derive_device_id(peer_cert)
 }
 
@@ -443,22 +453,24 @@ where
 {
     ensure_crypto_provider();
     debug!("Starting server TLS handshake over generic stream");
-    
-    let server_config = config.server_config()
+
+    let server_config = config
+        .server_config()
         .map_err(|e| SyncthingError::Tls(format!("failed to create server config: {}", e)))?;
     let acceptor = TlsAcceptor::from(Arc::new(server_config));
-    
-    let tls_stream = timeout(
-        TLS_HANDSHAKE_TIMEOUT,
-        acceptor.accept(stream)
-    ).await
+
+    let tls_stream = timeout(TLS_HANDSHAKE_TIMEOUT, acceptor.accept(stream))
+        .await
         .map_err(|_| SyncthingError::timeout("TLS handshake timeout"))?
         .map_err(|e| SyncthingError::Tls(format!("TLS handshake failed: {}", e)))?;
-    
+
     let device_id = peer_device_id_from_stream(&tls_stream)?;
-    
-    info!("Server TLS handshake completed, peer device_id={}", device_id);
-    
+
+    info!(
+        "Server TLS handshake completed, peer device_id={}",
+        device_id
+    );
+
     Ok((tls_stream, device_id))
 }
 
@@ -473,23 +485,25 @@ where
 {
     ensure_crypto_provider();
     debug!("Starting client TLS handshake over generic stream");
-    
-    let client_config = config.client_config()
+
+    let client_config = config
+        .client_config()
         .map_err(|e| SyncthingError::Tls(format!("failed to create client config: {}", e)))?;
     let connector = TlsConnector::from(Arc::new(client_config));
-    
+
     let server_name = ServerName::try_from("syncthing")
         .map_err(|_| SyncthingError::Tls("invalid server name".to_string()))?;
-    
+
     let tls_stream = timeout(
         TLS_HANDSHAKE_TIMEOUT,
-        connector.connect(server_name, stream)
-    ).await
-        .map_err(|_| SyncthingError::timeout("TLS handshake timeout"))?
-        .map_err(|e| SyncthingError::Tls(format!("TLS handshake failed: {}", e)))?;
-    
+        connector.connect(server_name, stream),
+    )
+    .await
+    .map_err(|_| SyncthingError::timeout("TLS handshake timeout"))?
+    .map_err(|e| SyncthingError::Tls(format!("TLS handshake failed: {}", e)))?;
+
     let device_id = peer_device_id_from_client_stream(&tls_stream)?;
-    
+
     if let Some(expected) = remote_device {
         if device_id != expected {
             return Err(SyncthingError::Tls(format!(
@@ -498,9 +512,12 @@ where
             )));
         }
     }
-    
-    info!("Client TLS handshake completed, peer device_id={}", device_id);
-    
+
+    info!(
+        "Client TLS handshake completed, peer device_id={}",
+        device_id
+    );
+
     Ok((tls_stream, device_id))
 }
 
@@ -512,35 +529,39 @@ pub fn generate_certificate(_device_name: &str) -> Result<(Vec<u8>, Vec<u8>)> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    
-    
-    
+
     #[test]
     fn test_device_id_derivation() {
         // 测试设备ID从证书派生
     }
-    
+
     #[tokio::test]
     async fn test_load_or_generate_certificate() {
         // 创建临时目录
-        let temp_dir = std::env::temp_dir().join("syncthing_test_").join(uuid::Uuid::new_v4().to_string());
+        let temp_dir = std::env::temp_dir()
+            .join("syncthing_test_")
+            .join(uuid::Uuid::new_v4().to_string());
         fs::create_dir_all(&temp_dir).await.unwrap();
-        
+
         // 第一次调用应该生成新证书
-        let config1 = SyncthingTlsConfig::load_or_generate(&temp_dir).await.unwrap();
+        let config1 = SyncthingTlsConfig::load_or_generate(&temp_dir)
+            .await
+            .unwrap();
         let device_id1 = config1.device_id();
-        
+
         // 检查证书文件是否已创建
         assert!(temp_dir.join(CERT_FILE_NAME).exists());
         assert!(temp_dir.join(KEY_FILE_NAME).exists());
-        
+
         // 第二次调用应该加载相同的证书
-        let config2 = SyncthingTlsConfig::load_or_generate(&temp_dir).await.unwrap();
+        let config2 = SyncthingTlsConfig::load_or_generate(&temp_dir)
+            .await
+            .unwrap();
         let device_id2 = config2.device_id();
-        
+
         // 设备ID应该相同
         assert_eq!(device_id1, device_id2);
-        
+
         // 清理
         let _ = fs::remove_dir_all(&temp_dir).await;
     }

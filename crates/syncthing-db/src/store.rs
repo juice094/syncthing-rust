@@ -188,9 +188,9 @@ impl BlockStore for BlockStoreImpl {
         let key = Self::block_key(&hash);
 
         // Store in database
-        self.store.put(&key, data).map_err(|e| {
-            SyncthingError::Storage(format!("Failed to store block: {}", e))
-        })?;
+        self.store
+            .put(&key, data)
+            .map_err(|e| SyncthingError::Storage(format!("Failed to store block: {}", e)))?;
 
         // Update cache
         let mut cache = self.block_cache.write().await;
@@ -210,9 +210,11 @@ impl BlockStore for BlockStoreImpl {
 
         // Fetch from store
         let key = Self::block_key(&hash);
-        match self.store.get(&key).map_err(|e| {
-            SyncthingError::Storage(format!("Failed to get block: {}", e))
-        })? {
+        match self
+            .store
+            .get(&key)
+            .map_err(|e| SyncthingError::Storage(format!("Failed to get block: {}", e)))?
+        {
             Some(data) => {
                 // Add to cache
                 let mut cache = self.block_cache.write().await;
@@ -234,18 +236,18 @@ impl BlockStore for BlockStoreImpl {
 
         // Check store
         let key = Self::block_key(&hash);
-        self.store.contains(&key).map_err(|e| {
-            SyncthingError::Storage(format!("Failed to check block: {}", e))
-        })
+        self.store
+            .contains(&key)
+            .map_err(|e| SyncthingError::Storage(format!("Failed to check block: {}", e)))
     }
 
     async fn delete(&self, hash: BlockHash) -> Result<()> {
         let key = Self::block_key(&hash);
 
         // Remove from store
-        self.store.delete(&key).map_err(|e| {
-            SyncthingError::Storage(format!("Failed to delete block: {}", e))
-        })?;
+        self.store
+            .delete(&key)
+            .map_err(|e| SyncthingError::Storage(format!("Failed to delete block: {}", e)))?;
 
         // Remove from cache
         let mut cache = self.block_cache.write().await;
@@ -327,7 +329,7 @@ impl BlockStoreImplBuilder {
             BlockStoreImpl::open_with_cache(path, self.cache_capacity)
         } else {
             Err(SyncthingError::config(
-                "Either path or in_memory must be specified".to_string()
+                "Either path or in_memory must be specified".to_string(),
             ))
         }
     }
@@ -377,10 +379,7 @@ mod tests {
         let store = BlockStoreImpl::open(temp_dir.path()).unwrap();
 
         let folder = FolderId::new("test-folder");
-        let files = vec![
-            FileInfo::new("file1.txt"),
-            FileInfo::new("file2.txt"),
-        ];
+        let files = vec![FileInfo::new("file1.txt"), FileInfo::new("file2.txt")];
 
         store.update_index(&folder, files.clone()).await.unwrap();
 
@@ -459,9 +458,15 @@ mod tests {
         let device_id = "test-device-123";
 
         let file = FileInfo::new("device_file.txt");
-        store.put_device_file(device_id, &folder, &file).await.unwrap();
+        store
+            .put_device_file(device_id, &folder, &file)
+            .await
+            .unwrap();
 
-        let retrieved = store.get_device_file(device_id, &folder, "device_file.txt").await.unwrap();
+        let retrieved = store
+            .get_device_file(device_id, &folder, "device_file.txt")
+            .await
+            .unwrap();
         assert!(retrieved.is_some());
         assert_eq!(retrieved.unwrap().name, "device_file.txt");
     }
