@@ -80,6 +80,12 @@ pub struct BepSessionMetrics {
     pub blocks_served: AtomicU64,
     pub heartbeat_timeouts: AtomicU64,
     pub errors: AtomicU64,
+    // T-D2: per-message-type counters
+    pub index_received: AtomicU64,
+    pub index_update_received: AtomicU64,
+    pub requests_received: AtomicU64,
+    pub responses_received: AtomicU64,
+    pub closes_received: AtomicU64,
 }
 
 /// Handler trait for BEP session events.
@@ -386,6 +392,7 @@ impl BepSession {
                 match bep_protocol::messages::decode_message::<bep_protocol::messages::Index>(&payload)
                 {
                     Ok(wire_index) => {
+                        self.metrics.index_received.fetch_add(1, Ordering::Relaxed);
                         let file_count = wire_index.files.len();
                         let folder = wire_index.folder.clone();
                         let index: syncthing_core::types::Index = wire_index.into();
@@ -415,6 +422,7 @@ impl BepSession {
                 >(&payload)
                 {
                     Ok(wire_update) => {
+                        self.metrics.index_update_received.fetch_add(1, Ordering::Relaxed);
                         let file_count = wire_update.files.len();
                         let folder = wire_update.folder.clone();
                         let update: syncthing_core::types::IndexUpdate = wire_update.into();
@@ -450,6 +458,7 @@ impl BepSession {
                 >(&payload)
                 {
                     Ok(req) => {
+                        self.metrics.requests_received.fetch_add(1, Ordering::Relaxed);
                         self.metrics.blocks_requested.fetch_add(1, Ordering::Relaxed);
                         self.emit(BepSessionEvent::BlockRequested {
                             device_id: self.device_id,
@@ -530,6 +539,7 @@ impl BepSession {
                 >(&payload)
                 {
                     Ok(resp) => {
+                        self.metrics.responses_received.fetch_add(1, Ordering::Relaxed);
                         info!(
                             "Received Response id={} code={} data_len={} from {}",
                             resp.id,
@@ -554,6 +564,7 @@ impl BepSession {
                 }
             }
             MessageType::Close => {
+                self.metrics.closes_received.fetch_add(1, Ordering::Relaxed);
                 info!("Received Close from {}", self.device_id);
                 return Err(SyncthingError::ConnectionClosed);
             }

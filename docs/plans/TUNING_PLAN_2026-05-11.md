@@ -84,9 +84,10 @@
 - 新增依赖 `rayon = "1.10"`、`num_cpus = "1.16"` 到 `crates/syncthing-fs/Cargo.toml`
 - **状态**：已落地。scanner 66 测试 + 5 doc-tests 全通过。
 
-### T-B2 目录扫描并发 ⏳
-`scan_directory` 当前 `for entry { scan_file().await }` 串行。改为 `futures::stream::buffer_unordered(num_cpus::get())`：
-- 顺序无关；8 核 CPU 100K 小文件扫描提速 4~6×
+### T-B2 目录扫描并发 ✅
+`scan_directory` 原 `for entry { scan_file().await }` 串行。已改为 `tokio::task::JoinSet` + 流控（max_concurrent = num_cpus::get().max(2)）：
+- 顺序无关；8 核 CPU 100K 小文件扫描预期提速 4~6×
+- **状态**：已落地。scanner 测试全通过。
 
 ### T-B3 复用 buffer ⏳
 当前每次 `scan_file` 都 `vec![0u8; block_size]`。改 `BytesMut` 或 ThreadLocal 复用。减少分配。
@@ -120,11 +121,12 @@
 - `daemon_runner.rs` 切换默认实现；`FileSystemDatabase` 保留为调试模式 fallback
 - **风险**：sled 数据目录与 JSON 共存期需迁移考量
 
-### T-C2 批量化 update_files
-- 不依赖 T-C1：保留 FileSystemDatabase 也可用 `tokio::task::JoinSet` 并发写入
-- 落盘策略：先写所有 `.tmp` 后 rename（与 puller 模式一致）
+### T-C2 批量化 update_files ✅
+- 已改为 `tokio::task::JoinSet` 并发写入；`FileSystemDatabase` 新增 `#[derive(Clone)]`
+- DashMap shard 锁天然保护同 folder 的并发缓存更新，无需额外同步
+- **状态**：已落地。测试通过。
 
-### T-C3 内存缓存上限
+### T-C3 内存缓存上限 ⏳
 - `DashMap<String, Vec<FileInfo>>` 改 `DashMap<String, LruCache<...>>`
 - 超过 cap 时驱逐到磁盘
 - 配置项：`config.advanced.metadata_cache_max_entries`（默认 100K）
@@ -149,10 +151,12 @@
 - commit `78061b7` 已对 `encode_message` 做过类似优化，复用思路
 - **状态**：已落地。bench 编译通过。
 
-### T-D2 BepSession 热循环 instrument ⏳
-- `BepSession::run` 主循环缺细粒度 metrics
-- 新增 per-message-type 计数器到 `BepSessionMetrics`
-- 暴露到 REST API `/rest/system/status` 供 TUI 显示
+### T-D2 BepSession 热循环 instrument ✅
+- `BepSessionMetrics` 新增 5 个 per-message-type 计数器：
+  - `index_received` / `index_update_received` / `requests_received` / `responses_received` / `closes_received`
+- `handle_message` 中各分支成功解码后自动累加
+- REST API 暴露 —— 待后续 `/rest/system/status` 字段追加（非阻塞）
+- **状态**：已落地。编译通过。
 
 ### T-D3 pending_responses 池化 ⏳
 - `DashMap<i32, oneshot::Sender<Response>>` 每个 Request 一次分配

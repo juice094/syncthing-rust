@@ -318,21 +318,31 @@ pub async fn scan_directory(
 
     let entries = entries?;
 
-    let mut results = Vec::new();
+    // T-B2: 并发扫描目录项（bounded concurrency = num_cpus）
+    let mut results = Vec::with_capacity(entries.len());
+    let max_concurrent = num_cpus::get().max(2);
+    let mut set = tokio::task::JoinSet::new();
     for (entry_path, rel_path_str, is_file) in entries {
-        let info = if is_file {
-            let block_size = optimal_block_size(
-                std::fs::metadata(&entry_path).map(|m| m.len()).unwrap_or(0),
-            );
-            scan_file(&entry_path, block_size).await?
-        } else {
-            quick_scan(&entry_path).await?
-        };
-
-        // Override the name with the relative path
-        let mut info_with_path = info;
-        info_with_path.name = rel_path_str;
-        results.push(info_with_path);
+        set.spawn(async move {
+            let mut info = if is_file {
+                let block_size = optimal_block_size(
+                    tokio::fs::metadata(&entry_path).await.map(|m| m.len()).unwrap_or(0),
+                );
+                scan_file(&entry_path, block_size).await?
+            } else {
+                quick_scan(&entry_path).await?
+            };
+            info.name = rel_path_str;
+            Ok::<_, SyncthingError>(info)
+        });
+        if set.len() >= max_concurrent {
+            if let Some(res) = set.join_next().await {
+                results.push(res.map_err(|e| SyncthingError::io(format!("scan task: {}", e)))??);
+            }
+        }
+    }
+    while let Some(res) = set.join_next().await {
+        results.push(res.map_err(|e| SyncthingError::io(format!("scan task: {}", e)))??);
     }
 
     Ok(results)

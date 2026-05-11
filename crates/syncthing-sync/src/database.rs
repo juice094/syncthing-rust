@@ -160,6 +160,7 @@ impl LocalDatabase for MemoryDatabase {
 }
 
 /// 文件系统数据库（实际持久化实现）
+#[derive(Clone)]
 pub struct FileSystemDatabase {
     base_path: std::path::PathBuf,
     cache: DashMap<String, Vec<FileInfo>>,
@@ -249,8 +250,17 @@ impl LocalDatabase for FileSystemDatabase {
     }
 
     async fn update_files(&self, folder: &str, files: Vec<FileInfo>) -> Result<()> {
+        // T-C2: 并发落盘，减少 O(N) 串行 syscall
+        let mut set = tokio::task::JoinSet::new();
         for file in files {
-            self.update_file(folder, file).await?;
+            let this = self.clone();
+            let folder = folder.to_string();
+            set.spawn(async move {
+                this.update_file(&folder, file).await
+            });
+        }
+        while let Some(res) = set.join_next().await {
+            res.map_err(|e| SyncError::database(format!("update_files task: {}", e)))??;
         }
         Ok(())
     }
