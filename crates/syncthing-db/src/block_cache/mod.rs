@@ -22,75 +22,8 @@ use syncthing_core::{
 use crate::kv::SledStore;
 use crate::metadata::MetadataStore;
 
-/// LRU cache for frequently accessed blocks (O(1) operations via `lru` crate).
-#[derive(Debug)]
-struct LruCache {
-    entries: lru::LruCache<BlockHash, Vec<u8>>,
-    max_size: usize,
-    current_size: usize,
-}
-
-impl LruCache {
-    fn new(max_size: usize) -> Self {
-        // Capacity is in entries; we manage byte-size limits manually.
-        let cap = std::num::NonZeroUsize::new(max_size.max(1)).unwrap();
-        Self {
-            entries: lru::LruCache::new(cap),
-            max_size,
-            current_size: 0,
-        }
-    }
-
-    fn peek(&self, hash: &BlockHash) -> Option<Vec<u8>> {
-        self.entries.peek(hash).cloned()
-    }
-
-    fn touch(&mut self, hash: &BlockHash) -> bool {
-        self.entries.get(hash).is_some()
-    }
-
-    fn put(&mut self, hash: BlockHash, data: Vec<u8>) -> usize {
-        let data_size = data.len();
-
-        // If entry already exists, update size accounting
-        if let Some(old_data) = self.entries.pop(&hash) {
-            self.current_size -= old_data.len();
-        }
-
-        // Evict entries if necessary (O(1) per eviction via lru::LruCache)
-        let mut evicted = 0usize;
-        while self.current_size + data_size > self.max_size && !self.entries.is_empty() {
-            if let Some((_, old_data)) = self.entries.pop_lru() {
-                self.current_size -= old_data.len();
-                evicted += 1;
-            } else {
-                break;
-            }
-        }
-
-        // Only insert if it fits
-        if data_size <= self.max_size {
-            self.current_size += data_size;
-            self.entries.put(hash, data);
-        }
-        evicted
-    }
-
-    fn contains(&self, hash: &BlockHash) -> bool {
-        self.entries.contains(hash)
-    }
-
-    fn remove(&mut self, hash: &BlockHash) {
-        if let Some(data) = self.entries.pop(hash) {
-            self.current_size -= data.len();
-        }
-    }
-
-    fn clear(&mut self) {
-        self.entries.clear();
-        self.current_size = 0;
-    }
-}
+mod lru;
+use lru::LruCache;
 
 /// Block store with LRU caching
 ///
