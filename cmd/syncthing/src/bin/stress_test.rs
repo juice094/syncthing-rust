@@ -15,6 +15,17 @@ use tokio::io::AsyncWriteExt;
 use tokio::time::{interval, interval_at};
 use tracing::{info, warn};
 
+/// PID 文件管理：写入当前进程号，返回路径用于后续清理
+async fn write_pid_file(path: &PathBuf) -> anyhow::Result<()> {
+    let pid = std::process::id();
+    tokio::fs::write(path, pid.to_string()).await?;
+    Ok(())
+}
+
+async fn remove_pid_file(path: &PathBuf) {
+    let _ = tokio::fs::remove_file(path).await;
+}
+
 #[derive(Parser, Debug)]
 #[command(name = "stress-test")]
 struct Args {
@@ -33,6 +44,12 @@ struct Args {
     /// Network fault injection interval, e.g. 30m
     #[arg(long, default_value = "30m")]
     fault_interval: String,
+    /// Resume from existing data directory (do not clean)
+    #[arg(long)]
+    resume: bool,
+    /// PID file path for process management
+    #[arg(long, default_value = "stress-test.pid")]
+    pid_file: PathBuf,
 }
 
 fn parse_duration(s: &str) -> anyhow::Result<Duration> {
@@ -75,14 +92,34 @@ async fn main() -> anyhow::Result<()> {
     let fault_interval = parse_duration(&args.fault_interval)?;
 
     info!(
-        "Stress test starting: duration={}, inject={}, fault={}",
+        "Stress test starting: duration={}, inject={}, fault={}, resume={}",
         fmt_duration(duration),
         fmt_duration(inject_interval),
-        fmt_duration(fault_interval)
+        fmt_duration(fault_interval),
+        args.resume
     );
 
-    // Clean old data
-    let _ = tokio::fs::remove_dir_all(&args.data_dir).await;
+    // PID file
+    write_pid_file(&args.pid_file).await?;
+    let pid_file = args.pid_file.clone();
+
+    // Ctrl+C / graceful shutdown
+    let (shutdown_tx, mut shutdown_rx) = tokio::sync::oneshot::channel::<()>();
+    tokio::spawn(async move {
+        if let Err(e) = tokio::signal::ctrl_c().await {
+            warn!("Failed to listen for Ctrl+C: {}", e);
+            return;
+        }
+        info!("Received Ctrl+C, requesting graceful shutdown...");
+        let _ = shutdown_tx.send(());
+    });
+
+    if !args.resume {
+        // Clean old data (fresh start)
+        let _ = tokio::fs::remove_dir_all(&args.data_dir).await;
+    } else {
+        info!("Resume mode: keeping existing data_dir {}", args.data_dir.display());
+    }
 
     let node_a_dir = args.data_dir.join("node-a");
     let node_b_dir = args.data_dir.join("node-b");
@@ -97,18 +134,22 @@ async fn main() -> anyhow::Result<()> {
     tokio::fs::create_dir_all(&folder_path_b).await?;
 
     // Configure shared folder on both nodes
-    node_a
-        .add_folder(syncthing_core::types::Folder::new(
-            folder_id,
-            folder_path_a.to_string_lossy(),
-        ))
-        .await?;
-    node_b
-        .add_folder(syncthing_core::types::Folder::new(
-            folder_id,
-            folder_path_b.to_string_lossy(),
-        ))
-        .await?;
+    if !args.resume {
+        node_a
+            .add_folder(syncthing_core::types::Folder::new(
+                folder_id,
+                folder_path_a.to_string_lossy(),
+            ))
+            .await?;
+        node_b
+            .add_folder(syncthing_core::types::Folder::new(
+                folder_id,
+                folder_path_b.to_string_lossy(),
+            ))
+            .await?;
+    } else {
+        info!("Resume mode: skipping folder reconfiguration");
+    }
 
     // Connect peers
     node_a.connect_to(&node_b).await?;
@@ -118,9 +159,13 @@ async fn main() -> anyhow::Result<()> {
         .await?;
     info!("Nodes connected, stress test active");
 
-    // Clean old reports
-    let _ = tokio::fs::remove_file(&args.report).await;
-    let _ = tokio::fs::remove_file(args.report.with_extension("metrics.csv")).await;
+    if !args.resume {
+        // Clean old reports
+        let _ = tokio::fs::remove_file(&args.report).await;
+        let _ = tokio::fs::remove_file(args.report.with_extension("metrics.csv")).await;
+    } else {
+        info!("Resume mode: appending to existing reports");
+    }
 
     let start = Instant::now();
     let error_count = Arc::new(AtomicU64::new(0));
@@ -265,9 +310,16 @@ async fn main() -> anyhow::Result<()> {
     });
 
     // ── Main timer ──
-    tokio::time::sleep(duration).await;
+    tokio::select! {
+        _ = tokio::time::sleep(duration) => {
+            info!("Stress test duration reached");
+        }
+        _ = &mut shutdown_rx => {
+            info!("Graceful shutdown requested");
+        }
+    }
 
-    info!("Stress test completed after {}", fmt_duration(start.elapsed()));
+    info!("Stress test stopping after {}", fmt_duration(start.elapsed()));
     monitor_task.abort();
     inject_task.abort();
     fault_task.abort();
@@ -288,6 +340,9 @@ async fn main() -> anyhow::Result<()> {
 
     node_a.shutdown().await;
     node_b.shutdown().await;
+
+    // Cleanup PID file
+    remove_pid_file(&pid_file).await;
     info!("Report: {}", args.report.display());
     Ok(())
 }
