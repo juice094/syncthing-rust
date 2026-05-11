@@ -22,9 +22,28 @@ cargo test --workspace
 cargo clippy --workspace --all-targets
 ```
 
-- **Tests**: 279+ passed, 0 failed. New features require tests.
+- **Tests**: 308+ passed, 0 failed. New features require tests.
 - **Clippy**: 0 warnings. No exceptions.
 - **Doc-tests**: Public APIs must have runnable examples or doc comments.
+- **File size**: 600-line soft cap per file (CI warns; see [`AGENTS.md`](AGENTS.md) §代码健康 §2). Plan a split when nearing the limit.
+
+---
+
+## Performance & Tuning Workflow
+
+Before claiming a performance improvement:
+
+1. **Establish baseline**: run `cargo bench -p <crate>` against `main` and commit the criterion baseline (or post numbers in the PR).
+2. **Apply change** and re-run the same benchmark on the same machine.
+3. **Report delta**: include the criterion output (`change: ...`) in the PR description.
+4. **Avoid regressions**: changes that don't address performance must not slow hot paths (scanner / BEP encode-decode / puller) by more than 5%.
+
+Profiling:
+
+- Flamegraph: `cargo flamegraph -p syncthing --bin stress_test --release` (see `docs/design/PROFILING.md` once T-A2 lands).
+- Heap: `dhat-rs` (feature-gated build).
+
+Current tuning roadmap: [`docs/plans/TUNING_PLAN_2026-05-11.md`](docs/plans/TUNING_PLAN_2026-05-11.md). Open issues referencing T-A/T-B/T-C/... task IDs.
 
 ---
 

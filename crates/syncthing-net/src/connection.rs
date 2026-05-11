@@ -31,8 +31,11 @@ pub const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(90);
 /// BEP header 最大大小 (64 KiB)
 pub const MAX_BEP_HEADER_SIZE: usize = 64 * 1024;
 
-/// BEP message 最大大小 (128 MiB)
-pub const MAX_BEP_MESSAGE_SIZE: usize = 128 * 1024 * 1024;
+/// BEP message 最大大小 (64 MiB)
+///
+/// 2026-05-11 (TUNING_PLAN T-D4)：从 128 MiB 收紧到 64 MiB。
+/// 理由：Syncthing 实际 Index 上限约 30 MiB（参考 Go 实现）；过宽放给攻击者太大空间。
+pub const MAX_BEP_MESSAGE_SIZE: usize = 64 * 1024 * 1024;
 
 /// 连接事件
 #[derive(Debug, Clone)]

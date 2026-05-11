@@ -9,7 +9,7 @@ use std::sync::atomic::{AtomicI32, Ordering};
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 use tracing::{debug, warn, Level};
-use tracing_subscriber::{layer::SubscriberExt, Layer as _, FmtSubscriber};
+use tracing_subscriber::{layer::SubscriberExt, Layer as _};
 
 use syncthing_core::types::Config;
 
@@ -136,8 +136,30 @@ async fn main() -> Result<()> {
 
     match cli.command {
         Commands::Run { listen, device_name } => {
-            let subscriber = FmtSubscriber::builder().with_max_level(log_level).finish();
-            tracing::subscriber::set_global_default(subscriber)?;
+            // T-F3: 日志滚动切片（默认 7 天 / 100 MB）
+            let logs_dir = config_dir.join("logs");
+            if let Err(e) = std::fs::create_dir_all(&logs_dir) {
+                eprintln!("Warning: cannot create logs dir: {}", e);
+            }
+            let file_appender = tracing_appender::rolling::Builder::new()
+                .rotation(tracing_appender::rolling::Rotation::DAILY)
+                .max_log_files(7)
+                .filename_prefix("daemon")
+                .filename_suffix("log")
+                .build(&logs_dir)
+                .unwrap_or_else(|e| {
+                    eprintln!("Warning: cannot create rolling file appender: {}. Falling back to stdout.", e);
+                    tracing_appender::rolling::daily(std::env::temp_dir(), "syncthing-fallback")
+                });
+            let (non_blocking, _guard) = tracing_appender::non_blocking(file_appender);
+            let subscriber = tracing_subscriber::registry()
+                .with(
+                    tracing_subscriber::fmt::layer()
+                        .with_writer(non_blocking)
+                        .with_filter(tracing_subscriber::filter::LevelFilter::from_level(log_level))
+                );
+            tracing::subscriber::set_global_default(subscriber)
+                .map_err(|e| anyhow::anyhow!("Failed to set subscriber: {}", e))?;
             let (listen, device_name) = resolve_daemon_config(&config_dir, listen, device_name)?;
             match tui::daemon_runner::start_daemon(config_dir.clone(), listen, device_name).await {
                 Ok(startup) => {

@@ -20,6 +20,8 @@ notify = { workspace = true }
 # 工具
 tracing = { workspace = true }
 walkdir = { workspace = true }
+num_cpus = { workspace = true }
+rayon = { workspace = true }
 regex = "1.10"
 libc = "0.2"
 
@@ -28,3 +30,8 @@ libc = "0.2"
 [dev-dependencies]
 tokio-test = "0.4"
 tempfile = { workspace = true }
+criterion = { workspace = true }
+
+[[bench]]
+name = "scanner"
+harness = false

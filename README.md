@@ -139,7 +139,26 @@ docs/
 | [`docs/design/FEATURE_COMPARISON.md`](docs/design/FEATURE_COMPARISON.md) | Feature parity with Go Syncthing |
 | [`docs/plans/INDEX.md`](docs/plans/INDEX.md) | Plan document navigation and cross-references |
 | [`docs/plans/PLAN_AUDIT_2026-04-27.md`](docs/plans/PLAN_AUDIT_2026-04-27.md) | Plan validity audit and project stage recalibration |
+| [`docs/plans/TUNING_PLAN_2026-05-11.md`](docs/plans/TUNING_PLAN_2026-05-11.md) | Performance / stability / architecture-debt tuning plan (cross-cut with POST_V0_2_0) |
 | [`docs/ai-protocol.md`](docs/ai-protocol.md) | Cross-session state anchor for AI agents |
+
+---
+
+## Performance & Tuning Status
+
+| Indicator (2026-05-11 audit) | Value | Action |
+|------------------------------|-------|--------|
+| Source lines (Rust) | 31,046 / 152 files | — |
+| Files exceeding 600-line soft cap | 12 | T-E (planned) |
+| `unwrap()/expect()` occurrences | 718 (incl. tests) | T-F2 (planned) |
+| Scanner SHA-256 parallelism | Single-threaded | T-B1 (planned) |
+| `FileSystemDatabase` storage | Per-file JSON (O(N) syscalls) | T-C (planned) |
+| criterion benchmarks | **None** | T-A1 (P0 prerequisite) |
+| 72h stress test | Not executed | T-F1 (P0, infra ready) |
+
+Full breakdown: [`docs/plans/TUNING_PLAN_2026-05-11.md`](docs/plans/TUNING_PLAN_2026-05-11.md).
+
+The tuning plan is **horizontally complementary** to [`POST_V0_2_0_ROADMAP.md`](docs/plans/POST_V0_2_0_ROADMAP.md) — they share the same P0 (72h stability) but the tuning plan adds measurement infrastructure, hot-path performance work, and architecture-debt containment.
 
 ---
 

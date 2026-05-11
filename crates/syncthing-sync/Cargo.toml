@@ -25,3 +25,8 @@ filetime = "0.2"
 tokio-test = "0.4"
 tracing-subscriber = { workspace = true }
 tempfile = { workspace = true }
+criterion = { workspace = true }
+
+[[bench]]
+name = "puller"
+harness = false
