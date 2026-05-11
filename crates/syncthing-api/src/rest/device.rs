@@ -90,11 +90,11 @@ pub(crate) async fn add_device(
 
     config.devices.push(device);
 
+    let Some(device) = config.devices.last() else {
+        return Err((StatusCode::INTERNAL_SERVER_ERROR, "device not found".to_string()));
+    };
     match state.config_store.save(&config).await {
-        Ok(_) => Ok((
-            StatusCode::CREATED,
-            Json(DeviceResponse::from(config.devices.last().unwrap().clone())),
-        )),
+        Ok(_) => Ok((StatusCode::CREATED, Json(DeviceResponse::from(device.clone())))),
         Err(e) => Err((StatusCode::INTERNAL_SERVER_ERROR, format!("{}", e))),
     }
 }

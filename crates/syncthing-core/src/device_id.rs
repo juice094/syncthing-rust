@@ -78,7 +78,9 @@ impl DeviceId {
             let start = i * 14;
             let end = start + 13;
             let group = &s[start..end];
-            let check_char = s.chars().nth(end).unwrap();
+            let Some(check_char) = s.chars().nth(end) else {
+                return false;
+            };
 
             let expected_check = luhn32_char(group);
             if check_char != expected_check {
@@ -109,7 +111,8 @@ impl fmt::Display for DeviceId {
         let parts: Vec<&str> = with_luhn
             .as_bytes()
             .chunks(7)
-            .map(|chunk| std::str::from_utf8(chunk).unwrap())
+            // SAFETY: chunks come from a base32 String which is pure ASCII.
+            .map(|chunk| unsafe { std::str::from_utf8_unchecked(chunk) })
             .collect();
 
         write!(f, "{}", parts.join("-"))
