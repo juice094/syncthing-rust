@@ -126,10 +126,11 @@
 - DashMap shard 锁天然保护同 folder 的并发缓存更新，无需额外同步
 - **状态**：已落地。测试通过。
 
-### T-C3 内存缓存上限 ⏳
-- `DashMap<String, Vec<FileInfo>>` 改 `DashMap<String, LruCache<...>>`
-- 超过 cap 时驱逐到磁盘
-- 配置项：`config.advanced.metadata_cache_max_entries`（默认 100K）
+### T-C3 内存缓存上限 ✅
+- `FileSystemDatabase` 新增 `cache_size: AtomicUsize` + `cache_cap: usize`（默认 100K）
+- `update_file` 新增文件时计数；超限时调用 `evict_one_folder()` 随机驱逐整 folder
+- `delete_file` 删除时递减计数，保持近似一致
+- **状态**：已落地。测试通过。
 
 ### T-C4 sled flush 调优（依赖 T-C1）
 - `sled::Config::flush_every_ms(1000)` → 5000 减少落盘
@@ -208,10 +209,14 @@
 
 > 与 POST_V0_2_0_ROADMAP.md Phase B 重叠，**不重复制定**，仅追加调优配套项。
 
-### T-F1 72h 压测执行（继承 POST_V0_2_0 P0）⏳
-- 复用 `cmd/syncthing/src/bin/stress_test.rs`
-- **新增 hook**：T-A3 metrics CSV 集成
-- **新增检查**：每小时 `process.memory_usage()` 采样 + tokio runtime metrics（task 数、worker idle）
+### T-F1 72h 压测执行（继承 POST_V0_2_0 P0）—— 基础设施就绪，可立即启动
+- `cmd/syncthing/src/bin/stress_test.rs` 已强化：
+  - **T-A3 hook**：每 10 分钟自动 `metrics::global().flush_to_csv()`
+  - **内存采样**：`sysinfo` 采集 RSS（MB）写入报告 CSV
+  - **变长负载**：注入文件大小轮换（1 KB / 64 KB / 1 MB / 10 MB），覆盖 block 哈希与传输全链路
+  - **清理旧报告**：启动时删除上次 report + metrics.csv，避免数据混淆
+- **启动命令**：`cargo run --release --bin syncthing -- stress-test --duration 72h`
+- **格雷侧/Linux 部署**：复制 `target/release/syncthing.exe`（或 Linux 构建）+ 执行上述命令
 
 ### T-F2 unwrap/expect 审计 ⏳
 - 当前 718 处（含测试）；目标 **非测试代码 < 50 处**

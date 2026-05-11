@@ -6,6 +6,7 @@ use crate::error::{Result, SyncError};
 use syncthing_core::types::{FileInfo, Folder, IndexID};
 use dashmap::DashMap;
 use std::path::Path;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
 /// 本地数据库 trait
@@ -160,10 +161,14 @@ impl LocalDatabase for MemoryDatabase {
 }
 
 /// 文件系统数据库（实际持久化实现）
+///
+/// T-C3: 内存缓存带软上限（默认 100K 文件），超限后随机驱逐整 folder。
 #[derive(Clone)]
 pub struct FileSystemDatabase {
     base_path: std::path::PathBuf,
     cache: DashMap<String, Vec<FileInfo>>,
+    cache_size: Arc<AtomicUsize>,
+    cache_cap: usize,
 }
 
 impl FileSystemDatabase {
@@ -171,7 +176,23 @@ impl FileSystemDatabase {
         Arc::new(Self {
             base_path: base_path.as_ref().to_path_buf(),
             cache: DashMap::new(),
+            cache_size: Arc::new(AtomicUsize::new(0)),
+            cache_cap: 100_000,
         })
+    }
+
+    /// 随机驱逐一个 folder 的缓存，返回驱逐的文件数
+    fn evict_one_folder(&self) -> usize {
+        if let Some(entry) = self.cache.iter().next() {
+            let key = entry.key().clone();
+            let count = entry.value().len();
+            drop(entry);
+            self.cache.remove(&key);
+            self.cache_size.fetch_sub(count, Ordering::Relaxed);
+            count
+        } else {
+            0
+        }
     }
 
     fn folder_path(&self, folder: &str) -> std::path::PathBuf {
@@ -238,14 +259,22 @@ impl LocalDatabase for FileSystemDatabase {
         
         tokio::fs::write(&path, content).await?;
         
-        // 更新缓存
+        // 更新缓存（T-C3: 带上限驱逐）
         let mut cache = self.cache.entry(folder.to_string()).or_default();
-        if let Some(idx) = cache.iter().position(|f| f.name == info.name) {
+        let is_new = if let Some(idx) = cache.iter().position(|f| f.name == info.name) {
             cache[idx] = info;
+            false
         } else {
             cache.push(info);
+            true
+        };
+        if is_new {
+            let size = self.cache_size.fetch_add(1, Ordering::Relaxed) + 1;
+            if size > self.cache_cap {
+                self.evict_one_folder();
+            }
         }
-        
+
         Ok(())
     }
 
@@ -271,9 +300,14 @@ impl LocalDatabase for FileSystemDatabase {
             tokio::fs::remove_file(&path).await?;
         }
 
-        // 更新缓存
+        // 更新缓存（T-C3: 递减计数）
         if let Some(mut cache) = self.cache.get_mut(folder) {
+            let before = cache.len();
             cache.retain(|f| f.name != name);
+            let after = cache.len();
+            if after < before {
+                self.cache_size.fetch_sub(before - after, Ordering::Relaxed);
+            }
         }
 
         Ok(())

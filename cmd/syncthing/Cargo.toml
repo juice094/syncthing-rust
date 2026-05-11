@@ -36,3 +36,4 @@ parking_lot = { workspace = true }
 
 axum = "0.7"
 arboard = "3.6.1"
+sysinfo = "0.30"
