@@ -530,6 +530,5 @@ desktop.ini
     IgnorePatterns::parse(patterns)
 }
 
-
 #[cfg(test)]
 mod tests;

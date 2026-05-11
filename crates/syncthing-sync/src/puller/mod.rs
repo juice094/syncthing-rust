@@ -442,6 +442,5 @@ pub struct PullStats {
     pub bytes_transferred: u64,
 }
 
-
 #[cfg(test)]
 mod tests;

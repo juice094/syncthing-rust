@@ -565,6 +565,5 @@ impl StunRefresher {
     }
 }
 
-
 #[cfg(test)]
 mod tests;

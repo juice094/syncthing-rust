@@ -551,6 +551,5 @@ impl FolderModel {
     }
 }
 
-
 #[cfg(test)]
 mod tests;
