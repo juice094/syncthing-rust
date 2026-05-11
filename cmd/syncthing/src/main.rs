@@ -118,7 +118,7 @@ async fn main() -> Result<()> {
     // 安装 rustls crypto provider，必须在任何 TLS 操作前执行
     rustls::crypto::ring::default_provider()
         .install_default()
-        .expect("Failed to install rustls crypto provider");
+        .map_err(|_| anyhow::anyhow!("Failed to install rustls crypto provider"))?;
 
     let cli = Cli::parse();
 

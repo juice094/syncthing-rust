@@ -26,6 +26,16 @@ function Test-ProcessAlive([int]$pid) {
     }
 }
 
+# T-F1: 全局多实例防护 — 扫描并清理所有旧的 stress_test.exe
+$existing = Get-Process -Name "stress_test" -ErrorAction SilentlyContinue
+if ($existing) {
+    foreach ($proc in $existing) {
+        Write-Host "[$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')] Killing stale stress_test PID $($proc.Id)"
+        Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
+    }
+    Start-Sleep -Seconds 2
+}
+
 $needsStart = $true
 if (Test-Path $pidPath) {
     $pidStr = Get-Content $pidPath -Raw
