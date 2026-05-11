@@ -1,247 +1,246 @@
-    use crate::database::MemoryDatabase;
-    use crate::scanner::Scanner;
-    use syncthing_core::types::BlockInfo;
+use super::*;
+use crate::database::MemoryDatabase;
+use crate::scanner::Scanner;
+use syncthing_core::types::BlockInfo;
 
-    struct MockBlockSource {
-        data: Bytes,
+struct MockBlockSource {
+    data: Bytes,
+}
+
+#[async_trait::async_trait]
+impl BlockSource for MockBlockSource {
+    async fn request_block(
+        &self,
+        _folder: &str,
+        _file: &str,
+        _block: &BlockInfo,
+        _block_no: usize,
+    ) -> Result<Bytes> {
+        Ok(self.data.clone())
     }
+}
 
+#[tokio::test]
+async fn test_puller_creation() {
+    let db = MemoryDatabase::new();
+    let events = EventPublisher::new(10);
+    let puller = Puller::new(db, events);
+    // 基本创建测试
+    assert!(puller.block_source.is_none());
+}
+
+#[tokio::test]
+async fn test_download_file_with_mock_source() {
+    let db = MemoryDatabase::new();
+    let events = EventPublisher::new(10);
+
+    // 创建临时目录
+    let temp_dir = tempfile::tempdir().unwrap();
+    let folder_path = temp_dir.path().to_path_buf();
+
+    // 准备测试数据
+    let test_data = b"hello world";
+    let hash = sha2::Sha256::digest(test_data);
+
+    let file_info = FileInfo {
+        name: "test.txt".to_string(),
+        file_type: syncthing_core::types::FileType::File,
+        size: test_data.len() as i64,
+        permissions: 0o644,
+        modified_s: 0,
+        modified_ns: 0,
+        version: syncthing_core::types::Vector::new(),
+        sequence: 0,
+        block_size: test_data.len() as i32,
+        blocks: vec![BlockInfo {
+            size: test_data.len() as i32,
+            hash: hash.to_vec(),
+            offset: 0,
+        }],
+        symlink_target: None,
+        deleted: Some(false),
+    };
+
+    let mock_source = Arc::new(MockBlockSource {
+        data: Bytes::from_static(test_data),
+    });
+
+    let result = Puller::download_file(
+        &folder_path,
+        &file_info,
+        &*db,
+        &events,
+        "test-folder",
+        Some(mock_source),
+        16,
+    )
+    .await;
+
+    assert!(result.is_ok());
+
+    // 验证文件内容
+    let file_path = folder_path.join("test.txt");
+    let content = tokio::fs::read_to_string(&file_path).await.unwrap();
+    assert_eq!(content, "hello world");
+}
+
+/// 集成测试：模拟远程索引更新后，check_needed_files 能发现 needed 文件，
+/// 且 pull_folder 能成功下载。
+#[tokio::test]
+async fn test_check_needed_files_then_pull() {
+    let db = MemoryDatabase::new();
+    let events = EventPublisher::new(10);
+
+    // 创建临时目录作为 folder path
+    let temp_dir = tempfile::tempdir().unwrap();
+    let folder_path = temp_dir.path().to_path_buf();
+    let folder = syncthing_core::types::Folder::new("test-folder", folder_path.to_str().unwrap());
+
+    // 准备测试数据
+    let test_data = b"pull test content";
+    let hash = sha2::Sha256::digest(test_data);
+
+    let file_info = FileInfo {
+        name: "pull_test.txt".to_string(),
+        file_type: syncthing_core::types::FileType::File,
+        size: test_data.len() as i64,
+        permissions: 0o644,
+        modified_s: 0,
+        modified_ns: 0,
+        version: syncthing_core::types::Vector::new(),
+        sequence: 1,
+        block_size: test_data.len() as i32,
+        blocks: vec![BlockInfo {
+            size: test_data.len() as i32,
+            hash: hash.to_vec(),
+            offset: 0,
+        }],
+        symlink_target: None,
+        deleted: Some(false),
+    };
+
+    // 模拟 index_handler 处理远程索引后更新 DB
+    db.update_file(&folder.id, file_info.clone()).await.unwrap();
+
+    // 创建 Puller + MockBlockSource
+    let mock_source = Arc::new(MockBlockSource {
+        data: Bytes::from_static(test_data),
+    });
+    let puller = Puller::new(db.clone(), events.clone()).with_block_source(Some(mock_source));
+
+    // Step 1: check_needed_files 应该发现本地不存在的文件
+    let needed = puller.check_needed_files(&folder).await.unwrap();
+    assert_eq!(needed.len(), 1, "Should detect 1 needed file");
+    assert_eq!(needed[0].name, "pull_test.txt");
+
+    // Step 2: pull_folder 应该成功下载文件
+    let stats = puller.pull_folder(&folder, needed).await.unwrap();
+    assert_eq!(stats.files_succeeded, 1, "Should succeed pulling 1 file");
+    assert_eq!(stats.files_failed, 0);
+
+    // Step 3: 验证本地文件内容正确
+    let file_path = folder_path.join("pull_test.txt");
+    assert!(file_path.exists(), "File should exist after pull");
+    let content = tokio::fs::read_to_string(&file_path).await.unwrap();
+    assert_eq!(content, "pull test content");
+
+    // Step 4: 再次 check_needed_files，应该为空（文件已存在且大小匹配）
+    let needed_after = puller.check_needed_files(&folder).await.unwrap();
+    assert!(
+        needed_after.is_empty(),
+        "Should not need pull after file exists"
+    );
+}
+
+/// E2E 集成测试：模拟两节点通过 block_server 同步单文件
+/// - 节点 A 扫描本地文件生成索引
+/// - 节点 B 接收索引，通过 block_server 从节点 A 读取块，完成 pull
+#[tokio::test]
+async fn test_e2e_sync_single_file_via_block_server() {
+    use crate::index_handler::IndexHandler;
+    use std::path::PathBuf;
+    use syncthing_core::types::{Folder, Index};
+
+    // 节点 A：创建临时文件并扫描
+    let temp_a = tempfile::tempdir().unwrap();
+    let file_path = temp_a.path().join("test.txt");
+    tokio::fs::write(&file_path, "hello sync world")
+        .await
+        .unwrap();
+
+    let db_a = MemoryDatabase::new();
+    let events_a = EventPublisher::new(10);
+    let scanner_a = Scanner::new(db_a.clone(), events_a.clone());
+    let folder_a = Folder::new("test", temp_a.path().to_str().unwrap());
+    let changed = scanner_a.scan_folder(&folder_a).await.unwrap();
+    assert_eq!(changed.len(), 1, "Should detect 1 changed file");
+    let file_info = changed.into_iter().next().unwrap();
+
+    // 节点 B：准备接收同步
+    let temp_b = tempfile::tempdir().unwrap();
+    let db_b = MemoryDatabase::new();
+    let events_b = EventPublisher::new(10);
+
+    // BlockSource 通过 block_server 从节点 A 读取块数据
+    struct LocalBlockSource {
+        folder_root: PathBuf,
+    }
     #[async_trait::async_trait]
-    impl BlockSource for MockBlockSource {
+    impl BlockSource for LocalBlockSource {
         async fn request_block(
             &self,
             _folder: &str,
-            _file: &str,
-            _block: &BlockInfo,
-            _block_no: usize,
+            file: &str,
+            block: &BlockInfo,
+            block_no: usize,
         ) -> Result<Bytes> {
-            Ok(self.data.clone())
+            let req = bep_protocol::messages::Request {
+                id: 1,
+                folder: "test".to_string(),
+                name: file.to_string(),
+                offset: block.offset,
+                size: block.size,
+                hash: block.hash.clone(),
+                from_temporary: false,
+                block_no: block_no as i32,
+            };
+            let data = crate::block_server::serve_block_request(&self.folder_root, &req)
+                .await
+                .map_err(|e| SyncError::pull(file.to_string(), e.to_string()))?;
+            Ok(Bytes::from(data))
         }
     }
 
-    #[tokio::test]
-    async fn test_puller_creation() {
-        let db = MemoryDatabase::new();
-        let events = EventPublisher::new(10);
-        let puller = Puller::new(db, events);
-        // 基本创建测试
-        assert!(puller.block_source.is_none());
-    }
+    let block_source = Arc::new(LocalBlockSource {
+        folder_root: temp_a.path().to_path_buf(),
+    });
+    let puller = Puller::new(db_b.clone(), events_b.clone()).with_block_source(Some(block_source));
 
-    #[tokio::test]
-    async fn test_download_file_with_mock_source() {
-        let db = MemoryDatabase::new();
-        let events = EventPublisher::new(10);
+    // 节点 B 的 index_handler 处理节点 A 的索引
+    let index_handler = IndexHandler::new(db_b.clone(), events_b.clone());
+    let folder_b = Folder::new("test", temp_b.path().to_str().unwrap());
+    let device_a = syncthing_core::DeviceId::random();
+    let index = Index {
+        folder: "test".to_string(),
+        files: vec![file_info],
+    };
+    let needed = index_handler
+        .handle_index(&folder_b, device_a, index)
+        .await
+        .unwrap();
 
-        // 创建临时目录
-        let temp_dir = tempfile::tempdir().unwrap();
-        let folder_path = temp_dir.path().to_path_buf();
+    // 执行 pull
+    let stats = puller.pull_folder(&folder_b, needed).await.unwrap();
+    assert_eq!(stats.files_succeeded, 1, "Should pull 1 file");
+    assert_eq!(stats.files_failed, 0);
 
-        // 准备测试数据
-        let test_data = b"hello world";
-        let hash = sha2::Sha256::digest(test_data);
+    // 验证节点 B 本地文件内容
+    let dest = temp_b.path().join("test.txt");
+    assert!(dest.exists(), "File should exist after pull");
+    let content = tokio::fs::read_to_string(&dest).await.unwrap();
+    assert_eq!(content, "hello sync world");
 
-        let file_info = FileInfo {
-            name: "test.txt".to_string(),
-            file_type: syncthing_core::types::FileType::File,
-            size: test_data.len() as i64,
-            permissions: 0o644,
-            modified_s: 0,
-            modified_ns: 0,
-            version: syncthing_core::types::Vector::new(),
-            sequence: 0,
-            block_size: test_data.len() as i32,
-            blocks: vec![BlockInfo {
-                size: test_data.len() as i32,
-                hash: hash.to_vec(),
-                offset: 0,
-            }],
-            symlink_target: None,
-            deleted: Some(false),
-        };
-
-        let mock_source = Arc::new(MockBlockSource {
-            data: Bytes::from_static(test_data),
-        });
-
-        let result = Puller::download_file(
-            &folder_path,
-            &file_info,
-            &*db,
-            &events,
-            "test-folder",
-            Some(mock_source),
-            16,
-        )
-        .await;
-
-        assert!(result.is_ok());
-
-        // 验证文件内容
-        let file_path = folder_path.join("test.txt");
-        let content = tokio::fs::read_to_string(&file_path).await.unwrap();
-        assert_eq!(content, "hello world");
-    }
-
-    /// 集成测试：模拟远程索引更新后，check_needed_files 能发现 needed 文件，
-    /// 且 pull_folder 能成功下载。
-    #[tokio::test]
-    async fn test_check_needed_files_then_pull() {
-        let db = MemoryDatabase::new();
-        let events = EventPublisher::new(10);
-
-        // 创建临时目录作为 folder path
-        let temp_dir = tempfile::tempdir().unwrap();
-        let folder_path = temp_dir.path().to_path_buf();
-        let folder =
-            syncthing_core::types::Folder::new("test-folder", folder_path.to_str().unwrap());
-
-        // 准备测试数据
-        let test_data = b"pull test content";
-        let hash = sha2::Sha256::digest(test_data);
-
-        let file_info = FileInfo {
-            name: "pull_test.txt".to_string(),
-            file_type: syncthing_core::types::FileType::File,
-            size: test_data.len() as i64,
-            permissions: 0o644,
-            modified_s: 0,
-            modified_ns: 0,
-            version: syncthing_core::types::Vector::new(),
-            sequence: 1,
-            block_size: test_data.len() as i32,
-            blocks: vec![BlockInfo {
-                size: test_data.len() as i32,
-                hash: hash.to_vec(),
-                offset: 0,
-            }],
-            symlink_target: None,
-            deleted: Some(false),
-        };
-
-        // 模拟 index_handler 处理远程索引后更新 DB
-        db.update_file(&folder.id, file_info.clone()).await.unwrap();
-
-        // 创建 Puller + MockBlockSource
-        let mock_source = Arc::new(MockBlockSource {
-            data: Bytes::from_static(test_data),
-        });
-        let puller = Puller::new(db.clone(), events.clone()).with_block_source(Some(mock_source));
-
-        // Step 1: check_needed_files 应该发现本地不存在的文件
-        let needed = puller.check_needed_files(&folder).await.unwrap();
-        assert_eq!(needed.len(), 1, "Should detect 1 needed file");
-        assert_eq!(needed[0].name, "pull_test.txt");
-
-        // Step 2: pull_folder 应该成功下载文件
-        let stats = puller.pull_folder(&folder, needed).await.unwrap();
-        assert_eq!(stats.files_succeeded, 1, "Should succeed pulling 1 file");
-        assert_eq!(stats.files_failed, 0);
-
-        // Step 3: 验证本地文件内容正确
-        let file_path = folder_path.join("pull_test.txt");
-        assert!(file_path.exists(), "File should exist after pull");
-        let content = tokio::fs::read_to_string(&file_path).await.unwrap();
-        assert_eq!(content, "pull test content");
-
-        // Step 4: 再次 check_needed_files，应该为空（文件已存在且大小匹配）
-        let needed_after = puller.check_needed_files(&folder).await.unwrap();
-        assert!(
-            needed_after.is_empty(),
-            "Should not need pull after file exists"
-        );
-    }
-
-    /// E2E 集成测试：模拟两节点通过 block_server 同步单文件
-    /// - 节点 A 扫描本地文件生成索引
-    /// - 节点 B 接收索引，通过 block_server 从节点 A 读取块，完成 pull
-    #[tokio::test]
-    async fn test_e2e_sync_single_file_via_block_server() {
-        use crate::index_handler::IndexHandler;
-        use std::path::PathBuf;
-        use syncthing_core::types::{Folder, Index};
-
-        // 节点 A：创建临时文件并扫描
-        let temp_a = tempfile::tempdir().unwrap();
-        let file_path = temp_a.path().join("test.txt");
-        tokio::fs::write(&file_path, "hello sync world")
-            .await
-            .unwrap();
-
-        let db_a = MemoryDatabase::new();
-        let events_a = EventPublisher::new(10);
-        let scanner_a = Scanner::new(db_a.clone(), events_a.clone());
-        let folder_a = Folder::new("test", temp_a.path().to_str().unwrap());
-        let changed = scanner_a.scan_folder(&folder_a).await.unwrap();
-        assert_eq!(changed.len(), 1, "Should detect 1 changed file");
-        let file_info = changed.into_iter().next().unwrap();
-
-        // 节点 B：准备接收同步
-        let temp_b = tempfile::tempdir().unwrap();
-        let db_b = MemoryDatabase::new();
-        let events_b = EventPublisher::new(10);
-
-        // BlockSource 通过 block_server 从节点 A 读取块数据
-        struct LocalBlockSource {
-            folder_root: PathBuf,
-        }
-        #[async_trait::async_trait]
-        impl BlockSource for LocalBlockSource {
-            async fn request_block(
-                &self,
-                _folder: &str,
-                file: &str,
-                block: &BlockInfo,
-                block_no: usize,
-            ) -> Result<Bytes> {
-                let req = bep_protocol::messages::Request {
-                    id: 1,
-                    folder: "test".to_string(),
-                    name: file.to_string(),
-                    offset: block.offset,
-                    size: block.size,
-                    hash: block.hash.clone(),
-                    from_temporary: false,
-                    block_no: block_no as i32,
-                };
-                let data = crate::block_server::serve_block_request(&self.folder_root, &req)
-                    .await
-                    .map_err(|e| SyncError::pull(file.to_string(), e.to_string()))?;
-                Ok(Bytes::from(data))
-            }
-        }
-
-        let block_source = Arc::new(LocalBlockSource {
-            folder_root: temp_a.path().to_path_buf(),
-        });
-        let puller =
-            Puller::new(db_b.clone(), events_b.clone()).with_block_source(Some(block_source));
-
-        // 节点 B 的 index_handler 处理节点 A 的索引
-        let index_handler = IndexHandler::new(db_b.clone(), events_b.clone());
-        let folder_b = Folder::new("test", temp_b.path().to_str().unwrap());
-        let device_a = syncthing_core::DeviceId::random();
-        let index = Index {
-            folder: "test".to_string(),
-            files: vec![file_info],
-        };
-        let needed = index_handler
-            .handle_index(&folder_b, device_a, index)
-            .await
-            .unwrap();
-
-        // 执行 pull
-        let stats = puller.pull_folder(&folder_b, needed).await.unwrap();
-        assert_eq!(stats.files_succeeded, 1, "Should pull 1 file");
-        assert_eq!(stats.files_failed, 0);
-
-        // 验证节点 B 本地文件内容
-        let dest = temp_b.path().join("test.txt");
-        assert!(dest.exists(), "File should exist after pull");
-        let content = tokio::fs::read_to_string(&dest).await.unwrap();
-        assert_eq!(content, "hello sync world");
-
-        // 验证数据库已更新
-        let db_file = db_b.get_file("test", "test.txt").await.unwrap();
-        assert!(db_file.is_some(), "File should be in database after pull");
-    }
+    // 验证数据库已更新
+    let db_file = db_b.get_file("test", "test.txt").await.unwrap();
+    assert!(db_file.is_some(), "File should be in database after pull");
+}

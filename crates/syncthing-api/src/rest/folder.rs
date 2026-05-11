@@ -95,10 +95,16 @@ pub(crate) async fn create_folder(
     config.folders.push(folder);
 
     let Some(folder) = config.folders.last() else {
-        return Err((StatusCode::INTERNAL_SERVER_ERROR, "folder not found".to_string()));
+        return Err((
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "folder not found".to_string(),
+        ));
     };
     match state.config_store.save(&config).await {
-        Ok(_) => Ok((StatusCode::CREATED, Json(FolderResponse::from(folder.clone())))),
+        Ok(_) => Ok((
+            StatusCode::CREATED,
+            Json(FolderResponse::from(folder.clone())),
+        )),
         Err(e) => Err((StatusCode::INTERNAL_SERVER_ERROR, format!("{}", e))),
     }
 }

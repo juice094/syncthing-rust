@@ -472,6 +472,5 @@ impl MetadataStore {
     }
 }
 
-
 #[cfg(test)]
 mod tests;

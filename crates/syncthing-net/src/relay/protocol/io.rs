@@ -4,8 +4,8 @@ use bytes::Bytes;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 use super::{
-    ConnectRequest, Header, JoinRelayRequest, JoinSessionRequest, Message, MessageType, Ping,
-    Pong, RelayFull, Response, SessionInvitation, MAGIC,
+    ConnectRequest, Header, JoinRelayRequest, JoinSessionRequest, Message, MessageType, Ping, Pong,
+    RelayFull, Response, SessionInvitation, MAGIC,
 };
 
 /// Read a complete message from an async reader.
