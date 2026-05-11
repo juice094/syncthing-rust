@@ -10,6 +10,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime};
 
 use clap::Parser;
+use sysinfo::{ProcessRefreshKind, RefreshKind, System};
 use tokio::io::AsyncWriteExt;
 use tokio::time::{interval, interval_at};
 use tracing::{info, warn};
@@ -117,13 +118,9 @@ async fn main() -> anyhow::Result<()> {
         .await?;
     info!("Nodes connected, stress test active");
 
-    // CSV header
-    {
-        let mut report = tokio::fs::File::create(&args.report).await?;
-        report
-            .write_all(b"timestamp,elapsed_secs,connected_a_b,connected_b_a,folder_state_a,folder_state_b,files_a,files_b,errors\n")
-            .await?;
-    }
+    // Clean old reports
+    let _ = tokio::fs::remove_file(&args.report).await;
+    let _ = tokio::fs::remove_file(args.report.with_extension("metrics.csv")).await;
 
     let start = Instant::now();
     let error_count = Arc::new(AtomicU64::new(0));
@@ -139,9 +136,20 @@ async fn main() -> anyhow::Result<()> {
     let monitor_errors = Arc::clone(&error_count);
     let monitor_fa = folder_path_a.clone();
     let monitor_fb = folder_path_b.clone();
+    let metrics_report = args.report.with_extension("metrics.csv");
 
     let monitor_task = tokio::spawn(async move {
         let mut ticker = interval(Duration::from_secs(600));
+        let mut sys = System::new_with_specifics(
+            RefreshKind::new().with_processes(ProcessRefreshKind::new()),
+        );
+        // T-A3: metrics CSV header
+        {
+            let hdr = "timestamp,elapsed_secs,connected_a_b,connected_b_a,folder_state_a,folder_state_b,files_a,files_b,errors,rss_mb\n";
+            if let Err(e) = append_to_file(&monitor_report, hdr.to_string()).await {
+                warn!("Failed to write report header: {}", e);
+            }
+        }
         loop {
             ticker.tick().await;
             let elapsed = start.elapsed().as_secs();
@@ -163,14 +171,25 @@ async fn main() -> anyhow::Result<()> {
             let files_b = count_files(&monitor_fb).await;
             let errors = monitor_errors.load(Ordering::Relaxed);
 
+            // Memory sampling (T-F1)
+            sys.refresh_processes_specifics(ProcessRefreshKind::new());
+            let rss_mb = sys.processes_by_exact_name("syncthing".as_ref())
+                .map(|p| p.memory() / 1024 / 1024)
+                .sum::<u64>();
+
             let ts = fmt_system_time(SystemTime::now());
             let line = format!(
-                "{},{},{},{},{},{},{},{},{}\n",
-                ts, elapsed, connected_ab, connected_ba, state_a, state_b, files_a, files_b, errors
+                "{},{},{},{},{},{},{},{},{},{}\n",
+                ts, elapsed, connected_ab, connected_ba, state_a, state_b, files_a, files_b, errors, rss_mb
             );
 
             if let Err(e) = append_to_file(&monitor_report, line).await {
                 warn!("Failed to write report: {}", e);
+            }
+
+            // T-A3: flush BEP metrics to CSV
+            if let Err(e) = syncthing_net::metrics::global().flush_to_csv(&metrics_report) {
+                warn!("Failed to flush metrics CSV: {}", e);
             }
         }
     });
@@ -181,22 +200,28 @@ async fn main() -> anyhow::Result<()> {
     let inject_task = tokio::spawn(async move {
         let mut ticker = interval(inject_interval);
         let mut counter = 0u64;
+        // T-F1: vary file sizes to stress block hashing and transfer
+        let sizes: Vec<usize> = vec![1024, 64 * 1024, 1024 * 1024, 10 * 1024 * 1024];
         loop {
             ticker.tick().await;
             counter += 1;
 
-            // Create
-            let file = inject_path.join(format!("file_{:04}.txt", counter));
-            if let Err(e) = tokio::fs::write(&file, format!("content {}", counter)).await {
+            // Create with rotating size
+            let size = sizes[(counter as usize) % sizes.len()];
+            let file = inject_path.join(format!("file_{:04}.dat", counter));
+            let data = vec![(counter % 256) as u8; size];
+            if let Err(e) = tokio::fs::write(&file, &data).await {
                 warn!("Inject create failed: {}", e);
                 inject_errors.fetch_add(1, Ordering::Relaxed);
             }
 
-            // Modify older file
+            // Modify older file (same size class)
             if counter > 3 {
-                let old = inject_path.join(format!("file_{:04}.txt", counter - 3));
+                let old = inject_path.join(format!("file_{:04}.dat", counter - 3));
                 if old.exists() {
-                    if let Err(e) = tokio::fs::write(&old, format!("modified {}", counter)).await {
+                    let size = sizes[((counter - 3) as usize) % sizes.len()];
+                    let data = vec![((counter % 256) + 1) as u8; size];
+                    if let Err(e) = tokio::fs::write(&old, &data).await {
                         warn!("Inject modify failed: {}", e);
                         inject_errors.fetch_add(1, Ordering::Relaxed);
                     }
@@ -205,7 +230,7 @@ async fn main() -> anyhow::Result<()> {
 
             // Delete oldest file
             if counter > 6 {
-                let old = inject_path.join(format!("file_{:04}.txt", counter - 6));
+                let old = inject_path.join(format!("file_{:04}.dat", counter - 6));
                 if old.exists() {
                     if let Err(e) = tokio::fs::remove_file(&old).await {
                         warn!("Inject delete failed: {}", e);
