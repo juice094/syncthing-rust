@@ -27,8 +27,8 @@ A Rust implementation of the [Syncthing](https://syncthing.net/) protocol stack,
 | Binary size | ~8 MB (release, Windows x64) |
 
 > **Current limitations**:
-> - 72h long-term stability test not yet executed (pending).
-> - Cross-version Rust interoperability (new `main` ↔ old pre-fix build) pending格雷侧 network verification.
+> - 72h long-term stability test **in progress** (started 2026-05-11 via `stress_test` binary with Windows Scheduled Task auto-resume).
+> - Cross-version Rust interoperability (new `main` ↔ old pre-fix build) pending cross-network verification.
 > - Go Syncthing full file-sync interoperability not yet validated (handshake verified only).
 
 ---
@@ -58,6 +58,20 @@ curl http://127.0.0.1:8385/rest/system/status | ConvertFrom-Json
 
 # Expected: uptime > 0, folders/devices counts match your config
 ```
+
+### Stress Test & Resilience Validation
+
+A built-in 72-hour stress-test binary exercises continuous file injection, network fault injection, and memory profiling:
+
+```powershell
+# Quick 5-minute validation run
+cargo run --release -p syncthing --bin stress_test -- --duration 5m --report smoke.csv
+
+# Full 72-hour unattended run with auto-resume on reboot (via Windows Scheduled Task)
+# See scripts\register-stress-task.ps1 for one-click registration
+```
+
+Full tuning plan: [`docs/plans/TUNING_PLAN_2026-05-11.md`](docs/plans/TUNING_PLAN_2026-05-11.md).
 
 ---
 
@@ -89,12 +103,12 @@ curl http://127.0.0.1:8385/rest/system/status | ConvertFrom-Json
 |-------|------|--------|
 | **Phase 1** | Core BEP protocol (TLS, Hello, ClusterConfig, Index) | ✅ Complete |
 | **Phase 2** | Network abstraction, watcher, REST API, dual-node coexistence | ✅ Complete |
-| **Phase 3** | BepSession observability, Push/Pull E2E with remote peer | ✅ Complete (verified against格雷侧 pre-fix Rust build; Go node pending) |
+| **Phase 3** | BepSession observability, Push/Pull E2E with remote peer | ✅ Complete (verified against earlier pre-fix Rust build; Go node pending) |
 | **Phase 3.5** | Connection stability, config persistence | ✅ Complete |
 | **Phase 4** | TUI hardening (event bridge, live sync state, config hot-reload) | ✅ Complete |
 | **Phase 5** | Zero-Tailscale interconnection (discovery results → ConnectionManager address pool) | 🔵 Core integrated; field validation pending |
 | **Phase A** | Security debt acceptance (cargo audit) | ✅ Complete (`.cargo/audit.toml` created) |
-| **Phase B** | 72h stress test | ⏳ Infrastructure ready (`bin/stress_test.rs` exists); execution pending |
+| **Phase B** | 72h stress test | 🟡 In progress (started 2026-05-11; auto-resume via Windows Scheduled Task) |
 | **Phase C** | REST API write-path closure | ✅ Complete (override/revert implemented, scan `sub` supported, device pause/resume body active) |
 
 Phase 5 design: [`docs/design/NETWORK_DISCOVERY_DESIGN.md`](docs/design/NETWORK_DISCOVERY_DESIGN.md).
@@ -154,7 +168,7 @@ docs/
 | Scanner SHA-256 parallelism | Single-threaded | T-B1 (planned) |
 | `FileSystemDatabase` storage | Per-file JSON (O(N) syscalls) | T-C (planned) |
 | criterion benchmarks | **None** | T-A1 (P0 prerequisite) |
-| 72h stress test | Not executed | T-F1 (P0, infra ready) |
+| 72h stress test | **In progress** (started 2026-05-11) | T-F1 (P0, running with fault injection) |
 
 Full breakdown: [`docs/plans/TUNING_PLAN_2026-05-11.md`](docs/plans/TUNING_PLAN_2026-05-11.md).
 
