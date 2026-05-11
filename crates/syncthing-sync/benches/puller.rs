@@ -41,7 +41,7 @@ fn bench_pull_single_file(c: &mut Criterion) {
             .with_block_source(Some(Arc::new(ZeroBlockSource)));
 
         let block_size = 128 * 1024;
-        let num_blocks = (*size + block_size - 1) / block_size;
+        let num_blocks = (*size).div_ceil(block_size);
         let mut blocks = Vec::with_capacity(num_blocks);
         for i in 0..num_blocks {
             let remaining = *size - (i * block_size);
