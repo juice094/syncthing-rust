@@ -14,8 +14,8 @@ use syncthing_core::DeviceId;
 
 use crate::handlers::validation;
 
-use super::ApiState;
 use super::db::ErrorResponse;
+use super::ApiState;
 
 pub(crate) async fn list_folders(State(state): State<ApiState>) -> impl IntoResponse {
     match state.config_store.load().await {
@@ -39,15 +39,10 @@ pub(crate) async fn get_folder(
     Path(id): Path<String>,
 ) -> impl IntoResponse {
     match state.config_store.load().await {
-        Ok(config) => {
-            match config.folders.iter().find(|f| f.id.as_str() == id) {
-                Some(folder) => Ok(Json(FolderResponse::from(folder.clone()))),
-                None => Err((
-                    StatusCode::NOT_FOUND,
-                    format!("Folder '{}' not found", id),
-                )),
-            }
-        }
+        Ok(config) => match config.folders.iter().find(|f| f.id.as_str() == id) {
+            Some(folder) => Ok(Json(FolderResponse::from(folder.clone()))),
+            None => Err((StatusCode::NOT_FOUND, format!("Folder '{}' not found", id))),
+        },
         Err(e) => Err((StatusCode::INTERNAL_SERVER_ERROR, format!("{}", e))),
     }
 }
@@ -100,7 +95,10 @@ pub(crate) async fn create_folder(
     config.folders.push(folder);
 
     match state.config_store.save(&config).await {
-        Ok(_) => Ok((StatusCode::CREATED, Json(FolderResponse::from(config.folders.last().unwrap().clone())))),
+        Ok(_) => Ok((
+            StatusCode::CREATED,
+            Json(FolderResponse::from(config.folders.last().unwrap().clone())),
+        )),
         Err(e) => Err((StatusCode::INTERNAL_SERVER_ERROR, format!("{}", e))),
     }
 }
@@ -141,7 +139,9 @@ pub(crate) async fn update_folder(
     }
 
     match state.config_store.save(&config).await {
-        Ok(_) => Ok(Json(FolderResponse::from(config.folders[folder_idx].clone()))),
+        Ok(_) => Ok(Json(FolderResponse::from(
+            config.folders[folder_idx].clone(),
+        ))),
         Err(e) => Err((StatusCode::INTERNAL_SERVER_ERROR, format!("{}", e))),
     }
 }
@@ -281,7 +281,11 @@ impl From<syncthing_core::types::Folder> for FolderResponse {
             id: folder.id,
             label: folder.label.unwrap_or_default(),
             path: folder.path,
-            devices: folder.devices.iter().map(|d: &DeviceId| d.short_id()).collect(),
+            devices: folder
+                .devices
+                .iter()
+                .map(|d: &DeviceId| d.short_id())
+                .collect(),
             rescan_interval_secs: folder.rescan_interval_secs as u32,
         }
     }

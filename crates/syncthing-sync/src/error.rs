@@ -109,9 +109,7 @@ impl SyncError {
     pub fn is_temporary(&self) -> bool {
         matches!(
             self,
-            SyncError::Io(_)
-                | SyncError::Timeout { .. }
-                | SyncError::Pull { .. }
+            SyncError::Io(_) | SyncError::Timeout { .. } | SyncError::Pull { .. }
         )
     }
 }

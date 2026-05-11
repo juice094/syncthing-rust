@@ -1,13 +1,13 @@
 //! 冲突解决器
-//! 
+//!
 //! 处理文件版本冲突，实现 Syncthing 的冲突解决策略
 
 use crate::database::LocalDatabase;
 use crate::error::{Result, SyncError};
 use crate::events::{ConflictResolution, EventPublisher, SyncEvent};
-use syncthing_core::types::{FileInfo, Vector};
 use std::path::Path;
 use std::sync::Arc;
+use syncthing_core::types::{FileInfo, Vector};
 use tokio::fs;
 use tracing::{debug, info, warn};
 
@@ -59,7 +59,8 @@ impl ConflictResolver {
 
         // 默认策略：重命名保留双方修改
         let resolution = ConflictResolution::RenameBoth;
-        self.apply_resolution(folder, local, remote, folder_path, resolution).await?;
+        self.apply_resolution(folder, local, remote, folder_path, resolution)
+            .await?;
 
         self.events.publish(SyncEvent::ConflictResolved {
             folder: folder.to_string(),
@@ -76,7 +77,7 @@ impl ConflictResolver {
         if local.version.dominates(&remote.version) {
             return false;
         }
-        
+
         // 如果远程版本支配本地版本，没有冲突
         if remote.version.dominates(&local.version) {
             return false;
@@ -115,7 +116,8 @@ impl ConflictResolver {
             ConflictResolution::RenameBoth => {
                 // 重命名保留双方修改
                 debug!(file = %local.name, "Renaming conflicting files");
-                self.rename_conflict_files(folder, local, remote, folder_path).await?;
+                self.rename_conflict_files(folder, local, remote, folder_path)
+                    .await?;
             }
         }
 
@@ -132,7 +134,7 @@ impl ConflictResolver {
     ) -> Result<()> {
         let local_path = folder_path.join(&local.name);
         let timestamp = chrono::Local::now().format("%Y%m%d-%H%M%S");
-        
+
         // 生成冲突文件名
         let conflict_name = format!(
             "{}.sync-conflict-{}-{}",
@@ -172,7 +174,7 @@ impl ConflictResolver {
         folder_path: &Path,
     ) -> Result<()> {
         let local_path = folder_path.join(&local.name);
-        
+
         // 读取本地文件内容
         let local_content = if local_path.exists() {
             fs::read_to_string(&local_path).await.ok()
@@ -183,12 +185,15 @@ impl ConflictResolver {
         // 如果无法读取为文本，回退到重命名策略
         if local_content.is_none() {
             warn!(file = %local.name, "Cannot merge binary file, using rename strategy");
-            return self.rename_conflict_files(folder, local, remote, folder_path).await;
+            return self
+                .rename_conflict_files(folder, local, remote, folder_path)
+                .await;
         }
 
         // 简化的合并策略：使用远程版本并标记为冲突
         // 实际实现应该使用三向合并或类似算法
-        self.rename_conflict_files(folder, local, remote, folder_path).await
+        self.rename_conflict_files(folder, local, remote, folder_path)
+            .await
     }
 
     /// 批量检查冲突
@@ -217,7 +222,7 @@ impl ConflictResolver {
         if remote.version.dominates(&local.version) {
             return remote;
         }
-        
+
         // 如果本地版本支配远程，选择本地
         if local.version.dominates(&remote.version) {
             return local;
@@ -297,9 +302,15 @@ mod tests {
         let v2 = Vector::new().with_counter(1, 3);
         let v3 = Vector::new().with_counter(2, 4);
 
-        assert_eq!(resolver.compare_versions(&v1, &v2), VersionComparison::Greater);
+        assert_eq!(
+            resolver.compare_versions(&v1, &v2),
+            VersionComparison::Greater
+        );
         assert_eq!(resolver.compare_versions(&v2, &v1), VersionComparison::Less);
-        assert_eq!(resolver.compare_versions(&v1, &v3), VersionComparison::Conflict);
+        assert_eq!(
+            resolver.compare_versions(&v1, &v3),
+            VersionComparison::Conflict
+        );
     }
 
     #[test]

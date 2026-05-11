@@ -77,9 +77,9 @@ impl DerpServer {
 
     /// 绑定监听地址，返回实际绑定的地址
     pub async fn bind(&mut self) -> Result<SocketAddr> {
-        let listener = TcpListener::bind(self.config.bind_addr).await.map_err(|e| {
-            SyncthingError::connection(format!("DERP server bind failed: {}", e))
-        })?;
+        let listener = TcpListener::bind(self.config.bind_addr)
+            .await
+            .map_err(|e| SyncthingError::connection(format!("DERP server bind failed: {}", e)))?;
         let addr = listener.local_addr().map_err(|e| {
             SyncthingError::connection(format!("DERP server local_addr failed: {}", e))
         })?;
@@ -94,12 +94,15 @@ impl DerpServer {
 
     /// 启动服务器（阻塞直到关闭）。必须先调用 `bind()`。
     pub async fn run(&self) -> Result<()> {
-        let listener = Arc::clone(self.listener.as_ref()
-            .ok_or_else(|| SyncthingError::config("DERP server not bound, call bind() first"))?);
+        let listener =
+            Arc::clone(self.listener.as_ref().ok_or_else(|| {
+                SyncthingError::config("DERP server not bound, call bind() first")
+            })?);
 
         info!(
             "DERP server listening on {} (websocket_upgrade={})",
-            self.local_addr().unwrap_or(self.config.bind_addr), self.config.websocket_upgrade
+            self.local_addr().unwrap_or(self.config.bind_addr),
+            self.config.websocket_upgrade
         );
 
         // 启动超时清理任务
@@ -135,7 +138,8 @@ impl DerpServer {
                     let clients = Arc::clone(&self.clients);
                     let addr_index = Arc::clone(&self.addr_index);
                     tokio::spawn(async move {
-                        if let Err(e) = Self::handle_client(stream, addr, clients, addr_index).await {
+                        if let Err(e) = Self::handle_client(stream, addr, clients, addr_index).await
+                        {
                             warn!("DERP client {} handler error: {}", addr, e);
                         }
                     });
@@ -167,10 +171,9 @@ impl DerpServer {
             .map_err(|e| SyncthingError::connection(format!("ClientInfo read failed: {}", e)))?;
         let payload_len = u32::from_be_bytes(len_buf) as usize;
         let mut payload_buf = vec![0u8; payload_len];
-        read_half
-            .read_exact(&mut payload_buf)
-            .await
-            .map_err(|e| SyncthingError::connection(format!("ClientInfo payload read failed: {}", e)))?;
+        read_half.read_exact(&mut payload_buf).await.map_err(|e| {
+            SyncthingError::connection(format!("ClientInfo payload read failed: {}", e))
+        })?;
 
         let mut combined = bytes::BytesMut::from(&len_buf[..]);
         combined.extend_from_slice(&payload_buf);
@@ -220,7 +223,10 @@ impl DerpServer {
 
         // 注册客户端（覆盖旧连接）
         if let Some(old) = clients.insert(device_id, client) {
-            warn!("DERP client {} reconnected from {}, dropping old connection from {}", device_id, addr, old.addr);
+            warn!(
+                "DERP client {} reconnected from {}, dropping old connection from {}",
+                device_id, addr, old.addr
+            );
             addr_index.remove(&old.addr);
         }
         addr_index.insert(addr, device_id);
@@ -272,7 +278,10 @@ impl DerpServer {
                                 debug!("DERP forwarded packet from {} to {}", device_id, target);
                             }
                         } else {
-                            debug!("DERP target {} not connected, dropping packet from {}", target, device_id);
+                            debug!(
+                                "DERP target {} not connected, dropping packet from {}",
+                                target, device_id
+                            );
                         }
                     }
                     Ok(Some((Frame::KeepAlive, _))) => {

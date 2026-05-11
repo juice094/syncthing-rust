@@ -20,7 +20,9 @@ pub fn draw(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
         .filter(|(_, s)| !matches!(s, syncthing_core::types::FolderStatus::Idle))
         .collect();
     if !active_folders.is_empty() || !app.sync_progress.is_empty() {
-        constraints.push(Constraint::Length((active_folders.len().max(app.sync_progress.len()) + 1) as u16 + 1));
+        constraints.push(Constraint::Length(
+            (active_folders.len().max(app.sync_progress.len()) + 1) as u16 + 1,
+        ));
     }
     constraints.push(Constraint::Min(0)); // 日志
 
@@ -80,9 +82,10 @@ pub fn draw(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
     // 活跃同步状态区域
     if !active_folders.is_empty() || !app.sync_progress.is_empty() {
         let theme = &app.theme;
-        let mut status_lines = vec![
-            Line::from(Span::styled("Active sync tasks:", theme.style_header)),
-        ];
+        let mut status_lines = vec![Line::from(Span::styled(
+            "Active sync tasks:",
+            theme.style_header,
+        ))];
         for (folder, status) in &active_folders {
             let label = match status {
                 syncthing_core::types::FolderStatus::Scanning => "Scanning",
@@ -93,11 +96,18 @@ pub fn draw(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
                 _ => "Working",
             };
             let color = match status {
-                syncthing_core::types::FolderStatus::Scanning | syncthing_core::types::FolderStatus::ScanWaiting => Color::Yellow,
-                syncthing_core::types::FolderStatus::Pulling | syncthing_core::types::FolderStatus::Pushing | syncthing_core::types::FolderStatus::SyncWaiting => Color::Cyan,
+                syncthing_core::types::FolderStatus::Scanning
+                | syncthing_core::types::FolderStatus::ScanWaiting => Color::Yellow,
+                syncthing_core::types::FolderStatus::Pulling
+                | syncthing_core::types::FolderStatus::Pushing
+                | syncthing_core::types::FolderStatus::SyncWaiting => Color::Cyan,
                 _ => Color::Gray,
             };
-            let progress = app.sync_progress.get(folder.as_str()).cloned().unwrap_or(0.0);
+            let progress = app
+                .sync_progress
+                .get(folder.as_str())
+                .cloned()
+                .unwrap_or(0.0);
             status_lines.push(Line::from(vec![
                 Span::raw(format!("  {}: ", folder)),
                 Span::styled(label, ratatui::style::Style::default().fg(color)),

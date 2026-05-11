@@ -44,13 +44,21 @@ impl<S> TlsPipe<S> {
 }
 
 impl<S: AsyncRead + Unpin> AsyncRead for TlsPipe<S> {
-    fn poll_read(mut self: Pin<&mut Self>, cx: &mut Context<'_>, buf: &mut ReadBuf<'_>) -> Poll<std::io::Result<()>> {
+    fn poll_read(
+        mut self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+        buf: &mut ReadBuf<'_>,
+    ) -> Poll<std::io::Result<()>> {
         Pin::new(&mut self.stream).poll_read(cx, buf)
     }
 }
 
 impl<S: AsyncWrite + Unpin> AsyncWrite for TlsPipe<S> {
-    fn poll_write(mut self: Pin<&mut Self>, cx: &mut Context<'_>, buf: &[u8]) -> Poll<std::io::Result<usize>> {
+    fn poll_write(
+        mut self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+        buf: &[u8],
+    ) -> Poll<std::io::Result<usize>> {
         Pin::new(&mut self.stream).poll_write(cx, buf)
     }
 
@@ -108,7 +116,10 @@ impl DialConnector for TransportBepConnector {
         device_name: &str,
         tls_config: &Arc<SyncthingTlsConfig>,
     ) -> CoreResult<Arc<BepConnection>> {
-        debug!("TransportBepConnector dialing {} for device {}", addr, device_id);
+        debug!(
+            "TransportBepConnector dialing {} for device {}",
+            addr, device_id
+        );
 
         // 1. 原始传输层拨号（优先使用 dial_device，支持 DERP 等中继传输）
         let pipe = self
@@ -133,12 +144,16 @@ impl DialConnector for TransportBepConnector {
         // 4. 创建 BEP 连接
         let (event_tx, _event_rx) = tokio::sync::mpsc::unbounded_channel();
         let tls_pipe = TlsPipe::new(tls_stream, local_addr, peer_addr);
-        let conn = BepConnection::new(Box::new(tls_pipe), ConnectionType::Outgoing, event_tx).await?;
+        let conn =
+            BepConnection::new(Box::new(tls_pipe), ConnectionType::Outgoing, event_tx).await?;
 
         conn.set_device_id(device_id);
         conn.set_state(syncthing_core::ConnectionState::ProtocolHandshakeComplete);
 
-        info!("BEP connection established to {} (device: {})", addr, device_id);
+        info!(
+            "BEP connection established to {} (device: {})",
+            addr, device_id
+        );
         Ok(conn)
     }
 }
@@ -165,9 +180,9 @@ impl BepTransportListener {
         device_name: String,
         tls_config: Arc<SyncthingTlsConfig>,
     ) -> CoreResult<SocketAddr> {
-        let bind_addr: SocketAddr = bind_addr.parse().map_err(|e| {
-            SyncthingError::config(format!("invalid bind address: {}", e))
-        })?;
+        let bind_addr: SocketAddr = bind_addr
+            .parse()
+            .map_err(|e| SyncthingError::config(format!("invalid bind address: {}", e)))?;
         let listener = transport.bind(bind_addr).await?;
         let listen_addr = listener.local_addr()?;
 
@@ -186,7 +201,9 @@ impl BepTransportListener {
                         let tls_config = Arc::clone(&tls_config);
 
                         tokio::spawn(async move {
-                            if let Err(e) = Self::handle_incoming(pipe, manager, &device_name, tls_config).await {
+                            if let Err(e) =
+                                Self::handle_incoming(pipe, manager, &device_name, tls_config).await
+                            {
                                 warn!("Failed to handle incoming BEP connection: {}", e);
                             }
                         });
@@ -213,7 +230,10 @@ impl BepTransportListener {
 
         // 服务端 TLS 握手
         let (tls_stream, device_id) = crate::tls::accept_tls_stream(pipe, &tls_config).await?;
-        debug!("Server TLS handshake completed: peer_device_id={}", device_id);
+        debug!(
+            "Server TLS handshake completed: peer_device_id={}",
+            device_id
+        );
 
         // BEP Hello 交换
         let mut tls_stream = tls_stream;
@@ -222,12 +242,16 @@ impl BepTransportListener {
         // 创建 BEP 连接
         let (event_tx, _event_rx) = tokio::sync::mpsc::unbounded_channel();
         let tls_pipe = TlsPipe::new(tls_stream, local_addr, peer_addr);
-        let conn = BepConnection::new(Box::new(tls_pipe), ConnectionType::Incoming, event_tx).await?;
+        let conn =
+            BepConnection::new(Box::new(tls_pipe), ConnectionType::Incoming, event_tx).await?;
 
         conn.set_device_id(device_id);
         manager.register_connection(device_id, conn).await?;
 
-        info!("Incoming BEP connection registered for device {}", device_id);
+        info!(
+            "Incoming BEP connection registered for device {}",
+            device_id
+        );
         Ok(())
     }
 }

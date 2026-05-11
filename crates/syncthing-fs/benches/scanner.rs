@@ -3,7 +3,7 @@
 //! 运行：cargo bench -p syncthing-fs
 //! 报告：target/criterion/
 
-use criterion::{black_box, criterion_group, criterion_main, Criterion, BenchmarkId, Throughput};
+use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
 use std::path::PathBuf;
 
 fn bench_scan_file(c: &mut Criterion) {

@@ -17,10 +17,10 @@ use tokio::net::tcp::OwnedWriteHalf;
 use tokio::sync::mpsc;
 use tracing::{debug, trace, warn};
 
-use syncthing_core::{PathQuality, ReliablePipe, TransportType};
 use syncthing_core::DeviceId;
+use syncthing_core::{PathQuality, ReliablePipe, TransportType};
 
-use super::protocol::{Frame};
+use super::protocol::Frame;
 
 /// 内部发送任务：从 channel 接收已编码的帧数据，写入 TCP stream
 async fn send_task(mut write_half: OwnedWriteHalf, mut rx: mpsc::UnboundedReceiver<Vec<u8>>) {
@@ -133,11 +133,7 @@ impl DerpPipe {
     /// * `stream` - 已连接到 DERP 服务器的 TCP stream
     /// * `target` - 目标设备 ID（SendPacket 的路由目标）
     /// * `local_device_id` - 本地设备 ID
-    pub fn new(
-        stream: tokio::net::TcpStream,
-        target: DeviceId,
-        local_device_id: DeviceId,
-    ) -> Self {
+    pub fn new(stream: tokio::net::TcpStream, target: DeviceId, local_device_id: DeviceId) -> Self {
         let local_addr = stream.local_addr().ok();
         let peer_addr = stream.peer_addr().ok();
         let (read_half, write_half) = stream.into_split();

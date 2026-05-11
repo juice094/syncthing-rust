@@ -25,10 +25,12 @@ async fn test_two_node_empty_folder_handshake() {
     node_b.connect_to(&node_a).await.expect("b connect to a");
 
     // Wait for connections to establish
-    node_a.wait_for_connection(node_b.device_id, Duration::from_secs(15))
+    node_a
+        .wait_for_connection(node_b.device_id, Duration::from_secs(15))
         .await
         .expect("a wait for b");
-    node_b.wait_for_connection(node_a.device_id, Duration::from_secs(15))
+    node_b
+        .wait_for_connection(node_a.device_id, Duration::from_secs(15))
         .await
         .expect("b wait for a");
 

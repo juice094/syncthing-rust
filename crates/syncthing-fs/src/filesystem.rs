@@ -10,10 +10,7 @@ use async_trait::async_trait;
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
-use syncthing_core::{
-    traits::FileSystem,
-    BlockHash, FileInfo, FileType, Result, SyncthingError,
-};
+use syncthing_core::{traits::FileSystem, BlockHash, FileInfo, FileType, Result, SyncthingError};
 use tokio::fs;
 use tokio::io::{AsyncReadExt, AsyncSeekExt, AsyncWriteExt};
 
@@ -196,7 +193,9 @@ impl FileSystem for NativeFileSystem {
 
         // Create parent directories if needed
         if let Some(parent) = full_path.parent() {
-            fs::create_dir_all(parent).await.map_err(SyncthingError::Io)?;
+            fs::create_dir_all(parent)
+                .await
+                .map_err(SyncthingError::Io)?;
         }
 
         // Open or create file (truncate=false because we seek to offset and write blocks)
@@ -296,7 +295,9 @@ impl FileSystem for NativeFileSystem {
 
         // Create parent directories for destination
         if let Some(parent) = to_full.parent() {
-            fs::create_dir_all(parent).await.map_err(SyncthingError::Io)?;
+            fs::create_dir_all(parent)
+                .await
+                .map_err(SyncthingError::Io)?;
         }
 
         // Try atomic rename first
@@ -323,7 +324,9 @@ impl FileSystem for NativeFileSystem {
 
 /// Build FileInfo from a filesystem path
 async fn build_file_info(path: &Path, name: &str) -> Result<FileInfo> {
-    let metadata = fs::symlink_metadata(path).await.map_err(SyncthingError::Io)?;
+    let metadata = fs::symlink_metadata(path)
+        .await
+        .map_err(SyncthingError::Io)?;
 
     let mut info = FileInfo::new(name);
     info.size = metadata.len() as i64;
@@ -481,7 +484,9 @@ mod tests {
         let fs = NativeFileSystem::new(temp_dir.path());
 
         let test_file = Path::new("test.txt");
-        fs.write_block(test_file, 0, b"Hello, World!").await.unwrap();
+        fs.write_block(test_file, 0, b"Hello, World!")
+            .await
+            .unwrap();
 
         let read_data = fs.read_block(test_file, 7, 5).await.unwrap();
         assert_eq!(read_data, b"World");

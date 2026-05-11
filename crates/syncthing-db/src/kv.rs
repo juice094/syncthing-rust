@@ -39,9 +39,8 @@ impl SledStore {
     /// # Errors
     /// Returns an error if the database cannot be opened
     pub fn open<P: AsRef<Path>>(path: P) -> Result<Self> {
-        let db = sled::open(path).map_err(|e| {
-            SyncthingError::Storage(format!("Failed to open database: {}", e))
-        })?;
+        let db = sled::open(path)
+            .map_err(|e| SyncthingError::Storage(format!("Failed to open database: {}", e)))?;
         Ok(Self { db })
     }
 
@@ -49,12 +48,9 @@ impl SledStore {
     ///
     /// Useful for testing and temporary storage.
     pub fn open_in_memory() -> Result<Self> {
-        let db = sled::Config::new()
-            .temporary(true)
-            .open()
-            .map_err(|e| {
-                SyncthingError::Storage(format!("Failed to create in-memory database: {}", e))
-            })?;
+        let db = sled::Config::new().temporary(true).open().map_err(|e| {
+            SyncthingError::Storage(format!("Failed to create in-memory database: {}", e))
+        })?;
         Ok(Self { db })
     }
 
@@ -66,9 +62,10 @@ impl SledStore {
     /// # Returns
     /// `Ok(Some(value))` if the key exists, `Ok(None)` if not
     pub fn get(&self, key: &[u8]) -> Result<Option<Vec<u8>>> {
-        let result = self.db.get(key).map_err(|e| {
-            SyncthingError::Storage(format!("Failed to get key: {}", e))
-        })?;
+        let result = self
+            .db
+            .get(key)
+            .map_err(|e| SyncthingError::Storage(format!("Failed to get key: {}", e)))?;
         Ok(result.map(|v| v.to_vec()))
     }
 
@@ -81,9 +78,9 @@ impl SledStore {
     /// # Errors
     /// Returns an error if the write fails
     pub fn put(&self, key: &[u8], value: &[u8]) -> Result<()> {
-        self.db.insert(key, value).map_err(|e| {
-            SyncthingError::Storage(format!("Failed to put key: {}", e))
-        })?;
+        self.db
+            .insert(key, value)
+            .map_err(|e| SyncthingError::Storage(format!("Failed to put key: {}", e)))?;
         Ok(())
     }
 
@@ -95,9 +92,10 @@ impl SledStore {
     /// # Returns
     /// `Ok(true)` if the key was present and deleted, `Ok(false)` if not found
     pub fn delete(&self, key: &[u8]) -> Result<bool> {
-        let existed = self.db.remove(key).map_err(|e| {
-            SyncthingError::Storage(format!("Failed to delete key: {}", e))
-        })?;
+        let existed = self
+            .db
+            .remove(key)
+            .map_err(|e| SyncthingError::Storage(format!("Failed to delete key: {}", e)))?;
         Ok(existed.is_some())
     }
 
@@ -106,9 +104,9 @@ impl SledStore {
     /// # Arguments
     /// * `key` - The key to check
     pub fn contains(&self, key: &[u8]) -> Result<bool> {
-        self.db.contains_key(key).map_err(|e| {
-            SyncthingError::Storage(format!("Failed to check key: {}", e))
-        })
+        self.db
+            .contains_key(key)
+            .map_err(|e| SyncthingError::Storage(format!("Failed to check key: {}", e)))
     }
 
     /// Apply a batch of operations atomically
@@ -127,9 +125,9 @@ impl SledStore {
             }
         }
 
-        self.db.apply_batch(sled_batch).map_err(|e| {
-            SyncthingError::Storage(format!("Failed to apply batch: {}", e))
-        })?;
+        self.db
+            .apply_batch(sled_batch)
+            .map_err(|e| SyncthingError::Storage(format!("Failed to apply batch: {}", e)))?;
 
         Ok(())
     }
@@ -141,9 +139,8 @@ impl SledStore {
     pub fn scan_prefix(&self, prefix: &[u8]) -> Result<Vec<(Vec<u8>, Vec<u8>)>> {
         let mut results = Vec::new();
         for result in self.db.scan_prefix(prefix) {
-            let (key, value) = result.map_err(|e| {
-                SyncthingError::Storage(format!("Failed to scan: {}", e))
-            })?;
+            let (key, value) =
+                result.map_err(|e| SyncthingError::Storage(format!("Failed to scan: {}", e)))?;
             results.push((key.to_vec(), value.to_vec()));
         }
         Ok(results)
@@ -161,9 +158,9 @@ impl SledStore {
 
     /// Flush all pending writes to disk
     pub fn flush(&self) -> Result<()> {
-        self.db.flush().map_err(|e| {
-            SyncthingError::Storage(format!("Failed to flush database: {}", e))
-        })?;
+        self.db
+            .flush()
+            .map_err(|e| SyncthingError::Storage(format!("Failed to flush database: {}", e)))?;
         Ok(())
     }
 }
@@ -177,17 +174,18 @@ pub struct SledTree {
 impl SledTree {
     /// Get value by key
     pub fn get(&self, key: &[u8]) -> Result<Option<Vec<u8>>> {
-        let result = self.tree.get(key).map_err(|e| {
-            SyncthingError::Storage(format!("Failed to get key from tree: {}", e))
-        })?;
+        let result = self
+            .tree
+            .get(key)
+            .map_err(|e| SyncthingError::Storage(format!("Failed to get key from tree: {}", e)))?;
         Ok(result.map(|v| v.to_vec()))
     }
 
     /// Store value by key
     pub fn put(&self, key: &[u8], value: &[u8]) -> Result<()> {
-        self.tree.insert(key, value).map_err(|e| {
-            SyncthingError::Storage(format!("Failed to put key in tree: {}", e))
-        })?;
+        self.tree
+            .insert(key, value)
+            .map_err(|e| SyncthingError::Storage(format!("Failed to put key in tree: {}", e)))?;
         Ok(())
     }
 
@@ -201,18 +199,17 @@ impl SledTree {
 
     /// Check if a key exists
     pub fn contains(&self, key: &[u8]) -> Result<bool> {
-        self.tree.contains_key(key).map_err(|e| {
-            SyncthingError::Storage(format!("Failed to check key in tree: {}", e))
-        })
+        self.tree
+            .contains_key(key)
+            .map_err(|e| SyncthingError::Storage(format!("Failed to check key in tree: {}", e)))
     }
 
     /// Get all keys with a given prefix
     pub fn scan_prefix(&self, prefix: &[u8]) -> Result<Vec<(Vec<u8>, Vec<u8>)>> {
         let mut results = Vec::new();
         for result in self.tree.scan_prefix(prefix) {
-            let (key, value) = result.map_err(|e| {
-                SyncthingError::Storage(format!("Failed to scan tree: {}", e))
-            })?;
+            let (key, value) = result
+                .map_err(|e| SyncthingError::Storage(format!("Failed to scan tree: {}", e)))?;
             results.push((key.to_vec(), value.to_vec()));
         }
         Ok(results)
@@ -238,9 +235,9 @@ impl SledTree {
 
     /// Flush pending writes to disk
     pub fn flush(&self) -> Result<()> {
-        self.tree.flush().map_err(|e| {
-            SyncthingError::Storage(format!("Failed to flush tree: {}", e))
-        })?;
+        self.tree
+            .flush()
+            .map_err(|e| SyncthingError::Storage(format!("Failed to flush tree: {}", e)))?;
         Ok(())
     }
 }
@@ -292,10 +289,7 @@ mod tests {
         assert_eq!(store.get(b"key3").unwrap(), Some(b"value3".to_vec()));
 
         // Test batch delete
-        let batch = vec![
-            (b"key1".to_vec(), None),
-            (b"key2".to_vec(), None),
-        ];
+        let batch = vec![(b"key1".to_vec(), None), (b"key2".to_vec(), None)];
 
         store.apply_batch(batch).unwrap();
 
@@ -316,7 +310,10 @@ mod tests {
         let results = store.scan_prefix(b"prefix:").unwrap();
         assert_eq!(results.len(), 2);
 
-        let keys: Vec<_> = results.iter().map(|(k, _)| String::from_utf8_lossy(k).to_string()).collect();
+        let keys: Vec<_> = results
+            .iter()
+            .map(|(k, _)| String::from_utf8_lossy(k).to_string())
+            .collect();
         assert!(keys.contains(&"prefix:key1".to_string()));
         assert!(keys.contains(&"prefix:key2".to_string()));
     }

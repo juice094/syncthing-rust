@@ -9,17 +9,20 @@ use tracing::warn;
 
 use syncthing_core::types::FolderId;
 
-use super::ApiState;
-use super::parse_device_id;
-use super::db::ErrorResponse;
 use super::config::{update_config, UpdateConfigRequest};
+use super::db::ErrorResponse;
+use super::parse_device_id;
+use super::ApiState;
 
 pub(crate) async fn pause_all(State(state): State<ApiState>) -> impl IntoResponse {
     if let Some(ref sync_model) = state.sync_model {
         match state.config_store.load().await {
             Ok(config) => {
                 for folder in &config.folders {
-                    if let Err(e) = sync_model.stop_folder(FolderId::new(folder.id.clone())).await {
+                    if let Err(e) = sync_model
+                        .stop_folder(FolderId::new(folder.id.clone()))
+                        .await
+                    {
                         return (
                             StatusCode::INTERNAL_SERVER_ERROR,
                             Json(ErrorResponse {
@@ -82,7 +85,10 @@ pub(crate) async fn resume_all(State(state): State<ApiState>) -> impl IntoRespon
         match state.config_store.load().await {
             Ok(config) => {
                 for folder in &config.folders {
-                    if let Err(e) = sync_model.start_folder(FolderId::new(folder.id.clone())).await {
+                    if let Err(e) = sync_model
+                        .start_folder(FolderId::new(folder.id.clone()))
+                        .await
+                    {
                         return (
                             StatusCode::INTERNAL_SERVER_ERROR,
                             Json(ErrorResponse {
@@ -100,7 +106,7 @@ pub(crate) async fn resume_all(State(state): State<ApiState>) -> impl IntoRespon
                     error: format!("Failed to load config: {}", e),
                 }),
             )
-            .into_response(),
+                .into_response(),
         }
     } else {
         (
@@ -184,7 +190,11 @@ pub(crate) async fn system_pause(
             Ok(mut config) => {
                 for device_id_str in &request.device {
                     let device_id = parse_device_id(device_id_str);
-                    if let Some(device) = config.devices.iter_mut().find(|d| d.id.to_string() == device_id.to_string()) {
+                    if let Some(device) = config
+                        .devices
+                        .iter_mut()
+                        .find(|d| d.id.to_string() == device_id.to_string())
+                    {
                         device.paused = true;
                         paused.push(device_id_str.clone());
                     }
@@ -228,7 +238,11 @@ pub(crate) async fn system_resume(
             Ok(mut config) => {
                 for device_id_str in &request.device {
                     let device_id = parse_device_id(device_id_str);
-                    if let Some(device) = config.devices.iter_mut().find(|d| d.id.to_string() == device_id.to_string()) {
+                    if let Some(device) = config
+                        .devices
+                        .iter_mut()
+                        .find(|d| d.id.to_string() == device_id.to_string())
+                    {
                         device.paused = false;
                         resumed.push(device_id_str.clone());
                     }

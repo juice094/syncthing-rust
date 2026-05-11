@@ -109,9 +109,7 @@ fn fingerprint(data: &[u8]) -> u32 {
 
 /// 判断数据包是否为 STUN 消息
 pub fn is_stun_packet(data: &[u8]) -> bool {
-    data.len() >= HEADER_LEN
-        && data[0] & 0b11000000 == 0
-        && data[4..8] == MAGIC_COOKIE
+    data.len() >= HEADER_LEN && data[0] & 0b11000000 == 0 && data[4..8] == MAGIC_COOKIE
 }
 
 /// 解析 STUN Binding Success Response，返回 Transaction ID 与映射地址。
@@ -278,7 +276,10 @@ impl NatType {
 
     /// 是否应直接 fallback 到 Relay
     pub fn needs_relay(self) -> bool {
-        matches!(self, NatType::Symmetric | NatType::Blocked | NatType::Unknown)
+        matches!(
+            self,
+            NatType::Symmetric | NatType::Blocked | NatType::Unknown
+        )
     }
 }
 
@@ -290,9 +291,19 @@ async fn query_with_socket(
 ) -> Result<SocketAddr> {
     let server_addr = tokio::net::lookup_host(stun_server)
         .await
-        .map_err(|e| SyncthingError::config(format!("failed to resolve STUN server '{}': {}", stun_server, e)))?
+        .map_err(|e| {
+            SyncthingError::config(format!(
+                "failed to resolve STUN server '{}': {}",
+                stun_server, e
+            ))
+        })?
         .next()
-        .ok_or_else(|| SyncthingError::config(format!("STUN server '{}' resolved to no addresses", stun_server)))?;
+        .ok_or_else(|| {
+            SyncthingError::config(format!(
+                "STUN server '{}' resolved to no addresses",
+                stun_server
+            ))
+        })?;
 
     let tx_id = new_tx_id();
     let request = build_binding_request(tx_id);
@@ -398,7 +409,10 @@ impl StunClient {
     /// 返回 `(NatType, 首选公网地址)`。
     pub async fn detect_nat_type(&self) -> Result<(NatType, Option<SocketAddr>)> {
         if self.servers.len() < 2 {
-            warn!("NAT type detection requires at least 2 STUN servers, got {}", self.servers.len());
+            warn!(
+                "NAT type detection requires at least 2 STUN servers, got {}",
+                self.servers.len()
+            );
             return Ok((NatType::Unknown, None));
         }
 
@@ -434,7 +448,10 @@ impl StunClient {
             NatType::Symmetric
         };
 
-        info!("NAT type detected: {:?} ({} vs {})", nat_type, addr_a, addr_b);
+        info!(
+            "NAT type detected: {:?} ({} vs {})",
+            nat_type, addr_a, addr_b
+        );
         Ok((nat_type, Some(addr_a)))
     }
 
@@ -569,24 +586,48 @@ mod tests {
     #[test]
     fn test_is_public_address() {
         // IPv4 公网地址
-        assert!(StunClient::is_public_address(&"8.8.8.8:1234".parse().unwrap()));
-        assert!(StunClient::is_public_address(&"1.2.3.4:1234".parse().unwrap()));
+        assert!(StunClient::is_public_address(
+            &"8.8.8.8:1234".parse().unwrap()
+        ));
+        assert!(StunClient::is_public_address(
+            &"1.2.3.4:1234".parse().unwrap()
+        ));
 
         // IPv4 私有地址
-        assert!(!StunClient::is_public_address(&"10.0.0.1:1234".parse().unwrap()));
-        assert!(!StunClient::is_public_address(&"192.168.1.1:1234".parse().unwrap()));
-        assert!(!StunClient::is_public_address(&"172.16.0.1:1234".parse().unwrap()));
-        assert!(!StunClient::is_public_address(&"127.0.0.1:1234".parse().unwrap()));
-        assert!(!StunClient::is_public_address(&"169.254.1.1:1234".parse().unwrap()));
+        assert!(!StunClient::is_public_address(
+            &"10.0.0.1:1234".parse().unwrap()
+        ));
+        assert!(!StunClient::is_public_address(
+            &"192.168.1.1:1234".parse().unwrap()
+        ));
+        assert!(!StunClient::is_public_address(
+            &"172.16.0.1:1234".parse().unwrap()
+        ));
+        assert!(!StunClient::is_public_address(
+            &"127.0.0.1:1234".parse().unwrap()
+        ));
+        assert!(!StunClient::is_public_address(
+            &"169.254.1.1:1234".parse().unwrap()
+        ));
 
         // IPv6 公网地址
-        assert!(StunClient::is_public_address(&"[2001:db8::1]:1234".parse().unwrap()));
+        assert!(StunClient::is_public_address(
+            &"[2001:db8::1]:1234".parse().unwrap()
+        ));
 
         // IPv6 私有/特殊地址
-        assert!(!StunClient::is_public_address(&"[::1]:1234".parse().unwrap()));
-        assert!(!StunClient::is_public_address(&"[fe80::1]:1234".parse().unwrap()));
-        assert!(!StunClient::is_public_address(&"[fc00::1]:1234".parse().unwrap()));
-        assert!(!StunClient::is_public_address(&"[ff02::1]:1234".parse().unwrap()));
+        assert!(!StunClient::is_public_address(
+            &"[::1]:1234".parse().unwrap()
+        ));
+        assert!(!StunClient::is_public_address(
+            &"[fe80::1]:1234".parse().unwrap()
+        ));
+        assert!(!StunClient::is_public_address(
+            &"[fc00::1]:1234".parse().unwrap()
+        ));
+        assert!(!StunClient::is_public_address(
+            &"[ff02::1]:1234".parse().unwrap()
+        ));
     }
 
     #[test]
@@ -720,20 +761,24 @@ mod tests {
             let mut buf = [0u8; 1024];
             let (len, from) = socket_a.recv_from(&mut buf).await.unwrap();
             let tx_id = extract_tx_id(&buf[..len]);
-            socket_a.send_to(&build_test_response(tx_id, mapped, true), from).await.unwrap();
+            socket_a
+                .send_to(&build_test_response(tx_id, mapped, true), from)
+                .await
+                .unwrap();
         });
 
         tokio::spawn(async move {
             let mut buf = [0u8; 1024];
             let (len, from) = socket_b.recv_from(&mut buf).await.unwrap();
             let tx_id = extract_tx_id(&buf[..len]);
-            socket_b.send_to(&build_test_response(tx_id, mapped, true), from).await.unwrap();
+            socket_b
+                .send_to(&build_test_response(tx_id, mapped, true), from)
+                .await
+                .unwrap();
         });
 
-        let client = StunClient::with_servers(vec![
-            server_a.to_string(),
-            server_b.to_string(),
-        ]).with_timeout(Duration::from_secs(2));
+        let client = StunClient::with_servers(vec![server_a.to_string(), server_b.to_string()])
+            .with_timeout(Duration::from_secs(2));
 
         let (nat_type, pub_addr) = client.detect_nat_type().await.unwrap();
         assert_eq!(nat_type, NatType::Open);
@@ -758,20 +803,24 @@ mod tests {
             let mut buf = [0u8; 1024];
             let (len, from) = socket_a.recv_from(&mut buf).await.unwrap();
             let tx_id = extract_tx_id(&buf[..len]);
-            socket_a.send_to(&build_test_response(tx_id, mapped_a, true), from).await.unwrap();
+            socket_a
+                .send_to(&build_test_response(tx_id, mapped_a, true), from)
+                .await
+                .unwrap();
         });
 
         tokio::spawn(async move {
             let mut buf = [0u8; 1024];
             let (len, from) = socket_b.recv_from(&mut buf).await.unwrap();
             let tx_id = extract_tx_id(&buf[..len]);
-            socket_b.send_to(&build_test_response(tx_id, mapped_b, true), from).await.unwrap();
+            socket_b
+                .send_to(&build_test_response(tx_id, mapped_b, true), from)
+                .await
+                .unwrap();
         });
 
-        let client = StunClient::with_servers(vec![
-            server_a.to_string(),
-            server_b.to_string(),
-        ]).with_timeout(Duration::from_secs(2));
+        let client = StunClient::with_servers(vec![server_a.to_string(), server_b.to_string()])
+            .with_timeout(Duration::from_secs(2));
 
         let (nat_type, pub_addr) = client.detect_nat_type().await.unwrap();
         assert_eq!(nat_type, NatType::Symmetric);
@@ -797,11 +846,8 @@ mod tests {
             // Intentionally do not respond
         });
 
-        let client = StunClient::with_servers(vec![
-            server_a.to_string(),
-            server_b.to_string(),
-        ])
-        .with_timeout(Duration::from_millis(500));
+        let client = StunClient::with_servers(vec![server_a.to_string(), server_b.to_string()])
+            .with_timeout(Duration::from_millis(500));
 
         let (nat_type, pub_addr) = client.detect_nat_type().await.unwrap();
         assert_eq!(nat_type, NatType::Blocked);

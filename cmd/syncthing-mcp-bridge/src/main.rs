@@ -89,8 +89,7 @@ impl McpServer {
             });
         }
         // Notifications have no id or id is null — no response needed
-        let is_notification =
-            req.id.is_none() || req.id.as_ref().is_some_and(|v| v.is_null());
+        let is_notification = req.id.is_none() || req.id.as_ref().is_some_and(|v| v.is_null());
 
         let result = match req.method.as_str() {
             "initialize" => self.handle_initialize(req.params).await,
@@ -295,7 +294,8 @@ impl McpServer {
             "get_connections" => self.rest_get("/rest/system/connections").await,
             "trigger_scan" => {
                 if let Some(id) = arg_opt_str(&args, "folder_id") {
-                    self.rest_post(&format!("/rest/scan/{}", id), Value::Null).await
+                    self.rest_post(&format!("/rest/scan/{}", id), Value::Null)
+                        .await
                 } else {
                     self.rest_post("/rest/scan", Value::Null).await
                 }
@@ -379,11 +379,7 @@ impl McpServer {
     async fn rest_post(&self, path: &str, body: Value) -> Result<String, String> {
         let url = format!("{}{}", self.base_url, path);
         let req = self.client.post(&url);
-        let req = if body.is_null() {
-            req
-        } else {
-            req.json(&body)
-        };
+        let req = if body.is_null() { req } else { req.json(&body) };
         req.send()
             .await
             .map_err(|e| e.to_string())?
@@ -415,7 +411,9 @@ fn arg_str(args: &Value, key: &str) -> Result<String, JsonRpcError> {
 }
 
 fn arg_opt_str(args: &Value, key: &str) -> Option<String> {
-    args.get(key).and_then(|v| v.as_str()).map(|s| s.to_string())
+    args.get(key)
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string())
 }
 
 fn arg_opt_array_str(args: &Value, key: &str) -> Option<Vec<String>> {

@@ -1,16 +1,11 @@
-use axum::{
-    extract::State,
-    http::StatusCode,
-    response::IntoResponse,
-    Json,
-};
+use axum::{extract::State, http::StatusCode, response::IntoResponse, Json};
 use serde::{Deserialize, Serialize};
 use syncthing_core::types::Config;
 
-use super::ApiState;
-use super::{parse_device_id, parse_address};
-use super::folder::FolderResponse;
 use super::device::DeviceResponse;
+use super::folder::FolderResponse;
+use super::ApiState;
+use super::{parse_address, parse_device_id};
 
 /// Configuration response payload
 #[derive(Debug, Serialize)]
@@ -39,8 +34,16 @@ impl ConfigResponse {
     pub fn from_config(config: Config) -> Self {
         Self {
             version: config.version as u32,
-            folders: config.folders.into_iter().map(FolderResponse::from).collect(),
-            devices: config.devices.into_iter().map(DeviceResponse::from).collect(),
+            folders: config
+                .folders
+                .into_iter()
+                .map(FolderResponse::from)
+                .collect(),
+            devices: config
+                .devices
+                .into_iter()
+                .map(DeviceResponse::from)
+                .collect(),
         }
     }
 }
@@ -109,7 +112,11 @@ pub(crate) async fn update_config(
         } else {
             let device = syncthing_core::types::Device {
                 id: device_id,
-                name: if req_device.name.is_empty() { None } else { Some(req_device.name) },
+                name: if req_device.name.is_empty() {
+                    None
+                } else {
+                    Some(req_device.name)
+                },
                 addresses: req_device.addresses.iter().map(parse_address).collect(),
                 paused: false,
                 introducer: req_device.introducer,

@@ -52,12 +52,7 @@ pub fn draw_gauge(
 }
 
 /// 紧凑行内进度条（适合列表中的文件夹行）
-pub fn draw_line_gauge(
-    f: &mut Frame,
-    area: ratatui::layout::Rect,
-    theme: &Theme,
-    ratio: f64,
-) {
+pub fn draw_line_gauge(f: &mut Frame, area: ratatui::layout::Rect, theme: &Theme, ratio: f64) {
     let ratio = ratio.clamp(0.0, 1.0);
     let gauge = LineGauge::default()
         .filled_style(Style::default().fg(theme.primary))
@@ -89,12 +84,18 @@ pub fn folder_sync_line<'a>(
 
     if let Some(rate) = in_rate {
         spans.push(Span::raw(" ↓"));
-        spans.push(Span::styled(format_bytes(rate), Style::default().fg(theme.info)));
+        spans.push(Span::styled(
+            format_bytes(rate),
+            Style::default().fg(theme.info),
+        ));
         spans.push(Span::raw("/s"));
     }
     if let Some(rate) = out_rate {
         spans.push(Span::raw(" ↑"));
-        spans.push(Span::styled(format_bytes(rate), Style::default().fg(theme.info)));
+        spans.push(Span::styled(
+            format_bytes(rate),
+            Style::default().fg(theme.info),
+        ));
         spans.push(Span::raw("/s"));
     }
 

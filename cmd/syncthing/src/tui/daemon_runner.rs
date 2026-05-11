@@ -1,7 +1,7 @@
 use std::net::SocketAddr;
 use std::path::PathBuf;
-use std::sync::Arc;
 use std::sync::atomic::AtomicI32;
+use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::{Context, Result};
@@ -11,17 +11,22 @@ use tracing::{info, warn};
 
 use syncthing_core::types::Config;
 use syncthing_core::DeviceId;
-use syncthing_net::{BepSession, BepSessionEvent, ConnectionManager, ConnectionManagerConfig, ConnectionManagerHandle, SyncthingTlsConfig};
 use syncthing_net::protocol::MessageType;
-use syncthing_sync::{database::FileSystemDatabase, SyncService, SyncManager, events::SyncEvent};
+use syncthing_net::{
+    BepSession, BepSessionEvent, ConnectionManager, ConnectionManagerConfig,
+    ConnectionManagerHandle, SyncthingTlsConfig,
+};
+use syncthing_sync::{database::FileSystemDatabase, events::SyncEvent, SyncManager, SyncService};
 
-use crate::{ManagerBlockSource, load_config, save_config, CONFIG_FILE_NAME};
+use crate::{load_config, save_config, ManagerBlockSource, CONFIG_FILE_NAME};
 
-use syncthing_core::traits::ConfigStore;
 use syncthing_api::config::JsonConfigStore;
+use syncthing_core::traits::ConfigStore;
 
 use super::bep_handler::DaemonBepHandler;
-use super::discovery_tasks::{GlobalDiscoveryShutdown, init_and_spawn_global_discovery, spawn_local_discovery};
+use super::discovery_tasks::{
+    init_and_spawn_global_discovery, spawn_local_discovery, GlobalDiscoveryShutdown,
+};
 use super::nat_tasks::{spawn_port_mapper, spawn_stun};
 use super::relay_listener::spawn_relay_listeners;
 
@@ -57,11 +62,10 @@ pub async fn start_daemon(
 
     let config_path = config_dir.join(CONFIG_FILE_NAME);
     let mut config = if config_path.exists() {
-        load_config(&config_path)
-            .unwrap_or_else(|e| {
-                warn!("Failed to load config: {}. Using default.", e);
-                Config::new()
-            })
+        load_config(&config_path).unwrap_or_else(|e| {
+            warn!("Failed to load config: {}. Using default.", e);
+            Config::new()
+        })
     } else {
         Config::new()
     };
@@ -87,13 +91,25 @@ pub async fn start_daemon(
         use rand::Rng;
         let api_key: String = (0..32)
             .map(|_| rand::thread_rng().gen_range(0..36))
-            .map(|i| if i < 10 { (b'0' + i) as char } else { (b'a' + i - 10) as char })
+            .map(|i| {
+                if i < 10 {
+                    (b'0' + i) as char
+                } else {
+                    (b'a' + i - 10) as char
+                }
+            })
             .collect();
         config.gui.api_key = api_key.clone();
-        info!("Generated API key for REST API: {}... (masked)", &api_key[..4]);
+        info!(
+            "Generated API key for REST API: {}... (masked)",
+            &api_key[..4]
+        );
         config_modified = true;
     } else {
-        info!("REST API enabled at {} with existing API key", config.gui.address);
+        info!(
+            "REST API enabled at {} with existing API key",
+            config.gui.address
+        );
     }
 
     if config_modified {
@@ -105,7 +121,6 @@ pub async fn start_daemon(
     // Runtime overrides from CLI (Layer 3) — do not persist
     config.listen_addr = listen;
     config.device_name = device_name;
-
 
     let db_path = config_dir.join("db");
     let db = FileSystemDatabase::new(&db_path);
@@ -120,7 +135,9 @@ pub async fn start_daemon(
     };
 
     let tls_config_arc = Arc::new(tls_config);
-    let identity = Arc::new(syncthing_net::identity::TlsIdentity::new(Arc::clone(&tls_config_arc)));
+    let identity = Arc::new(syncthing_net::identity::TlsIdentity::new(Arc::clone(
+        &tls_config_arc,
+    )));
     let (manager, handle) =
         ConnectionManager::new(manager_config, identity, Arc::clone(&tls_config_arc));
 
@@ -139,8 +156,9 @@ pub async fn start_daemon(
 
     manager.set_transport_registry(Arc::new(transport_registry));
 
-    let pending_responses: Arc<DashMap<i32, tokio::sync::oneshot::Sender<bep_protocol::messages::Response>>> =
-        Arc::new(DashMap::new());
+    let pending_responses: Arc<
+        DashMap<i32, tokio::sync::oneshot::Sender<bep_protocol::messages::Response>>,
+    > = Arc::new(DashMap::new());
 
     let block_source = Arc::new(ManagerBlockSource {
         manager: handle.clone(),
@@ -169,40 +187,77 @@ pub async fn start_daemon(
         let shared_folders_map = Arc::clone(&device_shared_folders_clone);
         tokio::spawn(async move {
             if let Err(e) = sync_service.connect_device(device_id).await {
-                warn!("Failed to connect device {} to sync service: {}", device_id, e);
+                warn!(
+                    "Failed to connect device {} to sync service: {}",
+                    device_id, e
+                );
             }
             // Abort any existing session for this device before starting a new one
             if let Some((_, old_handle)) = sessions.remove(&device_id) {
                 old_handle.abort();
             }
             let handle2 = tokio::spawn(async move {
-                let (event_tx, mut event_rx) = tokio::sync::mpsc::unbounded_channel::<BepSessionEvent>();
+                let (event_tx, mut event_rx) =
+                    tokio::sync::mpsc::unbounded_channel::<BepSessionEvent>();
                 let event_device_id = device_id;
                 let shared_folders_map = Arc::clone(&shared_folders_map);
                 tokio::spawn(async move {
                     while let Some(event) = event_rx.recv().await {
                         match &event {
                             BepSessionEvent::ClusterConfigComplete { shared_folders, .. } => {
-                                info!("[{}] ClusterConfig complete, shared folders: {:?}", event_device_id, shared_folders);
+                                info!(
+                                    "[{}] ClusterConfig complete, shared folders: {:?}",
+                                    event_device_id, shared_folders
+                                );
                                 shared_folders_map.insert(event_device_id, shared_folders.clone());
                             }
-                            BepSessionEvent::IndexSent { folder, file_count, .. } => {
-                                info!("[{}] Index sent for {} ({} files)", event_device_id, folder, file_count);
+                            BepSessionEvent::IndexSent {
+                                folder, file_count, ..
+                            } => {
+                                info!(
+                                    "[{}] Index sent for {} ({} files)",
+                                    event_device_id, folder, file_count
+                                );
                             }
-                            BepSessionEvent::IndexReceived { folder, file_count, .. } => {
-                                info!("[{}] Index received for {} ({} files)", event_device_id, folder, file_count);
+                            BepSessionEvent::IndexReceived {
+                                folder, file_count, ..
+                            } => {
+                                info!(
+                                    "[{}] Index received for {} ({} files)",
+                                    event_device_id, folder, file_count
+                                );
                             }
-                            BepSessionEvent::IndexUpdateReceived { folder, file_count, .. } => {
-                                info!("[{}] IndexUpdate received for {} ({} files)", event_device_id, folder, file_count);
+                            BepSessionEvent::IndexUpdateReceived {
+                                folder, file_count, ..
+                            } => {
+                                info!(
+                                    "[{}] IndexUpdate received for {} ({} files)",
+                                    event_device_id, folder, file_count
+                                );
                             }
-                            BepSessionEvent::BlockRequested { folder, name, offset, size, .. } => {
-                                info!("[{}] Block requested: {}/{} offset={} size={}", event_device_id, folder, name, offset, size);
+                            BepSessionEvent::BlockRequested {
+                                folder,
+                                name,
+                                offset,
+                                size,
+                                ..
+                            } => {
+                                info!(
+                                    "[{}] Block requested: {}/{} offset={} size={}",
+                                    event_device_id, folder, name, offset, size
+                                );
                             }
                             BepSessionEvent::HeartbeatTimeout { last_recv_age, .. } => {
-                                warn!("[{}] Heartbeat timeout (idle {:?})", event_device_id, last_recv_age);
+                                warn!(
+                                    "[{}] Heartbeat timeout (idle {:?})",
+                                    event_device_id, last_recv_age
+                                );
                             }
                             BepSessionEvent::PeerSyncState { folder, .. } => {
-                                info!("[{}] Peer sync state changed for {}", event_device_id, folder);
+                                info!(
+                                    "[{}] Peer sync state changed for {}",
+                                    event_device_id, folder
+                                );
                             }
                             BepSessionEvent::SessionEnded { reason, .. } => {
                                 info!("[{}] Session ended: {}", event_device_id, reason);
@@ -211,14 +266,25 @@ pub async fn start_daemon(
                     }
                 });
 
-                let handler = DaemonBepHandler { sync_service: Arc::clone(&sync_service) };
+                let handler = DaemonBepHandler {
+                    sync_service: Arc::clone(&sync_service),
+                };
                 if let Some(conn) = handle.get_connection(&device_id) {
-                    let session = BepSession::with_events(Arc::new(syncthing_core::DeviceIdentity::new(device_id)), conn, Arc::new(handler), pending, event_tx);
+                    let session = BepSession::with_events(
+                        Arc::new(syncthing_core::DeviceIdentity::new(device_id)),
+                        conn,
+                        Arc::new(handler),
+                        pending,
+                        event_tx,
+                    );
                     if let Err(e) = session.run().await {
                         warn!("BEP session for {} ended: {}", device_id, e);
                     }
                 } else {
-                    warn!("No connection for device {} to start BEP session", device_id);
+                    warn!(
+                        "No connection for device {} to start BEP session",
+                        device_id
+                    );
                 }
                 let _ = handle.disconnect(&device_id, "bep session ended").await;
             });
@@ -234,7 +300,10 @@ pub async fn start_daemon(
         let sessions = Arc::clone(&session_handles_clone);
         tokio::spawn(async move {
             if let Err(e) = sync_service.disconnect_device(device_id).await {
-                warn!("Failed to disconnect device {} from sync service: {}", device_id, e);
+                warn!(
+                    "Failed to disconnect device {} from sync service: {}",
+                    device_id, e
+                );
             }
             if let Some((_, handle)) = sessions.remove(&device_id) {
                 handle.abort();
@@ -286,10 +355,21 @@ pub async fn start_daemon(
                                 continue;
                             }
                             if let Some(conn) = event_handle.get_connection(&device_id) {
-                                if let Err(e) = conn.send_message(MessageType::IndexUpdate, payload.clone()).await {
-                                    warn!("Failed to send IndexUpdate to {} for {}: {}", device_id, folder, e);
+                                if let Err(e) = conn
+                                    .send_message(MessageType::IndexUpdate, payload.clone())
+                                    .await
+                                {
+                                    warn!(
+                                        "Failed to send IndexUpdate to {} for {}: {}",
+                                        device_id, folder, e
+                                    );
                                 } else {
-                                    info!("Sent IndexUpdate for {} to {} ({} files)", folder, device_id, files.len());
+                                    info!(
+                                        "Sent IndexUpdate for {} to {} ({} files)",
+                                        folder,
+                                        device_id,
+                                        files.len()
+                                    );
                                 }
                             }
                         }
@@ -322,28 +402,54 @@ pub async fn start_daemon(
         handle.clone(),
         Arc::clone(&sync_service),
         device_id,
-    ).await;
+    )
+    .await;
 
     // PortMapper background task（含自动续约）
-    spawn_port_mapper(actual_addr, local_port, Arc::clone(&public_addrs), global_discovery.clone());
+    spawn_port_mapper(
+        actual_addr,
+        local_port,
+        Arc::clone(&public_addrs),
+        global_discovery.clone(),
+    );
 
     // STUN background task
-    spawn_stun(local_port, Arc::clone(&public_addrs), global_discovery.clone());
+    spawn_stun(
+        local_port,
+        Arc::clone(&public_addrs),
+        global_discovery.clone(),
+    );
 
     // ── Local Discovery (Phase 0: 恢复连接能力) ──
-    spawn_local_discovery(device_id, actual_addr, Arc::clone(&public_addrs), handle.clone(), Arc::clone(&sync_service)).await;
+    spawn_local_discovery(
+        device_id,
+        actual_addr,
+        Arc::clone(&public_addrs),
+        handle.clone(),
+        Arc::clone(&sync_service),
+    )
+    .await;
 
     // 获取 relay pool（若启用），并进行分层健康检查
     let relay_pool_urls: Vec<String> = if config.options.relays_enabled {
         match syncthing_net::relay::fetch_relay_pool(None).await {
             Ok(urls) => {
-                info!("Fetched {} relay(s) from pool, running staged health check...", urls.len());
+                info!(
+                    "Fetched {} relay(s) from pool, running staged health check...",
+                    urls.len()
+                );
                 // Stage 1: lightweight TCP connect (all relays)
                 let tcp_healthy = syncthing_net::relay::filter_healthy_relays(urls, 3).await;
                 info!("{} relay(s) passed TCP health check", tcp_healthy.len());
                 // Stage 2: deep TLS + JoinRelay on top 10, stop at 10 to increase overlap probability
                 let to_check = tcp_healthy.into_iter().take(10).collect();
-                let healthy = syncthing_net::relay::filter_healthy_relays_tls(to_check, 3, tls_config_arc.as_ref(), 10).await;
+                let healthy = syncthing_net::relay::filter_healthy_relays_tls(
+                    to_check,
+                    3,
+                    tls_config_arc.as_ref(),
+                    10,
+                )
+                .await;
                 info!("{} relay(s) passed TLS health check", healthy.len());
                 healthy
             }
@@ -361,14 +467,22 @@ pub async fn start_daemon(
     {
         let cfg = sync_service.get_config().await.unwrap_or_default();
         for d in cfg.devices.into_iter().filter(|d| d.id != device_id) {
-            let tcp_addrs: Vec<SocketAddr> = d.addresses.iter().filter_map(|a| match a {
-                syncthing_core::types::AddressType::Tcp(s) => s.parse().ok(),
-                _ => None,
-            }).collect();
-            let mut relay_addrs: Vec<String> = d.addresses.iter().filter_map(|a| match a {
-                syncthing_core::types::AddressType::Relay(s) => Some(s.clone()),
-                _ => None,
-            }).collect();
+            let tcp_addrs: Vec<SocketAddr> = d
+                .addresses
+                .iter()
+                .filter_map(|a| match a {
+                    syncthing_core::types::AddressType::Tcp(s) => s.parse().ok(),
+                    _ => None,
+                })
+                .collect();
+            let mut relay_addrs: Vec<String> = d
+                .addresses
+                .iter()
+                .filter_map(|a| match a {
+                    syncthing_core::types::AddressType::Relay(s) => Some(s.clone()),
+                    _ => None,
+                })
+                .collect();
             // 若设备未配置 relay 地址但 relay pool 可用，使用所有 healthy relay 作为候选
             if relay_addrs.is_empty() {
                 for url in &relay_pool_urls {
@@ -386,8 +500,16 @@ pub async fn start_daemon(
     tokio::spawn(async move {
         tokio::time::sleep(Duration::from_secs(2)).await;
         for (peer_id, addrs, relay_urls) in peers {
-            info!("Auto-dialing peer {} at {:?} with {} relay candidates", peer_id, addrs, relay_urls.len());
-            if let Err(e) = handle_clone.connect_to_with_relay(peer_id, addrs, relay_urls).await {
+            info!(
+                "Auto-dialing peer {} at {:?} with {} relay candidates",
+                peer_id,
+                addrs,
+                relay_urls.len()
+            );
+            if let Err(e) = handle_clone
+                .connect_to_with_relay(peer_id, addrs, relay_urls)
+                .await
+            {
                 warn!("Failed to auto-dial peer {}: {}", peer_id, e);
             }
         }
@@ -396,12 +518,15 @@ pub async fn start_daemon(
     // ── Relay 被动监听（永久 mode）──
     let config_relay_urls: Vec<String> = {
         let cfg = sync_service.get_config().await.unwrap_or_default();
-        cfg.devices.iter().filter_map(|d| {
-            d.addresses.iter().find_map(|a| match a {
-                syncthing_core::types::AddressType::Relay(url) => Some(url.clone()),
-                _ => None,
+        cfg.devices
+            .iter()
+            .filter_map(|d| {
+                d.addresses.iter().find_map(|a| match a {
+                    syncthing_core::types::AddressType::Relay(url) => Some(url.clone()),
+                    _ => None,
+                })
             })
-        }).collect()
+            .collect()
     };
     spawn_relay_listeners(
         relay_pool_urls,
@@ -416,21 +541,22 @@ pub async fn start_daemon(
 
     let connection_handle = handle.clone();
     let session_handles_clone = Arc::clone(&session_handles);
-    let future: std::pin::Pin<Box<dyn std::future::Future<Output = Result<()>> + Send>> = Box::pin(async move {
-        let mut interval = tokio::time::interval(Duration::from_secs(1));
-        loop {
-            interval.tick().await;
-            // Clean up finished session handles
-            let finished: Vec<DeviceId> = session_handles_clone
-                .iter()
-                .filter(|entry| entry.value().is_finished())
-                .map(|entry| *entry.key())
-                .collect();
-            for d in finished {
-                session_handles_clone.remove(&d);
+    let future: std::pin::Pin<Box<dyn std::future::Future<Output = Result<()>> + Send>> =
+        Box::pin(async move {
+            let mut interval = tokio::time::interval(Duration::from_secs(1));
+            loop {
+                interval.tick().await;
+                // Clean up finished session handles
+                let finished: Vec<DeviceId> = session_handles_clone
+                    .iter()
+                    .filter(|entry| entry.value().is_finished())
+                    .map(|entry| *entry.key())
+                    .collect();
+                for d in finished {
+                    session_handles_clone.remove(&d);
+                }
             }
-        }
-    });
+        });
 
     // 配置热同步：监听 config.json 变更并通知 sync_service
     let config_path_for_watch = config_path.clone();
@@ -442,7 +568,10 @@ pub async fn start_daemon(
                 while let Ok(()) = stream.next().await {
                     match store.load().await {
                         Ok(new_config) => {
-                            if let Err(e) = sync_service_for_watch.update_config(new_config.clone()).await {
+                            if let Err(e) = sync_service_for_watch
+                                .update_config(new_config.clone())
+                                .await
+                            {
                                 warn!("Failed to update sync service config from watch: {}", e);
                             } else {
                                 info!("Config hot-reloaded from {:?}", config_path_for_watch);

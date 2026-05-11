@@ -1,18 +1,20 @@
 //! Syncthing Core Library
-//! 
+//!
 //! 提供核心的错误类型、设备ID定义和基础工具
 
-pub mod error;
 pub mod device_id;
-pub mod types;
-pub mod traits;
-pub mod validation;
+pub mod error;
 pub mod identity;
 pub mod paths;
+pub mod traits;
+pub mod types;
+pub mod validation;
 
-pub use error::{SyncthingError, Result};
 pub use device_id::DeviceId;
+pub use error::{Result, SyncthingError};
+pub use identity::{DeviceIdentity, Identity};
+pub use traits::{AggregateConnectionStats, ConnectionInfo, ConnectionManager, FolderDatabase};
+pub use traits::{
+    BoxedPipe, PathQuality, ReliablePipe, Transport, TransportListener, TransportType,
+};
 pub use types::*;
-pub use identity::{Identity, DeviceIdentity};
-pub use traits::{Transport, TransportListener, TransportType, ReliablePipe, BoxedPipe, PathQuality};
-pub use traits::{ConnectionManager, AggregateConnectionStats, ConnectionInfo, FolderDatabase};

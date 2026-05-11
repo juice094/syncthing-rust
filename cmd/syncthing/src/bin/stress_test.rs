@@ -68,7 +68,12 @@ fn parse_duration(s: &str) -> anyhow::Result<Duration> {
 
 fn fmt_duration(d: Duration) -> String {
     let secs = d.as_secs();
-    format!("{:02}h{:02}m{:02}s", secs / 3600, (secs % 3600) / 60, secs % 60)
+    format!(
+        "{:02}h{:02}m{:02}s",
+        secs / 3600,
+        (secs % 3600) / 60,
+        secs % 60
+    )
 }
 
 fn fmt_system_time(t: SystemTime) -> String {
@@ -118,14 +123,19 @@ async fn main() -> anyhow::Result<()> {
         // Clean old data (fresh start)
         let _ = tokio::fs::remove_dir_all(&args.data_dir).await;
     } else {
-        info!("Resume mode: keeping existing data_dir {}", args.data_dir.display());
+        info!(
+            "Resume mode: keeping existing data_dir {}",
+            args.data_dir.display()
+        );
     }
 
     let node_a_dir = args.data_dir.join("node-a");
     let node_b_dir = args.data_dir.join("node-b");
 
-    let node_a: syncthing_test_utils::harness::TestNode = syncthing_test_utils::harness::TestNode::new_with_dir("a", node_a_dir.clone()).await?;
-    let node_b: syncthing_test_utils::harness::TestNode = syncthing_test_utils::harness::TestNode::new_with_dir("b", node_b_dir.clone()).await?;
+    let node_a: syncthing_test_utils::harness::TestNode =
+        syncthing_test_utils::harness::TestNode::new_with_dir("a", node_a_dir.clone()).await?;
+    let node_b: syncthing_test_utils::harness::TestNode =
+        syncthing_test_utils::harness::TestNode::new_with_dir("b", node_b_dir.clone()).await?;
 
     let folder_id = "stress-folder";
     let folder_path_a = node_a_dir.join("sync");
@@ -185,7 +195,10 @@ async fn main() -> anyhow::Result<()> {
 
     let monitor_task = tokio::spawn(async move {
         let tick_secs = if duration.as_secs() < 600 { 10 } else { 600 };
-        let mut ticker = interval_at(tokio::time::Instant::now() + Duration::from_secs(5), Duration::from_secs(tick_secs));
+        let mut ticker = interval_at(
+            tokio::time::Instant::now() + Duration::from_secs(5),
+            Duration::from_secs(tick_secs),
+        );
         // T-F1: memory sampling via spawn_blocking to avoid freezing tokio worker on Windows
         let sysinfo_task = move || {
             let mut sys = System::new_with_specifics(
@@ -225,14 +238,21 @@ async fn main() -> anyhow::Result<()> {
             let errors = monitor_errors.load(Ordering::Relaxed);
 
             // Memory sampling (T-F1) - spawn_blocking for Windows stability
-            let rss_mb = tokio::task::spawn_blocking(sysinfo_task.clone())
-                .await
-                .unwrap_or(0);
+            let rss_mb = tokio::task::spawn_blocking(sysinfo_task).await.unwrap_or(0);
 
             let ts = fmt_system_time(SystemTime::now());
             let line = format!(
                 "{},{},{},{},{},{},{},{},{},{}\n",
-                ts, elapsed, connected_ab, connected_ba, state_a, state_b, files_a, files_b, errors, rss_mb
+                ts,
+                elapsed,
+                connected_ab,
+                connected_ba,
+                state_a,
+                state_b,
+                files_a,
+                files_b,
+                errors,
+                rss_mb
             );
 
             if let Err(e) = append_to_file(&monitor_report, line).await {
@@ -303,7 +323,10 @@ async fn main() -> anyhow::Result<()> {
         loop {
             ticker.tick().await;
             info!("Fault injection: disconnecting");
-            if let Err(e) = fault_handle.disconnect(&fault_peer, "stress fault injection").await {
+            if let Err(e) = fault_handle
+                .disconnect(&fault_peer, "stress fault injection")
+                .await
+            {
                 warn!("Fault disconnect failed: {}", e);
                 fault_errors.fetch_add(1, Ordering::Relaxed);
             }
@@ -326,7 +349,10 @@ async fn main() -> anyhow::Result<()> {
         }
     }
 
-    info!("Stress test stopping after {}", fmt_duration(start.elapsed()));
+    info!(
+        "Stress test stopping after {}",
+        fmt_duration(start.elapsed())
+    );
     monitor_task.abort();
     inject_task.abort();
     fault_task.abort();
@@ -360,7 +386,12 @@ async fn count_files(path: &PathBuf) -> usize {
         return 0;
     };
     while let Ok(Some(entry)) = entries.next_entry().await {
-        if entry.file_type().await.map(|t| t.is_file()).unwrap_or(false) {
+        if entry
+            .file_type()
+            .await
+            .map(|t| t.is_file())
+            .unwrap_or(false)
+        {
             count += 1;
         }
     }

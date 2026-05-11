@@ -47,7 +47,11 @@ pub fn draw(f: &mut Frame, app: &App, theme: &Theme) {
         let text = format!(
             "{}: {}",
             label,
-            app.device_form.fields.get(*field_idx).map(|s| s.as_str()).unwrap_or("")
+            app.device_form
+                .fields
+                .get(*field_idx)
+                .map(|s| s.as_str())
+                .unwrap_or("")
         );
         let is_focused = app.device_form.focus == *field_idx;
         let style = if is_focused {
@@ -57,13 +61,15 @@ pub fn draw(f: &mut Frame, app: &App, theme: &Theme) {
         } else {
             Style::default().fg(theme.text_secondary)
         };
-        let para = Paragraph::new(text)
-            .style(style)
-            .block(
-                Block::default()
-                    .borders(Borders::ALL)
-                    .border_style(if is_focused { theme.border_focused } else { theme.border }),
-            );
+        let para = Paragraph::new(text).style(style).block(
+            Block::default()
+                .borders(Borders::ALL)
+                .border_style(if is_focused {
+                    theme.border_focused
+                } else {
+                    theme.border
+                }),
+        );
         f.render_widget(para, chunks[i]);
 
         // Hint text below field

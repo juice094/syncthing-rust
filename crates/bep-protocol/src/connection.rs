@@ -6,14 +6,15 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-
 use parking_lot::RwLock;
 use tokio::io::AsyncWriteExt;
 use tokio::net::TcpStream;
 use tokio::sync::Mutex;
 use tracing::{debug, info};
 
-use syncthing_core::{ConnectionState, ConnectionStats, ConnectionType, DeviceId, Result, SyncthingError};
+use syncthing_core::{
+    ConnectionState, ConnectionStats, ConnectionType, DeviceId, Result, SyncthingError,
+};
 
 use crate::handshake::{exchange_hello, exchange_hello_server};
 use crate::messages::Hello;
@@ -138,12 +139,7 @@ impl BepRawConnection {
     }
 
     /// 创建新的Hello消息
-    fn create_hello(
-        &self,
-        device_name: &str,
-        client_name: &str,
-        client_version: &str,
-    ) -> Hello {
+    fn create_hello(&self, device_name: &str, client_name: &str, client_version: &str) -> Hello {
         Hello {
             device_name: device_name.to_string(),
             client_name: client_name.to_string(),

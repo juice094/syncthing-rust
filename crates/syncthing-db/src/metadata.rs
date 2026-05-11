@@ -121,8 +121,13 @@ fn make_folder_prefix(folder: &FolderId) -> Vec<u8> {
 /// Key for device index
 /// Format: device/<device_id>/folder/<folder_id>/file/<file_name>
 fn make_device_file_key(device_id: &str, folder: &FolderId, name: &str) -> Vec<u8> {
-    format!("device/{}/folder/{}/file/{}", device_id, folder.as_str(), name)
-        .into_bytes()
+    format!(
+        "device/{}/folder/{}/file/{}",
+        device_id,
+        folder.as_str(),
+        name
+    )
+    .into_bytes()
 }
 
 /// Key for block index
@@ -139,7 +144,9 @@ impl MetadataStore {
     /// # Arguments
     /// * `store` - The underlying sled store
     pub fn new(store: SledStore) -> Self {
-        Self { inner: StoreInner::Db(store) }
+        Self {
+            inner: StoreInner::Db(store),
+        }
     }
 
     /// Create a metadata store from an existing sled tree
@@ -147,7 +154,9 @@ impl MetadataStore {
     /// # Arguments
     /// * `tree` - The sled tree to use
     pub fn from_tree(tree: SledTree) -> Self {
-        Self { inner: StoreInner::Tree(tree) }
+        Self {
+            inner: StoreInner::Tree(tree),
+        }
     }
 
     /// Store file info
@@ -157,13 +166,12 @@ impl MetadataStore {
     /// * `info` - The file info to store
     pub async fn put_file(&self, folder: &FolderId, info: &FileInfo) -> Result<()> {
         let key = make_file_key(folder, &info.name);
-        let value = serde_json::to_vec(info).map_err(|e| {
-            SyncthingError::Storage(format!("Failed to serialize FileInfo: {}", e))
-        })?;
+        let value = serde_json::to_vec(info)
+            .map_err(|e| SyncthingError::Storage(format!("Failed to serialize FileInfo: {}", e)))?;
 
-        self.inner.put(&key, &value).map_err(|e| {
-            SyncthingError::Storage(format!("Failed to store file info: {}", e))
-        })?;
+        self.inner
+            .put(&key, &value)
+            .map_err(|e| SyncthingError::Storage(format!("Failed to store file info: {}", e)))?;
 
         // Update folder stats
         self.update_folder_stats(folder).await?;
@@ -181,9 +189,10 @@ impl MetadataStore {
     /// `Ok(Some(FileInfo))` if found, `Ok(None)` if not
     pub async fn get_file(&self, folder: &FolderId, name: &str) -> Result<Option<FileInfo>> {
         let key = make_file_key(folder, name);
-        let value = self.inner.get(&key).map_err(|e| {
-            SyncthingError::Storage(format!("Failed to get file info: {}", e))
-        })?;
+        let value = self
+            .inner
+            .get(&key)
+            .map_err(|e| SyncthingError::Storage(format!("Failed to get file info: {}", e)))?;
 
         match value {
             Some(bytes) => {
@@ -205,9 +214,10 @@ impl MetadataStore {
     /// Vector of all FileInfo in the folder
     pub async fn get_folder_index(&self, folder: &FolderId) -> Result<Vec<FileInfo>> {
         let prefix = make_folder_prefix(folder);
-        let results = self.inner.scan_prefix(&prefix).map_err(|e| {
-            SyncthingError::Storage(format!("Failed to scan folder index: {}", e))
-        })?;
+        let results = self
+            .inner
+            .scan_prefix(&prefix)
+            .map_err(|e| SyncthingError::Storage(format!("Failed to scan folder index: {}", e)))?;
 
         let mut files = Vec::new();
         for (_, value) in results {
@@ -237,10 +247,8 @@ impl MetadataStore {
             SyncthingError::Storage(format!("Failed to scan existing index: {}", e))
         })?;
 
-        let mut batch: Vec<(Vec<u8>, Option<Vec<u8>>)> = existing
-            .into_iter()
-            .map(|(key, _)| (key, None))
-            .collect();
+        let mut batch: Vec<(Vec<u8>, Option<Vec<u8>>)> =
+            existing.into_iter().map(|(key, _)| (key, None)).collect();
 
         // Add all new entries
         for file in files {
@@ -251,9 +259,9 @@ impl MetadataStore {
             batch.push((key, Some(value)));
         }
 
-        self.inner.apply_batch(batch).map_err(|e| {
-            SyncthingError::Storage(format!("Failed to update index: {}", e))
-        })?;
+        self.inner
+            .apply_batch(batch)
+            .map_err(|e| SyncthingError::Storage(format!("Failed to update index: {}", e)))?;
 
         // Update folder stats
         self.update_folder_stats(folder).await?;
@@ -268,11 +276,7 @@ impl MetadataStore {
     /// # Arguments
     /// * `folder` - The folder ID
     /// * `files` - Files to update (or delete if marked as deleted)
-    pub async fn update_index_delta(
-        &self,
-        folder: &FolderId,
-        files: Vec<FileInfo>,
-    ) -> Result<()> {
+    pub async fn update_index_delta(&self, folder: &FolderId, files: Vec<FileInfo>) -> Result<()> {
         let mut batch: Vec<(Vec<u8>, Option<Vec<u8>>)> = Vec::new();
 
         for file in files {
@@ -286,9 +290,9 @@ impl MetadataStore {
             batch.push((key, Some(value)));
         }
 
-        self.inner.apply_batch(batch).map_err(|e| {
-            SyncthingError::Storage(format!("Failed to apply index delta: {}", e))
-        })?;
+        self.inner
+            .apply_batch(batch)
+            .map_err(|e| SyncthingError::Storage(format!("Failed to apply index delta: {}", e)))?;
 
         // Update folder stats
         self.update_folder_stats(folder).await?;
@@ -303,9 +307,9 @@ impl MetadataStore {
     /// * `name` - The file name
     pub async fn delete_file(&self, folder: &FolderId, name: &str) -> Result<()> {
         let key = make_file_key(folder, name);
-        self.inner.delete(&key).map_err(|e| {
-            SyncthingError::Storage(format!("Failed to delete file: {}", e))
-        })?;
+        self.inner
+            .delete(&key)
+            .map_err(|e| SyncthingError::Storage(format!("Failed to delete file: {}", e)))?;
 
         // Update folder stats
         self.update_folder_stats(folder).await?;
@@ -319,9 +323,10 @@ impl MetadataStore {
     /// * `folder` - The folder ID
     pub async fn get_folder_stats(&self, folder: &FolderId) -> Result<FolderStats> {
         let key = make_folder_stats_key(folder);
-        let value = self.inner.get(&key).map_err(|e| {
-            SyncthingError::Storage(format!("Failed to get folder stats: {}", e))
-        })?;
+        let value = self
+            .inner
+            .get(&key)
+            .map_err(|e| SyncthingError::Storage(format!("Failed to get folder stats: {}", e)))?;
 
         match value {
             Some(bytes) => {
@@ -346,7 +351,8 @@ impl MetadataStore {
                 stats.file_count += 1;
                 stats.total_bytes += file.size as u64;
                 for block in &file.blocks {
-                    let hash_bytes: [u8; 32] = block.hash.as_slice().try_into().unwrap_or([0u8; 32]);
+                    let hash_bytes: [u8; 32] =
+                        block.hash.as_slice().try_into().unwrap_or([0u8; 32]);
                     unique_blocks.insert(BlockHash::from_bytes(hash_bytes), ());
                 }
             }
@@ -355,13 +361,12 @@ impl MetadataStore {
         stats.block_count = unique_blocks.len() as u64;
 
         let key = make_folder_stats_key(folder);
-        let value = serde_json::to_vec(&stats).map_err(|e| {
-            SyncthingError::Storage(format!("Failed to serialize stats: {}", e))
-        })?;
+        let value = serde_json::to_vec(&stats)
+            .map_err(|e| SyncthingError::Storage(format!("Failed to serialize stats: {}", e)))?;
 
-        self.inner.put(&key, &value).map_err(|e| {
-            SyncthingError::Storage(format!("Failed to store folder stats: {}", e))
-        })?;
+        self.inner
+            .put(&key, &value)
+            .map_err(|e| SyncthingError::Storage(format!("Failed to store folder stats: {}", e)))?;
 
         Ok(())
     }
@@ -369,25 +374,26 @@ impl MetadataStore {
     /// Check if a file exists in the index
     pub async fn file_exists(&self, folder: &FolderId, name: &str) -> Result<bool> {
         let key = make_file_key(folder, name);
-        self.inner.contains(&key).map_err(|e| {
-            SyncthingError::Storage(format!("Failed to check file existence: {}", e))
-        })
+        self.inner
+            .contains(&key)
+            .map_err(|e| SyncthingError::Storage(format!("Failed to check file existence: {}", e)))
     }
 
     /// Get the number of files in a folder
     pub async fn file_count(&self, folder: &FolderId) -> Result<usize> {
         let prefix = make_folder_prefix(folder);
-        let results = self.inner.scan_prefix(&prefix).map_err(|e| {
-            SyncthingError::Storage(format!("Failed to count files: {}", e))
-        })?;
+        let results = self
+            .inner
+            .scan_prefix(&prefix)
+            .map_err(|e| SyncthingError::Storage(format!("Failed to count files: {}", e)))?;
         Ok(results.len())
     }
 
     /// Flush all pending changes to disk
     pub async fn flush(&self) -> Result<()> {
-        self.inner.flush().map_err(|e| {
-            SyncthingError::Storage(format!("Failed to flush metadata store: {}", e))
-        })
+        self.inner
+            .flush()
+            .map_err(|e| SyncthingError::Storage(format!("Failed to flush metadata store: {}", e)))
     }
 
     /// Store file info for a specific device
@@ -403,9 +409,8 @@ impl MetadataStore {
         info: &FileInfo,
     ) -> Result<()> {
         let key = make_device_file_key(device_id, folder, &info.name);
-        let value = serde_json::to_vec(info).map_err(|e| {
-            SyncthingError::Storage(format!("Failed to serialize FileInfo: {}", e))
-        })?;
+        let value = serde_json::to_vec(info)
+            .map_err(|e| SyncthingError::Storage(format!("Failed to serialize FileInfo: {}", e)))?;
 
         self.inner.put(&key, &value).map_err(|e| {
             SyncthingError::Storage(format!("Failed to store device file info: {}", e))
@@ -449,9 +454,10 @@ impl MetadataStore {
         folder: &FolderId,
     ) -> Result<Vec<FileInfo>> {
         let prefix = format!("device/{}/folder/{}/", device_id, folder.as_str());
-        let results = self.inner.scan_prefix(prefix.as_bytes()).map_err(|e| {
-            SyncthingError::Storage(format!("Failed to scan device files: {}", e))
-        })?;
+        let results = self
+            .inner
+            .scan_prefix(prefix.as_bytes())
+            .map_err(|e| SyncthingError::Storage(format!("Failed to scan device files: {}", e)))?;
 
         let mut files = Vec::new();
         for (_, value) in results {
@@ -469,7 +475,7 @@ impl MetadataStore {
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+
     use tempfile::TempDir;
 
     fn create_test_file_info(name: &str, size: u64) -> FileInfo {
@@ -518,9 +524,18 @@ mod tests {
         let folder = FolderId::new("test-folder");
 
         // Add multiple files
-        store.put_file(&folder, &create_test_file_info("file1.txt", 100)).await.unwrap();
-        store.put_file(&folder, &create_test_file_info("file2.txt", 200)).await.unwrap();
-        store.put_file(&folder, &create_test_file_info("file3.txt", 300)).await.unwrap();
+        store
+            .put_file(&folder, &create_test_file_info("file1.txt", 100))
+            .await
+            .unwrap();
+        store
+            .put_file(&folder, &create_test_file_info("file2.txt", 200))
+            .await
+            .unwrap();
+        store
+            .put_file(&folder, &create_test_file_info("file3.txt", 300))
+            .await
+            .unwrap();
 
         // Get folder index
         let index = store.get_folder_index(&folder).await.unwrap();
@@ -540,8 +555,14 @@ mod tests {
         let folder = FolderId::new("test-folder");
 
         // Add initial files
-        store.put_file(&folder, &create_test_file_info("file1.txt", 100)).await.unwrap();
-        store.put_file(&folder, &create_test_file_info("file2.txt", 200)).await.unwrap();
+        store
+            .put_file(&folder, &create_test_file_info("file1.txt", 100))
+            .await
+            .unwrap();
+        store
+            .put_file(&folder, &create_test_file_info("file2.txt", 200))
+            .await
+            .unwrap();
 
         // Replace with new index
         let new_index = vec![
@@ -556,8 +577,16 @@ mod tests {
         assert_eq!(index.len(), 3);
 
         // Old files should be gone
-        assert!(store.get_file(&folder, "file1.txt").await.unwrap().is_none());
-        assert!(store.get_file(&folder, "file2.txt").await.unwrap().is_none());
+        assert!(store
+            .get_file(&folder, "file1.txt")
+            .await
+            .unwrap()
+            .is_none());
+        assert!(store
+            .get_file(&folder, "file2.txt")
+            .await
+            .unwrap()
+            .is_none());
 
         // New files should exist
         assert!(store.get_file(&folder, "new1.txt").await.unwrap().is_some());
@@ -574,13 +603,19 @@ mod tests {
         let folder = FolderId::new("test-folder");
 
         // Add initial files
-        store.put_file(&folder, &create_test_file_info("file1.txt", 100)).await.unwrap();
-        store.put_file(&folder, &create_test_file_info("file2.txt", 200)).await.unwrap();
+        store
+            .put_file(&folder, &create_test_file_info("file1.txt", 100))
+            .await
+            .unwrap();
+        store
+            .put_file(&folder, &create_test_file_info("file2.txt", 200))
+            .await
+            .unwrap();
 
         // Update with delta
         let delta = vec![
-            create_test_file_info("file2.txt", 250),  // Update
-            create_test_file_info("file3.txt", 300),  // Add
+            create_test_file_info("file2.txt", 250), // Update
+            create_test_file_info("file3.txt", 300), // Add
         ];
 
         store.update_index_delta(&folder, delta).await.unwrap();
@@ -589,14 +624,22 @@ mod tests {
         assert_eq!(index.len(), 3);
 
         // file1.txt should still exist
-        assert!(store.get_file(&folder, "file1.txt").await.unwrap().is_some());
+        assert!(store
+            .get_file(&folder, "file1.txt")
+            .await
+            .unwrap()
+            .is_some());
 
         // file2.txt should be updated
         let file2 = store.get_file(&folder, "file2.txt").await.unwrap().unwrap();
         assert_eq!(file2.size, 250);
 
         // file3.txt should be added
-        assert!(store.get_file(&folder, "file3.txt").await.unwrap().is_some());
+        assert!(store
+            .get_file(&folder, "file3.txt")
+            .await
+            .unwrap()
+            .is_some());
     }
 
     #[tokio::test]
@@ -636,8 +679,14 @@ mod tests {
         assert_eq!(stats.total_bytes, 0);
 
         // Add files
-        store.put_file(&folder, &create_test_file_info("file1.txt", 100)).await.unwrap();
-        store.put_file(&folder, &create_test_file_info("file2.txt", 200)).await.unwrap();
+        store
+            .put_file(&folder, &create_test_file_info("file1.txt", 100))
+            .await
+            .unwrap();
+        store
+            .put_file(&folder, &create_test_file_info("file2.txt", 200))
+            .await
+            .unwrap();
 
         // Stats should be updated
         let stats = store.get_folder_stats(&folder).await.unwrap();
@@ -654,8 +703,14 @@ mod tests {
         let folder1 = FolderId::new("folder1");
         let folder2 = FolderId::new("folder2");
 
-        store.put_file(&folder1, &create_test_file_info("file.txt", 100)).await.unwrap();
-        store.put_file(&folder2, &create_test_file_info("file.txt", 200)).await.unwrap();
+        store
+            .put_file(&folder1, &create_test_file_info("file.txt", 100))
+            .await
+            .unwrap();
+        store
+            .put_file(&folder2, &create_test_file_info("file.txt", 200))
+            .await
+            .unwrap();
 
         // Files should be isolated by folder
         let file1 = store.get_file(&folder1, "file.txt").await.unwrap().unwrap();
@@ -676,15 +731,24 @@ mod tests {
 
         // Store file for device
         let info = create_test_file_info("device_file.txt", 500);
-        store.put_device_file(device_id, &folder, &info).await.unwrap();
+        store
+            .put_device_file(device_id, &folder, &info)
+            .await
+            .unwrap();
 
         // Retrieve file for device
-        let retrieved = store.get_device_file(device_id, &folder, "device_file.txt").await.unwrap();
+        let retrieved = store
+            .get_device_file(device_id, &folder, "device_file.txt")
+            .await
+            .unwrap();
         assert!(retrieved.is_some());
         assert_eq!(retrieved.unwrap().size, 500);
 
         // Different device should not see the file
-        let other = store.get_device_file("OTHER", &folder, "device_file.txt").await.unwrap();
+        let other = store
+            .get_device_file("OTHER", &folder, "device_file.txt")
+            .await
+            .unwrap();
         assert!(other.is_none());
     }
 }

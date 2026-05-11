@@ -47,14 +47,17 @@ impl ConnectionManager {
         let (cancel_tx, cancel_rx) = oneshot::channel();
         {
             let mut pending = self.pending_connections.write().await;
-            pending.insert(device_id, super::PendingConnection {
+            pending.insert(
                 device_id,
-                addresses: addresses.clone(),
-                relay_urls: relay_urls.clone(),
-                retry_count,
-                last_attempt: Some(std::time::Instant::now()),
-                _cancel_tx: Some(cancel_tx),
-            });
+                super::PendingConnection {
+                    device_id,
+                    addresses: addresses.clone(),
+                    relay_urls: relay_urls.clone(),
+                    retry_count,
+                    last_attempt: Some(std::time::Instant::now()),
+                    _cancel_tx: Some(cancel_tx),
+                },
+            );
         }
 
         // 启动连接任务
@@ -62,7 +65,7 @@ impl ConnectionManager {
 
         Ok(())
     }
-    
+
     /// 启动连接任务
     fn spawn_connect_task(
         &self,

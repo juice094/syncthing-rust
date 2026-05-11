@@ -6,7 +6,7 @@ use crate::database::LocalDatabase;
 use crate::error::Result;
 use std::collections::HashMap;
 use std::sync::Arc;
-use syncthing_core::types::{FileInfo, IndexID, IndexDelta};
+use syncthing_core::types::{FileInfo, IndexDelta, IndexID};
 use syncthing_core::DeviceId;
 use tracing::{debug, info, warn};
 
@@ -64,7 +64,12 @@ impl IndexManager {
     }
 
     /// 注册远程设备的索引状态
-    pub fn register_remote_index(&mut self, device: DeviceId, index_id: IndexID, max_sequence: u64) {
+    pub fn register_remote_index(
+        &mut self,
+        device: DeviceId,
+        index_id: IndexID,
+        max_sequence: u64,
+    ) {
         self.remote_index_ids.insert(device, index_id);
         self.remote_max_sequences.insert(device, max_sequence);
     }
@@ -89,7 +94,11 @@ impl IndexManager {
         let remote_sequence = self.remote_max_sequences.get(device).copied().unwrap_or(0);
 
         // 从数据库获取序列号大于 remote_sequence 的文件
-        let files = match self.db.get_needed_files(&self.folder, remote_sequence).await {
+        let files = match self
+            .db
+            .get_needed_files(&self.folder, remote_sequence)
+            .await
+        {
             Ok(files) => files,
             Err(e) => {
                 warn!(
@@ -160,9 +169,7 @@ impl IndexManager {
         }
 
         // 持久化文件和元数据
-        self.db
-            .update_files(&self.folder, files.to_vec())
-            .await?;
+        self.db.update_files(&self.folder, files.to_vec()).await?;
         self.db
             .update_folder_index_meta(&self.folder, index_id, self.local_max_sequence)
             .await?;
@@ -197,9 +204,7 @@ impl IndexManager {
         }
 
         // 持久化文件和元数据
-        self.db
-            .update_files(&self.folder, files.to_vec())
-            .await?;
+        self.db.update_files(&self.folder, files.to_vec()).await?;
         self.db
             .update_folder_index_meta(&self.folder, index_id, self.local_max_sequence)
             .await?;

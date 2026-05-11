@@ -11,8 +11,7 @@ pub fn spawn_port_mapper(
     global_discovery: Option<Arc<syncthing_net::GlobalDiscovery>>,
 ) {
     tokio::spawn(async move {
-        let mut port_mapper = syncthing_net::PortMapper::new()
-            .with_local_addr(actual_addr);
+        let mut port_mapper = syncthing_net::PortMapper::new().with_local_addr(actual_addr);
         match port_mapper.allocate_port(local_port).await {
             Ok(mut mapping) => {
                 let mut current_ext = mapping.external_addr();
@@ -64,7 +63,10 @@ pub fn spawn_port_mapper(
                 }
             }
             Err(e) => {
-                warn!("PortMapper failed (expected if router has no UPnP/NAT-PMP): {}", e);
+                warn!(
+                    "PortMapper failed (expected if router has no UPnP/NAT-PMP): {}",
+                    e
+                );
             }
         }
     });
@@ -76,8 +78,7 @@ pub fn spawn_stun(
     global_discovery: Option<Arc<syncthing_net::GlobalDiscovery>>,
 ) {
     tokio::spawn(async move {
-        let stun = syncthing_net::StunClient::new()
-            .with_local_port(local_port);
+        let stun = syncthing_net::StunClient::new().with_local_port(local_port);
         match stun.get_public_address().await {
             Ok(pub_addr) => {
                 let pub_url = format!("tcp://{}", pub_addr);
@@ -88,7 +89,10 @@ pub fn spawn_stun(
                 }
             }
             Err(e) => {
-                warn!("STUN detection failed (expected behind symmetric NAT/firewall): {}", e);
+                warn!(
+                    "STUN detection failed (expected behind symmetric NAT/firewall): {}",
+                    e
+                );
             }
         }
     });

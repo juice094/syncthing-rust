@@ -17,10 +17,10 @@ use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
 use tokio::net::TcpStream;
 use tracing::{debug, info};
 
+use syncthing_core::traits::ReliablePipe;
 use syncthing_core::{
     BoxedPipe, Result, SyncthingError, Transport, TransportListener, TransportType,
 };
-use syncthing_core::traits::ReliablePipe;
 
 /// 代理配置
 #[derive(Debug, Clone)]
@@ -61,8 +61,7 @@ impl ProxyConfig {
             }
         }
 
-        let http = std::env::var("HTTP_PROXY")
-            .or_else(|_| std::env::var("http_proxy"));
+        let http = std::env::var("HTTP_PROXY").or_else(|_| std::env::var("http_proxy"));
 
         if let Ok(url) = http {
             if let Some(cfg) = Self::parse_http_url(&url) {
@@ -124,17 +123,20 @@ impl Transport for ProxiedTransport {
 
     async fn bind(&self, _addr: SocketAddr) -> Result<Box<dyn TransportListener>> {
         Err(SyncthingError::config(
-            "ProxiedTransport does not support inbound listening"
+            "ProxiedTransport does not support inbound listening",
         ))
     }
 
     async fn dial(&self, target: SocketAddr) -> Result<BoxedPipe> {
-        info!("Dialing {} via {:?} proxy at {}", target, self.config.proxy_type, self.config.addr);
+        info!(
+            "Dialing {} via {:?} proxy at {}",
+            target, self.config.proxy_type, self.config.addr
+        );
 
         // 1. 连接到代理服务器
-        let proxy_stream = TcpStream::connect(self.config.addr).await.map_err(|e| {
-            SyncthingError::connection(format!("proxy connect failed: {}", e))
-        })?;
+        let proxy_stream = TcpStream::connect(self.config.addr)
+            .await
+            .map_err(|e| SyncthingError::connection(format!("proxy connect failed: {}", e)))?;
 
         // 2. 根据代理类型建立隧道
         match self.config.proxy_type {
@@ -159,22 +161,18 @@ impl Transport for ProxiedTransport {
 }
 
 /// HTTP CONNECT 握手
-async fn http_connect_handshake(
-    mut stream: TcpStream,
-    target: SocketAddr,
-) -> Result<TcpStream> {
-    let request = format!(
-        "CONNECT {} HTTP/1.1\r\nHost: {}\r\n\r\n",
-        target, target
-    );
+async fn http_connect_handshake(mut stream: TcpStream, target: SocketAddr) -> Result<TcpStream> {
+    let request = format!("CONNECT {} HTTP/1.1\r\nHost: {}\r\n\r\n", target, target);
 
     debug!("Sending HTTP CONNECT request for {}", target);
-    tokio::io::AsyncWriteExt::write_all(&mut stream, request.as_bytes()).await
+    tokio::io::AsyncWriteExt::write_all(&mut stream, request.as_bytes())
+        .await
         .map_err(|e| SyncthingError::connection(format!("proxy write failed: {}", e)))?;
 
     // 读取响应（简单解析，期待 200）
     let mut buf = vec![0u8; 1024];
-    let n = tokio::io::AsyncReadExt::read(&mut stream, &mut buf).await
+    let n = tokio::io::AsyncReadExt::read(&mut stream, &mut buf)
+        .await
         .map_err(|e| SyncthingError::connection(format!("proxy read failed: {}", e)))?;
 
     let response = String::from_utf8_lossy(&buf[..n]);
@@ -194,17 +192,16 @@ async fn http_connect_handshake(
 /// SOCKS5 握手（RFC 1928）
 ///
 /// 仅实现无认证（0x00）方式，不支持用户名/密码或 GSSAPI。
-async fn socks5_handshake(
-    mut stream: TcpStream,
-    target: SocketAddr,
-) -> Result<TcpStream> {
+async fn socks5_handshake(mut stream: TcpStream, target: SocketAddr) -> Result<TcpStream> {
     // 1. 认证协商：VER=5, NMETHODS=1, METHOD=0x00 (no auth)
     let auth_request = [0x05u8, 0x01, 0x00];
-    tokio::io::AsyncWriteExt::write_all(&mut stream, &auth_request).await
+    tokio::io::AsyncWriteExt::write_all(&mut stream, &auth_request)
+        .await
         .map_err(|e| SyncthingError::connection(format!("socks5 auth write failed: {}", e)))?;
 
     let mut auth_response = [0u8; 2];
-    tokio::io::AsyncReadExt::read_exact(&mut stream, &mut auth_response).await
+    tokio::io::AsyncReadExt::read_exact(&mut stream, &mut auth_response)
+        .await
         .map_err(|e| SyncthingError::connection(format!("socks5 auth read failed: {}", e)))?;
 
     if auth_response[0] != 0x05 {
@@ -236,16 +233,20 @@ async fn socks5_handshake(
         }
     }
 
-    tokio::io::AsyncWriteExt::write_all(&mut stream, &request).await
+    tokio::io::AsyncWriteExt::write_all(&mut stream, &request)
+        .await
         .map_err(|e| SyncthingError::connection(format!("socks5 connect write failed: {}", e)))?;
 
     // 3. 读取响应头（4 bytes: VER, REP, RSV, ATYP）
     let mut response_header = [0u8; 4];
-    tokio::io::AsyncReadExt::read_exact(&mut stream, &mut response_header).await
+    tokio::io::AsyncReadExt::read_exact(&mut stream, &mut response_header)
+        .await
         .map_err(|e| SyncthingError::connection(format!("socks5 response read failed: {}", e)))?;
 
     if response_header[0] != 0x05 {
-        return Err(SyncthingError::connection("socks5 wrong version in response"));
+        return Err(SyncthingError::connection(
+            "socks5 wrong version in response",
+        ));
     }
     if response_header[1] != 0x00 {
         return Err(SyncthingError::connection(format!(
@@ -259,35 +260,35 @@ async fn socks5_handshake(
         0x01 => {
             // IPv4: 4 bytes addr + 2 bytes port
             let mut buf = [0u8; 6];
-            tokio::io::AsyncReadExt::read_exact(&mut stream, &mut buf).await
-                .map_err(|e| SyncthingError::connection(format!(
-                    "socks5 bind addr read failed: {}",
-                    e
-                )))?;
+            tokio::io::AsyncReadExt::read_exact(&mut stream, &mut buf)
+                .await
+                .map_err(|e| {
+                    SyncthingError::connection(format!("socks5 bind addr read failed: {}", e))
+                })?;
         }
         0x03 => {
             // Domain name: 1 byte len + N bytes domain + 2 bytes port
             let mut len_buf = [0u8; 1];
-            tokio::io::AsyncReadExt::read_exact(&mut stream, &mut len_buf).await
-                .map_err(|e| SyncthingError::connection(format!(
-                    "socks5 domain len read failed: {}",
-                    e
-                )))?;
+            tokio::io::AsyncReadExt::read_exact(&mut stream, &mut len_buf)
+                .await
+                .map_err(|e| {
+                    SyncthingError::connection(format!("socks5 domain len read failed: {}", e))
+                })?;
             let mut rest = vec![0u8; len_buf[0] as usize + 2];
-            tokio::io::AsyncReadExt::read_exact(&mut stream, &mut rest).await
-                .map_err(|e| SyncthingError::connection(format!(
-                    "socks5 domain read failed: {}",
-                    e
-                )))?;
+            tokio::io::AsyncReadExt::read_exact(&mut stream, &mut rest)
+                .await
+                .map_err(|e| {
+                    SyncthingError::connection(format!("socks5 domain read failed: {}", e))
+                })?;
         }
         0x04 => {
             // IPv6: 16 bytes addr + 2 bytes port
             let mut buf = [0u8; 18];
-            tokio::io::AsyncReadExt::read_exact(&mut stream, &mut buf).await
-                .map_err(|e| SyncthingError::connection(format!(
-                    "socks5 bind addr v6 read failed: {}",
-                    e
-                )))?;
+            tokio::io::AsyncReadExt::read_exact(&mut stream, &mut buf)
+                .await
+                .map_err(|e| {
+                    SyncthingError::connection(format!("socks5 bind addr v6 read failed: {}", e))
+                })?;
         }
         atyp => {
             return Err(SyncthingError::connection(format!(
@@ -309,13 +310,21 @@ struct ProxyPipe {
 }
 
 impl AsyncRead for ProxyPipe {
-    fn poll_read(mut self: Pin<&mut Self>, cx: &mut Context<'_>, buf: &mut ReadBuf<'_>) -> Poll<std::io::Result<()>> {
+    fn poll_read(
+        mut self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+        buf: &mut ReadBuf<'_>,
+    ) -> Poll<std::io::Result<()>> {
         Pin::new(&mut self.stream).poll_read(cx, buf)
     }
 }
 
 impl AsyncWrite for ProxyPipe {
-    fn poll_write(mut self: Pin<&mut Self>, cx: &mut Context<'_>, buf: &[u8]) -> Poll<std::io::Result<usize>> {
+    fn poll_write(
+        mut self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+        buf: &[u8],
+    ) -> Poll<std::io::Result<usize>> {
         Pin::new(&mut self.stream).poll_write(cx, buf)
     }
 

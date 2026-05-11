@@ -40,9 +40,9 @@ pub mod metadata;
 pub mod store;
 
 // Re-export main types
-pub use block_cache::{CachedBlockStore, CacheStats, BlockStoreBuilder};
+pub use block_cache::{BlockStoreBuilder, CacheStats, CachedBlockStore};
 pub use kv::{SledStore, SledTree};
-pub use metadata::{MetadataStore, FolderStats as DbFolderStats};
+pub use metadata::{FolderStats as DbFolderStats, MetadataStore};
 pub use store::BlockStoreImpl;
 
 /// Default database path
@@ -64,7 +64,9 @@ pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 ///
 /// # Errors
 /// Returns an error if the database cannot be opened
-pub fn create_block_store<P: AsRef<std::path::Path>>(path: P) -> crate::kv::Result<CachedBlockStore> {
+pub fn create_block_store<P: AsRef<std::path::Path>>(
+    path: P,
+) -> crate::kv::Result<CachedBlockStore> {
     let store = SledStore::open(path)?;
     Ok(CachedBlockStore::new(store, DEFAULT_CACHE_SIZE))
 }
@@ -72,8 +74,8 @@ pub fn create_block_store<P: AsRef<std::path::Path>>(path: P) -> crate::kv::Resu
 #[cfg(test)]
 mod integration_tests {
     use super::*;
-    use syncthing_core::{BlockHash, FileInfo, FolderId};
     use syncthing_core::traits::BlockStore;
+    use syncthing_core::{BlockHash, FileInfo, FolderId};
 
     #[tokio::test]
     async fn test_full_workflow() {
@@ -108,7 +110,10 @@ mod integration_tests {
             },
         ];
 
-        block_store.update_index(&folder, vec![file.clone()]).await.unwrap();
+        block_store
+            .update_index(&folder, vec![file.clone()])
+            .await
+            .unwrap();
 
         // 3. Verify index
         let index = block_store.get_index(&folder).await.unwrap();
@@ -159,14 +164,20 @@ mod integration_tests {
         // Initial index
         let file1 = FileInfo::new("file1.txt");
         let file2 = FileInfo::new("file2.txt");
-        block_store.update_index(&folder, vec![file1, file2]).await.unwrap();
+        block_store
+            .update_index(&folder, vec![file1, file2])
+            .await
+            .unwrap();
 
         // Delta update - add file3, modify file1
         let mut file1_updated = FileInfo::new("file1.txt");
         file1_updated.size = 1000;
         let file3 = FileInfo::new("file3.txt");
 
-        block_store.update_index_delta(&folder, vec![file1_updated, file3]).await.unwrap();
+        block_store
+            .update_index_delta(&folder, vec![file1_updated, file3])
+            .await
+            .unwrap();
 
         // Verify all three files exist
         let index = block_store.get_index(&folder).await.unwrap();

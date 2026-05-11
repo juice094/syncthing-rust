@@ -27,7 +27,7 @@ impl ReconnectScheduler {
             pending: DashMap::new(),
         }
     }
-    
+
     pub fn schedule<F>(&self, device_id: DeviceId, attempt: u32, task: F)
     where
         F: std::future::Future<Output = ()> + Send + 'static,
@@ -36,16 +36,16 @@ impl ReconnectScheduler {
         if let Some((_, handle)) = self.pending.remove(&device_id) {
             handle.abort();
         }
-        
+
         let backoff = self.config.backoff_duration(attempt);
         let handle = tokio::spawn(async move {
             sleep(backoff).await;
             task.await;
         });
-        
+
         self.pending.insert(device_id, handle);
     }
-    
+
     pub fn cancel(&self, device_id: &DeviceId) {
         if let Some((_, handle)) = self.pending.remove(device_id) {
             handle.abort();

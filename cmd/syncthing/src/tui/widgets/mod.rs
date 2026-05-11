@@ -4,9 +4,7 @@ pub mod progress;
 pub mod spinner;
 pub mod status_bar;
 
-use ratatui::{
-    layout::{Constraint, Direction, Layout, Rect},
-};
+use ratatui::layout::{Constraint, Direction, Layout, Rect};
 
 /// 在父区域中居中创建一个百分比大小的区域
 pub fn centered_rect(percent_x: u16, percent_y: u16, r: Rect) -> Rect {

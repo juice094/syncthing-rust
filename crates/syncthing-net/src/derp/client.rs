@@ -90,7 +90,9 @@ impl DerpClient {
     pub async fn connect(&self) -> Result<()> {
         let mut state = self.state.lock().await;
         if *state != DerpClientState::Disconnected {
-            return Err(SyncthingError::connection("DERP client already connected or connecting"));
+            return Err(SyncthingError::connection(
+                "DERP client already connected or connecting",
+            ));
         }
         *state = DerpClientState::Connecting;
         drop(state);
@@ -117,23 +119,20 @@ impl DerpClient {
             version: PROTOCOL_VERSION,
         };
         let encoded = client_info.encode();
-        write_half
-            .write_all(&encoded)
-            .await
-            .map_err(|e| SyncthingError::connection(format!("DERP ClientInfo send failed: {}", e)))?;
+        write_half.write_all(&encoded).await.map_err(|e| {
+            SyncthingError::connection(format!("DERP ClientInfo send failed: {}", e))
+        })?;
 
         // 读取 ServerInfo
         let mut len_buf = [0u8; 4];
-        read_half
-            .read_exact(&mut len_buf)
-            .await
-            .map_err(|e| SyncthingError::connection(format!("DERP ServerInfo read failed: {}", e)))?;
+        read_half.read_exact(&mut len_buf).await.map_err(|e| {
+            SyncthingError::connection(format!("DERP ServerInfo read failed: {}", e))
+        })?;
         let payload_len = u32::from_be_bytes(len_buf) as usize;
         let mut payload_buf = vec![0u8; payload_len];
-        read_half
-            .read_exact(&mut payload_buf)
-            .await
-            .map_err(|e| SyncthingError::connection(format!("DERP ServerInfo payload read failed: {}", e)))?;
+        read_half.read_exact(&mut payload_buf).await.map_err(|e| {
+            SyncthingError::connection(format!("DERP ServerInfo payload read failed: {}", e))
+        })?;
 
         let mut combined = bytes::BytesMut::from(&len_buf[..]);
         combined.extend_from_slice(&payload_buf);

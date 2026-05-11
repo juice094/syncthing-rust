@@ -1,15 +1,15 @@
 //! 文件夹扫描器
-//! 
+//!
 //! 实现定期扫描本地文件夹变更的功能
 
 use crate::database::LocalDatabase;
 use crate::error::{Result, SyncError};
 use crate::events::{EventPublisher, SyncEvent};
 use crate::ignore::IgnoreMatcher;
-use syncthing_core::types::{BlockInfo, FileInfo, FileType, Folder, Vector};
 use sha2::{Digest, Sha256};
 use std::path::Path;
 use std::sync::Arc;
+use syncthing_core::types::{BlockInfo, FileInfo, FileType, Folder, Vector};
 use tokio::fs;
 use tracing::{debug, error, info, trace};
 
@@ -48,11 +48,17 @@ impl Scanner {
         info!(folder_id = %folder.id, path = %scan_root.display(), "Starting folder scan");
 
         if !scan_root.exists() {
-            return Err(SyncError::scan(folder.id.clone(), format!("Path does not exist: {}", scan_root.display())));
+            return Err(SyncError::scan(
+                folder.id.clone(),
+                format!("Path does not exist: {}", scan_root.display()),
+            ));
         }
 
         if !scan_root.is_dir() {
-            return Err(SyncError::scan(folder.id.clone(), format!("Path is not a directory: {}", scan_root.display())));
+            return Err(SyncError::scan(
+                folder.id.clone(),
+                format!("Path is not a directory: {}", scan_root.display()),
+            ));
         }
 
         let mut changed_files = Vec::new();
@@ -63,7 +69,10 @@ impl Scanner {
         let matcher = IgnoreMatcher::load(&ignore_path);
 
         // 递归扫描目录
-        match self.scan_directory(&folder.id, path, &scan_root, &mut visited_paths, &matcher).await {
+        match self
+            .scan_directory(&folder.id, path, &scan_root, &mut visited_paths, &matcher)
+            .await
+        {
             Ok(files) => {
                 // 仅全量扫描时检查已删除的文件
                 if sub.is_none() {
@@ -153,17 +162,23 @@ impl Scanner {
         matcher: &IgnoreMatcher,
     ) -> Result<Vec<FileInfo>> {
         let mut files = Vec::new();
-        
+
         let entries = std::fs::read_dir(current_path).map_err(|e| {
-            SyncError::scan(folder_id.to_string(), format!("Failed to read directory: {}", e))
+            SyncError::scan(
+                folder_id.to_string(),
+                format!("Failed to read directory: {}", e),
+            )
         })?;
 
         for entry in entries {
             let entry = entry.map_err(|e| {
-                SyncError::scan(folder_id.to_string(), format!("Failed to read entry: {}", e))
+                SyncError::scan(
+                    folder_id.to_string(),
+                    format!("Failed to read entry: {}", e),
+                )
             })?;
             let path = entry.path();
-            
+
             // 跳过隐藏文件和特殊文件
             if let Some(file_name) = path.file_name() {
                 let name = file_name.to_string_lossy();
@@ -179,10 +194,14 @@ impl Scanner {
             }
 
             let metadata = entry.metadata().map_err(|e| {
-                SyncError::scan(folder_id.to_string(), format!("Failed to get metadata: {}", e))
+                SyncError::scan(
+                    folder_id.to_string(),
+                    format!("Failed to get metadata: {}", e),
+                )
             })?;
 
-            let relative_path = path.strip_prefix(base_path)
+            let relative_path = path
+                .strip_prefix(base_path)
                 .map_err(|e| SyncError::scan(folder_id.to_string(), format!("Path error: {}", e)))?
                 .to_string_lossy()
                 .replace('\\', "/");
@@ -201,16 +220,21 @@ impl Scanner {
 
             if is_dir {
                 // 递归扫描子目录
-                let sub_files = self.scan_directory(folder_id, base_path, &path, visited, matcher).await?;
+                let sub_files = self
+                    .scan_directory(folder_id, base_path, &path, visited, matcher)
+                    .await?;
                 files.extend(sub_files);
 
                 // 添加目录条目
-                let modified = metadata.modified()
+                let modified = metadata
+                    .modified()
                     .unwrap_or(std::time::SystemTime::UNIX_EPOCH);
-                let modified_secs = modified.duration_since(std::time::UNIX_EPOCH)
+                let modified_secs = modified
+                    .duration_since(std::time::UNIX_EPOCH)
                     .unwrap_or_default()
                     .as_secs() as i64;
-                let modified_nanos = modified.duration_since(std::time::UNIX_EPOCH)
+                let modified_nanos = modified
+                    .duration_since(std::time::UNIX_EPOCH)
                     .unwrap_or_default()
                     .subsec_nanos() as i32;
 
@@ -230,17 +254,24 @@ impl Scanner {
                 });
             } else if metadata.is_file() {
                 // 计算文件哈希和块信息
-                let file_info = self.scan_file(&path, &relative_path, &metadata, folder_id).await?;
+                let file_info = self
+                    .scan_file(&path, &relative_path, &metadata, folder_id)
+                    .await?;
                 files.push(file_info);
             } else if metadata.is_symlink() {
                 // 处理符号链接
                 let target = fs::read_link(&path).await.map_err(|e| {
-                    SyncError::scan(folder_id.to_string(), format!("Failed to read symlink: {}", e))
+                    SyncError::scan(
+                        folder_id.to_string(),
+                        format!("Failed to read symlink: {}", e),
+                    )
                 })?;
 
-                let modified = metadata.modified()
+                let modified = metadata
+                    .modified()
                     .unwrap_or(std::time::SystemTime::UNIX_EPOCH);
-                let modified_secs = modified.duration_since(std::time::UNIX_EPOCH)
+                let modified_secs = modified
+                    .duration_since(std::time::UNIX_EPOCH)
                     .unwrap_or_default()
                     .as_secs() as i64;
 
@@ -273,12 +304,15 @@ impl Scanner {
         folder_id: &str,
     ) -> Result<FileInfo> {
         let size = metadata.len() as i64;
-        let modified = metadata.modified()
+        let modified = metadata
+            .modified()
             .unwrap_or(std::time::SystemTime::UNIX_EPOCH);
-        let modified_secs = modified.duration_since(std::time::UNIX_EPOCH)
+        let modified_secs = modified
+            .duration_since(std::time::UNIX_EPOCH)
             .unwrap_or_default()
             .as_secs() as i64;
-        let modified_nanos = modified.duration_since(std::time::UNIX_EPOCH)
+        let modified_nanos = modified
+            .duration_since(std::time::UNIX_EPOCH)
             .unwrap_or_default()
             .subsec_nanos() as i32;
 
@@ -289,7 +323,7 @@ impl Scanner {
         if size > 0 {
             let block_size = DEFAULT_BLOCK_SIZE;
             let num_blocks = ((size + block_size as i64 - 1) / block_size as i64) as usize;
-            
+
             // 对于大文件，异步读取并计算哈希
             let file = tokio::fs::File::open(path).await.map_err(|e| {
                 SyncError::scan(folder_id.to_string(), format!("Failed to open file: {}", e))
@@ -300,9 +334,15 @@ impl Scanner {
             let mut offset = 0i64;
 
             for i in 0..num_blocks {
-                let bytes_read = tokio::io::AsyncReadExt::read(&mut reader, &mut buffer).await
-                    .map_err(|e| SyncError::scan(folder_id.to_string(), format!("Failed to read file: {}", e)))?;
-                
+                let bytes_read = tokio::io::AsyncReadExt::read(&mut reader, &mut buffer)
+                    .await
+                    .map_err(|e| {
+                        SyncError::scan(
+                            folder_id.to_string(),
+                            format!("Failed to read file: {}", e),
+                        )
+                    })?;
+
                 if bytes_read == 0 {
                     break;
                 }
@@ -374,8 +414,9 @@ impl Scanner {
     /// 快速扫描（仅检查修改时间）
     pub async fn quick_scan(&self, folder: &Folder) -> Result<Vec<FileInfo>> {
         debug!(folder_id = %folder.id, "Starting quick scan");
-        
-        let db_files: Vec<syncthing_core::types::FileInfo> = self.db.get_folder_files(&folder.id).await?;
+
+        let db_files: Vec<syncthing_core::types::FileInfo> =
+            self.db.get_folder_files(&folder.id).await?;
         let mut changed = Vec::new();
         let base_path = Path::new(&folder.path);
 
@@ -387,16 +428,20 @@ impl Scanner {
             let full_path = base_path.join(&db_file.name);
             match fs::metadata(&full_path).await {
                 Ok(metadata) => {
-                    let modified = metadata.modified()
+                    let modified = metadata
+                        .modified()
                         .unwrap_or(std::time::SystemTime::UNIX_EPOCH);
-                    let modified_secs = modified.duration_since(std::time::UNIX_EPOCH)
+                    let modified_secs = modified
+                        .duration_since(std::time::UNIX_EPOCH)
                         .unwrap_or_default()
                         .as_secs() as i64;
-                    let modified_nanos = modified.duration_since(std::time::UNIX_EPOCH)
+                    let modified_nanos = modified
+                        .duration_since(std::time::UNIX_EPOCH)
                         .unwrap_or_default()
                         .subsec_nanos() as i32;
 
-                    if db_file.modified_s != modified_secs || db_file.modified_ns != modified_nanos {
+                    if db_file.modified_s != modified_secs || db_file.modified_ns != modified_nanos
+                    {
                         changed.push(db_file);
                     }
                 }

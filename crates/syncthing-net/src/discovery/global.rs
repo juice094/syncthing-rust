@@ -23,8 +23,6 @@ pub const ANNOUNCE_INTERVAL: Duration = Duration::from_secs(1800);
 /// 失败重试间隔（5 分钟）
 pub const RETRY_INTERVAL: Duration = Duration::from_secs(300);
 
-
-
 /// Global Discovery 客户端
 ///
 /// 负责向发现服务器注册本机地址，并查询其他设备的地址。
@@ -175,22 +173,14 @@ impl GlobalDiscovery {
 
         debug!("GlobalDiscovery query for {} at {}", target, url);
 
-        let resp = self
-            .client
-            .get(&url)
-            .send()
-            .await
-            .map_err(|e| {
-                SyncthingError::network(format!("Global discovery query request failed: {}", e))
-            })?;
+        let resp = self.client.get(&url).send().await.map_err(|e| {
+            SyncthingError::network(format!("Global discovery query request failed: {}", e))
+        })?;
 
         let status = resp.status();
         if status.is_success() {
             let data: serde_json::Value = resp.json().await.map_err(|e| {
-                SyncthingError::network(format!(
-                    "Global discovery query JSON parse failed: {}",
-                    e
-                ))
+                SyncthingError::network(format!("Global discovery query JSON parse failed: {}", e))
             })?;
 
             let addresses: Vec<String> = data
@@ -211,14 +201,14 @@ impl GlobalDiscovery {
             Ok(addresses)
         } else if status.as_u16() == 404 {
             // 设备未注册，返回空列表而非错误
-            warn!("Global discovery query for {}: device not found (404)", target);
+            warn!(
+                "Global discovery query for {}: device not found (404)",
+                target
+            );
             Ok(Vec::new())
         } else {
             let text = resp.text().await.unwrap_or_default();
-            error!(
-                "Global discovery query failed: HTTP {} - {}",
-                status, text
-            );
+            error!("Global discovery query failed: HTTP {} - {}", status, text);
             Err(SyncthingError::network(format!(
                 "Global discovery query failed: HTTP {} - {}",
                 status, text

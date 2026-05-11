@@ -513,7 +513,6 @@ pub async fn write_message<W: AsyncWriteExt + Unpin>(
     Ok(())
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;

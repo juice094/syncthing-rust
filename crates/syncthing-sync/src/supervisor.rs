@@ -14,9 +14,8 @@ use tokio::task::JoinHandle;
 pub type BoxError = Box<dyn Error + Send + Sync>;
 
 /// Type alias for a factory that produces supervised task futures.
-pub type TaskFactory = Box<
-    dyn Fn() -> Pin<Box<dyn Future<Output = Result<(), BoxError>> + Send>> + Send + Sync,
->;
+pub type TaskFactory =
+    Box<dyn Fn() -> Pin<Box<dyn Future<Output = Result<(), BoxError>> + Send>> + Send + Sync>;
 
 /// Type alias for a permanent-failure callback.
 pub type FailureCallback = Arc<dyn Fn(&str) + Send + Sync>;
@@ -47,7 +46,9 @@ impl ExponentialBackoff {
     /// Compute the next backoff delay for the given attempt number.
     pub fn next_delay(&self, attempt: u32) -> Duration {
         let multiplier = 2u32.saturating_pow(attempt.min(31));
-        self.initial_delay.saturating_mul(multiplier).min(self.max_delay)
+        self.initial_delay
+            .saturating_mul(multiplier)
+            .min(self.max_delay)
     }
 }
 
@@ -280,7 +281,11 @@ mod tests {
         supervisor.shutdown().await;
 
         let vec = times.lock().unwrap();
-        assert!(vec.len() >= 3, "expected at least 3 attempts, got {}", vec.len());
+        assert!(
+            vec.len() >= 3,
+            "expected at least 3 attempts, got {}",
+            vec.len()
+        );
 
         let deltas: Vec<Duration> = vec.windows(2).map(|w| w[1].duration_since(w[0])).collect();
         for i in 1..deltas.len() {
@@ -366,6 +371,9 @@ mod tests {
 
         sleep(Duration::from_millis(100)).await;
         let after = running.load(Ordering::SeqCst);
-        assert_eq!(before, after, "task should not have restarted after shutdown");
+        assert_eq!(
+            before, after,
+            "task should not have restarted after shutdown"
+        );
     }
 }

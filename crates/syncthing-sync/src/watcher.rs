@@ -61,10 +61,7 @@ impl FolderWatcher {
         watcher
             .watch(&watch_path, RecursiveMode::Recursive)
             .map_err(|e| {
-                SyncError::scan(
-                    folder_id_watch,
-                    format!("Failed to watch path: {}", e),
-                )
+                SyncError::scan(folder_id_watch, format!("Failed to watch path: {}", e))
             })?;
 
         info!(folder_id = %folder_id, path = %path, "Folder watcher started");

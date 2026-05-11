@@ -160,7 +160,9 @@ pub(crate) async fn get_system_status(State(state): State<ApiState>) -> impl Int
                 .map(|d| d.to_string())
                 .unwrap_or_else(|| "unknown".to_string());
 
-            let (totup, totdown) = state.connection_manager.as_ref()
+            let (totup, totdown) = state
+                .connection_manager
+                .as_ref()
                 .map(|cm| {
                     let stats = cm.connection_stats();
                     (stats.total_bytes_sent, stats.total_bytes_received)
@@ -203,22 +205,20 @@ pub(crate) async fn get_db_completion(
     let folder_id = FolderId::new(params.folder);
 
     match state.sync_model {
-        Some(ref sync_model) => {
-            match sync_model.folder_completion(&folder_id, device_id).await {
-                Ok(completion) => {
-                    let resp = serde_json::json!({
-                        "completion": completion,
-                        "device": device_id.to_string(),
-                        "folder": folder_id.as_str(),
-                    });
-                    Ok(Json(resp))
-                }
-                Err(e) => {
-                    error!("Failed to get folder completion: {}", e);
-                    Err((StatusCode::INTERNAL_SERVER_ERROR, format!("{}", e)))
-                }
+        Some(ref sync_model) => match sync_model.folder_completion(&folder_id, device_id).await {
+            Ok(completion) => {
+                let resp = serde_json::json!({
+                    "completion": completion,
+                    "device": device_id.to_string(),
+                    "folder": folder_id.as_str(),
+                });
+                Ok(Json(resp))
             }
-        }
+            Err(e) => {
+                error!("Failed to get folder completion: {}", e);
+                Err((StatusCode::INTERNAL_SERVER_ERROR, format!("{}", e)))
+            }
+        },
         None => {
             let resp = serde_json::json!({
                 "completion": 100,
@@ -236,13 +236,13 @@ pub(crate) async fn get_db_status(State(state): State<ApiState>) -> impl IntoRes
     match state.config_store.load().await {
         Ok(config) => {
             let mut statuses = Vec::with_capacity(config.folders.len());
-            
+
             for folder in &config.folders {
                 let mut files_count = 0u64;
                 let mut directories_count = 0u64;
                 let mut symlinks_count = 0u64;
                 let mut bytes_count = 0u64;
-                
+
                 // 从数据库获取真实文件统计
                 if let Some(ref db) = state.db {
                     match db.get_folder_files(&folder.id).await {
@@ -250,7 +250,9 @@ pub(crate) async fn get_db_status(State(state): State<ApiState>) -> impl IntoRes
                             for info in file_infos {
                                 match info.file_type {
                                     syncthing_core::types::FileType::File => files_count += 1,
-                                    syncthing_core::types::FileType::Directory => directories_count += 1,
+                                    syncthing_core::types::FileType::Directory => {
+                                        directories_count += 1
+                                    }
                                     syncthing_core::types::FileType::Symlink => symlinks_count += 1,
                                 }
                                 bytes_count += info.size as u64;
@@ -261,14 +263,23 @@ pub(crate) async fn get_db_status(State(state): State<ApiState>) -> impl IntoRes
                         }
                     }
                 }
-                
+
                 // 从同步模型获取真实状态
                 let folder_state = if let Some(ref sync_model) = state.sync_model {
-                    match sync_model.folder_status(&FolderId::new(folder.id.clone())).await {
+                    match sync_model
+                        .folder_status(&FolderId::new(folder.id.clone()))
+                        .await
+                    {
                         Ok(syncthing_core::traits::FolderStatus::Idle) => "idle".to_string(),
-                        Ok(syncthing_core::traits::FolderStatus::Scanning) => "scanning".to_string(),
-                        Ok(syncthing_core::traits::FolderStatus::Syncing { .. }) => "syncing".to_string(),
-                        Ok(syncthing_core::traits::FolderStatus::Error { .. }) => "error".to_string(),
+                        Ok(syncthing_core::traits::FolderStatus::Scanning) => {
+                            "scanning".to_string()
+                        }
+                        Ok(syncthing_core::traits::FolderStatus::Syncing { .. }) => {
+                            "syncing".to_string()
+                        }
+                        Ok(syncthing_core::traits::FolderStatus::Error { .. }) => {
+                            "error".to_string()
+                        }
                         Ok(syncthing_core::traits::FolderStatus::Paused) => "paused".to_string(),
                         Err(e) => {
                             error!("Failed to get folder status for {}: {}", folder.id, e);
@@ -278,7 +289,7 @@ pub(crate) async fn get_db_status(State(state): State<ApiState>) -> impl IntoRes
                 } else {
                     "unknown".to_string()
                 };
-                
+
                 statuses.push(DbStatus {
                     folder: folder.id.to_string(),
                     files: files_count,
@@ -295,7 +306,7 @@ pub(crate) async fn get_db_status(State(state): State<ApiState>) -> impl IntoRes
                     state: folder_state,
                 });
             }
-            
+
             Ok(Json(statuses))
         }
         Err(e) => {
@@ -333,7 +344,9 @@ pub(crate) async fn get_connections(State(state): State<ApiState>) -> Json<Conne
 }
 
 /// GET /rest/system/connections - Go-compatible connection enumeration
-pub(crate) async fn get_system_connections(State(state): State<ApiState>) -> Json<SystemConnectionsResponse> {
+pub(crate) async fn get_system_connections(
+    State(state): State<ApiState>,
+) -> Json<SystemConnectionsResponse> {
     use std::collections::HashMap;
     let now = format!("{:?}", std::time::SystemTime::now());
 

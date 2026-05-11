@@ -56,7 +56,9 @@ pub async fn scan_file(path: &Path, block_size: usize) -> Result<FileInfo> {
     let block_size = block_size.clamp(MIN_BLOCK_SIZE, MAX_BLOCK_SIZE);
 
     // Get file metadata
-    let metadata = tokio::fs::metadata(path).await.map_err(SyncthingError::Io)?;
+    let metadata = tokio::fs::metadata(path)
+        .await
+        .map_err(SyncthingError::Io)?;
 
     if !metadata.is_file() {
         return Err(SyncthingError::io(format!(
@@ -205,7 +207,9 @@ pub fn optimal_block_size(file_size: u64) -> usize {
 /// This is faster for detecting file changes when comparing
 /// modification times and sizes is sufficient.
 pub async fn quick_scan(path: &Path) -> Result<FileInfo> {
-    let metadata = tokio::fs::metadata(path).await.map_err(SyncthingError::Io)?;
+    let metadata = tokio::fs::metadata(path)
+        .await
+        .map_err(SyncthingError::Io)?;
 
     let file_name = path
         .file_name()
@@ -262,12 +266,13 @@ pub async fn scan_directory(
             )));
         }
 
-        let can_skip = ignore.as_ref().map(|i| i.allows_skipping_ignored_dirs()).unwrap_or(false);
+        let can_skip = ignore
+            .as_ref()
+            .map(|i| i.allows_skipping_ignored_dirs())
+            .unwrap_or(false);
 
         let mut results = Vec::new();
-        let mut walker = walkdir::WalkDir::new(&path)
-            .follow_links(false)
-            .into_iter();
+        let mut walker = walkdir::WalkDir::new(&path).follow_links(false).into_iter();
 
         while let Some(entry) = walker.next() {
             let entry = match entry {
@@ -326,7 +331,10 @@ pub async fn scan_directory(
         set.spawn(async move {
             let mut info = if is_file {
                 let block_size = optimal_block_size(
-                    tokio::fs::metadata(&entry_path).await.map(|m| m.len()).unwrap_or(0),
+                    tokio::fs::metadata(&entry_path)
+                        .await
+                        .map(|m| m.len())
+                        .unwrap_or(0),
                 );
                 scan_file(&entry_path, block_size).await?
             } else {
@@ -481,7 +489,9 @@ mod tests {
 
         // Create test structure
         fs::create_dir(root.join("subdir")).await.unwrap();
-        fs::write(root.join("file1.txt"), b"content1").await.unwrap();
+        fs::write(root.join("file1.txt"), b"content1")
+            .await
+            .unwrap();
         fs::write(root.join("subdir/file2.txt"), b"content2")
             .await
             .unwrap();
@@ -504,7 +514,9 @@ mod tests {
         // Create test structure
         fs::create_dir(root.join("ignored_dir")).await.unwrap();
         fs::create_dir(root.join("kept_dir")).await.unwrap();
-        fs::write(root.join("ignored.txt"), b"ignored").await.unwrap();
+        fs::write(root.join("ignored.txt"), b"ignored")
+            .await
+            .unwrap();
         fs::write(root.join("kept.txt"), b"kept").await.unwrap();
         fs::write(root.join("ignored_dir/nested.txt"), b"nested")
             .await
@@ -563,10 +575,14 @@ mod tests {
         fs::write(&file_path, content).await.unwrap();
 
         let info = scan_file(&file_path, DEFAULT_BLOCK_SIZE).await.unwrap();
-        let hashes: Vec<_> = info.blocks.iter().map(|b| {
-            let bytes: [u8; 32] = b.hash.as_slice().try_into().unwrap();
-            BlockHash::from_bytes(bytes)
-        }).collect();
+        let hashes: Vec<_> = info
+            .blocks
+            .iter()
+            .map(|b| {
+                let bytes: [u8; 32] = b.hash.as_slice().try_into().unwrap();
+                BlockHash::from_bytes(bytes)
+            })
+            .collect();
 
         // Should succeed
         verify_file(&file_path, &hashes, DEFAULT_BLOCK_SIZE)
@@ -581,10 +597,14 @@ mod tests {
 
         fs::write(&file_path, b"original content").await.unwrap();
         let info = scan_file(&file_path, DEFAULT_BLOCK_SIZE).await.unwrap();
-        let hashes: Vec<_> = info.blocks.iter().map(|b| {
-            let bytes: [u8; 32] = b.hash.as_slice().try_into().unwrap();
-            BlockHash::from_bytes(bytes)
-        }).collect();
+        let hashes: Vec<_> = info
+            .blocks
+            .iter()
+            .map(|b| {
+                let bytes: [u8; 32] = b.hash.as_slice().try_into().unwrap();
+                BlockHash::from_bytes(bytes)
+            })
+            .collect();
 
         // Modify the file
         fs::write(&file_path, b"modified content").await.unwrap();

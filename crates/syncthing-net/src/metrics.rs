@@ -1,10 +1,10 @@
 //! Lightweight metrics collection for syncthing-net
 
+use parking_lot::Mutex;
 use std::io::Write;
 use std::sync::Arc;
 use std::sync::OnceLock;
 use std::time::{Duration, Instant};
-use parking_lot::Mutex;
 
 /// Global metrics collector
 static GLOBAL_METRICS: OnceLock<MetricsCollector> = OnceLock::new();
@@ -35,7 +35,13 @@ impl MetricsCollector {
         }
     }
 
-    pub fn record(&self, event: impl Into<String>, device_id: Option<String>, duration: Option<Duration>, bytes: Option<u64>) {
+    pub fn record(
+        &self,
+        event: impl Into<String>,
+        device_id: Option<String>,
+        duration: Option<Duration>,
+        bytes: Option<u64>,
+    ) {
         let rec = MetricRecord {
             timestamp: Instant::now(),
             event: event.into(),
@@ -51,11 +57,27 @@ impl MetricsCollector {
     }
 
     pub fn record_bep_message_sent(&self, device_id: String, msg_type: &str, bytes: u64) {
-        self.record(format!("bep_sent:{}", msg_type), Some(device_id), None, Some(bytes));
+        self.record(
+            format!("bep_sent:{}", msg_type),
+            Some(device_id),
+            None,
+            Some(bytes),
+        );
     }
 
-    pub fn record_bep_message_recv(&self, device_id: String, msg_type: &str, latency: Duration, bytes: u64) {
-        self.record(format!("bep_recv:{}", msg_type), Some(device_id), Some(latency), Some(bytes));
+    pub fn record_bep_message_recv(
+        &self,
+        device_id: String,
+        msg_type: &str,
+        latency: Duration,
+        bytes: u64,
+    ) {
+        self.record(
+            format!("bep_recv:{}", msg_type),
+            Some(device_id),
+            Some(latency),
+            Some(bytes),
+        );
     }
 
     pub fn record_reconnect(&self, device_id: String) {

@@ -12,10 +12,10 @@ use tracing::{debug, info};
 use syncthing_core::{ConnectionType, DeviceId, Result, SyncthingError};
 
 use crate::connection::BepConnection;
+use crate::connection::TcpBiStream;
 use crate::handshaker::BepHandshaker;
 use crate::relay::client::{join_session, RelayProtocolClient};
 use crate::relay::protocol::SessionInvitation;
-use crate::connection::TcpBiStream;
 use crate::tls::{accept_tls_stream, connect_tls_stream, SyncthingTlsConfig};
 
 /// 通过 relay 服务器建立与目标设备的 BEP 连接
@@ -108,7 +108,10 @@ pub async fn connect_bep_via_relay(
             )));
         }
 
-        debug!("Relay BEP TLS handshake completed with {} (server)", peer_device);
+        debug!(
+            "Relay BEP TLS handshake completed with {} (server)",
+            peer_device
+        );
 
         let _remote_hello = BepHandshaker::server_handshake(&mut tls_stream, device_name).await?;
 
@@ -134,7 +137,10 @@ pub async fn connect_bep_via_relay(
             )));
         }
 
-        debug!("Relay BEP TLS handshake completed with {} (client)", peer_device);
+        debug!(
+            "Relay BEP TLS handshake completed with {} (client)",
+            peer_device
+        );
 
         let _remote_hello = BepHandshaker::client_handshake(&mut tls_stream, device_name).await?;
 
@@ -212,7 +218,8 @@ mod tests {
     fn test_parse_relay_url_basic() {
         // 使用有效的 device ID（Base32-Luhn 格式）
         let valid_id = DeviceId::default().to_string();
-        let (addr, id) = parse_relay_url(&format!("relay://192.168.1.1:22067/?id={}", valid_id)).unwrap();
+        let (addr, id) =
+            parse_relay_url(&format!("relay://192.168.1.1:22067/?id={}", valid_id)).unwrap();
         assert_eq!(addr.to_string(), "192.168.1.1:22067");
         assert_eq!(id, DeviceId::default()); // 成功解析
     }

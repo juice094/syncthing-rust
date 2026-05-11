@@ -56,30 +56,17 @@ impl FrameType {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Frame {
     /// 客户端注册
-    ClientInfo {
-        device_id: DeviceId,
-        version: u8,
-    },
+    ClientInfo { device_id: DeviceId, version: u8 },
     /// 服务器信息
-    ServerInfo {
-        version: u8,
-    },
+    ServerInfo { version: u8 },
     /// 发送数据包到目标设备
-    SendPacket {
-        target: DeviceId,
-        payload: Vec<u8>,
-    },
+    SendPacket { target: DeviceId, payload: Vec<u8> },
     /// 收到来自某设备的数据包
-    RecvPacket {
-        from: DeviceId,
-        payload: Vec<u8>,
-    },
+    RecvPacket { from: DeviceId, payload: Vec<u8> },
     /// 心跳
     KeepAlive,
     /// 关闭对等端
-    ClosePeer {
-        target: DeviceId,
-    },
+    ClosePeer { target: DeviceId },
 }
 
 impl Frame {

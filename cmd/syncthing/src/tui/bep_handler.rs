@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use syncthing_core::DeviceId;
 use syncthing_net::BepSessionHandler;
-use syncthing_sync::{SyncService, SyncManager};
+use syncthing_sync::{SyncManager, SyncService};
 
 pub struct DaemonBepHandler {
     pub sync_service: Arc<SyncService>,
@@ -73,9 +73,16 @@ impl BepSessionHandler for DaemonBepHandler {
         folder_id: &str,
         _device_id: DeviceId,
     ) -> syncthing_core::Result<syncthing_core::types::Index> {
-        let mut files = self.sync_service.generate_index_update(folder_id, 0).await.map_err(|e| {
-            syncthing_core::SyncthingError::internal(format!("generate_index_update failed: {}", e))
-        })?;
+        let mut files = self
+            .sync_service
+            .generate_index_update(folder_id, 0)
+            .await
+            .map_err(|e| {
+                syncthing_core::SyncthingError::internal(format!(
+                    "generate_index_update failed: {}",
+                    e
+                ))
+            })?;
         // BEP protocol requires deleted files to have empty block lists
         for file in &mut files {
             if file.is_deleted() {
@@ -94,9 +101,12 @@ impl BepSessionHandler for DaemonBepHandler {
         index: syncthing_core::types::Index,
     ) -> syncthing_core::Result<()> {
         let folder = index.folder.clone();
-        self.sync_service.handle_index(&folder, device_id, index).await.map_err(|e| {
-            syncthing_core::SyncthingError::internal(format!("handle_index failed: {:?}", e))
-        })?;
+        self.sync_service
+            .handle_index(&folder, device_id, index)
+            .await
+            .map_err(|e| {
+                syncthing_core::SyncthingError::internal(format!("handle_index failed: {:?}", e))
+            })?;
         Ok(())
     }
 
@@ -110,7 +120,10 @@ impl BepSessionHandler for DaemonBepHandler {
             .handle_index_update(&folder, device_id, update)
             .await
             .map_err(|e| {
-                syncthing_core::SyncthingError::internal(format!("handle_index_update failed: {:?}", e))
+                syncthing_core::SyncthingError::internal(format!(
+                    "handle_index_update failed: {:?}",
+                    e
+                ))
             })?;
         Ok(())
     }
@@ -120,6 +133,9 @@ impl BepSessionHandler for DaemonBepHandler {
         _device_id: DeviceId,
         req: bep_protocol::messages::Request,
     ) -> std::result::Result<Vec<u8>, bep_protocol::messages::ErrorCode> {
-        self.sync_service.handle_block_request(&req).await.map_err(|e| e.error_code())
+        self.sync_service
+            .handle_block_request(&req)
+            .await
+            .map_err(|e| e.error_code())
     }
 }

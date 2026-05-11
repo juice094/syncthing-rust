@@ -151,7 +151,8 @@ impl CachedBlockStore {
     /// # Returns
     /// A new `CachedBlockStore` instance
     pub fn new(store: SledStore, cache_size: usize) -> Self {
-        let metadata_tree = store.open_tree("metadata")
+        let metadata_tree = store
+            .open_tree("metadata")
             .unwrap_or_else(|_| panic!("Failed to open metadata tree"));
         let metadata = MetadataStore::from_tree(metadata_tree);
 
@@ -169,7 +170,11 @@ impl CachedBlockStore {
     /// * `block_store` - Store for block data
     /// * `metadata_store` - Store for file metadata
     /// * `cache_size` - Maximum size of the LRU cache in bytes
-    pub fn with_metadata(block_store: SledStore, metadata_store: SledStore, cache_size: usize) -> Self {
+    pub fn with_metadata(
+        block_store: SledStore,
+        metadata_store: SledStore,
+        cache_size: usize,
+    ) -> Self {
         Self {
             store: block_store,
             metadata: MetadataStore::new(metadata_store),
@@ -227,9 +232,9 @@ impl BlockStore for CachedBlockStore {
         let key = make_block_key(&hash);
 
         // Store in sled
-        self.store.put(&key, data).map_err(|e| {
-            SyncthingError::Storage(format!("Failed to store block: {}", e))
-        })?;
+        self.store
+            .put(&key, data)
+            .map_err(|e| SyncthingError::Storage(format!("Failed to store block: {}", e)))?;
 
         // Add to cache
         let mut cache = self.cache.write().await;
@@ -262,9 +267,11 @@ impl BlockStore for CachedBlockStore {
 
         // Fetch from store
         let key = make_block_key(&hash);
-        match self.store.get(&key).map_err(|e| {
-            SyncthingError::Storage(format!("Failed to get block: {}", e))
-        })? {
+        match self
+            .store
+            .get(&key)
+            .map_err(|e| SyncthingError::Storage(format!("Failed to get block: {}", e)))?
+        {
             Some(data) => {
                 // Add to cache
                 let mut cache = self.cache.write().await;
@@ -288,18 +295,18 @@ impl BlockStore for CachedBlockStore {
 
         // Check store
         let key = make_block_key(&hash);
-        self.store.contains(&key).map_err(|e| {
-            SyncthingError::Storage(format!("Failed to check block: {}", e))
-        })
+        self.store
+            .contains(&key)
+            .map_err(|e| SyncthingError::Storage(format!("Failed to check block: {}", e)))
     }
 
     async fn delete(&self, hash: BlockHash) -> Result<()> {
         let key = make_block_key(&hash);
 
         // Remove from store
-        self.store.delete(&key).map_err(|e| {
-            SyncthingError::Storage(format!("Failed to delete block: {}", e))
-        })?;
+        self.store
+            .delete(&key)
+            .map_err(|e| SyncthingError::Storage(format!("Failed to delete block: {}", e)))?;
 
         // Remove from cache
         let mut cache = self.cache.write().await;
@@ -366,9 +373,8 @@ impl BlockStoreBuilder {
     /// Build the block store
     pub fn build(self) -> Result<CachedBlockStore> {
         let store = match self.db_path {
-            Some(path) => SledStore::open(path).map_err(|e| {
-                SyncthingError::Storage(format!("Failed to open database: {}", e))
-            })?,
+            Some(path) => SledStore::open(path)
+                .map_err(|e| SyncthingError::Storage(format!("Failed to open database: {}", e)))?,
             None => SledStore::open_in_memory().map_err(|e| {
                 SyncthingError::Storage(format!("Failed to create in-memory database: {}", e))
             })?,
@@ -377,8 +383,6 @@ impl BlockStoreBuilder {
         Ok(CachedBlockStore::new(store, self.cache_size))
     }
 }
-
-
 
 #[cfg(test)]
 mod tests {
@@ -547,10 +551,7 @@ mod tests {
         assert!(index.is_empty());
 
         // Update index
-        let files = vec![
-            FileInfo::new("file1.txt"),
-            FileInfo::new("file2.txt"),
-        ];
+        let files = vec![FileInfo::new("file1.txt"), FileInfo::new("file2.txt")];
 
         store.update_index(&folder, files.clone()).await.unwrap();
 
@@ -560,7 +561,10 @@ mod tests {
         // Delta update
         let mut new_file = FileInfo::new("file3.txt");
         new_file.sequence = 1;
-        store.update_index_delta(&folder, vec![new_file]).await.unwrap();
+        store
+            .update_index_delta(&folder, vec![new_file])
+            .await
+            .unwrap();
 
         let index = store.get_index(&folder).await.unwrap();
         assert_eq!(index.len(), 3);

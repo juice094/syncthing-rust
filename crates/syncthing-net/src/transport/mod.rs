@@ -10,9 +10,9 @@
 //! **注意**：`Transport` trait 本身定义在 `syncthing_core::traits` 中，
 //! 本模块只提供具体实现和注册表工具。
 
-pub mod tcp;
 pub mod bep_adapter;
 pub mod proxy;
+pub mod tcp;
 
 #[cfg(feature = "websocket")]
 pub mod websocket;

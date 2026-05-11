@@ -2,9 +2,9 @@
 //!
 //! Provides generate-cert, show-id, and metrics-flush commands.
 
-use std::path::PathBuf;
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
+use std::path::PathBuf;
 use tracing::{info, warn};
 
 use syncthing_net::SyncthingTlsConfig;
@@ -47,7 +47,6 @@ enum Commands {
     },
 }
 
-
 #[tokio::main]
 async fn main() -> Result<()> {
     rustls::crypto::ring::default_provider()
@@ -55,7 +54,9 @@ async fn main() -> Result<()> {
         .expect("Failed to install rustls crypto provider");
 
     let cli = Cli::parse();
-    let config_dir = cli.config_dir.unwrap_or_else(syncthing_core::paths::default_config_dir);
+    let config_dir = cli
+        .config_dir
+        .unwrap_or_else(syncthing_core::paths::default_config_dir);
 
     match cli.command {
         Commands::GenerateCert { device_name, force } => {

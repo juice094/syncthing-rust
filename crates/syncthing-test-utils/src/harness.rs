@@ -9,9 +9,7 @@ use anyhow::{Context, Result};
 use syncthing_core::types::{Config, Device, Folder, FolderStatus, GuiConfig, Options};
 use syncthing_core::DeviceId;
 use syncthing_net::{
-    ConnectionManager, ConnectionManagerConfig,
-    identity::TlsIdentity,
-    SyncthingTlsConfig,
+    identity::TlsIdentity, ConnectionManager, ConnectionManagerConfig, SyncthingTlsConfig,
 };
 use syncthing_sync::{database::MemoryDatabase, SyncManager, SyncService};
 
@@ -29,8 +27,11 @@ pub struct TestNode {
 impl TestNode {
     /// Create and start a new temporary node.
     pub async fn new(name: &str) -> Result<Self> {
-        let config_dir = std::env::temp_dir()
-            .join(format!("syncthing-e2e-{}-{:x}", name, rand::random::<u64>()));
+        let config_dir = std::env::temp_dir().join(format!(
+            "syncthing-e2e-{}-{:x}",
+            name,
+            rand::random::<u64>()
+        ));
         Self::new_with_dir(name, config_dir).await
     }
 
@@ -89,10 +90,7 @@ impl TestNode {
         registry.register(Arc::new(syncthing_net::transport::RawTcpTransport::new()));
         manager.set_transport_registry(Arc::new(registry));
 
-        let bep_addr = manager
-            .start()
-            .await
-            .context("start connection manager")?;
+        let bep_addr = manager.start().await.context("start connection manager")?;
 
         Ok(Self {
             config_dir,
@@ -132,7 +130,13 @@ impl TestNode {
     pub async fn connect_to(&self, peer: &TestNode) -> Result<()> {
         let device = Device {
             id: peer.device_id,
-            name: Some(peer.config_dir.file_name().unwrap_or_default().to_string_lossy().to_string()),
+            name: Some(
+                peer.config_dir
+                    .file_name()
+                    .unwrap_or_default()
+                    .to_string_lossy()
+                    .to_string(),
+            ),
             addresses: vec![syncthing_core::types::AddressType::Tcp(format!(
                 "tcp://{}",
                 peer.bep_addr

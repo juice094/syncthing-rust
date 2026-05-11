@@ -3,13 +3,13 @@
 //! 运行：cargo bench -p syncthing-sync
 //! 报告：target/criterion/
 
-use criterion::{black_box, criterion_group, criterion_main, Criterion, BenchmarkId, Throughput};
-use syncthing_sync::puller::{BlockSource, Puller};
+use bytes::Bytes;
+use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
+use std::sync::Arc;
+use syncthing_core::types::{BlockInfo, FileInfo, Folder};
 use syncthing_sync::database::MemoryDatabase;
 use syncthing_sync::events::EventPublisher;
-use syncthing_core::types::{BlockInfo, FileInfo, Folder};
-use bytes::Bytes;
-use std::sync::Arc;
+use syncthing_sync::puller::{BlockSource, Puller};
 
 struct ZeroBlockSource;
 
@@ -37,8 +37,7 @@ fn bench_pull_single_file(c: &mut Criterion) {
         let folder = Folder::new("bench", tmp.path().to_str().unwrap());
         let db = MemoryDatabase::new();
         let events = EventPublisher::new(1);
-        let puller = Puller::new(db, events)
-            .with_block_source(Some(Arc::new(ZeroBlockSource)));
+        let puller = Puller::new(db, events).with_block_source(Some(Arc::new(ZeroBlockSource)));
 
         let block_size = 128 * 1024;
         let num_blocks = (*size).div_ceil(block_size);
@@ -72,9 +71,7 @@ fn bench_pull_single_file(c: &mut Criterion) {
         group.bench_with_input(BenchmarkId::from_parameter(size), size, |b, _| {
             b.to_async(&rt).iter(|| async {
                 let stats = puller
-                    .pull_folder(&folder,
-                        vec![file_info.clone()],
-                    )
+                    .pull_folder(&folder, vec![file_info.clone()])
                     .await
                     .expect("pull");
                 black_box(stats);

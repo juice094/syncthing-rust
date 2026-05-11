@@ -8,8 +8,8 @@
 //! - 零依赖：不引入 tokio_rustls、wireguard 等具体库
 //! - 可扩展：具体实现（如 `TlsIdentity`）位于上层 crate（如 `syncthing-net`）
 
-use std::fmt::Debug;
 use crate::DeviceId;
+use std::fmt::Debug;
 
 /// 设备身份的抽象。
 ///

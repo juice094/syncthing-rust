@@ -212,7 +212,10 @@ impl LocalDiscovery {
             if iface.is_broadcast() {
                 for net in &iface.ipv4 {
                     let bcast: std::net::Ipv4Addr = net.broadcast();
-                    targets.push(SocketAddr::V4(SocketAddrV4::new(bcast, LOCAL_DISCOVERY_PORT)));
+                    targets.push(SocketAddr::V4(SocketAddrV4::new(
+                        bcast,
+                        LOCAL_DISCOVERY_PORT,
+                    )));
                 }
             }
 
@@ -254,9 +257,11 @@ impl LocalDiscovery {
         packet.extend_from_slice(&payload);
 
         // IPv4 socket for broadcast
-        let v4_socket = UdpSocket::bind("0.0.0.0:0").await
+        let v4_socket = UdpSocket::bind("0.0.0.0:0")
+            .await
             .map_err(|e| SyncthingError::network(format!("v4 bind failed: {}", e)))?;
-        v4_socket.set_broadcast(true)
+        v4_socket
+            .set_broadcast(true)
             .map_err(|e| SyncthingError::network(format!("set_broadcast failed: {}", e)))?;
 
         // IPv6 socket for multicast
@@ -295,11 +300,14 @@ impl LocalDiscovery {
     /// Returns the first valid Announce received (for testing).
     pub async fn listen_once(&self) -> Result<(Announce, SocketAddr)> {
         let bind_addr = SocketAddr::from(([0, 0, 0, 0], self.port));
-        let socket = UdpSocket::bind(bind_addr).await
+        let socket = UdpSocket::bind(bind_addr)
+            .await
             .map_err(|e| SyncthingError::network(format!("bind failed: {}", e)))?;
 
         let mut buf = vec![0u8; 65536];
-        let (len, addr) = socket.recv_from(&mut buf).await
+        let (len, addr) = socket
+            .recv_from(&mut buf)
+            .await
             .map_err(|e| SyncthingError::network(format!("recv failed: {}", e)))?;
 
         if len < 4 {
@@ -308,7 +316,10 @@ impl LocalDiscovery {
 
         let magic = u32::from_be_bytes([buf[0], buf[1], buf[2], buf[3]]);
         if magic != LOCAL_DISCOVERY_MAGIC {
-            return Err(SyncthingError::protocol(format!("magic mismatch: {:08x}", magic)));
+            return Err(SyncthingError::protocol(format!(
+                "magic mismatch: {:08x}",
+                magic
+            )));
         }
 
         let announce = Announce::decode(&buf[4..len])?;
@@ -328,23 +339,25 @@ impl LocalDiscovery {
 
         // IPv4 listen socket
         let v4_bind = SocketAddr::from(([0, 0, 0, 0], self.port));
-        let v4_socket = UdpSocket::bind(v4_bind).await
+        let v4_socket = UdpSocket::bind(v4_bind)
+            .await
             .map_err(|e| SyncthingError::network(format!("v4 listen bind failed: {}", e)))?;
 
         // IPv6 listen socket (optional)
-        let v6_socket = match UdpSocket::bind(SocketAddr::from(([0, 0, 0, 0, 0, 0, 0, 0], self.port))).await {
-            Ok(s) => {
-                // Join the multicast group on all IPv6-capable interfaces
-                if let Err(e) = s.join_multicast_v6(&LOCAL_DISCOVERY_V6_MULTICAST, 0) {
-                    tracing::warn!("Failed to join IPv6 multicast group: {}", e);
+        let v6_socket =
+            match UdpSocket::bind(SocketAddr::from(([0, 0, 0, 0, 0, 0, 0, 0], self.port))).await {
+                Ok(s) => {
+                    // Join the multicast group on all IPv6-capable interfaces
+                    if let Err(e) = s.join_multicast_v6(&LOCAL_DISCOVERY_V6_MULTICAST, 0) {
+                        tracing::warn!("Failed to join IPv6 multicast group: {}", e);
+                    }
+                    Some(s)
                 }
-                Some(s)
-            }
-            Err(e) => {
-                tracing::debug!("IPv6 listen bind failed (expected if no IPv6): {}", e);
-                None
-            }
-        };
+                Err(e) => {
+                    tracing::debug!("IPv6 listen bind failed (expected if no IPv6): {}", e);
+                    None
+                }
+            };
 
         let mut v4_buf = vec![0u8; 65536];
         let mut v6_buf = vec![0u8; 65536];
@@ -381,24 +394,30 @@ impl LocalDiscovery {
     ) {
         match result {
             Ok((len, addr)) => {
-                if len < 4 { return; }
+                if len < 4 {
+                    return;
+                }
                 let magic = u32::from_be_bytes([buf[0], buf[1], buf[2], buf[3]]);
-                if magic != LOCAL_DISCOVERY_MAGIC { return; }
+                if magic != LOCAL_DISCOVERY_MAGIC {
+                    return;
+                }
                 match Announce::decode(&buf[4..len]) {
                     Ok(announce) => {
                         match DeviceId::from_bytes(&announce.id) {
                             Ok(device_id) if device_id != *self_device_id => {
                                 tracing::info!(
                                     "Local discovery: {} at {:?} (from {})",
-                                    device_id, announce.addresses, addr
+                                    device_id,
+                                    announce.addresses,
+                                    addr
                                 );
-                                let _ = event_tx.send(
-                                    super::events::DiscoveryEvent::DeviceDiscovered {
+                                let _ = event_tx
+                                    .send(super::events::DiscoveryEvent::DeviceDiscovered {
                                         device_id,
                                         addresses: announce.addresses,
                                         source: super::events::DiscoverySource::Local,
-                                    }
-                                ).await;
+                                    })
+                                    .await;
                             }
                             Ok(_) => {
                                 // Own announce, ignore
@@ -480,7 +499,8 @@ mod tests {
         use std::str::FromStr;
         let device_id = syncthing_core::DeviceId::from_str(
             "YTKWHNG-OT27ZGH-6VVBRIJ-OHOUNWT-DYLJ2NR-TCXUXHI-QDUQR2U-OPLCBQG",
-        ).unwrap();
+        )
+        .unwrap();
         let addrs = vec!["tcp://127.0.0.1:22001".to_string()];
         // Use an ephemeral port to avoid Windows bind conflicts (os error 10048)
         let temp = std::net::UdpSocket::bind("0.0.0.0:0").unwrap();
@@ -490,9 +510,7 @@ mod tests {
         let discovery = LocalDiscovery::new(device_id, addrs.clone()).with_port(port);
 
         // Spawn listener
-        let listen_handle = tokio::spawn(async move {
-            discovery.listen_once().await
-        });
+        let listen_handle = tokio::spawn(async move { discovery.listen_once().await });
 
         // Give listener time to bind
         tokio::time::sleep(Duration::from_millis(200)).await;
@@ -513,6 +531,10 @@ mod tests {
 
         assert_eq!(received.id, device_id.as_bytes().to_vec());
         assert_eq!(received.addresses, addrs);
-        assert!(from_addr.ip().is_loopback() || from_addr.ip().is_unspecified() || from_addr.ip().is_ipv4());
+        assert!(
+            from_addr.ip().is_loopback()
+                || from_addr.ip().is_unspecified()
+                || from_addr.ip().is_ipv4()
+        );
     }
 }

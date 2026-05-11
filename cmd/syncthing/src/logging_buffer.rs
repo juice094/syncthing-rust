@@ -1,6 +1,6 @@
+use parking_lot::Mutex;
 use std::collections::VecDeque;
 use std::sync::Arc;
-use parking_lot::Mutex;
 use tracing_subscriber::Layer;
 
 /// 内存日志 Ring Buffer

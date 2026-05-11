@@ -52,8 +52,7 @@ use tokio::time::timeout;
 fn encode_ipv4_mapped(ip: std::net::Ipv4Addr) -> [u8; 16] {
     let octets = ip.octets();
     [
-        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0xff, 0xff,
-        octets[0], octets[1], octets[2], octets[3],
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0xff, 0xff, octets[0], octets[1], octets[2], octets[3],
     ]
 }
 
@@ -62,8 +61,8 @@ pub fn build_pcp_announce_request(my_ip: std::net::Ipv4Addr) -> Vec<u8> {
     let mut pkt = vec![0u8; 24];
     pkt[0] = PCP_VERSION;
     pkt[1] = PCP_OP_ANNOUNCE; // R=0, OpCode=0
-    // pkt[2..4] reserved = 0
-    // pkt[4..8] lifetime = 0 for announce
+                              // pkt[2..4] reserved = 0
+                              // pkt[4..8] lifetime = 0 for announce
     let ip_bytes = encode_ipv4_mapped(my_ip);
     pkt[8..24].copy_from_slice(&ip_bytes);
     pkt
@@ -81,7 +80,7 @@ pub fn build_pcp_request_mapping_packet(
     // Common header (24 bytes)
     pkt[0] = PCP_VERSION;
     pkt[1] = PCP_OP_MAP; // R=0, OpCode=1
-    // pkt[2..4] reserved = 0
+                         // pkt[2..4] reserved = 0
     pkt[4..8].copy_from_slice(&lifetime_sec.to_be_bytes());
     let ip_bytes = encode_ipv4_mapped(my_ip);
     pkt[8..24].copy_from_slice(&ip_bytes);
@@ -89,7 +88,7 @@ pub fn build_pcp_request_mapping_packet(
     // Opcode-specific data (36 bytes)
     // pkt[24..36] nonce = 0 (12 bytes)
     pkt[36] = PCP_UDP_MAPPING; // Protocol = UDP
-    // pkt[37..40] reserved = 0
+                               // pkt[37..40] reserved = 0
     pkt[40..42].copy_from_slice(&local_port.to_be_bytes());
     pkt[42..44].copy_from_slice(&prev_port.to_be_bytes());
     let ext_ip_bytes = encode_ipv4_mapped(prev_external_ip);
@@ -150,32 +149,49 @@ pub async fn allocate_port(
     local_port: u16,
     my_ip: std::net::Ipv4Addr,
 ) -> Result<(std::net::SocketAddr, PcpMappingState)> {
-    let socket = UdpSocket::bind("0.0.0.0:0").await
-        .map_err(|e| syncthing_core::SyncthingError::connection(format!("PCP bind failed: {}", e)))?;
+    let socket = UdpSocket::bind("0.0.0.0:0").await.map_err(|e| {
+        syncthing_core::SyncthingError::connection(format!("PCP bind failed: {}", e))
+    })?;
 
-    let pkt = build_pcp_request_mapping_packet(my_ip, local_port, local_port, PCP_MAP_LIFETIME_SEC, std::net::Ipv4Addr::UNSPECIFIED);
-    socket.send_to(&pkt, gateway).await
-        .map_err(|e| syncthing_core::SyncthingError::connection(format!("PCP send failed: {}", e)))?;
+    let pkt = build_pcp_request_mapping_packet(
+        my_ip,
+        local_port,
+        local_port,
+        PCP_MAP_LIFETIME_SEC,
+        std::net::Ipv4Addr::UNSPECIFIED,
+    );
+    socket.send_to(&pkt, gateway).await.map_err(|e| {
+        syncthing_core::SyncthingError::connection(format!("PCP send failed: {}", e))
+    })?;
 
     let mut buf = [0u8; 60];
-    let (len, _) = timeout(Duration::from_secs(5), socket.recv_from(&mut buf)).await
+    let (len, _) = timeout(Duration::from_secs(5), socket.recv_from(&mut buf))
+        .await
         .map_err(|_| syncthing_core::SyncthingError::connection("PCP mapping timeout"))?
-        .map_err(|e| syncthing_core::SyncthingError::connection(format!("PCP recv failed: {}", e)))?;
+        .map_err(|e| {
+            syncthing_core::SyncthingError::connection(format!("PCP recv failed: {}", e))
+        })?;
 
     let resp = parse_pcp_response(&buf[..len])
         .ok_or_else(|| syncthing_core::SyncthingError::connection("PCP invalid response"))?;
 
     if resp.result_code != PCP_CODE_OK {
-        return Err(syncthing_core::SyncthingError::connection(format!("PCP error code: {}", resp.result_code)));
+        return Err(syncthing_core::SyncthingError::connection(format!(
+            "PCP error code: {}",
+            resp.result_code
+        )));
     }
 
     if len < 60 {
-        return Err(syncthing_core::SyncthingError::connection("PCP MAP response too short"));
+        return Err(syncthing_core::SyncthingError::connection(
+            "PCP MAP response too short",
+        ));
     }
 
     // MAP response: external port at offset 42..44, external IP at 44..60 (IPv4-mapped IPv6)
     let external_port = u16::from_be_bytes([buf[42], buf[43]]);
-    let external_ip = std::net::Ipv4Addr::new(buf[44 + 12], buf[44 + 13], buf[44 + 14], buf[44 + 15]);
+    let external_ip =
+        std::net::Ipv4Addr::new(buf[44 + 12], buf[44 + 13], buf[44 + 14], buf[44 + 15]);
 
     let external_addr = std::net::SocketAddr::from((external_ip, external_port));
     let state = PcpMappingState {

@@ -1,11 +1,11 @@
 //! 同步任务管理
-//! 
+//!
 //! 管理同步任务队列和执行
 
 use crate::error::Result;
-use syncthing_core::types::FileInfo;
 use std::collections::VecDeque;
 use std::sync::Arc;
+use syncthing_core::types::FileInfo;
 use tokio::sync::Mutex;
 use tracing::{debug, trace};
 
@@ -22,19 +22,19 @@ pub struct SyncTask {
 /// 任务来源
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TaskSource {
-    Local,      // 本地变更
-    Remote,     // 远程同步
-    Manual,     // 手动触发
+    Local,  // 本地变更
+    Remote, // 远程同步
+    Manual, // 手动触发
 }
 
 /// 任务优先级
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum TaskPriority {
-    Critical = 0,  // 关键任务（如删除操作）
-    High = 1,      // 高优先级
-    Normal = 2,    // 普通优先级
-    Low = 3,       // 低优先级
-    Background = 4,// 后台任务
+    Critical = 0,   // 关键任务（如删除操作）
+    High = 1,       // 高优先级
+    Normal = 2,     // 普通优先级
+    Low = 3,        // 低优先级
+    Background = 4, // 后台任务
 }
 
 impl SyncTask {
@@ -74,19 +74,22 @@ impl TaskQueue {
     /// 添加任务
     pub async fn push(&self, task: SyncTask) -> Result<()> {
         let mut queue = self.queue.lock().await;
-        
+
         if queue.len() >= self.max_size {
-            return Err(crate::error::SyncError::Other("Task queue is full".to_string()));
+            return Err(crate::error::SyncError::Other(
+                "Task queue is full".to_string(),
+            ));
         }
 
         // 按优先级插入
-        let insert_pos = queue.iter()
+        let insert_pos = queue
+            .iter()
             .position(|t| t.priority > task.priority)
             .unwrap_or(queue.len());
-        
+
         queue.insert(insert_pos, task);
         debug!(queue_size = queue.len(), "Task added to queue");
-        
+
         Ok(())
     }
 
@@ -127,7 +130,7 @@ impl TaskQueue {
     pub async fn remove_file(&self, folder: &str, file_name: &str) -> Vec<SyncTask> {
         let mut queue = self.queue.lock().await;
         let mut removed = Vec::new();
-        
+
         queue.retain(|task| {
             let matches = task.folder == folder && task.file.name == file_name;
             if matches {
@@ -135,14 +138,15 @@ impl TaskQueue {
             }
             !matches
         });
-        
+
         removed
     }
 
     /// 获取指定文件夹的所有任务
     pub async fn get_folder_tasks(&self, folder: &str) -> Vec<SyncTask> {
         let queue = self.queue.lock().await;
-        queue.iter()
+        queue
+            .iter()
             .filter(|t| t.folder == folder)
             .cloned()
             .collect()
@@ -189,7 +193,7 @@ impl TaskExecutor {
                         };
 
                         let handler_future = handler(task);
-                        
+
                         tokio::spawn(async move {
                             let _permit = permit;
                             if let Err(e) = handler_future.await {

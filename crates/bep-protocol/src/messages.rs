@@ -35,7 +35,11 @@ pub struct Hello {
 
 impl Hello {
     /// 创建新的Hello消息
-    pub fn new(device_name: impl Into<String>, client_name: impl Into<String>, client_version: impl Into<String>) -> Self {
+    pub fn new(
+        device_name: impl Into<String>,
+        client_name: impl Into<String>,
+        client_version: impl Into<String>,
+    ) -> Self {
         Self {
             device_name: device_name.into(),
             client_name: client_name.into(),
@@ -117,60 +121,73 @@ impl Hello {
             let wire_type = tag & 0x07;
 
             match (field_num, wire_type) {
-                (1, 2) => { // device_name
+                (1, 2) => {
+                    // device_name
                     let (len, bytes_read) = read_varint(&buf[pos..])?;
                     pos += bytes_read;
                     if pos + len as usize > buf.len() {
                         return Err(crate::SyncthingError::protocol("truncated device_name"));
                     }
-                    hello.device_name = String::from_utf8_lossy(&buf[pos..pos + len as usize]).to_string();
+                    hello.device_name =
+                        String::from_utf8_lossy(&buf[pos..pos + len as usize]).to_string();
                     pos += len as usize;
                 }
-                (2, 2) => { // client_name
+                (2, 2) => {
+                    // client_name
                     let (len, bytes_read) = read_varint(&buf[pos..])?;
                     pos += bytes_read;
                     if pos + len as usize > buf.len() {
                         return Err(crate::SyncthingError::protocol("truncated client_name"));
                     }
-                    hello.client_name = String::from_utf8_lossy(&buf[pos..pos + len as usize]).to_string();
+                    hello.client_name =
+                        String::from_utf8_lossy(&buf[pos..pos + len as usize]).to_string();
                     pos += len as usize;
                 }
-                (3, 2) => { // client_version
+                (3, 2) => {
+                    // client_version
                     let (len, bytes_read) = read_varint(&buf[pos..])?;
                     pos += bytes_read;
                     if pos + len as usize > buf.len() {
                         return Err(crate::SyncthingError::protocol("truncated client_version"));
                     }
-                    hello.client_version = String::from_utf8_lossy(&buf[pos..pos + len as usize]).to_string();
+                    hello.client_version =
+                        String::from_utf8_lossy(&buf[pos..pos + len as usize]).to_string();
                     pos += len as usize;
                 }
-                (4, 0) => { // num_connections
+                (4, 0) => {
+                    // num_connections
                     let (val, bytes_read) = read_varint(&buf[pos..])?;
                     pos += bytes_read;
                     hello.num_connections = val as i32;
                 }
-                (5, 0) => { // timestamp
+                (5, 0) => {
+                    // timestamp
                     let (val, bytes_read) = read_varint(&buf[pos..])?;
                     pos += bytes_read;
                     hello.timestamp = val as i64;
                 }
-                (_, 2) => { // unknown string field, skip
+                (_, 2) => {
+                    // unknown string field, skip
                     let (len, bytes_read) = read_varint(&buf[pos..])?;
                     pos += bytes_read + len as usize;
                 }
-                (_, 0) => { // unknown varint field, skip
+                (_, 0) => {
+                    // unknown varint field, skip
                     let (_, bytes_read) = read_varint(&buf[pos..])?;
                     pos += bytes_read;
                 }
-                (_, 1) => { // unknown 64-bit field, skip
+                (_, 1) => {
+                    // unknown 64-bit field, skip
                     pos += 8;
                 }
-                (_, 5) => { // unknown 32-bit field, skip
+                (_, 5) => {
+                    // unknown 32-bit field, skip
                     pos += 4;
                 }
                 _ => {
                     return Err(crate::SyncthingError::protocol(format!(
-                        "unknown wire type: {}", wire_type
+                        "unknown wire type: {}",
+                        wire_type
                     )));
                 }
             }
@@ -533,8 +550,7 @@ pub fn encode_message<M: prost::Message>(msg: &M) -> crate::Result<bytes::Bytes>
 }
 
 pub fn decode_message<M: prost::Message + Default>(buf: &[u8]) -> crate::Result<M> {
-    M::decode(buf)
-        .map_err(|e| crate::SyncthingError::protocol(format!("decode failed: {}", e)))
+    M::decode(buf).map_err(|e| crate::SyncthingError::protocol(format!("decode failed: {}", e)))
 }
 
 // ============================================
@@ -554,11 +570,7 @@ impl From<syncthing_core::types::Vector> for WireVector {
 
 impl From<WireVector> for syncthing_core::types::Vector {
     fn from(v: WireVector) -> Self {
-        let counters = v
-            .counters
-            .into_iter()
-            .map(|c| (c.id, c.value))
-            .collect();
+        let counters = v.counters.into_iter().map(|c| (c.id, c.value)).collect();
         Self { counters }
     }
 }
@@ -618,7 +630,9 @@ impl From<WireFileInfo> for syncthing_core::types::FileInfo {
         Self {
             name: f.name,
             file_type: match f.r#type {
-                x if x == FileInfoType::Directory as i32 => syncthing_core::types::FileType::Directory,
+                x if x == FileInfoType::Directory as i32 => {
+                    syncthing_core::types::FileType::Directory
+                }
                 x if x == FileInfoType::Symlink as i32 => syncthing_core::types::FileType::Symlink,
                 _ => syncthing_core::types::FileType::File,
             },
@@ -737,13 +751,29 @@ mod tests {
 
     #[test]
     fn test_varint_roundtrip() {
-        let test_values = [0u64, 1, 127, 128, 255, 256, 16383, 16384, 65535, 65536, u32::MAX as u64];
-        
+        let test_values = [
+            0u64,
+            1,
+            127,
+            128,
+            255,
+            256,
+            16383,
+            16384,
+            65535,
+            65536,
+            u32::MAX as u64,
+        ];
+
         for &value in &test_values {
             let mut buf = BytesMut::new();
             put_varint(&mut buf, value);
             let (decoded, bytes_read) = read_varint(&buf).unwrap();
-            assert_eq!(decoded, value, "varint {} encoded to {:?}, decoded to {}", value, buf, decoded);
+            assert_eq!(
+                decoded, value,
+                "varint {} encoded to {:?}, decoded to {}",
+                value, buf, decoded
+            );
             assert_eq!(bytes_read, buf.len());
         }
     }

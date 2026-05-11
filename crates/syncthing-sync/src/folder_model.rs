@@ -1,18 +1,18 @@
 //! 文件夹模型实现
-//! 
+//!
 //! 实现文件夹级别的扫描和拉取循环
 
 use crate::database::LocalDatabase;
 use crate::error::Result;
 use crate::events::{EventPublisher, SyncEvent};
 use crate::model::FolderState;
-use crate::puller::{Puller, BlockSource};
+use crate::puller::{BlockSource, Puller};
 use crate::scanner::Scanner;
 use crate::watcher::FolderWatcher;
-use syncthing_core::DeviceId;
-use syncthing_core::types::{FileInfo, Folder, FolderStatus, FolderType};
 use std::sync::Arc;
 use std::time::Duration;
+use syncthing_core::types::{FileInfo, Folder, FolderStatus, FolderType};
+use syncthing_core::DeviceId;
 use tokio::sync::RwLock;
 use tracing::{debug, error, info, trace, warn};
 
@@ -38,8 +38,7 @@ impl FolderModel {
         block_source: Option<Arc<dyn BlockSource>>,
     ) -> Self {
         let scanner = Scanner::new(db.clone(), events.clone());
-        let puller = Puller::new(db.clone(), events.clone())
-            .with_block_source(block_source);
+        let puller = Puller::new(db.clone(), events.clone()).with_block_source(block_source);
         let folder_id = folder.id.clone();
         Self {
             folder,
@@ -197,7 +196,7 @@ impl FolderModel {
         }
 
         let mut state = self.state.write().await;
-        
+
         // 更新状态
         let old_status = state.status;
         state.status = FolderStatus::Scanning;
@@ -239,10 +238,10 @@ impl FolderModel {
             Err(e) => {
                 let err_str = e.to_string();
                 error!(folder_id = %self.folder.id, error = %err_str, "Scan failed");
-                
+
                 let mut state = self.state.write().await;
                 state.errors.push(err_str);
-                
+
                 // 恢复状态
                 state.status = old_status;
                 self.events.publish(SyncEvent::FolderStateChanged {
@@ -250,7 +249,7 @@ impl FolderModel {
                     from: FolderStatus::Scanning,
                     to: old_status,
                 });
-                
+
                 return Err(e);
             }
         };
@@ -259,7 +258,7 @@ impl FolderModel {
         let mut state = self.state.write().await;
         state.status = FolderStatus::Idle;
         state.last_scan = Some(chrono::Utc::now());
-        
+
         // 更新文件计数
         if let Ok(all_files) = self.db.get_folder_files(&self.folder.id).await {
             let files: &Vec<syncthing_core::types::FileInfo> = &all_files;
@@ -288,7 +287,7 @@ impl FolderModel {
         }
 
         let mut state = self.state.write().await;
-        
+
         // 如果已经在拉取中，跳过
         if state.status == FolderStatus::Pulling {
             trace!(folder_id = %self.folder.id, "Already pulling, skipping");
@@ -313,13 +312,13 @@ impl FolderModel {
             let mut pending = self.pending_pulls.write().await;
             std::mem::take(&mut *pending)
         };
-        
+
         // 2. 再检查文件系统状态（补充本地缺失的文件）
         let fs_needed = match self.puller.check_needed_files(&self.folder).await {
             Ok(files) => files,
             Err(e) => {
                 error!(folder_id = %self.folder.id, error = %e, "Failed to check needed files");
-                
+
                 let mut state = self.state.write().await;
                 state.status = old_status;
                 self.events.publish(SyncEvent::FolderStateChanged {
@@ -327,11 +326,11 @@ impl FolderModel {
                     from: FolderStatus::Pulling,
                     to: old_status,
                 });
-                
+
                 return Err(e);
             }
         };
-        
+
         // 合并 pending_pulls 和 fs_needed，去重
         for file in fs_needed {
             if !pending_files.iter().any(|f| f.name == file.name) {
@@ -342,7 +341,7 @@ impl FolderModel {
 
         if needed_files.is_empty() {
             debug!(folder_id = %self.folder.id, "No files need pulling");
-            
+
             let mut state = self.state.write().await;
             state.status = old_status;
             self.events.publish(SyncEvent::FolderStateChanged {
@@ -350,7 +349,7 @@ impl FolderModel {
                 from: FolderStatus::Pulling,
                 to: old_status,
             });
-            
+
             return Ok(());
         }
 
@@ -398,7 +397,7 @@ impl FolderModel {
             }
             Err(e) => {
                 error!(folder_id = %self.folder.id, error = %e, "Pull failed");
-                
+
                 let mut state = self.state.write().await;
                 state.status = old_status;
                 state.errors.push(e.to_string());
@@ -408,7 +407,7 @@ impl FolderModel {
                     from: FolderStatus::Pulling,
                     to: old_status,
                 });
-                
+
                 return Err(e);
             }
         }
@@ -417,11 +416,7 @@ impl FolderModel {
     }
 
     /// 处理远程索引
-    pub async fn handle_remote_index(
-        &self,
-        device: DeviceId,
-        files: Vec<FileInfo>,
-    ) -> Result<()> {
+    pub async fn handle_remote_index(&self, device: DeviceId, files: Vec<FileInfo>) -> Result<()> {
         debug!(
             folder_id = %self.folder.id,
             device = %device.short_id(),
@@ -441,10 +436,10 @@ impl FolderModel {
         }
 
         // 唤醒 pull loop 立即处理远程索引
-        // 使用 notify_one 而非 notify_waiters，确保即使 pull loop 正在执行 pull() 
+        // 使用 notify_one 而非 notify_waiters，确保即使 pull loop 正在执行 pull()
         // 也能在完成后立即收到通知，不会丢失唤醒信号。
         self.pull_notify.notify_one();
-        
+
         Ok(())
     }
 
@@ -492,8 +487,12 @@ impl FolderModel {
             updated.push(file);
         }
 
-        self.db.update_files(&self.folder.id, updated).await
-            .map_err(|e| crate::SyncError::scan(self.folder.id.clone(), format!("db update failed: {}", e)))?;
+        self.db
+            .update_files(&self.folder.id, updated)
+            .await
+            .map_err(|e| {
+                crate::SyncError::scan(self.folder.id.clone(), format!("db update failed: {}", e))
+            })?;
 
         info!(folder_id = %self.folder.id, count = count, "Override accepted local changes");
         Ok(())
@@ -530,7 +529,11 @@ impl FolderModel {
 
             if should_delete {
                 if let Err(e) = tokio::fs::remove_file(&local_path).await {
-                    warn!("Failed to delete {} for revert: {}", local_path.display(), e);
+                    warn!(
+                        "Failed to delete {} for revert: {}",
+                        local_path.display(),
+                        e
+                    );
                 } else {
                     deleted_count += 1;
                 }
@@ -562,7 +565,13 @@ mod tests {
 
     #[async_trait::async_trait]
     impl BlockSource for MockBlockSource {
-        async fn request_block(&self, _folder: &str, _file: &str, _block: &BlockInfo, _block_no: usize) -> crate::error::Result<Bytes> {
+        async fn request_block(
+            &self,
+            _folder: &str,
+            _file: &str,
+            _block: &BlockInfo,
+            _block_no: usize,
+        ) -> crate::error::Result<Bytes> {
             Ok(self.data.clone())
         }
     }
@@ -572,7 +581,7 @@ mod tests {
         let db = MemoryDatabase::new();
         let events = EventPublisher::new(10);
         let folder = Folder::new("test", "/tmp/test");
-        
+
         let model = FolderModel::new(folder, db, events, None);
         assert_eq!(model.id(), "test");
     }
@@ -584,11 +593,11 @@ mod tests {
 
         let db = MemoryDatabase::new();
         let events = EventPublisher::new(10);
-        
+
         let temp_dir = tempfile::tempdir().unwrap();
         let folder_path = temp_dir.path().to_path_buf();
         let folder = Folder::new("test-folder", folder_path.to_str().unwrap());
-        
+
         // 准备测试数据
         let test_data = b"notify pull test";
         let hash = sha2::Sha256::digest(test_data);
@@ -610,26 +619,31 @@ mod tests {
             symlink_target: None,
             deleted: Some(false),
         };
-        
+
         // 模拟远程索引已更新到 DB
         db.update_file(&folder.id, file_info).await.unwrap();
-        
+
         let mock_source = std::sync::Arc::new(MockBlockSource {
             data: Bytes::from_static(test_data),
         });
-        let model = std::sync::Arc::new(FolderModel::new(folder, db.clone(), events, Some(mock_source)));
-        
+        let model = std::sync::Arc::new(FolderModel::new(
+            folder,
+            db.clone(),
+            events,
+            Some(mock_source),
+        ));
+
         // 启动 pull loop
         let (tx, rx) = tokio::sync::watch::channel(false);
         let model_clone = std::sync::Arc::clone(&model);
         let handle = tokio::spawn(async move {
             model_clone.start_pull_loop(rx).await;
         });
-        
+
         // 调用 handle_remote_index 唤醒 pull loop
         let device = syncthing_core::DeviceId::default();
         model.handle_remote_index(device, vec![]).await.unwrap();
-        
+
         // 等待 pull loop 执行（最多 5 秒）
         tokio::time::timeout(tokio::time::Duration::from_secs(5), async {
             loop {
@@ -639,14 +653,16 @@ mod tests {
                     break;
                 }
             }
-        }).await.unwrap();
-        
+        })
+        .await
+        .unwrap();
+
         // 验证文件被下载
         let file_path = folder_path.join("notify_test.txt");
         assert!(file_path.exists(), "File should be pulled after notify");
         let content = tokio::fs::read_to_string(&file_path).await.unwrap();
         assert_eq!(content, "notify pull test");
-        
+
         // 停止 pull loop
         tx.send(true).unwrap();
         handle.await.unwrap();
