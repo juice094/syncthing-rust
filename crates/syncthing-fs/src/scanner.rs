@@ -8,8 +8,10 @@
 //! detecting file changes and content deduplication.
 
 use std::path::Path;
+use std::sync::OnceLock;
 use std::time::SystemTime;
 
+use rayon::prelude::*;
 use syncthing_core::{BlockHash, BlockInfo, FileInfo, FileType, Result, SyncthingError};
 use tokio::fs::File;
 use tokio::io::AsyncReadExt;
@@ -85,9 +87,29 @@ pub async fn scan_file(path: &Path, block_size: usize) -> Result<FileInfo> {
     Ok(info)
 }
 
+/// Number of blocks to accumulate before dispatching to the parallel hash pool.
+/// TUNING_PLAN T-B1: batch size chosen to amortize spawn_blocking overhead
+/// while keeping memory footprint reasonable (32 × 128 KiB ≈ 4 MiB per batch).
+const HASH_BATCH_SIZE: usize = 32;
+
+/// Thread pool dedicated to SHA-256 block hashing.
+/// Isolated from tokio's blocking pool to avoid starving I/O tasks.
+fn hash_pool() -> &'static rayon::ThreadPool {
+    static POOL: OnceLock<rayon::ThreadPool> = OnceLock::new();
+    POOL.get_or_init(|| {
+        rayon::ThreadPoolBuilder::new()
+            .num_threads(num_cpus::get().max(2))
+            .thread_name(|i| format!("hash-worker-{}", i))
+            .build()
+            .expect("hash thread pool")
+    })
+}
+
 /// Compute block hashes for a file
 ///
 /// Reads the file in chunks and computes SHA-256 hashes for each block.
+/// CPU-bound hashing is offloaded to a dedicated rayon pool via
+/// `tokio::task::spawn_blocking` (TUNING_PLAN T-B1).
 async fn compute_block_hashes(path: &Path, block_size: usize) -> Result<Vec<BlockInfo>> {
     let mut file = File::open(path).await.map_err(SyncthingError::Io)?;
     let metadata = file.metadata().await.map_err(SyncthingError::Io)?;
@@ -95,22 +117,39 @@ async fn compute_block_hashes(path: &Path, block_size: usize) -> Result<Vec<Bloc
 
     let mut blocks = Vec::new();
     let mut offset: u64 = 0;
-    let mut buffer = vec![0u8; block_size];
 
-    while offset < file_size {
-        let bytes_read = file.read(&mut buffer).await.map_err(SyncthingError::Io)?;
-        if bytes_read == 0 {
+    loop {
+        let mut batch: Vec<(u64, Vec<u8>)> = Vec::with_capacity(HASH_BATCH_SIZE);
+        while batch.len() < HASH_BATCH_SIZE && offset < file_size {
+            let mut chunk = vec![0u8; block_size];
+            let n = file.read(&mut chunk).await.map_err(SyncthingError::Io)?;
+            if n == 0 {
+                break;
+            }
+            chunk.truncate(n);
+            batch.push((offset, chunk));
+            offset += n as u64;
+        }
+        if batch.is_empty() {
             break;
         }
 
-        let hash = hash_block(&buffer[..bytes_read]);
-        blocks.push(BlockInfo {
-            hash: hash.to_vec(),
-            offset: offset as i64,
-            size: bytes_read as i32,
-        });
+        let hashed = tokio::task::spawn_blocking(move || {
+            hash_pool().install(|| {
+                batch
+                    .into_par_iter()
+                    .map(|(off, chunk)| BlockInfo {
+                        hash: BlockHash::from_data(&chunk).to_vec(),
+                        offset: off as i64,
+                        size: chunk.len() as i32,
+                    })
+                    .collect::<Vec<BlockInfo>>()
+            })
+        })
+        .await
+        .map_err(|e| SyncthingError::io(format!("hash task failed: {}", e)))?;
 
-        offset += bytes_read as u64;
+        blocks.extend(hashed);
     }
 
     Ok(blocks)

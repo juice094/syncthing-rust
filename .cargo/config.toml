@@ -1,0 +1,17 @@
+# Cargo profile configuration for syncthing-rust
+# 制定日期: 2026-05-11 (TUNING_PLAN T-G1)
+# 用途：开发期使用 release-thin profile 缩短编译，正式发布仍用 release（full LTO）
+
+[profile.release-thin]
+inherits = "release"
+lto = "thin"
+codegen-units = 16
+opt-level = 3
+# 与 release 的差异：lto thin（编译快 2~3 倍）+ codegen-units 16（并行化）
+# 适用场景：开发期 PR 验证、性能基准 baseline 建立
+# 不适用场景：正式 v0.2.x release（仍用 [profile.release] full LTO）
+
+[profile.bench]
+inherits = "release"
+debug = true
+# criterion 需要 debug 信息以便 flamegraph 关联源码行

@@ -18,3 +18,8 @@ parking_lot = { workspace = true }
 tokio-test = "0.4"
 tracing-subscriber = { workspace = true }
 syncthing-test-utils = { path = "../syncthing-test-utils" }
+criterion = { workspace = true }
+
+[[bench]]
+name = "encode_decode"
+harness = false

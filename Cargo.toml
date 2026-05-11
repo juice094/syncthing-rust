@@ -60,6 +60,16 @@ walkdir = "2"
 # 可选传输层
 tokio-tungstenite = "0.24"
 
+# 日志切片（T-F3）
+tracing-appender = "0.2"
+
+# 并行计算（T-B1 scanner 哈希）
+rayon = "1.10"
+num_cpus = "1.16"
+
+# 基准测试（T-A1）
+criterion = { version = "0.5", features = ["html_reports", "async_tokio"] }
+
 [profile.release]
 lto = true
 codegen-units = 1

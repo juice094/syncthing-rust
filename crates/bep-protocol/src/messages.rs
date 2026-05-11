@@ -48,10 +48,10 @@ impl Hello {
         }
     }
 
-    /// 编码为Protobuf字节
+    /// 编码为Protobuf字节（零拷贝，返回 `Bytes`）
     ///
-    /// 手动实现Protobuf编码（简化版，不使用prost-build）
-    pub fn encode_to_vec(&self) -> Vec<u8> {
+    /// TUNING_PLAN T-D1：避免 `encode_to_vec` 中的 `to_vec()` 拷贝。
+    pub fn encode_to_bytes(&self) -> bytes::Bytes {
         let mut buf = BytesMut::new();
 
         // field 1: device_name (string, tag = 1 << 3 | 2 = 10)
@@ -84,7 +84,14 @@ impl Hello {
             put_varint(&mut buf, self.timestamp as u64);
         }
 
-        buf.to_vec()
+        buf.freeze()
+    }
+
+    /// 编码为Protobuf字节
+    ///
+    /// 手动实现Protobuf编码（简化版，不使用prost-build）
+    pub fn encode_to_vec(&self) -> Vec<u8> {
+        self.encode_to_bytes().to_vec()
     }
 
     /// 从Protobuf字节解码
