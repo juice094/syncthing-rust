@@ -184,7 +184,8 @@ async fn main() -> anyhow::Result<()> {
     let metrics_report = args.report.with_extension("metrics.csv");
 
     let monitor_task = tokio::spawn(async move {
-        let mut ticker = interval(Duration::from_secs(600));
+        let tick_secs = if duration.as_secs() < 600 { 10 } else { 600 };
+        let mut ticker = interval_at(tokio::time::Instant::now() + Duration::from_secs(5), Duration::from_secs(tick_secs));
         let mut sys = System::new_with_specifics(
             RefreshKind::new().with_processes(ProcessRefreshKind::new()),
         );
