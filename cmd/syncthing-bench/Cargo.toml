@@ -1,6 +1,6 @@
 [package]
 name = "syncthing-bench"
-version = "0.2.0"
+version = "0.2.2"
 edition = "2021"
 description = "Syncthing sync benchmark tool — generates test datasets and verifies sync correctness"
 license = "MIT"

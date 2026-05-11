@@ -8,11 +8,20 @@ on:
 
 env:
   CARGO_TERM_COLOR: always
-  RUST_BACKTRACE: 1
 
 jobs:
-  check:
-    name: Check
+  fmt:
+    name: Formatting
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+      - run: cargo fmt --all -- --check
+
+  clippy:
+    name: Clippy
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -20,26 +29,51 @@ jobs:
         os: [ubuntu-latest, windows-latest]
     steps:
       - uses: actions/checkout@v4
-
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@stable
         with:
-          components: clippy, rustfmt
-
-      - name: Cache cargo registry
-        uses: Swatinem/rust-cache@v2
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
         with:
-          shared-key: "ci-${{ matrix.os }}"
+          shared-key: "clippy-${{ matrix.os }}"
+      - run: cargo clippy --workspace --all-targets -- -D warnings
 
-      - name: Check formatting
-        run: cargo fmt --all -- --check
-
-      - name: Run clippy
-        run: cargo clippy --workspace --all-targets -- -D warnings
-
-      - name: Build workspace
-        run: cargo build --workspace
-
-      - name: Run tests
-        run: cargo test --workspace
+  test:
+    name: Test
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: "test-${{ matrix.os }}"
+      - run: cargo test --workspace
         timeout-minutes: 15
+
+  audit:
+    name: Security Audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: rustsec/audit-check@v1
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+  file-size:
+    name: File Size Check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check Rust source files >600-line soft limit
+        run: |
+          echo "Checking Rust source files >600 lines..."
+          found=$(find crates cmd -name "*.rs" -exec wc -l {} + | awk '$1 > 600 {print $1 " " $2}')
+          if [ -n "$found" ]; then
+            echo "::warning::Files exceeding 600-line soft limit:"
+            echo "$found"
+          else
+            echo "All files within 600-line limit."
+          fi
