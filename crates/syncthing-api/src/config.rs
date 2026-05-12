@@ -235,7 +235,7 @@ impl ConfigStore for JsonConfigStore {
         let stream = JsonConfigStream {
             receiver: rx,
             path: self.path.clone(),
-            cache: cache,
+            cache,
         };
 
         Ok(Box::new(stream))
