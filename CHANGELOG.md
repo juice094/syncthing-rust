@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [0.2.4] — 2026-05-12
 
 ### 🐛 Critical Bug Fixes
 
@@ -11,7 +11,7 @@
   internal `parking_lot::RwLock` would block other tokio workers, eventually
   freezing the entire runtime at ~T+180s.
   - Refactored to use `RegisterAction` enum with explicit lock-release before await.
-  - Verified stable past T+10min in 72h stress test (previously consistently froze at T+180s).
+  - Verified stable past T+8h in 72h stress test (previously consistently froze at T+180s).
   - All 86 `syncthing-net` unit tests pass.
 
 ### 🔧 Stress Test Diagnostics (T-F1)
@@ -22,11 +22,13 @@
 - **rss_mb fix**: `processes_by_exact_name` now correctly looks for `stress_test` instead of `syncthing`.
 - **Daemon stderr capture**: PowerShell launcher now redirects stderr and sets `RUST_BACKTRACE=full`.
 
-### 📋 Documentation
+### 🚀 Performance Benchmarks (T-A1, T-B1)
 
-- New: `docs/reports/STRESS_TEST_DEATH_INVESTIGATION_2026-05-12.md` — full RCA writeup.
-- New: `docs/reports/UNWRAP_AUDIT_2026-05-12.md` — T-F2 complete audit.
-- New: `docs/reports/BASELINE_2026-05-12.md` — full Criterion baseline (scanner + puller + bep encode/decode).
+- **Full Criterion baseline** captured: scanner (1.49 GiB/s @1MiB) + puller (1.46 GiB/s @1MiB) + bep encode/decode (507 MiB/s).
+- **T-B1 rayon validation**: Scanner SHA-256 parallelization gives **9-11x speedup** on multi-block files (20-core machine).
+  - 16 MiB: 2.04 → 19.02 GiB/s (9.32x)
+  - 256 MiB: 2.01 → 23.17 GiB/s (11.51x)
+- **CI bench-smoke job** prevents benchmark rot.
 
 ### 🛡️ Code Quality (T-F2)
 
@@ -46,11 +48,33 @@
   - `connection.rs` (770) → `connection/mod.rs:695 + tests.rs:74`
   - `service.rs` (715) → `service/mod.rs:684 + tests.rs:30`
   - `session.rs` (979) → `session/mod.rs:606 + tests.rs:366`
+- **types/connection.rs extracted** (805 → 639 lines)
 
 ### 🔄 CI (T-G2)
 
 - **New `bench-smoke` job**: Compiles all benchmarks + runs short smoke tests
   with `--output-format bencher`. Prevents bench rot, provides perf data point per PR.
+- **`clippy::await_holding_lock` lint enabled**: Prevents T-F1-class deadlocks at compile time.
+
+### 🧹 Dead Code Cleanup
+
+- Removed truly-dead items: `ConnectionManager::from_arc()` method (28 lines), `PORT_MAP_SERVICE_TIMEOUT` constant.
+- Fixed 4 `redundant_clone` instances (perf micro-opts in EventBus, FolderWatcher, BlockServer).
+- Fixed 1 `redundant_field_names` (config.rs).
+
+### 📋 Documentation
+
+- New: `docs/reports/STRESS_TEST_DEATH_INVESTIGATION_2026-05-12.md` — full T-F1 RCA writeup.
+- New: `docs/reports/UNWRAP_AUDIT_2026-05-12.md` — T-F2 complete audit.
+- New: `docs/reports/BASELINE_2026-05-12.md` — full Criterion baseline + T-B1 results.
+- New: `docs/reports/LOCK_AWAIT_AUDIT_2026-05-12.md` — workspace-wide lock-await audit.
+
+### Stats
+
+- **13 commits** since v0.2.3
+- **295 unit tests** passing
+- **0 clippy warnings** (including new `await_holding_lock`)
+- **72h stress test running** since 13:07 (currently T+8h+ healthy with deadlock fix)
 
 ## [0.2.3] — 2026-05-11
 

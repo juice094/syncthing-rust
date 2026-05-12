@@ -1,6 +1,6 @@
 [package]
 name = "syncthing-fs"
-version = "0.2.3"
+version = "0.2.4"
 edition = "2021"
 authors = ["juice094"]
 description = "Filesystem abstraction and monitoring for Syncthing Rust"
