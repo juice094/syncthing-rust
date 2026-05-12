@@ -103,7 +103,7 @@ impl EventBus {
 
         // Send to WebSocket connections
         let connections = self.connections.clone();
-        let event_clone = event.clone();
+        let event_clone = event;
         tokio::spawn(async move {
             let conns = connections.read().await;
             for (id, tx) in conns.iter() {
