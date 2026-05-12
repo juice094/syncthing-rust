@@ -49,9 +49,9 @@ fn bench_serial_vs_parallel(c: &mut Criterion) {
     // 小数据（<1 MB）：并行可能没有收益（spawn 开销 > 计算）
     // 大数据（>16 MB）：并行应有明显收益（数百 blocks）
     let sizes: Vec<(usize, &str)> = vec![
-        (1 * 1024 * 1024, "1MiB"),    // 8 blocks
-        (16 * 1024 * 1024, "16MiB"),  // 128 blocks
-        (64 * 1024 * 1024, "64MiB"),  // 512 blocks
+        (1024 * 1024, "1MiB"),         // 8 blocks
+        (16 * 1024 * 1024, "16MiB"),   // 128 blocks
+        (64 * 1024 * 1024, "64MiB"),   // 512 blocks
         (256 * 1024 * 1024, "256MiB"), // 2048 blocks
     ];
 
