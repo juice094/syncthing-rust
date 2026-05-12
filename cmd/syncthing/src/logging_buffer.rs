@@ -58,7 +58,7 @@ where
         let msg = format!(
             "[{} {}] {}",
             meta.level(),
-            meta.target().split("::").last().unwrap_or(meta.target()),
+            meta.target().split("::").last().unwrap_or_else(|| meta.target()),
             visitor.0
         );
         self.buffer.push(msg);

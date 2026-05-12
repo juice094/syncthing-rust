@@ -131,7 +131,7 @@ fn run(scenario: Scenario, source: &Path, target: &Path) -> Result<SyncBenchRepo
         .map(|m| {
             let rel = Path::new(&m.path)
                 .strip_prefix(source)
-                .unwrap_or(Path::new(&m.path))
+                .unwrap_or_else(|_| Path::new(&m.path))
                 .to_string_lossy()
                 .to_string();
             (rel, m)
@@ -143,7 +143,7 @@ fn run(scenario: Scenario, source: &Path, target: &Path) -> Result<SyncBenchRepo
         .map(|m| {
             let rel = Path::new(&m.path)
                 .strip_prefix(target)
-                .unwrap_or(Path::new(&m.path))
+                .unwrap_or_else(|_| Path::new(&m.path))
                 .to_string_lossy()
                 .to_string();
             (rel, m)

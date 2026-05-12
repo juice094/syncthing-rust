@@ -114,7 +114,7 @@ impl IgnorePatterns {
             .await
             .map_err(SyncthingError::Io)?;
 
-        let base_dir = path.parent().unwrap_or(Path::new(""));
+        let base_dir = path.parent().unwrap_or_else(|| Path::new(""));
         let mut loaded = HashSet::new();
         loaded.insert(path.to_path_buf());
 
@@ -150,7 +150,7 @@ impl IgnorePatterns {
             .await
             .map_err(SyncthingError::Io)?;
 
-        let base_dir = path.parent().unwrap_or(Path::new("")).to_path_buf();
+        let base_dir = path.parent().unwrap_or_else(|| Path::new("")).to_path_buf();
         let included = Self::parse(&content);
 
         patterns.patterns.extend(included.patterns);
