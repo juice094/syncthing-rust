@@ -98,7 +98,7 @@ impl FolderWatcher {
 
         // Create the notify watcher
         let watcher = {
-            let tx = tx.clone();
+            let tx = tx;
             RecommendedWatcher::new(
                 move |res| {
                     if let Err(e) = tx.try_send(res) {
@@ -164,7 +164,7 @@ impl FolderWatcher {
         let (tx, mut rx) = mpsc::channel::<notify::Result<NotifyEvent>>(1024);
 
         let watcher = {
-            let tx = tx.clone();
+            let tx = tx;
             RecommendedWatcher::new(
                 move |res| {
                     if let Err(e) = tx.try_send(res) {

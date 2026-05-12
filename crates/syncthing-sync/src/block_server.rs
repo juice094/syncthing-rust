@@ -127,7 +127,7 @@ fn serve_block_request_sync(
             // 如果文件不存在，canonicalize 会失败。此时我们退而用规范化后的绝对路径比较前缀
 
             if file_path.is_absolute() {
-                file_path.clone()
+                file_path
             } else {
                 std::env::current_dir()
                     .unwrap_or_else(|_| PathBuf::from("."))

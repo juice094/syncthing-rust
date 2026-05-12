@@ -199,7 +199,7 @@ impl SyncService {
         });
 
         let watcher_handle = tokio::spawn({
-            let model = model.clone();
+            let model = model;
             async move {
                 model.start_watcher_loop(watcher_shutdown).await;
             }
