@@ -77,3 +77,30 @@ jobs:
           else
             echo "All files within 600-line limit."
           fi
+
+  bench-smoke:
+    name: Bench Smoke Test (T-G2)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: "bench-smoke"
+      - name: Compile all benchmarks
+        run: cargo bench --no-run --workspace
+        timeout-minutes: 15
+      - name: Run benchmarks (short, smoke test only)
+        # T-G2: 验证 benches 持续可执行；不做严格回归检测
+        # 仅作冒烟测试，输出供人工对照 docs/reports/BASELINE_2026-05-12.md
+        run: |
+          cargo bench -p syncthing-fs --bench scanner -- \
+            --warm-up-time 1 --measurement-time 1 --sample-size 10 \
+            --output-format bencher
+          cargo bench -p syncthing-sync --bench puller -- \
+            --warm-up-time 1 --measurement-time 1 --sample-size 10 \
+            --output-format bencher
+          cargo bench -p bep-protocol --bench encode_decode -- \
+            --warm-up-time 1 --measurement-time 1 --sample-size 10 \
+            --output-format bencher
+        timeout-minutes: 10

@@ -25,6 +25,32 @@
 ### 📋 Documentation
 
 - New: `docs/reports/STRESS_TEST_DEATH_INVESTIGATION_2026-05-12.md` — full RCA writeup.
+- New: `docs/reports/UNWRAP_AUDIT_2026-05-12.md` — T-F2 complete audit.
+- New: `docs/reports/BASELINE_2026-05-12.md` — full Criterion baseline (scanner + puller + bep encode/decode).
+
+### 🛡️ Code Quality (T-F2)
+
+- **Unwrap audit complete**: Workspace production unwraps reduced from 22 → 15
+  (remaining all are `.expect("...")` with documented invariants).
+- Fixed runtime panic risks:
+  - `parse().unwrap()` for `"0.0.0.0:0"` → `SocketAddr::new(...)` constructor
+  - `relay_url.as_ref().unwrap()` → `let Some(...) else continue` pattern
+  - `TcpTransport::start()` double-call panic → `SyncthingError::config(...)` Result
+  - `store.rs:98` zero capacity panic → `cache_capacity.max(1)`
+
+### 📐 File Structure (T-E1)
+
+- Final 5 large files split into `mod.rs` + `tests.rs` pattern:
+  - `messages.rs` (910) → `messages/mod.rs:697 + tests.rs:213`
+  - `types.rs` (882) → `types/mod.rs:805 + tests.rs:76`
+  - `connection.rs` (770) → `connection/mod.rs:695 + tests.rs:74`
+  - `service.rs` (715) → `service/mod.rs:684 + tests.rs:30`
+  - `session.rs` (979) → `session/mod.rs:606 + tests.rs:366`
+
+### 🔄 CI (T-G2)
+
+- **New `bench-smoke` job**: Compiles all benchmarks + runs short smoke tests
+  with `--output-format bencher`. Prevents bench rot, provides perf data point per PR.
 
 ## [0.2.3] — 2026-05-11
 
