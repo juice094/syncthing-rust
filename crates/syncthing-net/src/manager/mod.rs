@@ -48,6 +48,8 @@ pub struct ConnectionManager {
     /// 配置
     pub(crate) config: ConnectionManagerConfig,
     /// 本地设备身份（抽象层，解耦具体密码学方案）
+    /// 保留 Arc 引用以维持 trait object 生命周期；local_device_id 已缓存
+    #[allow(dead_code)]
     pub(crate) identity: Arc<dyn Identity>,
     /// 本地设备ID（从 identity 缓存，避免虚函数调用）
     pub(crate) local_device_id: DeviceId,
@@ -510,35 +512,6 @@ impl ConnectionManager {
             pending_connections: 0, // 简化处理
             total_bytes_sent,
             total_bytes_received,
-        }
-    }
-
-    #[allow(dead_code)]
-    /// 从引用创建（用于内部转换）
-    fn from_arc(manager: &ConnectionManager) -> Self {
-        let (_event_tx, _event_rx) = mpsc::unbounded_channel::<ConnectionEvent>();
-
-        Self {
-            config: manager.config.clone(),
-            identity: Arc::clone(&manager.identity),
-            local_device_id: manager.local_device_id,
-            connections: manager.connections.clone(),
-            conn_id_index: manager.conn_id_index.clone(),
-            pending_connections: TokioRwLock::new(HashMap::new()),
-            device_addresses: manager.device_addresses.clone(),
-            device_relay_urls: manager.device_relay_urls.clone(),
-            event_tx: manager.event_tx.clone(),
-            event_rx: RwLock::new(None),
-            running: RwLock::new(*manager.running.read()),
-            maintenance_handle: RwLock::new(None),
-            netmon_handle: RwLock::new(None),
-            on_connected: RwLock::new(manager.on_connected.read().clone()),
-            on_disconnected: RwLock::new(manager.on_disconnected.read().clone()),
-            self_weak: RwLock::new(None),
-            parallel_dialer: Arc::clone(&manager.parallel_dialer),
-            tls_config: Arc::clone(&manager.tls_config),
-            transport_registry: RwLock::new(manager.transport_registry.read().clone()),
-            listen_addr: RwLock::new(*manager.listen_addr.read()),
         }
     }
 }
