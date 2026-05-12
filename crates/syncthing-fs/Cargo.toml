@@ -31,7 +31,12 @@ libc = "0.2"
 tokio-test = "0.4"
 tempfile = { workspace = true }
 criterion = { workspace = true }
+sha2 = { workspace = true }
 
 [[bench]]
 name = "scanner"
+harness = false
+
+[[bench]]
+name = "hash_parallel"
 harness = false
