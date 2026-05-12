@@ -20,10 +20,6 @@ pub mod upnp;
 /// RFC 推荐 2 小时
 pub(crate) const PORT_MAP_LIFETIME_SEC: u32 = 7200;
 
-/// 服务探测超时
-#[allow(dead_code)]
-pub(crate) const PORT_MAP_SERVICE_TIMEOUT: Duration = Duration::from_millis(250);
-
 /// 通过 netdev 发现默认网关的 IPv4 地址
 async fn discover_gateway() -> Option<Ipv4Addr> {
     tokio::task::spawn_blocking(|| match netdev::get_default_gateway() {
