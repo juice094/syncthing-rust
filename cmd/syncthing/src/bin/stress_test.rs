@@ -91,6 +91,32 @@ fn fmt_system_time(t: SystemTime) -> String {
 async fn main() -> anyhow::Result<()> {
     tracing_subscriber::fmt::init();
 
+    // T-F1 ENHANCEMENT: Panic hook to capture all unhandled panics
+    let crash_log = std::env::current_dir()
+        .unwrap_or_default()
+        .join("stress-crash.log");
+    std::panic::set_hook(Box::new(move |info| {
+        let now = SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs();
+        let msg = format!(
+            "[ts={}] PANIC: {}\nbacktrace:\n{:?}\n\n",
+            now,
+            info,
+            std::backtrace::Backtrace::force_capture()
+        );
+        eprintln!("{}", msg);
+        if let Ok(mut file) = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&crash_log)
+        {
+            use std::io::Write;
+            let _ = file.write_all(msg.as_bytes());
+        }
+    }));
+
     let args = Args::parse();
     let duration = parse_duration(&args.duration)?;
     let inject_interval = parse_duration(&args.inject_interval)?;
@@ -219,6 +245,8 @@ async fn main() -> anyhow::Result<()> {
         loop {
             ticker.tick().await;
             let elapsed = start.elapsed().as_secs();
+            // T-F1 ENHANCEMENT: alive log per tick
+            info!("monitor alive at T+{}s", elapsed);
             let connected_ab = monitor_handle_a.get_connection(&monitor_peer_b).is_some();
             let connected_ba = monitor_handle_b.get_connection(&monitor_peer_a).is_some();
 
