@@ -265,7 +265,8 @@ async fn main() -> anyhow::Result<()> {
                 RefreshKind::new().with_processes(ProcessRefreshKind::new()),
             );
             sys.refresh_processes_specifics(ProcessRefreshKind::new());
-            sys.processes_by_exact_name("syncthing".as_ref())
+            // T-F1 FIX: 二进制名是 stress_test（非 syncthing），之前 rss_mb 永远为 0
+            sys.processes_by_exact_name("stress_test".as_ref())
                 .map(|p| p.memory() / 1024 / 1024)
                 .sum::<u64>()
         };

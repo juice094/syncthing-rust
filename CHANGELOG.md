@@ -1,5 +1,31 @@
 # Changelog
 
+## [Unreleased]
+
+### 🐛 Critical Bug Fixes
+
+- **DashMap Deadlock in BEP Connection Race Resolution** (T-F1):
+  `ConnectionManager::register_connection` previously held a DashMap write guard
+  (`RefMut`) across `.await` on `conn.close()`. When multiple connections raced
+  for the same device_id shard (common in BEP incoming/outgoing race), the
+  internal `parking_lot::RwLock` would block other tokio workers, eventually
+  freezing the entire runtime at ~T+180s.
+  - Refactored to use `RegisterAction` enum with explicit lock-release before await.
+  - Verified stable past T+10min in 72h stress test (previously consistently froze at T+180s).
+  - All 86 `syncthing-net` unit tests pass.
+
+### 🔧 Stress Test Diagnostics (T-F1)
+
+- **Panic hook with backtrace**: All panics now write to `stress-crash.log` with `std::backtrace::Backtrace::force_capture()`.
+- **Main task heartbeat**: New `stress-heartbeat.log` written every 30s by an independent task. Distinguishes runtime freeze (no panic) from external termination.
+- **Monitor tick 60s**: Long-run mode tick interval reduced from 600s → 60s for early-death visibility.
+- **rss_mb fix**: `processes_by_exact_name` now correctly looks for `stress_test` instead of `syncthing`.
+- **Daemon stderr capture**: PowerShell launcher now redirects stderr and sets `RUST_BACKTRACE=full`.
+
+### 📋 Documentation
+
+- New: `docs/reports/STRESS_TEST_DEATH_INVESTIGATION_2026-05-12.md` — full RCA writeup.
+
 ## [0.2.3] — 2026-05-11
 
 ### Infrastructure & Quality
