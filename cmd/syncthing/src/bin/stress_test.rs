@@ -145,6 +145,39 @@ async fn main() -> anyhow::Result<()> {
         let _ = shutdown_tx.send(());
     });
 
+    // T-F1 ENHANCEMENT: Main task heartbeat — writes timestamp to file every 30s
+    // If this file stops being updated while process appears dead, we know the main
+    // tokio::select was alive but process was killed externally. If file is updated
+    // recently but process is dead, that's a strong signal of TerminateProcess.
+    let heartbeat_path = std::env::current_dir()
+        .unwrap_or_default()
+        .join("stress-heartbeat.log");
+    let heartbeat_handle = tokio::spawn({
+        let path = heartbeat_path.clone();
+        async move {
+            let mut counter: u64 = 0;
+            let mut hb_ticker = interval(Duration::from_secs(30));
+            loop {
+                hb_ticker.tick().await;
+                counter += 1;
+                let now = SystemTime::now()
+                    .duration_since(SystemTime::UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_secs();
+                let line = format!("hb#{} ts={} pid={}\n", counter, now, std::process::id());
+                if let Ok(mut file) = std::fs::OpenOptions::new()
+                    .create(true)
+                    .append(true)
+                    .open(&path)
+                {
+                    use std::io::Write;
+                    let _ = file.write_all(line.as_bytes());
+                    let _ = file.flush();
+                }
+            }
+        }
+    });
+
     if !args.resume {
         // Clean old data (fresh start)
         let _ = tokio::fs::remove_dir_all(&args.data_dir).await;
@@ -220,7 +253,8 @@ async fn main() -> anyhow::Result<()> {
     let metrics_report = args.report.with_extension("metrics.csv");
 
     let monitor_task = tokio::spawn(async move {
-        let tick_secs = if duration.as_secs() < 600 { 10 } else { 600 };
+        // T-F1 ENHANCEMENT: tick every 60s for long runs (was 600s) — needed for early-death visibility
+        let tick_secs = if duration.as_secs() < 600 { 10 } else { 60 };
         let mut ticker = interval_at(
             tokio::time::Instant::now() + Duration::from_secs(5),
             Duration::from_secs(tick_secs),
@@ -384,6 +418,7 @@ async fn main() -> anyhow::Result<()> {
     monitor_task.abort();
     inject_task.abort();
     fault_task.abort();
+    heartbeat_handle.abort();
 
     // Final sync check
     let final_a = count_files(&folder_path_a).await;

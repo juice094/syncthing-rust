@@ -49,6 +49,10 @@ stress-test-data-*/
 stress-*.log
 *.pid
 *.metrics.csv
+stress-heartbeat.log
+stress-crash.log
+stress-daemon.out.log
+stress-daemon.err.log
 
 # Other test/diag artifacts
 diag*.csv

@@ -60,8 +60,18 @@ if ($needsStart) {
         "--fault-interval",  "30m",
         "--resume"
     )
-    Write-Host "[$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')] Starting stress_test with --resume"
-    Start-Process -FilePath $bin -ArgumentList $args -WorkingDirectory $RepoRoot -WindowStyle Hidden
+    # T-F1: 捕获 stderr — 没有重定向时无法看到 abort/segfault 消息
+    $stdoutLog = Join-Path $RepoRoot "stress-daemon.out.log"
+    $stderrLog = Join-Path $RepoRoot "stress-daemon.err.log"
+    # Set RUST_BACKTRACE=full to get full backtrace on any panic that reaches the runtime
+    $env:RUST_BACKTRACE = "full"
+    Write-Host "[$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')] Starting stress_test with --resume (RUST_BACKTRACE=full)"
+    Start-Process -FilePath $bin `
+                  -ArgumentList $args `
+                  -WorkingDirectory $RepoRoot `
+                  -WindowStyle Hidden `
+                  -RedirectStandardOutput $stdoutLog `
+                  -RedirectStandardError  $stderrLog
     Start-Sleep -Seconds 3
     if (Test-Path $pidPath) {
         $newPid = [int](Get-Content $pidPath -Raw).Trim()
