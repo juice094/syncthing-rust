@@ -77,7 +77,8 @@ impl BlockStoreImpl {
         let metadata = MetadataStore::from_tree(metadata_tree);
 
         // Create LRU cache with default size (64MB worth of blocks)
-        let cache = lru::LruCache::new(NonZero::new(1024).unwrap());
+        // T-F2: 字面量 1024 始终非零，使用 expect 文档化保证
+        let cache = lru::LruCache::new(NonZero::new(1024).expect("1024 is non-zero"));
 
         Ok(Self {
             store,
@@ -95,7 +96,10 @@ impl BlockStoreImpl {
         let store = SledStore::open(path)?;
         let metadata_tree = store.open_tree("metadata")?;
         let metadata = MetadataStore::from_tree(metadata_tree);
-        let cache = lru::LruCache::new(NonZero::new(cache_capacity).unwrap());
+        // T-F2: cache_capacity = 0 时使用最小值 1，避免运行时 panic
+        let cache = lru::LruCache::new(
+            NonZero::new(cache_capacity.max(1)).expect("max(1) guarantees non-zero"),
+        );
 
         Ok(Self {
             store,

@@ -9,7 +9,7 @@
 //! 可伪装：通过 WebSocket over HTTPS 运行，流量看起来像普通网站。
 //! 可链式：支持 Relay A → Relay B 的级联转发。
 
-use std::net::SocketAddr;
+use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -37,7 +37,7 @@ pub struct DerpServerConfig {
 impl Default for DerpServerConfig {
     fn default() -> Self {
         Self {
-            bind_addr: "0.0.0.0:3478".parse().unwrap(),
+            bind_addr: SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), 3478),
             client_timeout: Duration::from_secs(120),
             websocket_upgrade: false,
         }

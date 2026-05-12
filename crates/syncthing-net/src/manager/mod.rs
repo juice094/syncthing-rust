@@ -4,7 +4,7 @@
 //! 参考: syncthing/lib/connections/service.go, registry.go
 
 use std::collections::HashMap;
-use std::net::SocketAddr;
+use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::sync::{Arc, Weak};
 use std::time::Instant;
 
@@ -160,7 +160,11 @@ impl ConnectionManager {
         *self.transport_registry.write() = Some(registry);
         info!(
             "Transport registry set with schemes: {:?}",
-            self.transport_registry.read().as_ref().unwrap().schemes()
+            self.transport_registry
+                .read()
+                .as_ref()
+                .expect("just set above")
+                .schemes()
         );
     }
 
@@ -235,7 +239,7 @@ impl ConnectionManager {
                         "Failed to bind TCP listener to {}, trying random port: {}",
                         self.config.listen_addr, e
                     );
-                    let fallback_addr: SocketAddr = "0.0.0.0:0".parse().unwrap();
+                    let fallback_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), 0);
                     let mut tcp_transport_fallback = TcpTransport::new(
                         fallback_addr,
                         handle,
@@ -322,7 +326,11 @@ impl ConnectionManager {
 
     /// 启动网络监控任务
     pub fn start_netmon(&self, mut rx: mpsc::Receiver<NetChangeEvent>) {
-        let weak = self.self_weak.read().clone().unwrap();
+        let weak = self
+            .self_weak
+            .read()
+            .clone()
+            .expect("self_weak set during ConnectionManager::new");
         let handle = tokio::spawn(async move {
             while let Some(event) = rx.recv().await {
                 if let Some(manager) = weak.upgrade() {
@@ -433,7 +441,11 @@ impl ConnectionManager {
         );
 
         // 延迟后重连
-        let weak = self.self_weak.read().clone().unwrap();
+        let weak = self
+            .self_weak
+            .read()
+            .clone()
+            .expect("self_weak set during ConnectionManager::new");
         tokio::spawn(async move {
             sleep(backoff).await;
 

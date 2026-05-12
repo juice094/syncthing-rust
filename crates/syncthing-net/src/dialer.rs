@@ -313,7 +313,11 @@ impl ParallelDialer {
                     Some(c) => Arc::clone(c),
                     None => continue,
                 };
-                let url = relay_url.as_ref().unwrap().clone();
+                // T-F2: is_relay=true 由构造方保证 relay_url 一定为 Some
+                let Some(url) = relay_url.as_ref().cloned() else {
+                    debug!("Relay candidate missing URL, skipping");
+                    continue;
+                };
                 let local_device_id = self.local_device_id;
                 let device_name = self.device_name.clone();
                 let tls_config = Arc::clone(tls_config);

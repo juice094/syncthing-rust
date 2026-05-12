@@ -429,10 +429,18 @@ impl TcpTransport {
     /// 启动传输层
     pub async fn start(&mut self) -> Result<SocketAddr> {
         // 绑定监听器
-        let addr = self.listener.as_mut().unwrap().bind().await?;
+        let addr = self
+            .listener
+            .as_mut()
+            .ok_or_else(|| SyncthingError::config("TcpTransport::start called twice"))?
+            .bind()
+            .await?;
 
         // 启动监听循环
-        let listener = self.listener.take().unwrap();
+        let listener = self
+            .listener
+            .take()
+            .ok_or_else(|| SyncthingError::config("TcpTransport::start listener missing"))?;
         tokio::spawn(async move {
             if let Err(e) = listener.run().await {
                 error!("TCP listener error: {}", e);

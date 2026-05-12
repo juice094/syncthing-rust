@@ -12,7 +12,8 @@ pub(super) struct LruCache {
 
 impl LruCache {
     pub(super) fn new(max_size: usize) -> Self {
-        let cap = std::num::NonZeroUsize::new(max_size.max(1)).unwrap();
+        // T-F2: max_size.max(1) 保证 >= 1，NonZeroUsize::new 不会返回 None
+        let cap = std::num::NonZeroUsize::new(max_size.max(1)).expect("max(1) guarantees non-zero");
         Self {
             entries: lru::LruCache::new(cap),
             max_size,

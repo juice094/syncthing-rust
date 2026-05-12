@@ -6,7 +6,7 @@
 pub mod harness;
 
 use std::io;
-use std::net::SocketAddr;
+use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::pin::Pin;
 use std::task::{Context, Poll};
 use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
@@ -106,8 +106,9 @@ impl syncthing_core::traits::ReliablePipe for MemoryPipe {
 pub fn memory_pipe_pair(max_buf_size: usize) -> (MemoryPipe, MemoryPipe) {
     let (a, b) = tokio::io::duplex(max_buf_size);
 
-    let addr_a: SocketAddr = "127.0.0.1:1".parse().unwrap();
-    let addr_b: SocketAddr = "127.0.0.1:2".parse().unwrap();
+    // T-F2: 使用构造器替代 parse().unwrap()（编译期常量，无需运行时验证）
+    let addr_a = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 1);
+    let addr_b = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 2);
 
     (
         MemoryPipe::new(a, addr_a, addr_b),
