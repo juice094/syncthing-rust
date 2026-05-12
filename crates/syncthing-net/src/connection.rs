@@ -5,7 +5,7 @@
 //! 参考: syncthing/lib/connections/*.go
 //! 2026-04-11 已验证与 Go BEP 实现跨网络互通（参见 VERIFICATION_REPORT_BEP_2026-04-11.md）。
 
-use std::net::SocketAddr;
+use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -211,10 +211,10 @@ impl BepConnection {
     ) -> Result<Arc<Self>> {
         let remote_addr = pipe
             .peer_addr()
-            .unwrap_or_else(|| "0.0.0.0:0".parse().unwrap());
+            .unwrap_or_else(|| SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), 0));
         let local_addr = pipe
             .local_addr()
-            .unwrap_or_else(|| "0.0.0.0:0".parse().unwrap());
+            .unwrap_or_else(|| SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), 0));
 
         let (message_tx, message_rx) = mpsc::unbounded_channel();
         let (incoming_tx, incoming_rx) = mpsc::unbounded_channel();

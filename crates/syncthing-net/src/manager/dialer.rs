@@ -77,7 +77,11 @@ impl ConnectionManager {
         let parallel_dialer = Arc::clone(&self.parallel_dialer);
         let tls_config = Arc::clone(&self.tls_config);
         let local_device_id = self.local_device_id;
-        let self_weak = self.self_weak.read().clone().unwrap();
+        let self_weak = self
+            .self_weak
+            .read()
+            .clone()
+            .expect("self_weak set during ConnectionManager::new");
 
         tokio::spawn(async move {
             tokio::select! {
