@@ -7,14 +7,14 @@
 
 A Rust implementation of the [Syncthing](https://syncthing.net/) protocol stack, designed for **zero-runtime-dependency** deployment and wire-compatible interoperability with the official Go Syncthing daemon.
 
-> ⚠️ **Current stage (2026-05-13 recalibration)**: **Early alpha / not production-ready.**
+> ⚠️ **Current stage (2026-05-13 post-T2.6)**: **Alpha — core sync chain verified, but not production-ready.**
 >
 > - ✅ **Connection layer stable**: 9h+ stress test, 758 connection cycles, 0 deadlocks, 0 panics (T-F1 fix verified).
 > - ✅ **Protocol layer correct**: TLS, BEP Hello, ClusterConfig, Index encode/decode all working.
-> - ❌ **End-to-end sync does NOT complete**: The new `e2e_sync` diagnostic test (2026-05-13) exposes a missing trigger in the puller / index_handler chain (see [`docs/KNOWN_ISSUES.md`](./docs/KNOWN_ISSUES.md) §2). Files do **not** actually transfer between nodes until this is fixed in v0.2.5.
-> - ⏳ **72h endurance test** and **cross-version interop automation** are both incomplete.
+> - ✅ **End-to-end sync working** (T2.6 fix, 2026-05-13): `e2e_sync` test now passes. Single-file two-node sync completes in ~12s (TLS → Hello → ClusterConfig → Index → Block → file materialized). See [`docs/KNOWN_ISSUES.md`](./docs/KNOWN_ISSUES.md) §2 for the root cause writeup.
+> - ⏳ **72h endurance test** and **cross-version interop automation** are both still incomplete.
 >
-> **Do not use this project as a Go Syncthing replacement yet.** It is currently suitable only for: BEP protocol research, Rust reference reading, and contributing fixes.
+> **Not yet a drop-in Go Syncthing replacement**, but suitable for: BEP protocol research, Rust reference reading, controlled experiments, and contributing fixes.
 
 ---
 
@@ -23,18 +23,17 @@ A Rust implementation of the [Syncthing](https://syncthing.net/) protocol stack,
 | Dimension | State |
 |-----------|-------|
 | BEP Protocol (TLS + Hello + ClusterConfig + Index + Request/Response) | ✅ Codec + handshake verified |
-| **End-to-end file sync (A→B actual transfer)** | ❌ **Broken** (`e2e_sync` fails to materialize file on B; KNOWN_ISSUES §2) |
+| **End-to-end file sync (A→B actual transfer)** | ✅ **Working** (`e2e_sync` test passes; T2.6 fix) |
 | File-sync internal modules (puller / scanner / folder_model) unit tests | ✅ 295 unit tests passing |
 | Network Discovery (Local + Global + STUN + UPnP + Relay v1) | ✅ Implementation complete; ParallelDialer with RTT scoring |
 | REST API (read + write, Go-layout compatible) | ✅ Read + write complete |
-| Tests | **295 unit + 1 e2e passed, 1 ignored (e2e_sync diagnostic)** |
+| Tests | **295 unit + 1 e2e passing, 0 ignored** |
 | Lint | **0 clippy warnings** (incl. `await_holding_lock` + `manual_let_else`) |
 | Security audit | **3 unmaintained** upstream transitive deps (accepted debt, see `.cargo/audit.toml`) |
 | Binary size | ~12 MB (release, Windows x64) |
 
 > **Current limitations (must read)**:
-> - **§2 end-to-end sync broken**: the project's core promise (file synchronization) is not working. See [`docs/KNOWN_ISSUES.md`](./docs/KNOWN_ISSUES.md).
-> - **§1 ClusterConfig first-handshake 10s timeout**: connection stability impacted (auto-reconnect saves it).
+> - **§1 ClusterConfig first-handshake 10s timeout**: first connection cycle is delayed ~12s due to a known race (auto-reconnect always succeeds on the second cycle).
 > - 72h stress test on Windows desktop is infeasible (sleep kills nohup children); requires Linux.
 > - Go Syncthing full file-sync interoperability was hand-tested once on 2026-04-11, no automation.
 

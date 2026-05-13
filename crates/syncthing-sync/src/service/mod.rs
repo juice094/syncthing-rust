@@ -255,8 +255,19 @@ impl SyncManager for SyncService {
             config.folders.push(folder.clone());
         }
 
-        // 初始化文件夹
+        // 初始化文件夹（创建 FolderModel）
+        let folder_id = folder.id.clone();
         self.add_folder_internal(folder).await?;
+
+        // T2.6 fix (KNOWN_ISSUES §2): also spawn scan/pull/watcher loops so that
+        // folders added at runtime (via REST API, TUI, or test harness) actually
+        // start synchronizing. Previously only `SyncManager::start()` spawned
+        // loops, leaving any folder added after startup silently inactive
+        // (pull_notify would fire but no task was awaiting it, dropping the
+        // signal — the end-to-end sync chain breakage diagnosed in v0.2.4).
+        // `start_folder_internal` is idempotent (early-returns if already
+        // running), so this is safe to call unconditionally.
+        self.start_folder_internal(&folder_id).await?;
 
         Ok(())
     }

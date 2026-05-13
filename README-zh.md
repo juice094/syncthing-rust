@@ -7,14 +7,14 @@
 
 [Syncthing](https://syncthing.net/) 协议栈的 Rust 实现，设计目标为**零运行时依赖**部署，与官方 Go Syncthing 守护进程线级兼容互操作。
 
-> ⚠️ **当前阶段（2026-05-13 校准）**：**早期 alpha / 不可用于生产**。
+> ⚠️ **当前阶段（2026-05-13 post-T2.6）**：**alpha — 核心 sync 链路已打通，但未到生产**。
 > 
 > - ✅ **连接层稳定**：9h+ 压测 758 次连接周期，0 死锁、0 panic（T-F1 已修复）。
 > - ✅ **协议层正确**：TLS、BEP Hello、ClusterConfig、Index 编解码全部正常。
-> - ❌ **端到端同步未通过**：2026-05-13 增设的 `e2e_sync` 诊断测试暴露 puller / index_handler 链路有断链（详见 [`docs/KNOWN_ISSUES.md`](./docs/KNOWN_ISSUES.md) §2）。该 bug 在 v0.2.5 修复前**文件不会真正在节点间同步**。
-> - ⏳ **72h 长跑、跨版本互通自动化** 均未完成。
+> - ✅ **端到端同步已打通**（T2.6 修复，2026-05-13）：`e2e_sync` 测试通过，单文件双节点同步 ~12s 完成（TLS → Hello → ClusterConfig → Index → Block → 文件落地）。详细 RCA 见 [`docs/KNOWN_ISSUES.md`](./docs/KNOWN_ISSUES.md) §2。
+> - ⏳ **72h 长跑、跨版本互通自动化** 仍未完成。
 >
-> **不应使用本项目替代官方 Go Syncthing**。本项目目前仅适合：研究 BEP 协议、参考 Rust 实现、参与开发。
+> **尚未达到 Go Syncthing 的替代水准**，但已适用于：研究 BEP 协议、参考 Rust 实现、做受控实验、参与开发。
 
 ---
 
@@ -23,18 +23,17 @@
 | 维度 | 状态 |
 |-----------|-------|
 | BEP 协议（TLS + Hello + ClusterConfig + Index + Request/Response） | ✅ 编解码 + 握手验证通过 |
-| **端到端文件同步**（A→B 实际传输） | ❌ **失败**（e2e_sync 测试中 file 无法到达 B；KNOWN_ISSUES §2） |
+| **端到端文件同步**（A→B 实际传输） | ✅ **工作正常**（`e2e_sync` 测试通过，T2.6 修复） |
 | 文件同步内部模块（puller / scanner / folder_model）单测 | ✅ 295 unit tests 全通过 |
 | 网络发现（Local + Global + STUN + UPnP + Relay v1） | ✅ 实现完成；ParallelDialer 带 RTT 评分 |
 | REST API（读写，兼容 Go 布局） | ✅ 读路径完整；写路径完成 |
-| 测试 | **295 unit + 1 e2e passed, 1 ignored (e2e_sync diagnostic)** |
+| 测试 | **295 unit + 1 e2e 通过，0 ignored** |
 | 代码检查 | **0 clippy warnings**（含 `await_holding_lock` + `manual_let_else`） |
 | 安全审计 | **3 unmaintained** 上游传递依赖（已接受债务，见 `.cargo/audit.toml`） |
 | 二进制体积 | ~12 MB（release，Windows x64） |
 
 > **当前限制（务必阅读）**：
-> - **§2 端到端 sync 失败**：核心承诺（文件同步）目前不工作。详见 [`docs/KNOWN_ISSUES.md`](./docs/KNOWN_ISSUES.md)。
-> - **§1 ClusterConfig 首次握手 10s 超时**：连接稳定性受影响（自动重连兜底）。
+> - **§1 ClusterConfig 首次握手 10s 超时**：首次连接约 12s 才完成 ClusterConfig 交换（自动重连第二轮兜底）。
 > - 72h 压测在 Windows 桌面不可行（休眠杀进程），需 Linux 平台。
 > - Go Syncthing 完整文件同步互操作仅 2026-04-11 手工验证一次，无自动化。
 

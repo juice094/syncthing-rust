@@ -2,16 +2,17 @@
 
 本目录包含 `syncthing-rust` 项目的设计文档、验证报告、计划、运维指南与历史归档。
 
-> ⚠️ **项目当前不在"事实好用"阶段**。请先阅读 [`KNOWN_ISSUES.md`](KNOWN_ISSUES.md) 了解当前缺陷边界。  
-> **快速入口**: [plans/NEXT_STEPS_2026-05-13.md](plans/NEXT_STEPS_2026-05-13.md) — 当前活跃路线图（v0.2.5 patch 含 P0 修复 T2.6）
+> ✅ **当前阶段（2026-05-13 post-T2.6）**：核心 sync 链路已打通，e2e_sync 测试通过。  
+> **快速入口**: [plans/NEXT_STEPS_2026-05-13.md](plans/NEXT_STEPS_2026-05-13.md) — 当前活跃路线图（T2 全部完成，准备 v0.2.5 patch）  
+> **历史缺陷追溯**: [`KNOWN_ISSUES.md`](KNOWN_ISSUES.md) §2 含 T2.6 修复 RCA
 
 ---
 
-## 🚨 必读
+## 📋 必读
 
 | 文档 | 用途 |
 |------|------|
-| [`KNOWN_ISSUES.md`](KNOWN_ISSUES.md) | **已知缺陷登记**（端到端 sync 断链、ClusterConfig race 等） |
+| [`KNOWN_ISSUES.md`](KNOWN_ISSUES.md) | 已知缺陷登记（含 T2.6 RCA、ClusterConfig race 等） |
 
 ---
 
