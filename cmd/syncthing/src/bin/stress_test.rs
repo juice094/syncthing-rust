@@ -9,11 +9,14 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime};
 
+use chrono::{DateTime, Utc};
 use clap::Parser;
 use sysinfo::{ProcessRefreshKind, RefreshKind, System};
 use tokio::io::AsyncWriteExt;
 use tokio::time::{interval, interval_at};
 use tracing::{info, warn};
+use tracing_subscriber::layer::SubscriberExt;
+use tracing_subscriber::util::SubscriberInitExt;
 
 /// PID 文件管理：写入当前进程号，返回路径用于后续清理
 async fn write_pid_file(path: &PathBuf) -> anyhow::Result<()> {
@@ -50,6 +53,9 @@ struct Args {
     /// PID file path for process management
     #[arg(long, default_value = "stress-test.pid")]
     pid_file: PathBuf,
+    /// T2.2 — Directory for rotating log files (daily rotation, keep 7 days)
+    #[arg(long, default_value = "stress-logs")]
+    log_dir: PathBuf,
 }
 
 fn parse_duration(s: &str) -> anyhow::Result<Duration> {
@@ -77,19 +83,70 @@ fn fmt_duration(d: Duration) -> String {
 }
 
 fn fmt_system_time(t: SystemTime) -> String {
-    let dur = t.duration_since(SystemTime::UNIX_EPOCH).unwrap_or_default();
-    let secs = dur.as_secs();
-    let days = secs / 86400;
-    let rem = secs % 86400;
-    let hh = rem / 3600;
-    let mm = (rem % 3600) / 60;
-    let ss = rem % 60;
-    format!("{}T{:02}:{:02}:{:02}Z", days, hh, mm, ss)
+    // T2.2: Use chrono for proper ISO 8601 (RFC 3339) timestamp.
+    // Previous impl emitted "days_since_epoch + HH:MM:SS" which broke CSV consumers.
+    let dt: DateTime<Utc> = t.into();
+    dt.format("%Y-%m-%dT%H:%M:%SZ").to_string()
+}
+
+/// T2.2: Initialize logging with rotating file appender + stdout.
+///
+/// - File: `<log_dir>/stress.log.YYYY-MM-DD` rotated daily, max 7 retained.
+/// - Stdout: same content, useful for live tailing under nohup.
+/// - Filter: respects `RUST_LOG` env var, defaults to INFO.
+///
+/// Returns the non-blocking worker guard which **must be held** for the duration of
+/// `main()`; dropping it flushes and closes the appender.
+fn init_logging(log_dir: &PathBuf) -> anyhow::Result<tracing_appender::non_blocking::WorkerGuard> {
+    if let Err(e) = std::fs::create_dir_all(log_dir) {
+        eprintln!(
+            "Warning: cannot create log dir {:?}: {}. Logs will fall back to TMP.",
+            log_dir, e
+        );
+    }
+    let file_appender = tracing_appender::rolling::Builder::new()
+        .rotation(tracing_appender::rolling::Rotation::DAILY)
+        .max_log_files(7)
+        .filename_prefix("stress")
+        .filename_suffix("log")
+        .build(log_dir)
+        .unwrap_or_else(|e| {
+            eprintln!(
+                "Warning: cannot create rolling file appender: {}. Falling back to TMP/stress-fallback.",
+                e
+            );
+            tracing_appender::rolling::daily(std::env::temp_dir(), "stress-fallback")
+        });
+    let (non_blocking, guard) = tracing_appender::non_blocking(file_appender);
+
+    let env_filter = tracing_subscriber::EnvFilter::try_from_default_env()
+        .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info"));
+
+    let file_layer = tracing_subscriber::fmt::layer()
+        .with_writer(non_blocking)
+        .with_ansi(false);
+    let stdout_layer = tracing_subscriber::fmt::layer()
+        .with_writer(std::io::stdout)
+        .with_ansi(true);
+
+    tracing_subscriber::registry()
+        .with(env_filter)
+        .with(file_layer)
+        .with(stdout_layer)
+        .try_init()
+        .map_err(|e| anyhow::anyhow!("Failed to set tracing subscriber: {}", e))?;
+
+    Ok(guard)
 }
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    tracing_subscriber::fmt::init();
+    let args = Args::parse();
+
+    // T2.2: replace `tracing_subscriber::fmt::init()` with rotating file appender
+    // (daily rotation, keep 7 days) + stdout layer. The non-blocking worker guard
+    // must outlive main() to flush buffered logs on exit.
+    let _log_guard = init_logging(&args.log_dir)?;
 
     // T-F1 ENHANCEMENT: Panic hook to capture all unhandled panics
     let crash_log = std::env::current_dir()
@@ -117,7 +174,6 @@ async fn main() -> anyhow::Result<()> {
         }
     }));
 
-    let args = Args::parse();
     let duration = parse_duration(&args.duration)?;
     let inject_interval = parse_duration(&args.inject_interval)?;
     let fault_interval = parse_duration(&args.fault_interval)?;
