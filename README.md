@@ -1,8 +1,9 @@
 # syncthing-rust
 
 [![Rust](https://img.shields.io/badge/rust-1.85%2B-orange?logo=rust)](https://www.rust-lang.org)
-[![Tests](https://img.shields.io/badge/tests-308%20passed-brightgreen)]()
+[![Tests](https://img.shields.io/badge/tests-296%20passed-brightgreen)]()
 [![Clippy](https://img.shields.io/badge/clippy-0%20warnings-brightgreen)]()
+[![Version](https://img.shields.io/badge/version-v0.2.5-blue)]()
 [![License](https://img.shields.io/badge/license-MIT-blue)](./LICENSE)
 
 A Rust implementation of the [Syncthing](https://syncthing.net/) protocol stack, designed for **zero-runtime-dependency** deployment and wire-compatible interoperability with the official Go Syncthing daemon.
@@ -188,7 +189,7 @@ See [`CONTRIBUTING.md`](./CONTRIBUTING.md). Short version:
 
 ```powershell
 # Quick validation
-cargo test --workspace          # must pass: 308 passed
+cargo test --workspace          # must pass: 296 passed
 cargo clippy --workspace --all-targets  # must be 0 warnings
 
 # Or run the local health check script (Windows)
