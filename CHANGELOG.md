@@ -1,5 +1,122 @@
 # Changelog
 
+## [0.2.5] — 2026-05-13
+
+### 🎯 Headline: End-to-end sync chain unblocked
+
+v0.2.4 stabilized the connection layer (T-F1 deadlock fix, 9h+ stress test);
+v0.2.5 now closes the actual file-sync loop. A two-node single-file sync
+completes in ~12s end-to-end (TLS → Hello → ClusterConfig → Index → Block →
+file materialized on receiver). The previously-`#[ignore]`-pinned
+`e2e_sync` diagnostic test is now part of the regular suite.
+
+### 🐛 Critical Bug Fix
+
+- **Runtime-added folders never synchronized** (T2.6):
+  `SyncManager::add_folder` created the `FolderModel` but did **not** spawn
+  the scan/pull/watcher tokio tasks. Only `SyncManager::start()` did, via
+  `start_folder_loops()`. As a result, any folder added at runtime — via
+  REST API `POST /rest/config/folders`, TUI commands, or test harnesses —
+  was silently inactive. A remote `Index` arriving for such a folder would
+  call `folder_model.handle_remote_index()` and `pull_notify.notify_one()`,
+  but no task was awaiting the notify, so the signal was dropped on the
+  floor. `Puller::pull_folder()` was never invoked, no `Request` was ever
+  sent, no `Response` was ever received, no file ever materialized.
+
+  **Fix** (one-line addition in `service::add_folder`): call the idempotent
+  `start_folder_internal` after `add_folder_internal`. `start_folder_internal`
+  already early-returns if the folder is already running, so this is safe to
+  call unconditionally.
+
+  **Verification**:
+  - `cargo test --test e2e_sync` — 1 passed in 12.02s (was `#[ignore]`)
+  - 295 unit tests still pass
+  - 0 clippy warnings
+
+  This was the project's P0 release blocker. See `docs/KNOWN_ISSUES.md` §2
+  for the full root-cause writeup.
+
+### 🧹 Refactor
+
+- **T2.3 — `service/mod.rs` business split** (RFC-001): 695 → 60 lines.
+  Extracted into four sibling files by responsibility:
+  - `lifecycle.rs` (197 lines) — constructors / `start` / `stop` / internal
+    helpers
+  - `sync_manager.rs` (225 lines) — `impl SyncManager for SyncService`
+  - `network_bridge.rs` (119 lines) — BEP transport callbacks
+    (`handle_index`, `handle_block_request`, …)
+  - `sync_model.rs` (164 lines) — `impl syncthing_core::traits::SyncModel`
+    (FFI boundary)
+
+  Pure location refactor — no API surface or runtime semantics changed.
+  All field visibility scoped to `pub(super)`. Tests pass unchanged after
+  trivially adding `use crate::model::SyncManager;` to `tests.rs`.
+
+- **T2.5 — `TestNode` BEP bridge harness**:
+  New `crates/syncthing-test-utils/src/bep_bridge.rs` (344 lines) wires a
+  `TestBepHandler` + `TestBlockSource` on top of `ConnectionManager`
+  callbacks, so integration tests can drive the full BEP pipeline
+  (ClusterConfig + Index + Block) instead of stopping at the Hello
+  handshake. Enabled the `e2e_sync` regression test.
+
+### 🛠 Stress Test Tooling (T2.2)
+
+- **Log rotation**: `bin/stress_test.rs` now uses
+  `tracing_appender::rolling` for daily log files (keep 7 days), preventing
+  multi-day runs from accumulating gigabyte-scale log files. Added
+  `--log-dir <PATH>` CLI flag (defaults to `stress-logs/`).
+- **CSV timestamps**: Replaced the broken hand-rolled `fmt_system_time` (which
+  produced strings like `"20585T05:07:55Z"`) with `chrono` ISO 8601
+  formatting. Stress-test report CSVs are now machine-parseable.
+
+### 📚 Documentation
+
+- **`docs/KNOWN_ISSUES.md`**: §2 (end-to-end sync broken) marked as fixed,
+  with the actual root cause documented (not the originally-suspected
+  puller/index_handler bug, but the `add_folder` loop-spawn omission).
+- **`docs/reports/STRESS_TEST_REPORT_2026-05-13.md`**: 191-line analysis of
+  the 9h11m stress run that died from Windows desktop sleep, with the
+  observation that originally raised T2.5 ("0 ClusterConfig events in
+  9 hours — harness never drives BEP session").
+- **`docs/operations/TAILSCALE_GUIDE.md` (225 lines)**: Three paths to
+  Tailscale-based NAT traversal — zero-code (use Tailscale as L3),
+  embedded DERP client, or run own DERP server (project already has 1480
+  lines of DERP impl).
+- **`docs/operations/PROXY_GUIDE.md` (198 lines)**: How to use the
+  existing `SOCKS5_PROXY` / `HTTP_PROXY` env-var support in
+  `transport/proxy.rs` with Watt Toolkit, clash, or similar tools.
+- **`docs/drafts/RFC-001-service-split.md`**: T2.3 architecture decision
+  record (split rationale, target file structure, verification checklist).
+- **`README.md` / `README-zh.md`**: Updated stage banner from
+  "early alpha / not production-ready" to "alpha — core sync chain
+  verified". End-to-end sync row in the at-a-glance table flipped from ❌
+  to ✅.
+
+### 🗂 Project Hygiene
+
+- **Phase A file splits — 6/6 complete** (T1.1–T1.6):
+  - `dialer.rs` 621 → 452 + tests 168 (`90e6d3b`)
+  - `block_cache.rs` 556 → 322 + tests 234 (`5fd42b0`)
+  - `types/mod.rs` 639 → 477 + `types/folder.rs` 176 (`f21c8fe`)
+  - `daemon_runner.rs` 596 → 476 + helpers 176 (`0140851`)
+  - `traits.rs` 574 → 463 + `traits/transport.rs` 127 (`66589c2`)
+  - `service/mod.rs` 695 → 60 + 4 children 705 (T2.3 above)
+
+- **Clippy nursery — `manual_let_else`** enabled and applied across 10
+  sites in 9 files (T1.4, `921cf0f`).
+
+### ⚠️ Known Limitations (unchanged from v0.2.4)
+
+- **§1 ClusterConfig first-handshake 10s timeout**: first connection cycle
+  is delayed ~12s due to a known race. Auto-reconnect always succeeds on
+  the second cycle. Tracked in `docs/KNOWN_ISSUES.md`.
+- 72h stress test on Windows desktop infeasible (sleep kills nohup
+  children); awaits Linux platform repeat.
+- Go Syncthing cross-version interop: hand-tested once on 2026-04-11; no
+  automation.
+
+---
+
 ## [0.2.4] — 2026-05-12
 
 ### 🐛 Critical Bug Fixes
