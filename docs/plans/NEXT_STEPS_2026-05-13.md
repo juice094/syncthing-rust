@@ -2,11 +2,23 @@
 
 > 承接 [`NEXT_STEPS_2026-05-12.md`](./NEXT_STEPS_2026-05-12.md)（已归档）  
 > 本文档为 v0.2.4 发布后的活动计划，按时间窗与优先级双维度组织。  
-> **状态快照（2026-05-13 晚盘）**：Phase A 完成 **6/6**；CI 全绿；HEAD = `66589c2`
+> **状态快照（2026-05-13 深夜）**：Phase A 完成 **6/6**；T2 部分完成（T2.0a/b/T2.1/T2.2 ✅，T2.5 ⚠️）；**🔥 新发现 P0 缺陷 T2.6**
 
 ---
 
-## 0. 现状快照（2026-05-13 晚盘更新）
+## 🚨 重要：项目不在"事实好用"阶段
+
+T2.5 期间编写的 `e2e_sync` 诊断测试**暴露了核心 sync 链路断链**：BEP 协议层 + 连接层全部工作，但 puller / index_handler 不会触发 Block 请求，导致**端到端文件同步失败**。
+
+- 详细分析：[`../KNOWN_ISSUES.md`](../KNOWN_ISSUES.md) §2
+- 失败测试：`cmd/syncthing/tests/e2e_sync.rs`（`#[ignore]` 暂挂）
+- 修复优先级：**v0.2.5 patch 阻断项（T2.6）**
+
+在 T2.6 完成前：**README 已标注"early alpha / 不可用于生产"**。
+
+---
+
+## 0. 现状快照（2026-05-13 深夜更新）
 
 ### 运行态
 - **72h 压测**：⚠️ **意外终止**（系统休眠导致），T+9h11m，最后心跳 #1103
@@ -72,10 +84,13 @@ T-F1 死锁、T-F2 unwrap 审计、T-A1 baseline、T-B1 rayon 验证、T-E1 8 �
 | **T2.0a** | `operations/TAILSCALE_GUIDE.md` — Tailscale 协同部署指南 | 1h | 低 | 无 | ✅ 2026-05-13 |
 | **T2.0b** | `operations/PROXY_GUIDE.md` — SOCKS5/HTTP 代理（Watt Toolkit 等）使用指南 | 1h | 低 | 无 | ✅ 2026-05-13 |
 | **T2.1** | `STRESS_TEST_REPORT_2026-05-13.md` — 9h+ 压测完整分析（含连接层 vs 同步层结论） | 3h | 低 | 压测落幕 | ✅ 2026-05-13 |
-| **T2.2** | T-F3 `tracing-appender` 日志滚动（hourly / daily rotation） | 2h | 低 | T2.1 完成 | ⏳ |
-| **T2.3** | `service/mod.rs` (684) 业务拆分 — 需要先出**架构 RFC** | 1h RFC + 4h impl | 高 | T2.2 完成 | ⏳ |
-| **T2.4** | Linux 平台 72h 重跑（验证 epoll 路径无死锁 + TestNode 增强后端到端 sync） | 后台 72h | 中 | T2.1 完成 + harness 改进 | ⏳ |
-| **T2.5** | TestNode harness 增强：注入 BepSession 启动逻辑（覆盖完整 BEP 流水线） | 3-5h | 中 | T2.1 暴露此缺口 | ⏳ |
+| **T2.2** | T-F3 `tracing-appender` 日志滚动 + CSV ISO8601 时间戳修复 | 2h | 低 | T2.1 完成 | ✅ `38fb07f` |
+| **T2.3** | `service/mod.rs` (684) 业务拆分 — 需要先出**架构 RFC** | 1h RFC + 4h impl | 高 | T2.6 完成 | ⏳ |
+| **T2.4** | Linux 平台 72h 重跑（验证 epoll 路径无死锁 + TestNode 增强后端到端 sync） | 后台 72h | 中 | T2.6 完成 | ⏳ |
+| **T2.5** | TestNode harness 增强：注入 BepSession 启动逻辑（覆盖完整 BEP 流水线）+ e2e_sync 诊断测试 | 3-5h | 中 | T2.1 暴露此缺口 | ⚠️ **部分完成** — bep_bridge 已工作，但 e2e_sync 测试 `#[ignore]`（暴露 §2 puller bug） |
+| **T2.6** | **🔥 P0** — 修复 puller / index_handler 链路（KNOWN_ISSUES §2，端到端 sync 断链）+ 解除 e2e_sync 的 `#[ignore]` | 4-8h | 高 | T2.5 完成（已暴露） | ⏳ **必做** |
+
+> 🔥 **v0.2.5 patch 必含项**：T2.6 是核心承诺修复，没有它项目不能称为"事实可用"。详见 [`../KNOWN_ISSUES.md`](../KNOWN_ISSUES.md)。
 
 ### T3 — v0.3.0 立项窗口（~05-16 起）
 

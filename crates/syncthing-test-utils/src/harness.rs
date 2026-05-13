@@ -2,6 +2,7 @@
 
 use std::net::SocketAddr;
 use std::path::PathBuf;
+use std::sync::atomic::AtomicI32;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -13,6 +14,8 @@ use syncthing_net::{
 };
 use syncthing_sync::{database::MemoryDatabase, SyncManager, SyncService};
 
+use crate::bep_bridge::{install_bep_bridge, PendingResponses, TestBlockSource};
+
 /// Temporary test node.
 pub struct TestNode {
     pub config_dir: PathBuf,
@@ -21,6 +24,9 @@ pub struct TestNode {
     pub bep_addr: SocketAddr,
     pub sync_service: Arc<SyncService>,
     pub connection_handle: syncthing_net::manager::ConnectionManagerHandle,
+    /// T2.5 — Pending block-request responses, shared with `TestBlockSource`.
+    /// Exposed for tests that want to inspect in-flight requests.
+    pub pending_responses: PendingResponses,
     _manager: Arc<ConnectionManager>,
 }
 
@@ -90,6 +96,24 @@ impl TestNode {
         registry.register(Arc::new(syncthing_net::transport::RawTcpTransport::new()));
         manager.set_transport_registry(Arc::new(registry));
 
+        // T2.5 — Install BEP session bridge BEFORE manager.start() so the
+        // on_connected/on_disconnected callbacks fire for every peer connection.
+        // This drives BepSession::run() per peer, enabling ClusterConfig /
+        // Index / Block transfer (i.e. real end-to-end sync).
+        let pending_responses = install_bep_bridge(
+            &manager,
+            Arc::clone(&sync_service),
+            connection_handle.clone(),
+        );
+
+        // Provide a block source so the puller can fetch remote blocks via BEP.
+        let block_source = Arc::new(TestBlockSource {
+            manager: connection_handle.clone(),
+            next_id: AtomicI32::new(1),
+            pending_responses: pending_responses.clone(),
+        });
+        sync_service.set_block_source(block_source).await;
+
         let bep_addr = manager.start().await.context("start connection manager")?;
 
         Ok(Self {
@@ -98,6 +122,7 @@ impl TestNode {
             bep_addr,
             sync_service,
             connection_handle,
+            pending_responses,
             _manager: manager,
         })
     }

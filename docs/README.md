@@ -2,7 +2,16 @@
 
 本目录包含 `syncthing-rust` 项目的设计文档、验证报告、计划、运维指南与历史归档。
 
-> **快速入口**: [plans/NEXT_STEPS_2026-05-13.md](plans/NEXT_STEPS_2026-05-13.md) — 当前活跃路线图（v0.2.4 后 Phase A 完成）
+> ⚠️ **项目当前不在"事实好用"阶段**。请先阅读 [`KNOWN_ISSUES.md`](KNOWN_ISSUES.md) 了解当前缺陷边界。  
+> **快速入口**: [plans/NEXT_STEPS_2026-05-13.md](plans/NEXT_STEPS_2026-05-13.md) — 当前活跃路线图（v0.2.5 patch 含 P0 修复 T2.6）
+
+---
+
+## 🚨 必读
+
+| 文档 | 用途 |
+|------|------|
+| [`KNOWN_ISSUES.md`](KNOWN_ISSUES.md) | **已知缺陷登记**（端到端 sync 断链、ClusterConfig race 等） |
 
 ---
 
@@ -11,6 +20,7 @@
 ```
 docs/
 ├── README.md                          # 本文档（导航页）
+├── KNOWN_ISSUES.md                    # 已知缺陷登记（必读）
 ├── design/                            # 活跃的设计文档
 ├── plans/                             # 计划与路线图
 ├── reports/                           # 验证报告与实现总结
