@@ -2,25 +2,31 @@
 
 > 承接 [`NEXT_STEPS_2026-05-12.md`](./NEXT_STEPS_2026-05-12.md)（已归档）  
 > 本文档为 v0.2.4 发布后的活动计划，按时间窗与优先级双维度组织。  
-> **状态快照**：72h 压测 T+9h+ 稳定运行；CI 全绿；HEAD = `eb95a0b`
+> **状态快照（2026-05-13 中段）**：Phase A 完成 4/6（T1.1/T1.2/T1.4/T1.6）；CI 全绿；HEAD = `f21c8fe`
 
 ---
 
-## 0. 现状快照（2026-05-13 早盘）
+## 0. 现状快照（2026-05-13 中段更新）
 
 ### 运行态
-- **72h 压测**：PID 20048，T+33065s（≈9h11m），心跳 #1103，无 panic / 无 stall。
-- **预计完成**：2026-05-15 13:07 ± 30min。
-- **观测**：日志稳定输出，BEP 重连成功（race resolution 路径已验证）。
+- **72h 压测**：⚠️ **意外终止**（系统休眠导致），T+9h11m，最后心跳 #1103
+- **详情**：[`STRESS_TEST_PARTIAL_2026-05-12_to_05-13.md`](../reports/STRESS_TEST_PARTIAL_2026-05-12_to_05-13.md)
+- **结论**：T-F1 修复在 9h+（原死亡点的 184 倍）稳定运行，但 72h 目标需在 Linux 平台重跑
 
 ### 工程态
-- **HEAD**：`eb95a0b docs: 阶段性会话总结与路线图归档（2026-05-12）`
-- **CI**：windows + ubuntu 全绿；6 jobs 通过。
-- **质量门**：295 tests 全通过；`clippy::await_holding_lock` 启用；`cargo audit` 接受债务清单未变。
-- **代码规模**：37 715 行 Rust；top 5 文件 = 684/639/621/606/602。
+- **HEAD**：`f21c8fe refactor(T1.2): 抽取 folder 类型到 types/folder.rs`
+- **CI**：windows + ubuntu 全绿；6 jobs 通过
+- **质量门**：295 tests 全通过；`clippy::await_holding_lock` + `manual_let_else` 启用；0 警告
+- **代码规模**：37 714 行 Rust；top 5 文件 = 684/606/599/596/574
 
 ### 已交付（v0.2.3 → v0.2.4，20 commits）
 T-F1 死锁、T-F2 unwrap 审计、T-A1 baseline、T-B1 rayon 验证、T-E1 8 文件拆分、T-G2 bench-smoke CI、redundant_clone / or_fun_call / await_holding_lock。详见 `SESSION_SUMMARY_2026-05-12.md`。
+
+### Phase A 已完成（2026-05-13 早盘）
+- ✅ T1.1 dialer.rs split（621 → 452 + tests 168）— commit `90e6d3b`
+- ✅ T1.4 manual_let_else 全工程（10 处）— commit `921cf0f`
+- ✅ T1.6 block_cache.rs split（556 → 322 + tests 234）— commit `5fd42b0`
+- ✅ T1.2 types/folder.rs extraction（639 → 477）— commit `f21c8fe`
 
 ---
 
@@ -36,21 +42,21 @@ T-F1 死锁、T-F2 unwrap 审计、T-A1 baseline、T-B1 rayon 验证、T-E1 8 �
    (并行不打断压测)        (压测后即刻执行)                    (规划与设计)
 ```
 
-### T1 — 压测窗口期（今天起 ~63h，可与压测完全并行）
+### T1 — 压测窗口期（剩余 2/6 项，可继续并行执行）
 
 不依赖运行时；**不允许**触碰 stress_test、syncthing-net 的 manager / connection；
 绑定为"纯重构 / 纯文档 / 纯 CI"工作流，零运行时风险。
 
-| ID | 任务 | 预计 | 风险 | 依赖 |
-|----|------|------|------|------|
-| **T1.1** | `dialer.rs` tests 抽取到 `dialer/tests.rs` | 1h | 低 | 无 |
-| **T1.2** | `types/folder.rs` 抽取（FolderType / FolderStatus / Compression / Folder） | 2h | 中（pub use 复用面） | 无 |
-| **T1.3** | `daemon_runner.rs` (596) 拆分（TUI 子模块，run/event/render 三段） | 2h | 中 | 无（TUI 与压测无关） |
-| **T1.4** | clippy nursery 补丁（`manual_let_else` 8 处 + `needless_collect`） | 1h | 低 | 无 |
-| **T1.5** | `traits.rs` (574) 模块拆分（按 trait 分组：connection / database / scanner） | 2h | 中 | 无 |
-| **T1.6** | `block_cache/mod.rs` (556) tests 抽取 | 0.5h | 低 | 无 |
+| ID | 任务 | 预计 | 风险 | 依赖 | 状态 |
+|----|------|------|------|------|------|
+| **T1.1** | `dialer.rs` tests 抽取到 `dialer/tests.rs` | 1h | 低 | 无 | ✅ `90e6d3b` |
+| **T1.2** | `types/folder.rs` 抽取（FolderType / FolderStatus / Compression / Folder） | 2h | 中（pub use 复用面） | 无 | ✅ `f21c8fe` |
+| **T1.3** | `daemon_runner.rs` (596) 拆分（TUI 子模块，run/event/render 三段） | 2h | 中 | 无（TUI 与压测无关） | ⏳ Next |
+| **T1.4** | clippy nursery 补丁（`manual_let_else` 10 处） | 1h | 低 | 无 | ✅ `921cf0f` |
+| **T1.5** | `traits.rs` (574) 模块拆分（按 trait 分组：connection / database / scanner） | 2h | 中 | 无 | ⏳ Next |
+| **T1.6** | `block_cache/mod.rs` (556) tests 抽取 | 0.5h | 低 | 无 | ✅ `5fd42b0` |
 
-**T1 合计 ~8.5h 工程时间**。可在 2 个工作日内分段完成，每完成一项独立 commit + push，享受 CI 即时反馈。
+**T1 进度**：4/6 完成（约 4.5h 已花）；剩余 **T1.3 + T1.5**（合计 ~4h）
 
 ### T2 — 压测窗口后（~05-15 起）
 
