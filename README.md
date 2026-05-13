@@ -7,9 +7,14 @@
 
 A Rust implementation of the [Syncthing](https://syncthing.net/) protocol stack, designed for **zero-runtime-dependency** deployment and wire-compatible interoperability with the official Go Syncthing daemon.
 
-> **Current stage**: Functionally complete Beta. Core BEP messages, multi-path networking, REST API read-path, and TUI observation are operational. Pending long-term stability validation (72h stress test) and cross-version Rust interoperability verification.
+> ⚠️ **Current stage (2026-05-13 recalibration)**: **Early alpha / not production-ready.**
 >
-> **Value proposition**: If you need a single static binary (< 10 MB) that speaks BEP over TLS and can sync folders with official Syncthing nodes — without Go runtime or CGO — this is it.
+> - ✅ **Connection layer stable**: 9h+ stress test, 758 connection cycles, 0 deadlocks, 0 panics (T-F1 fix verified).
+> - ✅ **Protocol layer correct**: TLS, BEP Hello, ClusterConfig, Index encode/decode all working.
+> - ❌ **End-to-end sync does NOT complete**: The new `e2e_sync` diagnostic test (2026-05-13) exposes a missing trigger in the puller / index_handler chain (see [`docs/KNOWN_ISSUES.md`](./docs/KNOWN_ISSUES.md) §2). Files do **not** actually transfer between nodes until this is fixed in v0.2.5.
+> - ⏳ **72h endurance test** and **cross-version interop automation** are both incomplete.
+>
+> **Do not use this project as a Go Syncthing replacement yet.** It is currently suitable only for: BEP protocol research, Rust reference reading, and contributing fixes.
 
 ---
 
@@ -17,19 +22,21 @@ A Rust implementation of the [Syncthing](https://syncthing.net/) protocol stack,
 
 | Dimension | State |
 |-----------|-------|
-| BEP Protocol (TLS + Hello + ClusterConfig + Index + Request/Response) | ✅ Core messages implemented and handshake verified |
-| File Sync (Pull via BEP blocks, passive Push upload) | ✅ Pull verified; passive upload implemented |
-| Network Discovery (Local + Global + STUN + UPnP + Relay v1) | ✅ Core implementation complete; ParallelDialer with RTT scoring |
-| REST API (read + write, Go-layout compatible) | ✅ Read + write complete (override/revert implemented) |
-| Tests | **308 passed, 3 ignored, 0 failed** |
-| Lint | **0 clippy warnings** |
+| BEP Protocol (TLS + Hello + ClusterConfig + Index + Request/Response) | ✅ Codec + handshake verified |
+| **End-to-end file sync (A→B actual transfer)** | ❌ **Broken** (`e2e_sync` fails to materialize file on B; KNOWN_ISSUES §2) |
+| File-sync internal modules (puller / scanner / folder_model) unit tests | ✅ 295 unit tests passing |
+| Network Discovery (Local + Global + STUN + UPnP + Relay v1) | ✅ Implementation complete; ParallelDialer with RTT scoring |
+| REST API (read + write, Go-layout compatible) | ✅ Read + write complete |
+| Tests | **295 unit + 1 e2e passed, 1 ignored (e2e_sync diagnostic)** |
+| Lint | **0 clippy warnings** (incl. `await_holding_lock` + `manual_let_else`) |
 | Security audit | **3 unmaintained** upstream transitive deps (accepted debt, see `.cargo/audit.toml`) |
-| Binary size | ~8 MB (release, Windows x64) |
+| Binary size | ~12 MB (release, Windows x64) |
 
-> **Current limitations**:
-> - 72h long-term stability test **in progress** (started 2026-05-11 via `stress_test` binary with Windows Scheduled Task auto-resume).
-> - Cross-version Rust interoperability (new `main` ↔ old pre-fix build) pending cross-network verification.
-> - Go Syncthing full file-sync interoperability not yet validated (handshake verified only).
+> **Current limitations (must read)**:
+> - **§2 end-to-end sync broken**: the project's core promise (file synchronization) is not working. See [`docs/KNOWN_ISSUES.md`](./docs/KNOWN_ISSUES.md).
+> - **§1 ClusterConfig first-handshake 10s timeout**: connection stability impacted (auto-reconnect saves it).
+> - 72h stress test on Windows desktop is infeasible (sleep kills nohup children); requires Linux.
+> - Go Syncthing full file-sync interoperability was hand-tested once on 2026-04-11, no automation.
 
 ---
 

@@ -3,6 +3,7 @@
 //! Provides in-memory primitives for deterministic testing of the network
 //! and protocol layers without spawning real TCP sockets or processes.
 
+pub mod bep_bridge;
 pub mod harness;
 
 use std::io;
