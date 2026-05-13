@@ -448,14 +448,11 @@ impl BepConnection {
                     }
                 };
 
-                let header = match MessageHeader::from_bep_header(&bep_header) {
-                    Some(h) => h,
-                    None => {
-                        return Err(SyncthingError::protocol(format!(
-                            "unknown message type: {}",
-                            bep_header.r#type
-                        )))
-                    }
+                let Some(header) = MessageHeader::from_bep_header(&bep_header) else {
+                    return Err(SyncthingError::protocol(format!(
+                        "unknown message type: {}",
+                        bep_header.r#type
+                    )));
                 };
 
                 // 处理 LZ4 压缩

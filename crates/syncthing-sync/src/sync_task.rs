@@ -187,9 +187,8 @@ impl TaskExecutor {
                     }
                 } => {
                     if let Some(task) = task {
-                        let permit = match semaphore.clone().acquire_owned().await {
-                            Ok(p) => p,
-                            Err(_) => break,
+                        let Ok(permit) = semaphore.clone().acquire_owned().await else {
+                            break;
                         };
 
                         let handler_future = handler(task);

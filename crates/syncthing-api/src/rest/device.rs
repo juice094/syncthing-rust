@@ -153,13 +153,12 @@ pub(crate) async fn update_device(
         ));
     }
 
-    let device = match config
+    let Some(device) = config
         .devices
         .iter_mut()
         .find(|d| d.id.to_string() == device_id.to_string())
-    {
-        Some(d) => d,
-        None => return Err((StatusCode::NOT_FOUND, format!("Device '{}' not found", id))),
+    else {
+        return Err((StatusCode::NOT_FOUND, format!("Device '{}' not found", id)));
     };
 
     device.name = Some(request.name);

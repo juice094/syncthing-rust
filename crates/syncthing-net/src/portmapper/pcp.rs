@@ -126,9 +126,8 @@ pub fn parse_pcp_response(pkt: &[u8]) -> Option<PcpResponse> {
 
 /// 探测 PCP 网关是否响应
 pub async fn probe_gateway(gateway: std::net::SocketAddr, my_ip: std::net::Ipv4Addr) -> bool {
-    let socket = match UdpSocket::bind("0.0.0.0:0").await {
-        Ok(s) => s,
-        Err(_) => return false,
+    let Ok(socket) = UdpSocket::bind("0.0.0.0:0").await else {
+        return false;
     };
     let pkt = build_pcp_announce_request(my_ip);
     if socket.send_to(&pkt, gateway).await.is_err() {

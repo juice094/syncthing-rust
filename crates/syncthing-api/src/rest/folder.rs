@@ -128,9 +128,8 @@ pub(crate) async fn update_folder(
         Err(e) => return Err((StatusCode::INTERNAL_SERVER_ERROR, format!("{}", e))),
     };
 
-    let folder_idx = match config.folders.iter().position(|f| f.id.as_str() == id) {
-        Some(idx) => idx,
-        None => return Err((StatusCode::NOT_FOUND, format!("Folder '{}' not found", id))),
+    let Some(folder_idx) = config.folders.iter().position(|f| f.id.as_str() == id) else {
+        return Err((StatusCode::NOT_FOUND, format!("Folder '{}' not found", id)));
     };
 
     // Update fields
