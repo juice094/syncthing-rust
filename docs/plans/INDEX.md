@@ -2,7 +2,7 @@
 
 > **维护原则**：计划不是墓碑，是活文档。过时计划必须归档，避免误导决策。
 > **最后审计**：2026-04-27，详见 [`PLAN_AUDIT_2026-04-27.md`](./PLAN_AUDIT_2026-04-27.md)
-> **最后更新**：2026-05-12（NEXT_STEPS 滚动维护）
+> **最后更新**：2026-05-13（NEXT_STEPS 滚动维护，v0.2.4 发布后 T1/T2/T3 三段计划）
 
 ---
 
@@ -10,13 +10,14 @@
 
 | 文件 | 状态 | 说明 |
 |------|------|------|
-| [`NEXT_STEPS_2026-05-12.md`](./NEXT_STEPS_2026-05-12.md) | ✅ **最新** | **v0.2.4 发布后路线图**。承接 NEXT_STEPS_2026-05-11.md，反映 T-F1/F2/E1/A1/B1/G2 完成、72h 压测进行中。 |
+| [`NEXT_STEPS_2026-05-13.md`](./NEXT_STEPS_2026-05-13.md) | ✅ **最新** | **v0.2.4 发布后活动计划**。按 72h 压测窗口分 T1（并行重构）/T2（压测落幕收尾）/T3（v0.3.0 立项）三段，含 v0.3.0 候选范围。 |
 | [`POST_V0_2_0_ROADMAP.md`](./POST_V0_2_0_ROADMAP.md) | ✅ 活跃 | **当前权威路线图**。制定日期 2026-04-26，审计修正后 2026-04-27。含优先级矩阵（P0~P5）、分阶段执行计划、决策记录（ADR）。 |
-| [`TUNING_PLAN_2026-05-11.md`](./TUNING_PLAN_2026-05-11.md) | ✅ 活跃 | **横向调优**。T-A~T-G 七大任务组。本次会话完成 T-F1/F2/A1/B1/E1/G2，待执行 T-C/D3/F3。 |
+| [`TUNING_PLAN_2026-05-11.md`](./TUNING_PLAN_2026-05-11.md) | ✅ 活跃 | **横向调优**。T-A~T-G 七大任务组。v0.2.4 周期完成 T-F1/F2/A1/B1/E1/G2，待执行 T-C/D3/F3（参考 NEXT_STEPS_2026-05-13）。 |
 | [`PHASE3_PLAN.md`](./PHASE3_PLAN.md) | ⚠️ 保留+勘误 | BepSession 硬化计划。3.1~3.3 已完成，3.4（72h stress test）✅ **2026-05-12 已恢复并稳定**（T-F1 死锁修复后）。 |
 
 ## 已归档计划
 
+- [`NEXT_STEPS_2026-05-12.md`](./NEXT_STEPS_2026-05-12.md) — ⚠️ 已被 NEXT_STEPS_2026-05-13.md 取代
 - [`NEXT_STEPS_2026-05-11.md`](./NEXT_STEPS_2026-05-11.md) — ⚠️ 已被 NEXT_STEPS_2026-05-12.md 取代
 
 ## 审计报告
@@ -53,10 +54,12 @@ MVP_RECOVERY (Phase 1~3) ──→ PHASE3 (3.1~3.3 完成, 3.4 ⏳)
 
 ## 跨文件跳转速查
 
-- **当前该做什么？** → [`POST_V0_2_0_ROADMAP.md`](./POST_V0_2_0_ROADMAP.md)
+- **当前该做什么？** → [`NEXT_STEPS_2026-05-13.md`](./NEXT_STEPS_2026-05-13.md)（T1/T2/T3 三段编排）
+- **战略级路线（P0~P5 矩阵 + ADR）？** → [`POST_V0_2_0_ROADMAP.md`](./POST_V0_2_0_ROADMAP.md)
 - **如何调优 / 压测 / 拆大文件？** → [`TUNING_PLAN_2026-05-11.md`](./TUNING_PLAN_2026-05-11.md)
 - **为什么 cargo audit 不再是 P0？** → [`PLAN_AUDIT_2026-04-27.md`](./PLAN_AUDIT_2026-04-27.md) §三、P0 评估
 - **PHASE3 的 Go 验证声明为什么可疑？** → [`PHASE3_PLAN.md`](./PHASE3_PLAN.md) 顶部勘误横幅
 - **项目阶段性定位是什么？** → [`PLAN_AUDIT_2026-04-27.md`](./PLAN_AUDIT_2026-04-27.md) §三、定位重定义
 - **历史计划为什么被归档？** → [`PLAN_AUDIT_2026-04-27.md`](./PLAN_AUDIT_2026-04-27.md) §一、逐份判定
 - **安全审计 / 接受债务 / 漏洞报告？** → [`../../SECURITY.md`](../../SECURITY.md)
+- **v0.2.4 周期单日归档？** → [`../reports/SESSION_SUMMARY_2026-05-12.md`](../reports/SESSION_SUMMARY_2026-05-12.md)
