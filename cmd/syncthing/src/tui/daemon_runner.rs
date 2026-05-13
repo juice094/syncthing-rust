@@ -11,12 +11,11 @@ use tracing::{info, warn};
 
 use syncthing_core::types::Config;
 use syncthing_core::DeviceId;
-use syncthing_net::protocol::MessageType;
 use syncthing_net::{
     BepSession, BepSessionEvent, ConnectionManager, ConnectionManagerConfig,
     ConnectionManagerHandle, SyncthingTlsConfig,
 };
-use syncthing_sync::{database::FileSystemDatabase, events::SyncEvent, SyncManager, SyncService};
+use syncthing_sync::{database::FileSystemDatabase, SyncManager, SyncService};
 
 use crate::{load_config, save_config, ManagerBlockSource, CONFIG_FILE_NAME};
 
@@ -27,8 +26,10 @@ use super::bep_handler::DaemonBepHandler;
 use super::discovery_tasks::{
     init_and_spawn_global_discovery, spawn_local_discovery, GlobalDiscoveryShutdown,
 };
+use super::index_dispatcher::spawn_index_propagation_loop;
 use super::nat_tasks::{spawn_port_mapper, spawn_stun};
 use super::relay_listener::spawn_relay_listeners;
+use super::session_logger::spawn_session_event_logger;
 
 /// Daemon 启动结果
 pub struct DaemonStartup {
@@ -197,74 +198,11 @@ pub async fn start_daemon(
                 old_handle.abort();
             }
             let handle2 = tokio::spawn(async move {
-                let (event_tx, mut event_rx) =
+                let (event_tx, event_rx) =
                     tokio::sync::mpsc::unbounded_channel::<BepSessionEvent>();
                 let event_device_id = device_id;
                 let shared_folders_map = Arc::clone(&shared_folders_map);
-                tokio::spawn(async move {
-                    while let Some(event) = event_rx.recv().await {
-                        match &event {
-                            BepSessionEvent::ClusterConfigComplete { shared_folders, .. } => {
-                                info!(
-                                    "[{}] ClusterConfig complete, shared folders: {:?}",
-                                    event_device_id, shared_folders
-                                );
-                                shared_folders_map.insert(event_device_id, shared_folders.clone());
-                            }
-                            BepSessionEvent::IndexSent {
-                                folder, file_count, ..
-                            } => {
-                                info!(
-                                    "[{}] Index sent for {} ({} files)",
-                                    event_device_id, folder, file_count
-                                );
-                            }
-                            BepSessionEvent::IndexReceived {
-                                folder, file_count, ..
-                            } => {
-                                info!(
-                                    "[{}] Index received for {} ({} files)",
-                                    event_device_id, folder, file_count
-                                );
-                            }
-                            BepSessionEvent::IndexUpdateReceived {
-                                folder, file_count, ..
-                            } => {
-                                info!(
-                                    "[{}] IndexUpdate received for {} ({} files)",
-                                    event_device_id, folder, file_count
-                                );
-                            }
-                            BepSessionEvent::BlockRequested {
-                                folder,
-                                name,
-                                offset,
-                                size,
-                                ..
-                            } => {
-                                info!(
-                                    "[{}] Block requested: {}/{} offset={} size={}",
-                                    event_device_id, folder, name, offset, size
-                                );
-                            }
-                            BepSessionEvent::HeartbeatTimeout { last_recv_age, .. } => {
-                                warn!(
-                                    "[{}] Heartbeat timeout (idle {:?})",
-                                    event_device_id, last_recv_age
-                                );
-                            }
-                            BepSessionEvent::PeerSyncState { folder, .. } => {
-                                info!(
-                                    "[{}] Peer sync state changed for {}",
-                                    event_device_id, folder
-                                );
-                            }
-                            BepSessionEvent::SessionEnded { reason, .. } => {
-                                info!("[{}] Session ended: {}", event_device_id, reason);
-                            }
-                        }
-                    }
-                });
+                spawn_session_event_logger(event_device_id, event_rx, shared_folders_map);
 
                 let handler = DaemonBepHandler {
                     sync_service: Arc::clone(&sync_service),
@@ -318,69 +256,11 @@ pub async fn start_daemon(
     info!("Sync service started");
 
     // 启动事件监听任务：当本地索引更新时，向共享该文件夹的已连接设备发送 IndexUpdate
-    let event_sync_service = sync_service.clone();
-    let event_handle = handle.clone();
-    let device_shared_folders_clone = Arc::clone(&device_shared_folders);
-    tokio::spawn(async move {
-        let mut subscriber = event_sync_service.events().subscribe();
-        while let Some(event) = subscriber.recv().await {
-            if let SyncEvent::LocalIndexUpdated { folder, files } = event {
-                if files.is_empty() {
-                    continue;
-                }
-                // 防御性清空：确保 deleted 文件的 block list 为空（BEP 协议要求）
-                let mut safe_files = files.clone();
-                for file in &mut safe_files {
-                    if file.is_deleted() {
-                        file.blocks.clear();
-                    }
-                }
-                let update = syncthing_core::types::IndexUpdate {
-                    folder: folder.clone(),
-                    files: safe_files,
-                };
-                let wire_update: bep_protocol::messages::IndexUpdate = update.into();
-                match bep_protocol::messages::encode_message(&wire_update) {
-                    Ok(payload) => {
-                        for device_id in event_handle.connected_devices() {
-                            // 只发送给共享该文件夹的设备
-                            let should_send = match device_shared_folders_clone.get(&device_id) {
-                                Some(entry) => entry.value().contains(&folder),
-                                None => {
-                                    // 尚未收到 ClusterConfig，保守起见不发送
-                                    false
-                                }
-                            };
-                            if !should_send {
-                                continue;
-                            }
-                            if let Some(conn) = event_handle.get_connection(&device_id) {
-                                if let Err(e) = conn
-                                    .send_message(MessageType::IndexUpdate, payload.clone())
-                                    .await
-                                {
-                                    warn!(
-                                        "Failed to send IndexUpdate to {} for {}: {}",
-                                        device_id, folder, e
-                                    );
-                                } else {
-                                    info!(
-                                        "Sent IndexUpdate for {} to {} ({} files)",
-                                        folder,
-                                        device_id,
-                                        files.len()
-                                    );
-                                }
-                            }
-                        }
-                    }
-                    Err(e) => {
-                        warn!("Failed to encode IndexUpdate for {}: {}", folder, e);
-                    }
-                }
-            }
-        }
-    });
+    spawn_index_propagation_loop(
+        sync_service.clone(),
+        handle.clone(),
+        Arc::clone(&device_shared_folders),
+    );
 
     let actual_addr = manager
         .start()
