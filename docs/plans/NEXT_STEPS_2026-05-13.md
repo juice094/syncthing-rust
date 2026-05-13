@@ -2,11 +2,11 @@
 
 > 承接 [`NEXT_STEPS_2026-05-12.md`](./NEXT_STEPS_2026-05-12.md)（已归档）  
 > 本文档为 v0.2.4 发布后的活动计划，按时间窗与优先级双维度组织。  
-> **状态快照（2026-05-13 中段）**：Phase A 完成 4/6（T1.1/T1.2/T1.4/T1.6）；CI 全绿；HEAD = `f21c8fe`
+> **状态快照（2026-05-13 晚盘）**：Phase A 完成 **6/6**；CI 全绿；HEAD = `66589c2`
 
 ---
 
-## 0. 现状快照（2026-05-13 中段更新）
+## 0. 现状快照（2026-05-13 晚盘更新）
 
 ### 运行态
 - **72h 压测**：⚠️ **意外终止**（系统休眠导致），T+9h11m，最后心跳 #1103
@@ -14,19 +14,21 @@
 - **结论**：T-F1 修复在 9h+（原死亡点的 184 倍）稳定运行，但 72h 目标需在 Linux 平台重跑
 
 ### 工程态
-- **HEAD**：`f21c8fe refactor(T1.2): 抽取 folder 类型到 types/folder.rs`
+- **HEAD**：`66589c2 refactor(T1.5): 抽取传输层 trait 到 traits/transport.rs`
 - **CI**：windows + ubuntu 全绿；6 jobs 通过
 - **质量门**：295 tests 全通过；`clippy::await_holding_lock` + `manual_let_else` 启用；0 警告
-- **代码规模**：37 714 行 Rust；top 5 文件 = 684/606/599/596/574
+- **代码规模**：37 788 行 Rust；top 5 文件 = 684/606/599/569/568（service / session / connection / stun / tls）
 
 ### 已交付（v0.2.3 → v0.2.4，20 commits）
 T-F1 死锁、T-F2 unwrap 审计、T-A1 baseline、T-B1 rayon 验证、T-E1 8 文件拆分、T-G2 bench-smoke CI、redundant_clone / or_fun_call / await_holding_lock。详见 `SESSION_SUMMARY_2026-05-12.md`。
 
-### Phase A 已完成（2026-05-13 早盘）
+### Phase A 完成 6/6（2026-05-13）
 - ✅ T1.1 dialer.rs split（621 → 452 + tests 168）— commit `90e6d3b`
 - ✅ T1.4 manual_let_else 全工程（10 处）— commit `921cf0f`
 - ✅ T1.6 block_cache.rs split（556 → 322 + tests 234）— commit `5fd42b0`
 - ✅ T1.2 types/folder.rs extraction（639 → 477）— commit `f21c8fe`
+- ✅ T1.3 daemon_runner.rs split（596 → 476 + session_logger 88 + index_dispatcher 88）— commit `0140851`
+- ✅ T1.5 traits/transport.rs extraction（574 → 463 + transport 127）— commit `66589c2`
 
 ---
 
@@ -42,7 +44,7 @@ T-F1 死锁、T-F2 unwrap 审计、T-A1 baseline、T-B1 rayon 验证、T-E1 8 �
    (并行不打断压测)        (压测后即刻执行)                    (规划与设计)
 ```
 
-### T1 — 压测窗口期（剩余 2/6 项，可继续并行执行）
+### T1 — 压测窗口期（**完成 6/6** ✅）
 
 不依赖运行时；**不允许**触碰 stress_test、syncthing-net 的 manager / connection；
 绑定为"纯重构 / 纯文档 / 纯 CI"工作流，零运行时风险。
@@ -51,12 +53,17 @@ T-F1 死锁、T-F2 unwrap 审计、T-A1 baseline、T-B1 rayon 验证、T-E1 8 �
 |----|------|------|------|------|------|
 | **T1.1** | `dialer.rs` tests 抽取到 `dialer/tests.rs` | 1h | 低 | 无 | ✅ `90e6d3b` |
 | **T1.2** | `types/folder.rs` 抽取（FolderType / FolderStatus / Compression / Folder） | 2h | 中（pub use 复用面） | 无 | ✅ `f21c8fe` |
-| **T1.3** | `daemon_runner.rs` (596) 拆分（TUI 子模块，run/event/render 三段） | 2h | 中 | 无（TUI 与压测无关） | ⏳ Next |
+| **T1.3** | `daemon_runner.rs` (596) 拆分（session_logger + index_dispatcher 两个 helper） | 2h | 中 | 无（TUI 与压测无关） | ✅ `0140851` |
 | **T1.4** | clippy nursery 补丁（`manual_let_else` 10 处） | 1h | 低 | 无 | ✅ `921cf0f` |
-| **T1.5** | `traits.rs` (574) 模块拆分（按 trait 分组：connection / database / scanner） | 2h | 中 | 无 | ⏳ Next |
+| **T1.5** | `traits.rs` (574) 抽取 transport 子模块 | 2h | 中 | 无 | ✅ `66589c2` |
 | **T1.6** | `block_cache/mod.rs` (556) tests 抽取 | 0.5h | 低 | 无 | ✅ `5fd42b0` |
 
-**T1 进度**：4/6 完成（约 4.5h 已花）；剩余 **T1.3 + T1.5**（合计 ~4h）
+**T1 完成**：6/6（约 8.5h 实测）
+
+#### T1.5 后续可选（v0.3.0 内继续）
+- T1.5b：抽取 `traits/storage.rs`（FileSystem + BlockStore + ConfigStore + FolderDatabase）— ~150 行
+- T1.5c：抽取 `traits/sync_model.rs`（Discovery + Events + SyncModel）— ~190 行
+- 之后 mod.rs 仅保留 BepConnection + ConnectionManager（~165 行）
 
 ### T2 — 压测窗口后（~05-15 起）
 
