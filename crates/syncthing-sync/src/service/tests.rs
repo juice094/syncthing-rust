@@ -1,5 +1,8 @@
-use super::*;
+use super::SyncService;
 use crate::database::MemoryDatabase;
+use crate::error::SyncError;
+use crate::model::SyncManager;
+use syncthing_core::types::Folder;
 
 #[tokio::test]
 async fn test_service_creation() {

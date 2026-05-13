@@ -87,7 +87,7 @@ T-F1 死锁、T-F2 unwrap 审计、T-A1 baseline、T-B1 rayon 验证、T-E1 8 �
 | **T2.0b** | `operations/PROXY_GUIDE.md` — SOCKS5/HTTP 代理（Watt Toolkit 等）使用指南 | 1h | 低 | 无 | ✅ 2026-05-13 |
 | **T2.1** | `STRESS_TEST_REPORT_2026-05-13.md` — 9h+ 压测完整分析（含连接层 vs 同步层结论） | 3h | 低 | 压测落幕 | ✅ 2026-05-13 |
 | **T2.2** | T-F3 `tracing-appender` 日志滚动 + CSV ISO8601 时间戳修复 | 2h | 低 | T2.1 完成 | ✅ `38fb07f` |
-| **T2.3** | `service/mod.rs` (684) 业务拆分 — 需要先出**架构 RFC** | 1h RFC + 4h impl | 高 | T2.6 完成 | ⏳ |
+| **T2.3** | `service/mod.rs` (695) 业务拆分 — 需要先出**架构 RFC** | 1h RFC + 4h impl（实际 ~1.5h） | 高 | T2.6 完成 | ✅ 2026-05-13 — RFC-001 落地，695→60 主文件 + 4 子模块（lifecycle/sync_manager/network_bridge/sync_model） |
 | **T2.4** | Linux 平台 72h 重跑（验证 epoll 路径无死锁 + TestNode 增强后端到端 sync） | 后台 72h | 中 | T2.6 完成 | ⏳ |
 | **T2.5** | TestNode harness 增强：注入 BepSession 启动逻辑（覆盖完整 BEP 流水线）+ e2e_sync 诊断测试 | 3-5h | 中 | T2.1 暴露此缺口 | ✅ 2026-05-13（暴露 §2 add_folder bug） |
 | **T2.6** | **P0** — 修复端到端 sync 链路（KNOWN_ISSUES §2）+ 解除 e2e_sync 的 `#[ignore]` | 4-8h（实际 ~2h） | 高 | T2.5 完成（已暴露） | ✅ 2026-05-13 — 根因为 `add_folder` 未 spawn loop，幂等 `start_folder_internal` 修复 |
