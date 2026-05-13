@@ -68,3 +68,7 @@ audit*.log
 
 .devbase/
 
+
+# Local release binary staging area
+dist/
+stress-*.err
