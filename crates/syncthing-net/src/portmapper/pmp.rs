@@ -117,9 +117,8 @@ pub fn build_pmp_request_public_addr_packet() -> Vec<u8> {
 
 /// 探测 NAT-PMP 网关是否响应
 pub async fn probe_gateway(gateway: SocketAddr) -> bool {
-    let socket = match UdpSocket::bind("0.0.0.0:0").await {
-        Ok(s) => s,
-        Err(_) => return false,
+    let Ok(socket) = UdpSocket::bind("0.0.0.0:0").await else {
+        return false;
     };
     let pkt = build_pmp_request_public_addr_packet();
     if socket.send_to(&pkt, gateway).await.is_err() {

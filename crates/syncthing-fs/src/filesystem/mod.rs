@@ -88,9 +88,8 @@ impl NativeFileSystem {
         let ignore = ignore.clone();
 
         // Check if path exists and is a directory
-        let metadata = match fs::metadata(&full_path).await {
-            Ok(m) => m,
-            Err(_) => return Ok(Vec::new()),
+        let Ok(metadata) = fs::metadata(&full_path).await else {
+            return Ok(Vec::new());
         };
 
         if !metadata.is_dir() {
@@ -116,9 +115,8 @@ impl NativeFileSystem {
                 let entry_path = entry.path();
 
                 // Get relative path
-                let rel_path = match entry_path.strip_prefix(&root) {
-                    Ok(p) => p,
-                    Err(_) => continue,
+                let Ok(rel_path) = entry_path.strip_prefix(&root) else {
+                    continue;
                 };
                 // Normalize path separators for cross-platform consistency
                 let rel_path_str = rel_path.to_string_lossy().replace('\\', "/");

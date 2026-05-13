@@ -206,9 +206,8 @@ impl UpnpClient {
         external_port: u16,
         protocol: PortMappingProtocol,
     ) -> Result<bool> {
-        let gateway = match self.discover_gateway().await {
-            Ok(g) => g,
-            Err(_) => return Ok(false),
+        let Ok(gateway) = self.discover_gateway().await else {
+            return Ok(false);
         };
 
         match gateway

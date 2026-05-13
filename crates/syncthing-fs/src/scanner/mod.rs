@@ -199,9 +199,8 @@ pub async fn scan_directory(
                 continue;
             }
 
-            let rel_path = match entry_path.strip_prefix(&path) {
-                Ok(p) => p,
-                Err(_) => continue,
+            let Ok(rel_path) = entry_path.strip_prefix(&path) else {
+                continue;
             };
             // Normalize path separators for cross-platform consistency
             let rel_path_str = rel_path.to_string_lossy().replace('\\', "/");
