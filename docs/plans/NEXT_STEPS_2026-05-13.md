@@ -2,19 +2,21 @@
 
 > 承接 [`NEXT_STEPS_2026-05-12.md`](./NEXT_STEPS_2026-05-12.md)（已归档）  
 > 本文档为 v0.2.4 发布后的活动计划，按时间窗与优先级双维度组织。  
-> **状态快照（2026-05-13 深夜）**：Phase A 完成 **6/6**；T2 部分完成（T2.0a/b/T2.1/T2.2 ✅，T2.5 ⚠️）；**🔥 新发现 P0 缺陷 T2.6**
+> **状态快照（2026-05-13 深夜）**：Phase A 完成 **6/6**；T2 完成 **6/6**（T2.0a/b ✅、T2.1 ✅、T2.2 ✅、T2.5 ✅、**T2.6 ✅ P0 已修复**）
 
 ---
 
-## 🚨 重要：项目不在"事实好用"阶段
+## ✅ 重大里程碑：端到端 sync 链路打通（T2.6，2026-05-13 夜）
 
-T2.5 期间编写的 `e2e_sync` 诊断测试**暴露了核心 sync 链路断链**：BEP 协议层 + 连接层全部工作，但 puller / index_handler 不会触发 Block 请求，导致**端到端文件同步失败**。
+T2.5 期间编写的 `e2e_sync` 诊断测试暴露了端到端 sync 断链。**T2.6 完成定位与修复**：
 
-- 详细分析：[`../KNOWN_ISSUES.md`](../KNOWN_ISSUES.md) §2
-- 失败测试：`cmd/syncthing/tests/e2e_sync.rs`（`#[ignore]` 暂挂）
-- 修复优先级：**v0.2.5 patch 阻断项（T2.6）**
+- **实际根因**（非原假设的 puller 链路）：`SyncManager::add_folder` 创建 `FolderModel` 但**未 spawn** scan/pull/watcher 三个循环，`pull_notify.notify_one()` 通知到没有 awaiter 的 Notify → 静默丢失
+- **影响范围**：测试 / REST API / TUI 在运行时添加的文件夹**永不同步**（必须重启进程）— 不仅是测试问题，也是生产代码 bug
+- **修复**：在 `add_folder` 末尾无条件调用幂等的 `start_folder_internal`（3 行）
+- **验证**：`cargo test --test e2e_sync` 12.18s 通过；295 unit tests 全过；clippy 0 警告
+- **详细 RCA**：[`../KNOWN_ISSUES.md`](../KNOWN_ISSUES.md) §2
 
-在 T2.6 完成前：**README 已标注"early alpha / 不可用于生产"**。
+可以发 v0.2.5 patch。
 
 ---
 
@@ -87,10 +89,10 @@ T-F1 死锁、T-F2 unwrap 审计、T-A1 baseline、T-B1 rayon 验证、T-E1 8 �
 | **T2.2** | T-F3 `tracing-appender` 日志滚动 + CSV ISO8601 时间戳修复 | 2h | 低 | T2.1 完成 | ✅ `38fb07f` |
 | **T2.3** | `service/mod.rs` (684) 业务拆分 — 需要先出**架构 RFC** | 1h RFC + 4h impl | 高 | T2.6 完成 | ⏳ |
 | **T2.4** | Linux 平台 72h 重跑（验证 epoll 路径无死锁 + TestNode 增强后端到端 sync） | 后台 72h | 中 | T2.6 完成 | ⏳ |
-| **T2.5** | TestNode harness 增强：注入 BepSession 启动逻辑（覆盖完整 BEP 流水线）+ e2e_sync 诊断测试 | 3-5h | 中 | T2.1 暴露此缺口 | ⚠️ **部分完成** — bep_bridge 已工作，但 e2e_sync 测试 `#[ignore]`（暴露 §2 puller bug） |
-| **T2.6** | **🔥 P0** — 修复 puller / index_handler 链路（KNOWN_ISSUES §2，端到端 sync 断链）+ 解除 e2e_sync 的 `#[ignore]` | 4-8h | 高 | T2.5 完成（已暴露） | ⏳ **必做** |
+| **T2.5** | TestNode harness 增强：注入 BepSession 启动逻辑（覆盖完整 BEP 流水线）+ e2e_sync 诊断测试 | 3-5h | 中 | T2.1 暴露此缺口 | ✅ 2026-05-13（暴露 §2 add_folder bug） |
+| **T2.6** | **P0** — 修复端到端 sync 链路（KNOWN_ISSUES §2）+ 解除 e2e_sync 的 `#[ignore]` | 4-8h（实际 ~2h） | 高 | T2.5 完成（已暴露） | ✅ 2026-05-13 — 根因为 `add_folder` 未 spawn loop，幂等 `start_folder_internal` 修复 |
 
-> 🔥 **v0.2.5 patch 必含项**：T2.6 是核心承诺修复，没有它项目不能称为"事实可用"。详见 [`../KNOWN_ISSUES.md`](../KNOWN_ISSUES.md)。
+> ✅ **v0.2.5 patch 可发**：T2.6 已修复，e2e_sync 测试通过。详见 [`../KNOWN_ISSUES.md`](../KNOWN_ISSUES.md) §2。
 
 ### T3 — v0.3.0 立项窗口（~05-16 起）
 

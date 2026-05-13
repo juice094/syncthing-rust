@@ -1,26 +1,26 @@
 # Known Issues
 
 > **维护原则**：发现的缺陷必须显式登记，避免误判项目成熟度。  
-> **最后更新**：2026-05-13
+> **最后更新**：2026-05-13（T2.6 修复）
 
 本文档列举当前已知未修复的功能性 / 行为性问题。  
 **这些问题决定了项目目前的"事实可用性"边界**。
 
 ---
 
-## ⚠️ 项目阶段定位（2026-05-13）
+## ⚠️ 项目阶段定位（2026-05-13 post-T2.6）
 
 | 维度 | 状态 |
 |------|------|
-| 代码完成度 | ~80%（MVP 全部 module 编译） |
+| 代码完成度 | ~85%（MVP 全部 module 编译；端到端链路通） |
 | 单元测试覆盖 | 295/295 通过 |
 | 连接层稳定性 | ✅ 9h+ 压测验证（T-F1 死锁已修复） |
-| **端到端同步** | ❌ **失败**（见 §2） |
+| **端到端同步** | ✅ **已修复**（T2.6，见 §2） |
 | 跨版本互通 | ⚠️ 仅 2026-04-11 单次手工验证，无自动化 |
-| 长跑（72h） | ⏳ 未完成（Windows 桌面休眠 + harness 缺陷） |
-| 生产就绪度 | **不可用于生产** |
+| 长跑（72h） | ⏳ 未完成（Windows 桌面休眠限制） |
+| 生产就绪度 | **alpha，已可用于研究 / 测试，未到生产** |
 
-类比：发动机 / 变速箱 / 车架 / 轮子都装好了，但传动轴某节有问题，踩油门发动机转、轮子不转。
+类比：发动机 / 变速箱 / 车架 / 轮子都装好了，传动轴的卡扣插好了，可以踩油门跑。但还没拿到出厂检验报告（72h 长跑）和路况认证（跨版本互通）。
 
 ---
 
@@ -50,53 +50,58 @@
 
 ---
 
-## §2. 端到端文件同步未完成（**P0 关键缺陷**）
+## §2. 端到端文件同步未完成（**已修复 ✅** T2.6）
 
-**症状**：两节点连接成功 → ClusterConfig 交换 → Index 包含 1 文件 → 接收端日志显示  
+> **历史记录**：2026-05-13 早盘标定为 P0 阻断；同日晚 T2.6 定位并修复。
+
+**症状（修复前）**：两节点连接成功 → ClusterConfig 交换 → Index 包含 1 文件 → 接收端日志显示  
 `New file from remote file=hello.txt`  
 **但之后没有任何 Block Request / Response 事件**，文件 45s 内不出现在接收端。
 
-**复现**：
+**实际根因**：
+`SyncManager::add_folder`（`crates/syncthing-sync/src/service/mod.rs`）只调用 `add_folder_internal`（创建 `FolderModel`），但 **没有调用 `start_folder_internal`** 来 spawn 该文件夹的 scan/pull/watcher 三个循环。
+
+具体后果链：
+1. `start_folder_loops()` 只在 `SyncManager::start()` 时遍历当时已存在的 folders
+2. 测试 / REST API / TUI 在运行时通过 `add_folder` 添加的文件夹 → FolderModel 存在但**没有任何任务**
+3. 远程 Index 到达 → `index_handler` → `folder_model.handle_remote_index` → `pull_notify.notify_one()`
+4. 但 `pull_loop` 任务从未 spawn → 没人在 `pull_notify.notified().await` 上等 → **通知静默丢失**
+5. → `puller.pull_folder` 永不调用 → `BlockSource::request_block` 永不调用
+
+**这不仅影响测试**：生产中通过 REST API `POST /rest/config/folders` 在运行时添加文件夹也会复现同样问题——重启进程前文件夹永不同步。
+
+**修复**：
+```rust
+// service/mod.rs::SyncManager::add_folder (commit XXX, 2026-05-13)
+async fn add_folder(&self, folder: Folder) -> Result<()> {
+    // ...
+    let folder_id = folder.id.clone();
+    self.add_folder_internal(folder).await?;
+    self.start_folder_internal(&folder_id).await?;  // ← NEW
+    Ok(())
+}
+```
+
+`start_folder_internal` 在 line 176 已经做了 `folder_tasks.contains_key()` 幂等检查，无条件调用安全。
+
+**验证**：
 ```bash
-cargo test --test e2e_sync -- --ignored --nocapture
-# RUST_LOG=info,syncthing_sync=debug 可看到详细链路
+cargo test --release -p syncthing --test e2e_sync test_two_node_single_file_sync -- --nocapture
+# 12.18s, 1 passed
 ```
 
-**已确认正常的环节**：
-- ✅ `TestNode::install_bep_bridge`（T2.5）正确注册 `on_connected`
-- ✅ BepSession::run() 启动并进入 steady-state
-- ✅ ClusterConfig 双向发送 / 接收
-- ✅ Index 双向发送，Sender 端正确报告 1 file
-- ✅ Receiver 端 index_handler 接收到 index 并识别 "New file from remote"
-
-**断链位置（疑似）**：
+日志可观察到完整链路：
 ```
-index_handler.rs::on_index()
-    ↓ identifies need_files
-    ↓ ??? — should trigger folder_model / puller
-    ↓
-puller.rs::pull_file()  ← never called?
-    ↓
-BlockSource::request_block()  ← never called
+Received full index folder=e2e file_count=1
+Starting folder pull file_count=1
+Received Response id=1 code=0 data_len=54   ← Block 传输!
+File download completed file=hello.txt
 ```
-
-**影响**：
-- 项目**核心承诺**（文件同步）目前**不工作**
-- 9h+ 压测的"稳定性"实际只是连接层稳定，sync 从未跑起来过
-- 任何生产部署 = 文件不会同步
-
-**修复优先级**：**P0 — 阻断 v0.3.0 一切其他增强**
 
 **追踪**：
-- 测试：`cmd/syncthing/tests/e2e_sync.rs`（已 `#[ignore]`）
+- 修复 commit：见本次 commit
+- 历史诊断测试：`cmd/syncthing/tests/e2e_sync.rs`（已解除 `#[ignore]`）
 - 报告：`docs/reports/STRESS_TEST_REPORT_2026-05-13.md` §6
-
-**下一步行动（"B 路径"）**：
-1. 阅读 `crates/syncthing-sync/src/index_handler.rs`
-2. 阅读 `crates/syncthing-sync/src/folder_model/mod.rs`（puller 调度）
-3. 在 `puller::pull_file` 入口加 trace 日志
-4. 再跑 e2e_sync，看在哪一步链路断
-5. 修复 + 移除 `#[ignore]` + 提交修复
 
 ---
 
@@ -141,15 +146,15 @@ BlockSource::request_block()  ← never called
 
 ## 路线图影响
 
-按本文档现状：
+按本文档现状（T2.6 修复后）：
 
 | v0.X.Y | 必须包含 |
 |--------|---------|
-| **v0.2.5（patch）** | §2 puller 链路修复（提升到 P0） |
+| **v0.2.5（patch）** | ✅ §2 已修复 — 准备发布 |
 | **v0.3.0** | §1 ClusterConfig race + §4 TestNode 文档 + Linux 72h（§3） |
 | **v0.4.0** | 跨版本互通自动化 + GUI / Web UI |
 
-v0.3.0 路线图（`NEXT_STEPS_2026-05-13.md`）需要插入新 T2.6 = 修复 §2 + 取消 e2e_sync 的 `#[ignore]`。
+v0.3.0 路线图（`NEXT_STEPS_2026-05-13.md`）中 T2.6 已完成。
 
 ---
 

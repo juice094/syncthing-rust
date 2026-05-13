@@ -1,34 +1,25 @@
-//! T2.5 - End-to-end sync test using the BEP bridge in TestNode harness.
+//! T2.5/T2.6 - End-to-end sync test using the BEP bridge in TestNode harness.
 //!
-//! ⚠️ STATUS (2026-05-13): **FAILING by design — pinned with `#[ignore]`.**
+//! Status (2026-05-13 post-T2.6): **PASSING**.
 //!
-//! This test was added by T2.5 as a **diagnostic** that exposes a real
-//! end-to-end sync defect in syncthing-rust. The intent is:
+//! This test was introduced by T2.5 as a diagnostic that originally exposed a
+//! real end-to-end sync defect: `SyncManager::add_folder` created the
+//! `FolderModel` but never spawned its scan/pull/watcher tasks, leaving any
+//! folder added at runtime silently inactive. The `pull_notify.notify_one()`
+//! from `handle_remote_index` was being delivered to a Notify with no
+//! awaiter, so the block-request chain was never driven.
 //!
-//! 1. Prove the BEP bridge wiring is correct (it is — see logs)
-//! 2. Drive ClusterConfig + Index exchange (works — see logs)
-//! 3. Verify file materialization on receiver (FAILS — see `docs/KNOWN_ISSUES.md`)
+//! T2.6 fix (one-line addition in `service::add_folder`): unconditionally
+//! call `start_folder_internal` after `add_folder_internal`. The helper is
+//! idempotent. See `docs/KNOWN_ISSUES.md` §2 for the full investigation.
 //!
-//! Observation from running with `RUST_LOG=info,syncthing_sync=debug`:
-//! - ClusterConfig is exchanged (after one 10s reconnect cycle)
-//! - Sender publishes Index with 1 file (after `scan_folder()` forces a rescan)
-//! - Receiver logs `New file from remote file=hello.txt`
-//! - **But no subsequent Block request / Response is observed**
-//! - File never materializes on receiver within 45s
+//! Verification surface (in execution order):
 //!
-//! Root cause (suspected): index_handler → puller → BlockSource::request_block
-//! pipeline has a missing trigger somewhere. See KNOWN_ISSUES.md §2.
-//!
-//! This test is the "B path" investigation target — once the puller chain is
-//! fixed, remove `#[ignore]`.
-//!
-//! Originally intended verification surface:
-//!
-//! 1. TLS handshake + Hello exchange    (already covered by `e2e_handshake.rs`)
-//! 2. **ClusterConfig exchange**         ← T2.5 (works ✅)
-//! 3. **Index sync**                     ← T2.5 (works ✅)
-//! 4. **Block transfer**                 ← T2.5 (BROKEN ❌)
-//! 5. File materialization on receiver  ← T2.5 (BROKEN ❌)
+//! 1. TLS handshake + Hello exchange
+//! 2. ClusterConfig exchange
+//! 3. Index sync (sender broadcasts file metadata)
+//! 4. Block transfer (receiver requests blocks via BEP)
+//! 5. File materialization on receiver
 
 use std::time::Duration;
 use syncthing_core::types::Folder;
@@ -36,7 +27,6 @@ use syncthing_sync::SyncManager;
 use syncthing_test_utils::harness::TestNode;
 
 #[tokio::test]
-#[ignore = "T2.5 diagnostic: exposes puller/index_handler chain bug; see KNOWN_ISSUES.md"]
 async fn test_two_node_single_file_sync() {
     // Init tracing for debugging (no-op if already initialized).
     let _ = tracing_subscriber::fmt()
