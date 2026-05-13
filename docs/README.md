@@ -1,8 +1,8 @@
 # Documentation
 
-本目录包含 `syncthing-rust` 项目的设计文档、验证报告、计划与历史归档。
+本目录包含 `syncthing-rust` 项目的设计文档、验证报告、计划、运维指南与历史归档。
 
-> **快速入口**: [design/NETWORK_DISCOVERY_DESIGN.md](design/NETWORK_DISCOVERY_DESIGN.md) — 当前活跃的设计文档（自建网络发现层）。
+> **快速入口**: [plans/NEXT_STEPS_2026-05-13.md](plans/NEXT_STEPS_2026-05-13.md) — 当前活跃路线图（v0.2.4 后 Phase A 完成）
 
 ---
 
@@ -14,6 +14,7 @@ docs/
 ├── design/                            # 活跃的设计文档
 ├── plans/                             # 计划与路线图
 ├── reports/                           # 验证报告与实现总结
+├── operations/                        # 运维与部署指南
 └── archive/                           # 历史归档（工作日志、早期报告）
 ```
 
@@ -31,12 +32,17 @@ docs/
 
 ## plans/ — 计划与路线图
 
+> ⚠️ 本节为简表。完整且最新的计划索引见 [`plans/INDEX.md`](plans/INDEX.md)。
+
 | 文档 | 内容 | 状态 |
 |------|------|------|
-| [PHASE4_PLAN.md](plans/PHASE4_PLAN.md) | Phase 4 目标：TUI 增强、长时压测、生产打包 | 🔵 进行中 |
+| [NEXT_STEPS_2026-05-13.md](plans/NEXT_STEPS_2026-05-13.md) | v0.2.4 发布后活动计划（T1/T2/T3 三段）| ✅ 最新 |
+| [POST_V0_2_0_ROADMAP.md](plans/POST_V0_2_0_ROADMAP.md) | 战略级路线图（P0~P5 矩阵 + ADR）| 🟢 活跃 |
+| [TUNING_PLAN_2026-05-11.md](plans/TUNING_PLAN_2026-05-11.md) | 横向调优计划（T-A~T-G） | 🟢 活跃 |
+| [PHASE4_PLAN.md](plans/PHASE4_PLAN.md) | Phase 4 目标（已被 NEXT_STEPS 覆盖）| 🗃️ 归档 |
 | [PHASE3_PLAN.md](plans/PHASE3_PLAN.md) | Phase 3 目标：Push/Pull E2E、BEP 协议兼容 | ✅ 已完成 |
 | [WAVE3_PLAN.md](plans/WAVE3_PLAN.md) | Wave 3 详细任务分解 | ✅ 已完成 |
-| [improvement-plan.md](plans/improvement-plan.md) | 通用改进事项清单 | 🔵 持续更新 |
+| [improvement-plan.md](plans/improvement-plan.md) | 通用改进事项清单 | 🗃️ 已归档 |
 | [MVP_RECOVERY_PLAN.md](plans/MVP_RECOVERY_PLAN.md) | 早期项目恢复计划 | 🗃️ 归档 |
 
 ---
@@ -45,10 +51,25 @@ docs/
 
 | 文档 | 内容 | 日期 |
 |------|------|------|
+| [STRESS_TEST_REPORT_2026-05-13.md](reports/STRESS_TEST_REPORT_2026-05-13.md) | 9h11m 压测完整分析（T-F1 死锁修复验证） | 2026-05-13 |
+| [SESSION_SUMMARY_2026-05-12.md](reports/SESSION_SUMMARY_2026-05-12.md) | v0.2.3→v0.2.4 周期工程归档 | 2026-05-12 |
+| [STRESS_TEST_DEATH_INVESTIGATION_2026-05-12.md](reports/STRESS_TEST_DEATH_INVESTIGATION_2026-05-12.md) | T-F1 死锁根因分析（RCA）| 2026-05-12 |
+| [BASELINE_2026-05-12.md](reports/BASELINE_2026-05-12.md) | Scanner/Puller/BEP 性能基线 | 2026-05-12 |
+| [LOCK_AWAIT_AUDIT_2026-05-12.md](reports/LOCK_AWAIT_AUDIT_2026-05-12.md) | 全工程跨 await 持锁审计 | 2026-05-12 |
+| [UNWRAP_AUDIT_2026-05-12.md](reports/UNWRAP_AUDIT_2026-05-12.md) | unwrap/expect 审计 | 2026-05-12 |
 | [IMPLEMENTATION_SUMMARY.md](reports/IMPLEMENTATION_SUMMARY.md) | 架构总览、crate 职责、当前实现状态 | 持续更新 |
 | [VERIFICATION_REPORT_BEP_2026-04-11.md](reports/VERIFICATION_REPORT_BEP_2026-04-11.md) | 首次跨网络 BEP 互操作测试（Tailscale） | 2026-04-11 |
 | [INTEROP_TEST_REPORT.md](reports/INTEROP_TEST_REPORT.md) | 本地互操作测试笔记 | 2026-04-11 |
 | [PROJECT_STATUS.md](reports/PROJECT_STATUS.md) | 滚动项目状态快照 | 🗃️ 可能过时 |
+
+---
+
+## operations/ — 运维与部署指南
+
+| 文档 | 内容 | 适用场景 |
+|------|------|----------|
+| [TAILSCALE_GUIDE.md](operations/TAILSCALE_GUIDE.md) | 与 Tailscale 协同部署，零配置 NAT 穿透 | 跨家庭/4G/CGNAT 同步 |
+| [PROXY_GUIDE.md](operations/PROXY_GUIDE.md) | 通过 SOCKS5/HTTP 代理（如 Watt Toolkit、clash）转发出站连接 | 加速 discovery/relay、合规审计 |
 
 ---
 
@@ -71,5 +92,7 @@ docs/
 
 - **新协作者**: 先看 [`reports/IMPLEMENTATION_SUMMARY.md`](reports/IMPLEMENTATION_SUMMARY.md) 了解架构，再看根目录 `README.md` 编译运行。
 - **架构决策**: [`design/ARCHITECTURE_DECISIONS.md`](design/ARCHITECTURE_DECISIONS.md) 是所有粗粒度架构决策的统一入口。
-- **当前开发重点**: [`design/NETWORK_DISCOVERY_DESIGN.md`](design/NETWORK_DISCOVERY_DESIGN.md) 是网络层下一阶段（Phase 5）的权威参考。
+- **当前开发重点**: [`plans/NEXT_STEPS_2026-05-13.md`](plans/NEXT_STEPS_2026-05-13.md) 是 v0.2.4 后的活动路线图，含 T1/T2/T3 三段计划。
+- **部署使用**: 跨网络同步看 [`operations/TAILSCALE_GUIDE.md`](operations/TAILSCALE_GUIDE.md)；代理转发看 [`operations/PROXY_GUIDE.md`](operations/PROXY_GUIDE.md)。
+- **稳定性证据**: [`reports/STRESS_TEST_REPORT_2026-05-13.md`](reports/STRESS_TEST_REPORT_2026-05-13.md) 含 9h+ 压测分析。
 - **历史追溯**: 需要了解某个决策的背景时，查阅 `archive/` 中的工作日报。

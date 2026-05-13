@@ -67,12 +67,15 @@ T-F1 死锁、T-F2 unwrap 审计、T-A1 baseline、T-B1 rayon 验证、T-E1 8 �
 
 ### T2 — 压测窗口后（~05-15 起）
 
-| ID | 任务 | 预计 | 风险 | 触发 |
-|----|------|------|------|------|
-| **T2.1** | `72H_STRESS_REPORT_2026-05-15.md` 撰写（内存曲线、连接数、错误率、监控 CSV 解析） | 3h | 低 | 压测落幕 |
-| **T2.2** | T-F3 `tracing-appender` 日志滚动（hourly / daily rotation） | 2h | 低 | T2.1 完成 |
-| **T2.3** | `service/mod.rs` (684) 业务拆分 — 需要先出**架构 RFC** | 1h RFC + 4h impl | 高 | T2.2 完成 |
-| **T2.4** | Linux 平台重跑 72h 压测（验证 epoll/io_uring 路径无新死锁） | 后台 72h | 中 | T2.1 完成 |
+| ID | 任务 | 预计 | 风险 | 触发 | 状态 |
+|----|------|------|------|------|------|
+| **T2.0a** | `operations/TAILSCALE_GUIDE.md` — Tailscale 协同部署指南 | 1h | 低 | 无 | ✅ 2026-05-13 |
+| **T2.0b** | `operations/PROXY_GUIDE.md` — SOCKS5/HTTP 代理（Watt Toolkit 等）使用指南 | 1h | 低 | 无 | ✅ 2026-05-13 |
+| **T2.1** | `STRESS_TEST_REPORT_2026-05-13.md` — 9h+ 压测完整分析（含连接层 vs 同步层结论） | 3h | 低 | 压测落幕 | ✅ 2026-05-13 |
+| **T2.2** | T-F3 `tracing-appender` 日志滚动（hourly / daily rotation） | 2h | 低 | T2.1 完成 | ⏳ |
+| **T2.3** | `service/mod.rs` (684) 业务拆分 — 需要先出**架构 RFC** | 1h RFC + 4h impl | 高 | T2.2 完成 | ⏳ |
+| **T2.4** | Linux 平台 72h 重跑（验证 epoll 路径无死锁 + TestNode 增强后端到端 sync） | 后台 72h | 中 | T2.1 完成 + harness 改进 | ⏳ |
+| **T2.5** | TestNode harness 增强：注入 BepSession 启动逻辑（覆盖完整 BEP 流水线） | 3-5h | 中 | T2.1 暴露此缺口 | ⏳ |
 
 ### T3 — v0.3.0 立项窗口（~05-16 起）
 
