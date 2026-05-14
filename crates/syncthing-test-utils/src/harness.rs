@@ -208,6 +208,7 @@ impl TestNode {
 
     /// Graceful shutdown and cleanup of temporary directory.
     pub async fn shutdown(self) {
+        let _ = self.connection_handle.stop().await;
         let _ = self.sync_service.stop().await;
         let _ = tokio::fs::remove_dir_all(&self.config_dir).await;
     }
