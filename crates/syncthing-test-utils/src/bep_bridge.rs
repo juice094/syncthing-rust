@@ -339,9 +339,10 @@ pub fn install_bep_bridge(
             if let Err(e) = sync_service.disconnect_device(device_id).await {
                 warn!("[test-harness] disconnect_device failed: {}", e);
             }
-            if let Some((_, h)) = sessions.remove(&device_id) {
-                h.abort();
-            }
+            // 不 abort：race resolution 替换连接时，on_disconnected 可能在 on_connected
+            // 启动新 BepSession 之后才执行，abort 会误杀新 session。旧 session 自己会在
+            // 连接关闭后检测到 recv/send 错误并退出。
+            let _ = sessions.remove(&device_id);
         });
     });
 

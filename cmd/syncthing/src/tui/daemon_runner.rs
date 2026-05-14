@@ -247,9 +247,11 @@ pub async fn start_daemon(
                     device_id, e
                 );
             }
-            if let Some((_, handle)) = sessions.remove(&device_id) {
-                handle.abort();
-            }
+            // 移除旧句柄（避免泄漏），但不 abort：
+            // race resolution 替换连接时，on_disconnected 可能在 on_connected 启动新
+            // BepSession 之后才执行，abort 会误杀新 session。旧 session 自己会在连接
+            // 关闭后检测到 recv/send 错误并退出。
+            let _ = sessions.remove(&device_id);
         });
     });
 

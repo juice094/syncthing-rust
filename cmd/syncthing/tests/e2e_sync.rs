@@ -98,9 +98,20 @@ async fn test_two_node_single_file_sync() {
                 break;
             }
         }
-        // WORKAROUND for §1 ClusterConfig race: if sync stalls, re-dial and wait
+        // WORKAROUND for §1 ClusterConfig race: if sync stalls, disconnect
+        // both directions and re-dial. connect_to_with_relay returns Ok(())
+        // if already connected, so we must explicitly disconnect first.
         if start.elapsed() > Duration::from_secs(30) && !retried {
             tracing::warn!("Sync stalled, retrying connections (§1 workaround)");
+            let _ = node_a
+                .connection_handle
+                .disconnect(&node_b.device_id, "retry")
+                .await;
+            let _ = node_b
+                .connection_handle
+                .disconnect(&node_a.device_id, "retry")
+                .await;
+            tokio::time::sleep(Duration::from_millis(500)).await;
             let _ = node_a.connect_to(&node_b).await;
             let _ = node_b.connect_to(&node_a).await;
             let _ = node_a
