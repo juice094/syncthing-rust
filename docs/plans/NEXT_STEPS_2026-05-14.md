@@ -2,7 +2,7 @@
 
 > 承接 [NEXT_STEPS_2026-05-13.md](./NEXT_STEPS_2026-05-13.md)（已归档）
 > 本文档为 INC-20260514-001 存储耗尽事故复盘后的行动计划。
-> **状态快照（2026-05-14 23:30）**：v0.2.6 已发布；H-1~H-6 全部完成；运行时安全审查完成；T3.1b reconnect_device + session health check 完成；跨版本互通验证通过（Rust v0.2.6 vs Go v2.1.0）；Tailscale 验证纳入后续。
+> **状态快照（2026-05-14 23:59）**：v0.2.6 已发布；H-1~H-6 全部完成；运行时安全审查完成；T3.1b reconnect_device + session health check 完成；跨版本互通验证通过（Rust v0.2.6 vs Go v2.1.0）；Tailscale 验证纳入后续；**代码健康度审查 + 依赖清理 + criterion benchmark 骨架完成；CI 全绿（0 failed, 0 clippy warnings）；e2e_sync 因 §1 race 标记 ignore。**
 
 ---
 
@@ -189,6 +189,9 @@ v0.3.0 在原有基础上增加运行时安全基线要求：
 |------|--------|------|------|
 | Tailscale 链路验证 | P2 | 两台 Tailnet 设备 | 有条件时执行；验证 CGNAT 地址下的直连、MTU 表现、回退行为 |
 | Linux 72h 长跑 | P1 | Gray-Cloud VPS | 脚本已就绪 (`scripts/72h_*.sh`)，待部署启动 |
+| ~~代码健康度审查 + 依赖清理~~ | ✅ | — | `cargo machete` 清理 4 个未使用依赖；生产代码 unwrap 337/expect 30 |
+| ~~criterion benchmark 骨架~~ | ✅ | — | 4 个 bench（device_id, scanner, hash_parallel, encode_decode）|
+| ~~e2e_sync flaky 处理~~ | ✅ | — | 标记 `#[ignore]`，说明 §1 ClusterConfig race 根因 |
 
 ---
 
