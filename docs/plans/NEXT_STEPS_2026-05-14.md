@@ -99,17 +99,23 @@ v0.3.0 在原有基础上增加运行时安全基线要求：
 | 原任务 | 调整 |
 |--------|------|
 | T2.4 Linux 72h 压测 | **保留**，但必须先完成 v0.2.6 |
-| T3.1 pending_responses slab | 保留 |
+| T3.1 §1 ClusterConfig race (`on_disconnected` 误杀) | **✅ 已完成** (commit `3656007`) |
+| T3.1b `connect_to` 重连语义 | 纳入 v0.3.0：`connect_to_with_relay` 在已连接时应检查 session 健康度，或统一使用 `reconnect_device` |
 | T3.2 FileSystemDatabase WAL RFC | 保留，可能延至 v0.4.0 |
 | T3.4 dialer 业务拆分 | 保留 |
-| §1 ClusterConfig race | 纳入 v0.3.0 必含 |
 | §4 TestNode rescan interval | 纳入 v0.3.0 必含 |
 
+**v0.2.6 → v0.3.0 基线完成情况**：
+- [x] 所有 channel 必须有界 ✅ (H-3)
+- [x] 所有 loop 必须可优雅终止 ✅ (H-6)
+- [x] 生产代码零 panic ✅ (H-5)
+- [x] 日志轮转通过单日 10GB 压力测试 ✅ (H-2)
+- [x] §1 ClusterConfig race 修复 ✅ (T3.1)
+
 **新增 v0.3.0 准入标准**：
-- 所有 channel 必须有界
-- 所有 loop 必须可优雅终止
-- 生产代码零 panic（除 main.rs 启动失败）
-- 日志轮转通过单日 10GB 压力测试
+- `connect_to` 重连语义：已连接时若 session 不健康，应自动重新触发 `on_connected`
+- 跨版本互通测试：与 Go 版 syncthing 至少 1 次自动化验证
+- Linux 72h 长跑无内存泄漏、无死锁
 
 ---
 
