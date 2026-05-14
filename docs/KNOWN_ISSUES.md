@@ -24,29 +24,26 @@
 
 ---
 
-## §1. ClusterConfig 首次握手必定超时（中危）
+## §1. ClusterConfig 首次握手超时 / on_disconnected 误杀新 BepSession（**已修复 ✅** T3.1）
 
-**症状**：两节点同时拨号对方时（双向 `connect_to`），首轮 BEP session 在 10s 内都收不到对端 ClusterConfig，触发 timeout → 重连 → 第二轮成功。
+**症状**：两节点同时拨号对方时（双向 `connect_to`），e2e_sync 偶发 90s 超时；首轮 BEP session 收不到 ClusterConfig。
 
-**复现**：`cargo test --test e2e_sync -- --ignored` 日志最早 10s 段。
+**实际根因**：
+race resolution 替换连接时，旧连接的 `close()` 触发 `Disconnected` 事件 → `on_disconnected` callback。
+`on_disconnected` 的 task 在 `on_connected` 启动新 BepSession **之后** 才执行，
+`sessions.remove(&device_id)` 拿到的是**新 session 的 handle**，随后的 `handle.abort()` 误杀了刚启动的正确 BepSession。
+结果：双方保留的物理连接上无人运行 BepSession，ClusterConfig 无人收发，10s 超时。
 
-**根因（推测）**：
-- 双向 `connect_to` 在毫秒级内发起两个 TCP 连接
-- 两个 `BepSession::run()` 异步启动，各自发送 ClusterConfig
-- 由于 race resolution 机制立刻 close 一组连接，对方还没来得及读 ClusterConfig
-- BepSession 的 ClusterConfig 等待逻辑硬编码 10s（`crates/syncthing-net/src/session/mod.rs`）
+**修复**（commit `3656007`）：
+- `daemon_runner.rs` / `bep_bridge.rs`：`on_disconnected` 只 `sessions.remove` 清理句柄，**不再 `abort`**。
+- 旧 BepSession 自己会在连接关闭后检测到 `recv/send` 错误并退出。
+- 新增 `ConnectionManagerHandle::reconnect_device` API，支持显式断开+清 pending+重拨。
 
-**影响**：
-- 用户体感"启动后约 12 秒才真正连上"
-- 长跑场景每次 process 重启都浪费 10s
-- 不影响最终连通性（重连机制兜底）
+**剩余限制**：
+- `connect_to_with_relay` 在已有连接时直接返回 `Ok(())`，不重新触发 `on_connected`。
+  已通过 `reconnect_device` API 规避；生产代码中如需强制重连应使用 `reconnect_device`。
 
-**修复方向**：
-- A. 在 race resolution 中转移已发送/已接收的 ClusterConfig 缓冲
-- B. 推迟 BepSession::run() 启动直到 race resolution 稳定（~100ms 延迟）
-- C. 缩短超时到 3s + 立刻重试
-
-**追踪**：`docs/plans/NEXT_STEPS_2026-05-13.md` §T3 候选
+**追踪**：`docs/plans/NEXT_STEPS_2026-05-14.md` §T3.1
 
 ---
 
