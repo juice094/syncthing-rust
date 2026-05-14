@@ -412,7 +412,9 @@ mod tests {
                 assert_eq!(from, device_a);
                 assert_eq!(payload, b"hello from A");
             }
-            other => panic!("expected RecvPacket, got {:?}", other),
+            other => {
+                assert!(false, "expected RecvPacket, got {:?}", other);
+            }
         }
     }
 }

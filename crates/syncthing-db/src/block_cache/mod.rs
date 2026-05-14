@@ -83,18 +83,18 @@ impl CachedBlockStore {
     ///
     /// # Returns
     /// A new `CachedBlockStore` instance
-    pub fn new(store: SledStore, cache_size: usize) -> Self {
+    pub fn new(store: SledStore, cache_size: usize) -> Result<Self> {
         let metadata_tree = store
             .open_tree("metadata")
-            .unwrap_or_else(|_| panic!("Failed to open metadata tree"));
+            .map_err(|e| SyncthingError::Storage(format!("Failed to open metadata tree: {}", e)))?;
         let metadata = MetadataStore::from_tree(metadata_tree);
 
-        Self {
+        Ok(Self {
             store,
             metadata,
             cache: Arc::new(RwLock::new(LruCache::new(cache_size))),
             stats: Arc::new(RwLock::new(CacheStats::default())),
-        }
+        })
     }
 
     /// Create a new block store with both block and metadata storage
@@ -313,7 +313,7 @@ impl BlockStoreBuilder {
             })?,
         };
 
-        Ok(CachedBlockStore::new(store, self.cache_size))
+        CachedBlockStore::new(store, self.cache_size)
     }
 }
 
