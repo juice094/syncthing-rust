@@ -456,7 +456,7 @@ pub async fn start_daemon(
                         }
 
                         // 2. T3.1b: 每 60s 检查"有连接但无 BepSession"的设备并尝试重连
-                        if tick_count % 60 == 0 {
+                        if tick_count.is_multiple_of(60) {
                             let connected = handle.connected_devices();
                             for device_id in connected {
                                 let has_session = session_handles_clone.contains_key(&device_id);
