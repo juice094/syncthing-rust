@@ -5,6 +5,7 @@ use syncthing_core::types::Folder;
 use syncthing_test_utils::harness::TestNode;
 
 #[tokio::test]
+#[serial_test::serial]
 async fn test_two_node_empty_folder_handshake() {
     let node_a = TestNode::new("a").await.expect("create node a");
     let node_b = TestNode::new("b").await.expect("create node b");

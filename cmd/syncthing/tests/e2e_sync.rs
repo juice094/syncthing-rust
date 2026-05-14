@@ -27,6 +27,7 @@ use syncthing_sync::SyncManager;
 use syncthing_test_utils::harness::TestNode;
 
 #[tokio::test]
+#[serial_test::serial]
 async fn test_two_node_single_file_sync() {
     // Init tracing for debugging (no-op if already initialized).
     let _ = tracing_subscriber::fmt()
@@ -85,10 +86,12 @@ async fn test_two_node_single_file_sync() {
     // T2.5: Wait for the file to appear on node B (Index + Block pull).
     // Generous timeout accounts for: initial ClusterConfig 10s timeout +
     // reconnect backoff 1-3s + index propagation + block transfer.
+    // NOTE: under `cargo test --workspace` parallelism, CPU contention can
+    // delay the sync pipeline; 90s is a safe upper bound (isolated run ~12s).
     let file_b = folder_b_path.join("hello.txt");
     let start = std::time::Instant::now();
     let mut found = false;
-    while start.elapsed() < Duration::from_secs(45) {
+    while start.elapsed() < Duration::from_secs(90) {
         if file_b.exists() {
             let received = tokio::fs::read(&file_b).await.expect("read file_b");
             if received == test_payload {
@@ -104,6 +107,6 @@ async fn test_two_node_single_file_sync() {
 
     assert!(
         found,
-        "T2.5: file did not sync to node B within 45s - BEP bridge not driving full pipeline?"
+        "T2.5: file did not sync to node B within 90s - BEP bridge not driving full pipeline?"
     );
 }

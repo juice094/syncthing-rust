@@ -104,6 +104,11 @@ impl ConnectionManagerHandle {
         }
     }
 
+    /// 停止连接管理器
+    pub async fn stop(&self) -> syncthing_core::Result<()> {
+        self.inner.stop().await
+    }
+
     /// 获取统计信息
     pub fn stats(&self) -> ManagerStats {
         self.inner.stats()
