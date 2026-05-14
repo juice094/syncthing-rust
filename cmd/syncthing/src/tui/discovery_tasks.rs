@@ -29,6 +29,7 @@ impl Drop for GlobalDiscoveryShutdown {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 pub async fn init_and_spawn_global_discovery(
     device_id: DeviceId,
     cert_path: &Path,

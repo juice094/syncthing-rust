@@ -391,7 +391,7 @@ mod tests {
                 assert_eq!(items, vec!["file.txt".to_string()]);
             }
             other => {
-                assert!(false, "Wrong event type: expected LocalIndexUpdated, got {:?}", other);
+                panic!("Wrong event type: expected LocalIndexUpdated, got {:?}", other);
             }
         }
     }
