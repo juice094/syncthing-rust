@@ -25,11 +25,9 @@ tracing-subscriber = { workspace = true }
 tracing-appender = { workspace = true }
 chrono = { workspace = true }
 clap = { version = "4.5", features = ["derive"] }
-dirs = "5.0"
 anyhow = "1.0"
 bytes = { workspace = true }
 async-trait = { workspace = true }
-serde = { workspace = true }
 rand = { workspace = true }
 serde_json = { workspace = true }
 

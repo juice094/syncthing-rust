@@ -14,9 +14,7 @@ path = "src/main.rs"
 anyhow = { workspace = true }
 tokio = { workspace = true }
 tracing = { workspace = true }
-tracing-subscriber = { workspace = true }
 clap = { version = "4.5", features = ["derive"] }
-dirs = "5.0"
 rustls = { workspace = true, features = ["ring"] }
 syncthing-net = { path = "../../crates/syncthing-net" }
 syncthing-core = { path = "../../crates/syncthing-core" }

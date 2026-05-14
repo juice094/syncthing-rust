@@ -1,76 +1,51 @@
-//! BEP encode/decode benchmarks (TUNING_PLAN T-A1)
-//!
-//! 运行：cargo bench -p bep-protocol
-//! 报告：target/criterion/
+use criterion::{black_box, criterion_group, criterion_main, Criterion};
+use prost::Message;
+use bep_protocol::messages::{Hello, Index, WireFileInfo, WireVector, WireBlockInfo};
 
-use bep_protocol::messages::Hello;
-use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
-
-fn bench_hello_encode(c: &mut Criterion) {
-    let mut group = c.benchmark_group("hello_encode");
-
-    let hello = Hello::new(
-        "device-name-32-bytes-padding-xxxx",
-        "syncthing-rust",
-        "0.2.0-beta",
-    );
-
-    group.bench_function("encode_to_vec", |b| {
+fn bench_hello_encode_decode(c: &mut Criterion) {
+    let hello = Hello::new("rust-node", "syncthing", "v0.2.6");
+    c.bench_function("hello_encode_decode", |b| {
         b.iter(|| {
-            let v = black_box(&hello).encode_to_vec();
-            black_box(v);
+            let encoded = hello.encode_to_bytes();
+            let _ = Hello::decode(black_box(&encoded)).unwrap();
         });
     });
-
-    group.finish();
 }
 
-fn bench_hello_decode(c: &mut Criterion) {
-    let mut group = c.benchmark_group("hello_decode");
-
-    let hello = Hello::new(
-        "device-name-32-bytes-padding-xxxx",
-        "syncthing-rust",
-        "0.2.0-beta",
-    );
-    let buf = hello.encode_to_vec();
-    group.throughput(Throughput::Bytes(buf.len() as u64));
-
-    group.bench_function("decode", |b| {
-        b.iter(|| {
-            let h = Hello::decode(black_box(&buf)).expect("decode hello");
-            black_box(h);
-        });
-    });
-
-    group.finish();
-}
-
-fn bench_hello_roundtrip_sizes(c: &mut Criterion) {
-    let mut group = c.benchmark_group("hello_roundtrip_by_size");
-
-    for name_len in [16usize, 64, 256, 1024].iter() {
-        let device_name = "x".repeat(*name_len);
-        let hello = Hello::new(device_name.as_str(), "syncthing-rust", "0.2.0-beta");
-        let encoded = hello.encode_to_vec();
-        group.throughput(Throughput::Bytes(encoded.len() as u64));
-
-        group.bench_with_input(BenchmarkId::from_parameter(name_len), name_len, |b, _| {
-            b.iter(|| {
-                let v = black_box(&hello).encode_to_vec();
-                let decoded = Hello::decode(&v).expect("decode");
-                black_box(decoded);
-            });
+fn bench_index_encode_decode(c: &mut Criterion) {
+    let mut files = Vec::new();
+    for i in 0..100 {
+        files.push(WireFileInfo {
+            name: format!("file_{}.txt", i),
+            r#type: 0,
+            size: 1024,
+            permissions: 0o644,
+            modified_s: 0,
+            deleted: false,
+            invalid: false,
+            no_permissions: false,
+            version: Some(WireVector { counters: vec![] }),
+            sequence: i as i64,
+            modified_ns: 0,
+            modified_by: 0,
+            block_size: 128 * 1024,
+            platform: None,
+            blocks: vec![WireBlockInfo { offset: 0, size: 1024, hash: vec![0u8; 32] }],
+            symlink_target: vec![],
+            blocks_hash: vec![],
+            encrypted: vec![],
+            previous_blocks_hash: vec![],
         });
     }
-
-    group.finish();
+    let index = Index { folder: "test".to_string(), files, last_sequence: 100 };
+    c.bench_function("index_100files_encode_decode", |b| {
+        b.iter(|| {
+            let mut buf = Vec::new();
+            index.encode(black_box(&mut buf)).unwrap();
+            let _ = Index::decode(black_box(&*buf)).unwrap();
+        });
+    });
 }
 
-criterion_group!(
-    benches,
-    bench_hello_encode,
-    bench_hello_decode,
-    bench_hello_roundtrip_sizes
-);
+criterion_group!(benches, bench_hello_encode_decode, bench_index_encode_decode);
 criterion_main!(benches);
