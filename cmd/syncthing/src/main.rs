@@ -136,23 +136,23 @@ async fn main() -> Result<()> {
             listen,
             device_name,
         } => {
-            // T-F3: 日志滚动切片（默认 7 天 / 100 MB）
+            // H-2: 日志按小时轮转，保留 7 天（168 文件），防止单日无限膨胀
             let logs_dir = config_dir.join("logs");
             if let Err(e) = std::fs::create_dir_all(&logs_dir) {
                 eprintln!("Warning: cannot create logs dir: {}", e);
             }
             let file_appender = tracing_appender::rolling::Builder::new()
-                .rotation(tracing_appender::rolling::Rotation::DAILY)
-                .max_log_files(7)
+                .rotation(tracing_appender::rolling::Rotation::HOURLY)
+                .max_log_files(168)
                 .filename_prefix("daemon")
                 .filename_suffix("log")
                 .build(&logs_dir)
                 .unwrap_or_else(|e| {
                     eprintln!(
-                        "Warning: cannot create rolling file appender: {}. Falling back to stdout.",
+                        "Warning: cannot create rolling file appender: {}. Falling back to TMP.",
                         e
                     );
-                    tracing_appender::rolling::daily(std::env::temp_dir(), "syncthing-fallback")
+                    tracing_appender::rolling::hourly(std::env::temp_dir(), "syncthing-fallback")
                 });
             let (non_blocking, _guard) = tracing_appender::non_blocking(file_appender);
             let subscriber = tracing_subscriber::registry().with(
