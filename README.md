@@ -35,6 +35,7 @@ A Rust implementation of the [Syncthing](https://syncthing.net/) protocol stack,
 
 > **Current limitations (must read)**:
 > - **§1 ClusterConfig first-handshake 10s timeout**: first connection cycle is delayed ~12s due to a known race (auto-reconnect always succeeds on the second cycle).
+> - **§7 Runtime safety gaps** (v0.2.6 fix in progress): config hot-reload lacks debounce (can loop under notify event storm); daemon log rotation is daily-only (no single-file size cap); several `unbounded_channel`s exist in network layer. See [`docs/KNOWN_ISSUES.md`](./docs/KNOWN_ISSUES.md) §7 for full audit.
 > - 72h stress test on Windows desktop is infeasible (sleep kills nohup children); requires Linux.
 > - Go Syncthing full file-sync interoperability was hand-tested once on 2026-04-11, no automation.
 

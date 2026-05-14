@@ -1,7 +1,7 @@
 # Known Issues
 
 > **维护原则**：发现的缺陷必须显式登记，避免误判项目成熟度。  
-> **最后更新**：2026-05-13（T2.6 修复）
+> **最后更新**：2026-05-14（运行时安全审查后，INC-20260514-001 复盘）
 
 本文档列举当前已知未修复的功能性 / 行为性问题。  
 **这些问题决定了项目目前的"事实可用性"边界**。
@@ -144,14 +144,104 @@ File download completed file=hello.txt
 
 ---
 
+## §7. 运行时安全缺陷汇总（高危，v0.2.6 必须修复）
+
+> **来源**：`INC-20260514-001` 存储耗尽事故复盘 + 系统性代码审查（2026-05-14）。  
+> **核心结论**：项目存在 **"无 debounce 的 watcher + 无大小限制的日志 + 无界 channel + 生产代码 panic"** 的系统性缺失。以下子项按严重程度排列。
+
+### §7.1 配置热重载死循环（P0，已造成事故）
+
+**症状**：`notify` 事件风暴 → `daemon_runner.rs` 无 debounce 处理 → `info!` 日志高频输出 → 19 小时写出 21G → 磁盘 100% → 系统雪崩。
+
+**根因**：
+- `JsonConfigStore::watch()`（`syncthing-api/src/config.rs:203`）与 `daemon_runner.rs:448` 均未对文件系统事件做去抖；
+- `notify` 在 overlayfs/云盘环境下可能产生虚假事件风暴；
+- 热重载成功日志使用 `info!` 级别，落在高频路径。
+
+**修复方向**：
+- A. `daemon_runner` 增加 500ms~1s debounce（重置计时器模式）；
+- B. `config.rs:271` / `daemon_runner.rs:457` 日志降为 `debug!`；
+- C. `stream.next()` 对比 mtime/sha256，无变化跳过 reload。
+
+**追踪**：v0.2.6 hotfix H-1
+
+### §7.2 日志轮转仅按天、无单文件大小上限（P0，已造成事故）
+
+**症状**：`tracing_appender::rolling::Rotation::DAILY` 在同一天内允许无限膨胀。事故中 `daemon.2026-05-13.log` 单文件 21G。
+
+**根因**：`main.rs:144-146` 只有按日轮转 + `max_log_files(7)`，缺少单文件尺寸上限或按小时分割。
+
+**修复方向**：改为按大小轮转（100MB）或至少 `Rotation::HOURLY`。
+
+**追踪**：v0.2.6 hotfix H-2
+
+### §7.3 无界 Channel 内存泄漏风险（P1）
+
+**症状**：对端高速发包 / 文件系统事件风暴 / 连接事件堆积时，内存无界增长，最终 OOM。
+
+**涉及位置**（生产代码中 `unbounded_channel`）：
+- `syncthing-net/src/connection/mod.rs:126-127` — BEP message/incoming
+- `syncthing-net/src/manager/mod.rs:100` — ConnectionManager events
+- `syncthing-net/src/derp/server.rs:214` / `client.rs:75` / `pipe.rs:141-142` — DERP 全链路
+- `cmd/syncthing/src/tui/daemon_runner.rs:202` — BepSessionEvent
+- `crates/syncthing-sync/src/watcher.rs:30` — notify Event
+
+**修复方向**：全部改为有界 channel（如 1024），发送端用 `try_send`，满时丢弃或反压。
+
+**追踪**：v0.2.6 hotfix H-3
+
+### §7.4 丢弃的 Receiver + 无界发送 = 确定泄漏（P1）
+
+**症状**：`event_tx` 被持有并发送，但 `_event_rx` 被立即丢弃。消息进入无消费者的无界 channel，永不释放。
+
+**涉及位置**：
+- `relay_listener.rs:125,144`
+- `tcp_transport.rs:191,269`
+- `bep_adapter.rs:145,243`
+
+**修复方向**：移除无用 channel，改用 `tracing::error!` 或原子标志；若需消费则保留 receiver。
+
+**追踪**：v0.2.6 hotfix H-4
+
+### §7.5 生产代码中存在 panic 路径（P2）
+
+**症状**：外部输入（网络帧、事件类型、数据库文件）不可信，但代码使用 `panic!` / `unreachable!`，导致整进程崩溃。
+
+**涉及位置**：
+- `syncthing-api/src/events.rs:368` — `panic!("Wrong event type")`
+- `syncthing-db/src/block_cache/mod.rs:89` — `panic!("Failed to open metadata tree")`
+- `syncthing-net/src/derp/server.rs:415` — 非预期帧类型 panic
+- `syncthing-net/src/manager/registry.rs:68` — `unreachable!()`
+
+**修复方向**：全部改为 `error!` + 返回 `Err` 或跳过处理。
+
+**追踪**：v0.2.6 hotfix H-5
+
+### §7.6 Interval Loop 缺少优雅终止（P2）
+
+**症状**：部分 `loop { interval.tick().await }` 未 `select!` 绑定 shutdown，daemon 停止时依赖 Tokio task abort，可能延迟资源释放。
+
+**涉及位置**：
+- `daemon_runner.rs:427-438` — session cleanup
+- `discovery_tasks.rs:84` — global discovery
+- `relay_listener.rs:38,109` — relay listeners
+- `syncthing-api/src/events.rs:202,222` — event bus
+
+**修复方向**：参照 `folder_model` 的 `select! { _ = shutdown.changed() => break }` 模式改造。
+
+**追踪**：v0.2.6 hotfix H-6
+
+---
+
 ## 路线图影响
 
-按本文档现状（T2.6 修复后）：
+按本文档现状（2026-05-14 安全审查后）：
 
 | v0.X.Y | 必须包含 |
 |--------|---------|
-| **v0.2.5（patch）** | ✅ §2 已修复 — 准备发布 |
-| **v0.3.0** | §1 ClusterConfig race + §4 TestNode 文档 + Linux 72h（§3） |
+| **v0.2.5** | ✅ §2 已修复 — 已发布 |
+| **v0.2.6（hotfix）** | §7 运行时安全缺陷（H-1~H-6）：debounce + 日志上限 + 有界 channel + panic 清除 + shutdown select |
+| **v0.3.0** | §1 ClusterConfig race + §4 TestNode 文档 + Linux 72h（§3）+ T3.1/T3.4 |
 | **v0.4.0** | 跨版本互通自动化 + GUI / Web UI |
 
 v0.3.0 路线图（`NEXT_STEPS_2026-05-13.md`）中 T2.6 已完成。
