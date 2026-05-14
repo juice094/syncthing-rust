@@ -1,6 +1,6 @@
+use bep_protocol::messages::{Hello, Index, WireBlockInfo, WireFileInfo, WireVector};
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
 use prost::Message;
-use bep_protocol::messages::{Hello, Index, WireFileInfo, WireVector, WireBlockInfo};
 
 fn bench_hello_encode_decode(c: &mut Criterion) {
     let hello = Hello::new("rust-node", "syncthing", "v0.2.6");
@@ -30,14 +30,22 @@ fn bench_index_encode_decode(c: &mut Criterion) {
             modified_by: 0,
             block_size: 128 * 1024,
             platform: None,
-            blocks: vec![WireBlockInfo { offset: 0, size: 1024, hash: vec![0u8; 32] }],
+            blocks: vec![WireBlockInfo {
+                offset: 0,
+                size: 1024,
+                hash: vec![0u8; 32],
+            }],
             symlink_target: vec![],
             blocks_hash: vec![],
             encrypted: vec![],
             previous_blocks_hash: vec![],
         });
     }
-    let index = Index { folder: "test".to_string(), files, last_sequence: 100 };
+    let index = Index {
+        folder: "test".to_string(),
+        files,
+        last_sequence: 100,
+    };
     c.bench_function("index_100files_encode_decode", |b| {
         b.iter(|| {
             let mut buf = Vec::new();
@@ -47,5 +55,9 @@ fn bench_index_encode_decode(c: &mut Criterion) {
     });
 }
 
-criterion_group!(benches, bench_hello_encode_decode, bench_index_encode_decode);
+criterion_group!(
+    benches,
+    bench_hello_encode_decode,
+    bench_index_encode_decode
+);
 criterion_main!(benches);

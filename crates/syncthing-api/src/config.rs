@@ -279,9 +279,8 @@ impl ConfigStream for JsonConfigStream {
             .await
             .map_err(SyncthingError::Io)?;
 
-        let config: Config = serde_json::from_str(&content).map_err(|e| {
-            SyncthingError::config(format!("Failed to parse updated JSON: {}", e))
-        })?;
+        let config: Config = serde_json::from_str(&content)
+            .map_err(|e| SyncthingError::config(format!("Failed to parse updated JSON: {}", e)))?;
 
         let mut cache = self.cache.write().await;
         *cache = Some(config);

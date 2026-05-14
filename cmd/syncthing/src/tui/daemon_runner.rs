@@ -202,8 +202,7 @@ pub async fn start_daemon(
                 old_handle.abort();
             }
             let handle2 = tokio::spawn(async move {
-                let (event_tx, event_rx) =
-                    tokio::sync::mpsc::channel::<BepSessionEvent>(256);
+                let (event_tx, event_rx) = tokio::sync::mpsc::channel::<BepSessionEvent>(256);
                 let event_device_id = device_id;
                 let shared_folders_map = Arc::clone(&shared_folders_map);
                 spawn_session_event_logger(event_device_id, event_rx, shared_folders_map);
@@ -430,8 +429,8 @@ pub async fn start_daemon(
     let connection_handle = handle.clone();
     let session_handles_clone = Arc::clone(&session_handles);
     let mut shutdown_rx = shutdown_rx;
-    let future: std::pin::Pin<Box<dyn std::future::Future<Output = Result<()>> + Send>> =
-        Box::pin(async move {
+    let future: std::pin::Pin<Box<dyn std::future::Future<Output = Result<()>> + Send>> = Box::pin(
+        async move {
             let mut interval = tokio::time::interval(Duration::from_secs(1));
             let mut tick_count = 0u64;
             loop {
@@ -475,7 +474,8 @@ pub async fn start_daemon(
                 }
             }
             Ok(())
-        });
+        },
+    );
 
     // 配置热同步：监听 config.json 变更并通知 sync_service
     // H-1: 500ms debounce（重置计时器模式）+ 日志降级为 debug

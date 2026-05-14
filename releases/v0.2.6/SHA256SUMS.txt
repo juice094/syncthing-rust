@@ -1,0 +1,4 @@
+e2a0e5046929ab4a0f5f38621dd1ad435b6189ba03593a3e9f75d90d357e451b *stress_test-v0.2.6-x86_64-pc-windows-msvc.exe
+1cec231f05fc8d68d261a5c1e87522dfa8088e09cc00ae1231b5c5e3029aaccc *stress_test-v0.2.6-x86_64-unknown-linux-gnu
+14a327edd9b1437f532a7eec5acff5eca9aa575a56707db94c472364578edcaa *syncthing-v0.2.6-x86_64-pc-windows-msvc.exe
+2074d34924935474380e5d56bffb6407258760e8da09d260d56332b3008de3a2 *syncthing-v0.2.6-x86_64-unknown-linux-gnu

@@ -31,5 +31,10 @@ fn bench_device_id_roundtrip(c: &mut Criterion) {
     });
 }
 
-criterion_group!(benches, bench_device_id_parse, bench_device_id_to_string, bench_device_id_roundtrip);
+criterion_group!(
+    benches,
+    bench_device_id_parse,
+    bench_device_id_to_string,
+    bench_device_id_roundtrip
+);
 criterion_main!(benches);

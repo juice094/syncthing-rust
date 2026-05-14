@@ -202,7 +202,9 @@ impl BepConnection {
         *self.inner.device_id.write() = Some(device_id);
 
         // 通知连接建立
-        let _ = self.event_tx.try_send(ConnectionEvent::Connected { device_id });
+        let _ = self
+            .event_tx
+            .try_send(ConnectionEvent::Connected { device_id });
     }
 
     /// 获取连接类型

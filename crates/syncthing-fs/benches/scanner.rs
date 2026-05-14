@@ -1,7 +1,7 @@
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
+use std::io::Write;
 use syncthing_fs::scanner;
 use tempfile::NamedTempFile;
-use std::io::Write;
 
 fn bench_scan_small_file(c: &mut Criterion) {
     let mut tmp = NamedTempFile::new().unwrap();
@@ -10,9 +10,7 @@ fn bench_scan_small_file(c: &mut Criterion) {
     let rt = tokio::runtime::Runtime::new().unwrap();
     c.bench_function("scan_file_1kb", |b| {
         b.iter(|| {
-            let _ = rt.block_on(async {
-                scanner::scan_file(black_box(&path), 128 * 1024).await
-            });
+            let _ = rt.block_on(async { scanner::scan_file(black_box(&path), 128 * 1024).await });
         });
     });
 }
@@ -24,9 +22,7 @@ fn bench_scan_medium_file(c: &mut Criterion) {
     let rt = tokio::runtime::Runtime::new().unwrap();
     c.bench_function("scan_file_1mb", |b| {
         b.iter(|| {
-            let _ = rt.block_on(async {
-                scanner::scan_file(black_box(&path), 128 * 1024).await
-            });
+            let _ = rt.block_on(async { scanner::scan_file(black_box(&path), 128 * 1024).await });
         });
     });
 }
