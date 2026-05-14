@@ -188,7 +188,7 @@ impl SyncthingTcpListener {
                 .await?;
 
         // 创建BEP连接（先不关联设备ID）
-        let (event_tx, _event_rx) = tokio::sync::mpsc::unbounded_channel();
+        let (event_tx, _event_rx) = tokio::sync::mpsc::channel(256);
 
         let conn = BepConnection::new(
             Box::new(TcpBiStream::Server(tls_stream)),
@@ -266,7 +266,7 @@ pub async fn connect_bep(
         crate::handshaker::BepHandshaker::client_handshake(&mut tls_stream, device_name).await?;
 
     // 创建BEP连接
-    let (event_tx, _event_rx) = tokio::sync::mpsc::unbounded_channel();
+    let (event_tx, _event_rx) = tokio::sync::mpsc::channel(256);
 
     let conn = BepConnection::new(
         Box::new(TcpBiStream::Client(tls_stream)),

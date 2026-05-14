@@ -156,7 +156,7 @@ impl ConnectionManager {
         }
 
         // 发送事件
-        let _ = self.event_tx.send(ConnectionEvent::Connected { device_id });
+        let _ = self.event_tx.send(ConnectionEvent::Connected { device_id }).await;
 
         Ok(())
     }

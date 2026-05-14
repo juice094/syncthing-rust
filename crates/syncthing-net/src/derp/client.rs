@@ -55,7 +55,7 @@ pub enum DerpClientState {
 }
 
 /// Type alias for the inbound packet channel.
-type PacketRx = mpsc::UnboundedReceiver<(DeviceId, Vec<u8>)>;
+type PacketRx = mpsc::Receiver<(DeviceId, Vec<u8>)>;
 
 /// DERP 客户端
 ///
@@ -64,7 +64,7 @@ pub struct DerpClient {
     config: DerpClientConfig,
     state: Arc<Mutex<DerpClientState>>,
     /// 出站数据包发送通道（应用层 → DERP 客户端）
-    packet_tx: mpsc::UnboundedSender<(DeviceId, Vec<u8>)>,
+    packet_tx: mpsc::Sender<(DeviceId, Vec<u8>)>,
     /// 入站数据包接收通道（DERP 客户端 → 应用层）
     packet_rx: Arc<Mutex<PacketRx>>,
 }
@@ -72,7 +72,7 @@ pub struct DerpClient {
 impl DerpClient {
     /// 创建新的 DERP 客户端（不立即连接）
     pub fn new(config: DerpClientConfig) -> Self {
-        let (packet_tx, packet_rx) = mpsc::unbounded_channel();
+        let (packet_tx, packet_rx) = mpsc::channel(256);
         Self {
             config,
             state: Arc::new(Mutex::new(DerpClientState::Disconnected)),
@@ -82,7 +82,7 @@ impl DerpClient {
     }
 
     /// 获取出站数据包发送通道
-    pub fn packet_sender(&self) -> mpsc::UnboundedSender<(DeviceId, Vec<u8>)> {
+    pub fn packet_sender(&self) -> mpsc::Sender<(DeviceId, Vec<u8>)> {
         self.packet_tx.clone()
     }
 
@@ -182,7 +182,7 @@ impl DerpClient {
                     match crate::derp::protocol::Frame::decode(&mut combined) {
                         Ok(Some((Frame::RecvPacket { from, payload }, _))) => {
                             // 将收到的数据包转发给应用层
-                            if let Err(e) = packet_tx.send((from, payload)) {
+                            if let Err(e) = packet_tx.send((from, payload)).await {
                                 warn!("DERP failed to forward packet to app layer: {}", e);
                             }
                         }

@@ -18,7 +18,7 @@ impl FolderWatcher {
     pub fn watch(
         folder_id: &str,
         path: &str,
-    ) -> Result<(RecommendedWatcher, mpsc::UnboundedReceiver<Event>)> {
+    ) -> Result<(RecommendedWatcher, mpsc::Receiver<Event>)> {
         let watch_path = std::path::PathBuf::from(path);
         if !watch_path.exists() {
             return Err(SyncError::scan(
@@ -27,7 +27,7 @@ impl FolderWatcher {
             ));
         }
 
-        let (tx, rx) = mpsc::unbounded_channel::<Event>();
+        let (tx, rx) = mpsc::channel::<Event>(256);
         let folder_id_for_log = folder_id.to_string();
         let folder_id_for_err = folder_id.to_string();
 
@@ -39,7 +39,9 @@ impl FolderWatcher {
                         match event.kind {
                             notify::EventKind::Access(_) => {}
                             _ => {
-                                let _ = tx.send(event);
+                                if let Err(e) = tx.try_send(event) {
+                                    warn!(folder_id = %folder_id_for_log, error = %e, "Watcher event dropped (channel full)");
+                                }
                             }
                         }
                     }

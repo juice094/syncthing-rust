@@ -199,7 +199,7 @@ pub async fn start_daemon(
             }
             let handle2 = tokio::spawn(async move {
                 let (event_tx, event_rx) =
-                    tokio::sync::mpsc::unbounded_channel::<BepSessionEvent>();
+                    tokio::sync::mpsc::channel::<BepSessionEvent>(256);
                 let event_device_id = device_id;
                 let shared_folders_map = Arc::clone(&shared_folders_map);
                 spawn_session_event_logger(event_device_id, event_rx, shared_folders_map);

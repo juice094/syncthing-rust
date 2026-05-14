@@ -142,7 +142,7 @@ impl DialConnector for TransportBepConnector {
         let _remote_hello = BepHandshaker::client_handshake(&mut tls_stream, device_name).await?;
 
         // 4. 创建 BEP 连接
-        let (event_tx, _event_rx) = tokio::sync::mpsc::unbounded_channel();
+        let (event_tx, _event_rx) = tokio::sync::mpsc::channel(256);
         let tls_pipe = TlsPipe::new(tls_stream, local_addr, peer_addr);
         let conn =
             BepConnection::new(Box::new(tls_pipe), ConnectionType::Outgoing, event_tx).await?;
@@ -240,7 +240,7 @@ impl BepTransportListener {
         let _remote_hello = BepHandshaker::server_handshake(&mut tls_stream, device_name).await?;
 
         // 创建 BEP 连接
-        let (event_tx, _event_rx) = tokio::sync::mpsc::unbounded_channel();
+        let (event_tx, _event_rx) = tokio::sync::mpsc::channel(256);
         let tls_pipe = TlsPipe::new(tls_stream, local_addr, peer_addr);
         let conn =
             BepConnection::new(Box::new(tls_pipe), ConnectionType::Incoming, event_tx).await?;

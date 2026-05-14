@@ -53,8 +53,8 @@ async fn test_split_boxed_pipe() {
 #[tokio::test]
 async fn test_bep_connection_over_memory_pipe() {
     let (pipe_a, pipe_b) = syncthing_test_utils::memory_pipe_pair(4096);
-    let (tx_a, _rx_a) = mpsc::unbounded_channel();
-    let (tx_b, _rx_b) = mpsc::unbounded_channel();
+    let (tx_a, _rx_a) = mpsc::channel(256);
+    let (tx_b, _rx_b) = mpsc::channel(256);
 
     let conn_a = BepConnection::new(Box::new(pipe_a), ConnectionType::Outgoing, tx_a)
         .await

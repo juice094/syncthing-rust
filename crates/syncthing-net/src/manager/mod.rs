@@ -64,9 +64,9 @@ pub struct ConnectionManager {
     /// 设备 Relay URL 映射
     pub(crate) device_relay_urls: DashMap<DeviceId, Vec<String>>,
     /// 事件发送器
-    pub(crate) event_tx: mpsc::UnboundedSender<ConnectionEvent>,
+    pub(crate) event_tx: mpsc::Sender<ConnectionEvent>,
     /// 事件接收器
-    pub(crate) event_rx: RwLock<Option<mpsc::UnboundedReceiver<ConnectionEvent>>>,
+    pub(crate) event_rx: RwLock<Option<mpsc::Receiver<ConnectionEvent>>>,
     /// 运行状态
     pub(crate) running: RwLock<bool>,
     /// 维护任务句柄
@@ -97,7 +97,7 @@ impl ConnectionManager {
         tls_config: Arc<SyncthingTlsConfig>,
     ) -> (Arc<Self>, ConnectionManagerHandle) {
         let local_device_id = identity.device_id();
-        let (event_tx, event_rx) = mpsc::unbounded_channel();
+        let (event_tx, event_rx) = mpsc::channel(256);
 
         let parallel_dialer = Arc::new(ParallelDialer::with_tcp_connector(
             local_device_id,
