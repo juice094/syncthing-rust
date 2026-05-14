@@ -236,6 +236,7 @@ impl ConfigStore for JsonConfigStore {
             receiver: rx,
             path: self.path.clone(),
             cache,
+            last_modified: None,
         };
 
         Ok(Box::new(stream))
@@ -247,6 +248,7 @@ pub struct JsonConfigStream {
     receiver: mpsc::Receiver<()>,
     path: PathBuf,
     cache: Arc<RwLock<Option<Config>>>,
+    last_modified: Option<std::time::SystemTime>,
 }
 
 #[async_trait]
@@ -257,19 +259,34 @@ impl ConfigStream for JsonConfigStream {
             .await
             .ok_or_else(|| SyncthingError::config("Watch channel closed".to_string()))?;
 
-        if self.path.exists() {
-            let content = tokio::fs::read_to_string(&self.path)
-                .await
-                .map_err(SyncthingError::Io)?;
-
-            let config: Config = serde_json::from_str(&content).map_err(|e| {
-                SyncthingError::config(format!("Failed to parse updated JSON: {}", e))
-            })?;
-
-            let mut cache = self.cache.write().await;
-            *cache = Some(config);
-            info!("JSON configuration reloaded from file");
+        if !self.path.exists() {
+            return Ok(());
         }
+
+        // H-1: mtime dedup — skip reload if file hasn't actually changed
+        let modified = tokio::fs::metadata(&self.path)
+            .await
+            .map_err(SyncthingError::Io)?
+            .modified()
+            .map_err(SyncthingError::Io)?;
+
+        if self.last_modified == Some(modified) {
+            debug!("Config file mtime unchanged, skipping reload");
+            return Ok(());
+        }
+
+        let content = tokio::fs::read_to_string(&self.path)
+            .await
+            .map_err(SyncthingError::Io)?;
+
+        let config: Config = serde_json::from_str(&content).map_err(|e| {
+            SyncthingError::config(format!("Failed to parse updated JSON: {}", e))
+        })?;
+
+        let mut cache = self.cache.write().await;
+        *cache = Some(config);
+        self.last_modified = Some(modified);
+        debug!("JSON configuration reloaded from file");
 
         Ok(())
     }

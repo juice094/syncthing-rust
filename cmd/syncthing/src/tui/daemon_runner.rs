@@ -7,7 +7,7 @@ use std::time::Duration;
 use anyhow::{Context, Result};
 use dashmap::DashMap;
 use tokio::task::JoinHandle;
-use tracing::{info, warn};
+use tracing::{debug, info, warn};
 
 use syncthing_core::types::Config;
 use syncthing_core::DeviceId;
@@ -439,25 +439,42 @@ pub async fn start_daemon(
         });
 
     // 配置热同步：监听 config.json 变更并通知 sync_service
+    // H-1: 500ms debounce（重置计时器模式）+ 日志降级为 debug
     let config_path_for_watch = config_path.clone();
     let sync_service_for_watch = Arc::clone(&sync_service);
     tokio::spawn(async move {
         let store = JsonConfigStore::new(&config_path_for_watch);
         match store.watch().await {
             Ok(mut stream) => {
-                while let Ok(()) = stream.next().await {
-                    match store.load().await {
-                        Ok(new_config) => {
-                            if let Err(e) = sync_service_for_watch
-                                .update_config(new_config.clone())
-                                .await
-                            {
-                                warn!("Failed to update sync service config from watch: {}", e);
-                            } else {
-                                info!("Config hot-reloaded from {:?}", config_path_for_watch);
+                loop {
+                    // 等待第一个事件
+                    if let Ok(()) = stream.next().await {
+                        let mut deadline = tokio::time::Instant::now() + Duration::from_millis(500);
+                        // debounce 窗口：期间新事件重置计时器
+                        loop {
+                            tokio::select! {
+                                Ok(()) = stream.next() => {
+                                    deadline = tokio::time::Instant::now() + Duration::from_millis(500);
+                                }
+                                _ = tokio::time::sleep_until(deadline) => {
+                                    break;
+                                }
                             }
                         }
-                        Err(e) => warn!("Failed to load config for hot-reload: {}", e),
+                        // 窗口结束，执行 reload
+                        match store.load().await {
+                            Ok(new_config) => {
+                                if let Err(e) = sync_service_for_watch
+                                    .update_config(new_config.clone())
+                                    .await
+                                {
+                                    warn!("Failed to update sync service config from watch: {}", e);
+                                } else {
+                                    debug!("Config hot-reloaded from {:?}", config_path_for_watch);
+                                }
+                            }
+                            Err(e) => warn!("Failed to load config for hot-reload: {}", e),
+                        }
                     }
                 }
             }
