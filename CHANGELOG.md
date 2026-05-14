@@ -2,6 +2,15 @@
 
 ## [Unreleased]
 
+### 🔬 Interop
+- **Cross-version interop verified** (2026-05-14): Rust v0.2.6 ↔ Go syncthing v2.1.0.
+  TLS 1.3 handshake, BEP Hello/ClusterConfig/Index exchange, and file sync
+  (1× text + 3× binary files) all pass on local loopback.
+  `scripts/cross_version_test.sh` rewritten with platform-aware config generation
+  and full-field JSON/XML serialization.
+
+---
+
 ## [0.2.6] — 2026-05-14（运行时安全 hotfix）
 
 ### 🎯 Headline: 运行时安全加固 — 防止资源耗尽雪崩
