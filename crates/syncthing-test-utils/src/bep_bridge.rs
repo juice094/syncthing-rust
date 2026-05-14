@@ -298,7 +298,7 @@ pub fn install_bep_bridge(
                 old.abort();
             }
             let handle2 = tokio::spawn(async move {
-                let (event_tx, _event_rx) = mpsc::unbounded_channel::<BepSessionEvent>();
+                let (event_tx, _event_rx) = mpsc::channel::<BepSessionEvent>(256);
                 let handler = TestBepHandler {
                     sync_service: Arc::clone(&sync_service),
                 };

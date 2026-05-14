@@ -91,15 +91,15 @@ pub struct BepConnection {
     /// 写入端
     write_half: Arc<Mutex<Option<tokio::io::WriteHalf<syncthing_core::traits::BoxedPipe>>>>,
     /// 消息发送通道
-    message_tx: mpsc::UnboundedSender<Message>,
+    message_tx: mpsc::Sender<Message>,
     /// 事件发送器
-    event_tx: mpsc::UnboundedSender<ConnectionEvent>,
+    event_tx: mpsc::Sender<ConnectionEvent>,
     /// 关闭信号
     shutdown_tx: RwLock<Option<oneshot::Sender<()>>>,
     /// 接收消息通道发送端（供读取任务使用）
-    incoming_tx: mpsc::UnboundedSender<(MessageType, Bytes)>,
+    incoming_tx: mpsc::Sender<(MessageType, Bytes)>,
     /// 接收消息通道接收端
-    incoming_rx: Arc<Mutex<mpsc::UnboundedReceiver<(MessageType, Bytes)>>>,
+    incoming_rx: Arc<Mutex<mpsc::Receiver<(MessageType, Bytes)>>>,
 }
 
 /// 内部消息结构
@@ -114,7 +114,7 @@ impl BepConnection {
     pub async fn new(
         pipe: syncthing_core::traits::BoxedPipe,
         conn_type: ConnectionType,
-        event_tx: mpsc::UnboundedSender<ConnectionEvent>,
+        event_tx: mpsc::Sender<ConnectionEvent>,
     ) -> Result<Arc<Self>> {
         let remote_addr = pipe
             .peer_addr()
@@ -123,8 +123,8 @@ impl BepConnection {
             .local_addr()
             .unwrap_or_else(|| SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), 0));
 
-        let (message_tx, message_rx) = mpsc::unbounded_channel();
-        let (incoming_tx, incoming_rx) = mpsc::unbounded_channel();
+        let (message_tx, message_rx) = mpsc::channel(256);
+        let (incoming_tx, incoming_rx) = mpsc::channel(256);
         let (shutdown_tx, shutdown_rx) = oneshot::channel();
 
         let id = uuid::Uuid::new_v4();
@@ -202,7 +202,7 @@ impl BepConnection {
         *self.inner.device_id.write() = Some(device_id);
 
         // 通知连接建立
-        let _ = self.event_tx.send(ConnectionEvent::Connected { device_id });
+        let _ = self.event_tx.try_send(ConnectionEvent::Connected { device_id });
     }
 
     /// 获取连接类型
@@ -245,6 +245,7 @@ impl BepConnection {
         let msg = Message { header, payload };
         self.message_tx
             .send(msg)
+            .await
             .map_err(|_| SyncthingError::ConnectionClosed)?;
 
         self.update_stats(|s| {
@@ -302,7 +303,7 @@ impl BepConnection {
         self.set_state(ConnectionState::Disconnected);
 
         // 发送断开事件
-        let _ = self.event_tx.send(ConnectionEvent::Disconnected {
+        let _ = self.event_tx.try_send(ConnectionEvent::Disconnected {
             reason: "connection closed".to_string(),
         });
 
@@ -323,7 +324,7 @@ impl BepConnection {
     async fn run(
         &self,
         mut shutdown_rx: oneshot::Receiver<()>,
-        message_rx: Arc<Mutex<mpsc::UnboundedReceiver<Message>>>,
+        message_rx: Arc<Mutex<mpsc::Receiver<Message>>>,
     ) -> Result<()> {
         // 启动读取任务
         let read_handle = self.spawn_read_task();
@@ -481,13 +482,17 @@ impl BepConnection {
                 debug!("Received message: {:?}", header.message_type);
 
                 if let Some(device_id) = *inner.device_id.read() {
-                    let _ = event_tx.send(ConnectionEvent::MessageReceived {
+                    if let Err(e) = event_tx.try_send(ConnectionEvent::MessageReceived {
                         device_id,
                         msg_type: header.message_type,
-                    });
+                    }) {
+                        warn!("Failed to send message received event: {}", e);
+                    }
                 }
 
-                let _ = incoming_tx.send((header.message_type, Bytes::from(msg_buf)));
+                if let Err(e) = incoming_tx.try_send((header.message_type, Bytes::from(msg_buf))) {
+                    warn!("Failed to enqueue incoming message: {}", e);
+                }
             }
         })
     }
@@ -495,7 +500,7 @@ impl BepConnection {
     /// 启动写入任务
     fn spawn_write_task(
         &self,
-        message_rx: Arc<Mutex<mpsc::UnboundedReceiver<Message>>>,
+        message_rx: Arc<Mutex<mpsc::Receiver<Message>>>,
     ) -> tokio::task::JoinHandle<Result<()>> {
         let write_half = Arc::clone(&self.write_half);
         let inner = Arc::clone(&self.inner);
@@ -588,7 +593,7 @@ impl Drop for BepConnection {
     fn drop(&mut self) {
         // 确保连接被关闭
         if self.is_alive() {
-            let _ = self.event_tx.send(ConnectionEvent::Disconnected {
+            let _ = self.event_tx.try_send(ConnectionEvent::Disconnected {
                 reason: "connection dropped".to_string(),
             });
         }

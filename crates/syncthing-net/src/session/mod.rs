@@ -134,7 +134,7 @@ pub struct BepSession {
     handler: Arc<dyn BepSessionHandler>,
     pending_responses:
         Arc<DashMap<i32, tokio::sync::oneshot::Sender<bep_protocol::messages::Response>>>,
-    event_tx: Option<tokio::sync::mpsc::UnboundedSender<BepSessionEvent>>,
+    event_tx: Option<tokio::sync::mpsc::Sender<BepSessionEvent>>,
     metrics: Arc<BepSessionMetrics>,
     remote_shared_folders: Option<Vec<String>>,
 }
@@ -170,7 +170,7 @@ impl BepSession {
         pending_responses: Arc<
             DashMap<i32, tokio::sync::oneshot::Sender<bep_protocol::messages::Response>>,
         >,
-        event_tx: tokio::sync::mpsc::UnboundedSender<BepSessionEvent>,
+        event_tx: tokio::sync::mpsc::Sender<BepSessionEvent>,
     ) -> Self {
         let device_id = identity.device_id();
         Self {
@@ -187,7 +187,9 @@ impl BepSession {
 
     fn emit(&self, event: BepSessionEvent) {
         if let Some(ref tx) = self.event_tx {
-            let _ = tx.send(event);
+            if let Err(e) = tx.try_send(event) {
+                debug!("Failed to emit BEP session event: {}", e);
+            }
         }
     }
 

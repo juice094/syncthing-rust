@@ -74,8 +74,8 @@ impl BepSessionHandler for MockHandler {
 #[tokio::test]
 async fn test_session_ping_pong() {
     let (pipe_a, pipe_b) = syncthing_test_utils::memory_pipe_pair(4096);
-    let (tx_a, _rx_a) = tokio::sync::mpsc::unbounded_channel();
-    let (tx_b, _rx_b) = tokio::sync::mpsc::unbounded_channel();
+    let (tx_a, _rx_a) = tokio::sync::mpsc::channel(256);
+    let (tx_b, _rx_b) = tokio::sync::mpsc::channel(256);
 
     let conn_a = BepConnection::new(Box::new(pipe_a), ConnectionType::Outgoing, tx_a)
         .await
@@ -137,8 +137,8 @@ async fn test_session_ping_pong() {
 #[tokio::test]
 async fn test_session_block_request_response() {
     let (pipe_a, pipe_b) = syncthing_test_utils::memory_pipe_pair(4096);
-    let (tx_a, _rx_a) = tokio::sync::mpsc::unbounded_channel();
-    let (tx_b, _rx_b) = tokio::sync::mpsc::unbounded_channel();
+    let (tx_a, _rx_a) = tokio::sync::mpsc::channel(256);
+    let (tx_b, _rx_b) = tokio::sync::mpsc::channel(256);
 
     let conn_a = BepConnection::new(Box::new(pipe_a), ConnectionType::Outgoing, tx_a)
         .await
@@ -217,8 +217,8 @@ async fn test_session_block_request_response() {
 #[tokio::test]
 async fn test_session_events_and_metrics() {
     let (pipe_a, pipe_b) = syncthing_test_utils::memory_pipe_pair(4096);
-    let (tx_a, _rx_a) = tokio::sync::mpsc::unbounded_channel();
-    let (tx_b, _rx_b) = tokio::sync::mpsc::unbounded_channel();
+    let (tx_a, _rx_a) = tokio::sync::mpsc::channel(256);
+    let (tx_b, _rx_b) = tokio::sync::mpsc::channel(256);
 
     let conn_a = BepConnection::new(Box::new(pipe_a), ConnectionType::Outgoing, tx_a)
         .await
@@ -232,7 +232,7 @@ async fn test_session_events_and_metrics() {
     let pending: Arc<DashMap<i32, tokio::sync::oneshot::Sender<bep_protocol::messages::Response>>> =
         Arc::new(DashMap::new());
 
-    let (event_tx, mut event_rx) = tokio::sync::mpsc::unbounded_channel::<BepSessionEvent>();
+    let (event_tx, mut event_rx) = tokio::sync::mpsc::channel::<BepSessionEvent>(256);
     let session = BepSession::with_events(
         Arc::new(syncthing_core::DeviceIdentity::new(device_id)),
         Arc::clone(&conn_a),

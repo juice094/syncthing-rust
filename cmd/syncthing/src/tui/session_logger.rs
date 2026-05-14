@@ -5,7 +5,6 @@
 use std::sync::Arc;
 
 use dashmap::DashMap;
-use tokio::sync::mpsc::UnboundedReceiver;
 use tokio::task::JoinHandle;
 use tracing::{info, warn};
 
@@ -18,7 +17,7 @@ use syncthing_net::BepSessionEvent;
 /// 同时在收到 `ClusterConfigComplete` 时更新 `shared_folders_map`。
 pub fn spawn_session_event_logger(
     event_device_id: DeviceId,
-    mut event_rx: UnboundedReceiver<BepSessionEvent>,
+    mut event_rx: tokio::sync::mpsc::Receiver<BepSessionEvent>,
     shared_folders_map: Arc<DashMap<DeviceId, Vec<String>>>,
 ) -> JoinHandle<()> {
     tokio::spawn(async move {
