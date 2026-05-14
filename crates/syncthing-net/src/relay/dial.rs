@@ -90,7 +90,10 @@ pub async fn connect_bep_via_relay(
     debug!("Relay session mode connected to {}", session_addr);
 
     // 5. 在 session stream 上启动 BEP TLS 握手 + Hello + 创建连接
-    let (event_tx, _event_rx) = tokio::sync::mpsc::channel(256);
+    let (event_tx, mut event_rx) = tokio::sync::mpsc::channel(256);
+    tokio::spawn(async move {
+        while event_rx.recv().await.is_some() {}
+    });
 
     let conn = if invitation.server_socket {
         // 作为 TLS server
