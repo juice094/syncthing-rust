@@ -89,6 +89,26 @@ impl ConnectionManagerHandle {
             .await
     }
 
+    /// 按设备 ID 强制重连（自动从内部地址池获取地址）。
+    pub async fn reconnect_device_by_id(
+        &self,
+        device_id: DeviceId,
+    ) -> syncthing_core::Result<()> {
+        let addresses = self
+            .inner
+            .device_addresses
+            .get(&device_id)
+            .map(|e| e.clone())
+            .unwrap_or_default();
+        let relay_urls = self
+            .inner
+            .device_relay_urls
+            .get(&device_id)
+            .map(|e| e.clone())
+            .unwrap_or_default();
+        self.reconnect_device(device_id, addresses, relay_urls).await
+    }
+
     /// 强制重连到设备：断开现有连接并重新拨号。
     ///
     /// 与 `connect_to` 不同，此方法在设备已连接时也会执行完整的
