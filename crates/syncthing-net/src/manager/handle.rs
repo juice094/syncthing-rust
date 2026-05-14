@@ -89,6 +89,28 @@ impl ConnectionManagerHandle {
             .await
     }
 
+    /// 强制重连到设备：断开现有连接并重新拨号。
+    ///
+    /// 与 `connect_to` 不同，此方法在设备已连接时也会执行完整的
+    /// 断开 → 清 pending → 拨号流程，确保 `on_connected` 被重新触发。
+    pub async fn reconnect_device(
+        &self,
+        device_id: DeviceId,
+        addresses: Vec<SocketAddr>,
+        relay_urls: Vec<String>,
+    ) -> syncthing_core::Result<()> {
+        // 1. 断开现有连接（触发 on_disconnected 清理旧 session）
+        self.disconnect(&device_id, "reconnect").await.ok();
+        // 2. 清除 pending 状态，防止 connect_to_with_relay 因"already pending"直接返回
+        {
+            let mut pending = self.inner.pending_connections.write().await;
+            pending.remove(&device_id);
+        }
+        // 3. 重新拨号
+        self.connect_to_with_relay(device_id, addresses, relay_urls)
+            .await
+    }
+
     /// 更新设备的地址池（由 discovery 层调用）
     pub fn update_addresses(
         &self,

@@ -177,6 +177,35 @@ impl TestNode {
         Ok(())
     }
 
+    /// 强制重连到对等节点（断开现有连接后重新拨号）。
+    ///
+    /// 与 `connect_to` 不同，此方法在已连接时也会执行完整的重连流程，
+    /// 确保 `on_connected` 被重新触发。
+    pub async fn reconnect_to(&self, peer: &TestNode) -> Result<()> {
+        let device = Device {
+            id: peer.device_id,
+            name: Some(
+                peer.config_dir
+                    .file_name()
+                    .unwrap_or_default()
+                    .to_string_lossy()
+                    .to_string(),
+            ),
+            addresses: vec![syncthing_core::types::AddressType::Tcp(format!(
+                "tcp://{}",
+                peer.bep_addr
+            ))],
+            paused: false,
+            introducer: false,
+        };
+        self.add_device(device).await?;
+        self.connection_handle
+            .reconnect_device(peer.device_id, vec![peer.bep_addr], vec![])
+            .await
+            .context("reconnect_to peer")?;
+        Ok(())
+    }
+
     /// Wait for connection to a specific device.
     pub async fn wait_for_connection(&self, peer_id: DeviceId, timeout: Duration) -> Result<()> {
         let start = std::time::Instant::now();
