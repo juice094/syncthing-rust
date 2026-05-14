@@ -122,7 +122,10 @@ async fn run_relay_listener(
                 accept_tls_stream(session_stream, tls_config).await?;
             let _remote_hello =
                 BepHandshaker::server_handshake(&mut tls_stream, device_name).await?;
-            let (event_tx, _event_rx) = tokio::sync::mpsc::channel(256);
+            let (event_tx, mut event_rx) = tokio::sync::mpsc::channel(256);
+            tokio::spawn(async move {
+                while event_rx.recv().await.is_some() {}
+            });
             let conn = BepConnection::new(
                 Box::new(TcpBiStream::Server(tls_stream)),
                 ConnectionType::Incoming,
@@ -141,7 +144,10 @@ async fn run_relay_listener(
                 connect_tls_stream(session_stream, tls_config, Some(local_device_id)).await?;
             let _remote_hello =
                 BepHandshaker::client_handshake(&mut tls_stream, device_name).await?;
-            let (event_tx, _event_rx) = tokio::sync::mpsc::channel(256);
+            let (event_tx, mut event_rx) = tokio::sync::mpsc::channel(256);
+            tokio::spawn(async move {
+                while event_rx.recv().await.is_some() {}
+            });
             let conn = BepConnection::new(
                 Box::new(TcpBiStream::Client(tls_stream)),
                 ConnectionType::Incoming,
