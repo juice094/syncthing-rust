@@ -41,6 +41,8 @@ pub struct DaemonStartup {
     pub device_id: DeviceId,
     #[allow(dead_code)]
     pub global_discovery_shutdown: Option<GlobalDiscoveryShutdown>,
+    /// Daemon 优雅关闭信号发送端
+    pub shutdown_tx: tokio::sync::watch::Sender<bool>,
 }
 
 /// 启动 daemon，返回 future 和句柄
@@ -50,6 +52,8 @@ pub async fn start_daemon(
     device_name: String,
 ) -> Result<DaemonStartup> {
     info!("Starting Syncthing Rust daemon from TUI...");
+
+    let (shutdown_tx, shutdown_rx) = tokio::sync::watch::channel(false);
 
     let tls_config = SyncthingTlsConfig::load_or_generate(&config_dir)
         .await
@@ -282,6 +286,7 @@ pub async fn start_daemon(
         handle.clone(),
         Arc::clone(&sync_service),
         device_id,
+        shutdown_rx.clone(),
     )
     .await;
 
@@ -417,25 +422,37 @@ pub async fn start_daemon(
         handle.clone(),
         Arc::clone(&public_addrs),
         global_discovery.clone(),
+        shutdown_rx.clone(),
     );
 
     let connection_handle = handle.clone();
     let session_handles_clone = Arc::clone(&session_handles);
+    let mut shutdown_rx = shutdown_rx;
     let future: std::pin::Pin<Box<dyn std::future::Future<Output = Result<()>> + Send>> =
         Box::pin(async move {
             let mut interval = tokio::time::interval(Duration::from_secs(1));
             loop {
-                interval.tick().await;
-                // Clean up finished session handles
-                let finished: Vec<DeviceId> = session_handles_clone
-                    .iter()
-                    .filter(|entry| entry.value().is_finished())
-                    .map(|entry| *entry.key())
-                    .collect();
-                for d in finished {
-                    session_handles_clone.remove(&d);
+                tokio::select! {
+                    _ = shutdown_rx.changed() => {
+                        if *shutdown_rx.borrow() {
+                            info!("Daemon session cleanup loop shutting down");
+                            break;
+                        }
+                    }
+                    _ = interval.tick() => {
+                        // Clean up finished session handles
+                        let finished: Vec<DeviceId> = session_handles_clone
+                            .iter()
+                            .filter(|entry| entry.value().is_finished())
+                            .map(|entry| *entry.key())
+                            .collect();
+                        for d in finished {
+                            session_handles_clone.remove(&d);
+                        }
+                    }
                 }
             }
+            Ok(())
         });
 
     // 配置热同步：监听 config.json 变更并通知 sync_service
@@ -489,5 +506,6 @@ pub async fn start_daemon(
         session_handles,
         device_id,
         global_discovery_shutdown,
+        shutdown_tx,
     })
 }

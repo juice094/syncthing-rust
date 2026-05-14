@@ -18,6 +18,7 @@ pub fn spawn_relay_listeners(
     handle: syncthing_net::ConnectionManagerHandle,
     public_addrs: Arc<Mutex<Vec<String>>>,
     global_discovery: Option<Arc<syncthing_net::GlobalDiscovery>>,
+    shutdown_rx: tokio::sync::watch::Receiver<bool>,
 ) {
     let mut relay_listen_urls: std::collections::HashSet<String> =
         config_relay_urls.into_iter().collect();
@@ -31,11 +32,16 @@ pub fn spawn_relay_listeners(
         let relay_device_name = device_name.clone();
         let relay_public_addrs = Arc::clone(&public_addrs);
         let relay_global_discovery = global_discovery.clone();
+        let mut relay_shutdown = shutdown_rx.clone();
         tokio::spawn(async move {
             let mut backoff = Duration::from_secs(1);
             const MAX_BACKOFF: Duration = Duration::from_secs(300);
             const RESET_THRESHOLD: Duration = Duration::from_secs(60);
             loop {
+                if *relay_shutdown.borrow() {
+                    info!("Relay listener for {} shutting down", relay_url);
+                    break;
+                }
                 let start = std::time::Instant::now();
                 match run_relay_listener(
                     &relay_url,
@@ -57,7 +63,15 @@ pub fn spawn_relay_listeners(
                         relay_url, e, backoff
                     ),
                 }
-                tokio::time::sleep(backoff).await;
+                tokio::select! {
+                    _ = relay_shutdown.changed() => {
+                        if *relay_shutdown.borrow() {
+                            info!("Relay listener for {} shutting down during backoff", relay_url);
+                            break;
+                        }
+                    }
+                    _ = tokio::time::sleep(backoff) => {}
+                }
                 // Exponential backoff; reset if the listener ran successfully for a while
                 if start.elapsed() > RESET_THRESHOLD {
                     backoff = Duration::from_secs(1);

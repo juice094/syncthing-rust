@@ -13,7 +13,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use tokio::sync::{broadcast, mpsc, RwLock};
+use tokio::sync::{broadcast, mpsc, watch, RwLock};
 use tracing::{debug, trace, warn};
 
 use syncthing_core::types::Event;
@@ -163,6 +163,8 @@ pub struct FilteredSubscriber {
     receiver: broadcast::Receiver<Event>,
     /// Event types to filter for (empty = all events)
     filter: Vec<EventType>,
+    /// Optional shutdown signal
+    shutdown: Option<watch::Receiver<bool>>,
 }
 
 /// Event type for filtering
@@ -192,7 +194,14 @@ impl FilteredSubscriber {
         Self {
             receiver: event_bus.subscribe(),
             filter,
+            shutdown: None,
         }
+    }
+
+    /// Attach a shutdown signal receiver.
+    pub fn with_shutdown(mut self, shutdown: watch::Receiver<bool>) -> Self {
+        self.shutdown = Some(shutdown);
+        self
     }
 
     /// Receive the next event
@@ -200,18 +209,29 @@ impl FilteredSubscriber {
     /// If a filter is set, events not matching the filter are skipped.
     pub async fn recv(&mut self) -> Result<Event> {
         loop {
-            match self.receiver.recv().await {
-                Ok(event) => {
-                    if self.filter.is_empty() || self.matches_filter(&event) {
-                        return Ok(event);
+            tokio::select! {
+                result = self.receiver.recv() => {
+                    match result {
+                        Ok(event) => {
+                            if self.filter.is_empty() || self.matches_filter(&event) {
+                                return Ok(event);
+                            }
+                            // Event doesn't match filter, continue waiting
+                        }
+                        Err(e) => {
+                            return Err(SyncthingError::internal(format!(
+                                "Event receiver error: {}",
+                                e
+                            )));
+                        }
                     }
-                    // Event doesn't match filter, continue waiting
                 }
-                Err(e) => {
-                    return Err(SyncthingError::internal(format!(
-                        "Event receiver error: {}",
-                        e
-                    )));
+                _ = self.shutdown.as_mut().unwrap().changed(), if self.shutdown.is_some() => {
+                    if *self.shutdown.as_ref().unwrap().borrow() {
+                        return Err(SyncthingError::internal(
+                            "Event subscriber shut down".to_string(),
+                        ));
+                    }
                 }
             }
         }

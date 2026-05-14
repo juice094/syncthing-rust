@@ -37,6 +37,7 @@ pub async fn init_and_spawn_global_discovery(
     handle: ConnectionManagerHandle,
     sync_service: Arc<SyncService>,
     local_device_id: DeviceId,
+    mut shutdown_rx: tokio::sync::watch::Receiver<bool>,
 ) -> (
     Option<Arc<syncthing_net::GlobalDiscovery>>,
     Option<GlobalDiscoveryShutdown>,
@@ -82,38 +83,47 @@ pub async fn init_and_spawn_global_discovery(
         tokio::spawn(async move {
             let mut interval = tokio::time::interval(Duration::from_secs(300));
             loop {
-                interval.tick().await;
-                for peer_id in &query_devices {
-                    match gd.query(*peer_id).await {
-                        Ok(urls) => {
-                            let tcp_addrs: Vec<SocketAddr> = urls
-                                .iter()
-                                .filter_map(|u| {
-                                    u.strip_prefix("tcp://").and_then(|s| s.parse().ok())
-                                })
-                                .collect();
-                            let relay_urls: Vec<String> = urls
-                                .iter()
-                                .filter_map(|u| {
-                                    if u.starts_with("relay://") {
-                                        Some(u.clone())
-                                    } else {
-                                        None
-                                    }
-                                })
-                                .collect();
-                            if !tcp_addrs.is_empty() || !relay_urls.is_empty() {
-                                info!(
-                                    "Global discovery: updating {} with {} tcp + {} relay addr(s)",
-                                    peer_id,
-                                    tcp_addrs.len(),
-                                    relay_urls.len()
-                                );
-                                query_handle.update_addresses(*peer_id, tcp_addrs, relay_urls);
-                            }
+                tokio::select! {
+                    _ = shutdown_rx.changed() => {
+                        if *shutdown_rx.borrow() {
+                            debug!("Global discovery query loop shutting down");
+                            break;
                         }
-                        Err(e) => {
-                            debug!("Global discovery query for {} failed: {}", peer_id, e);
+                    }
+                    _ = interval.tick() => {
+                        for peer_id in &query_devices {
+                            match gd.query(*peer_id).await {
+                                Ok(urls) => {
+                                    let tcp_addrs: Vec<SocketAddr> = urls
+                                        .iter()
+                                        .filter_map(|u| {
+                                            u.strip_prefix("tcp://").and_then(|s| s.parse().ok())
+                                        })
+                                        .collect();
+                                    let relay_urls: Vec<String> = urls
+                                        .iter()
+                                        .filter_map(|u| {
+                                            if u.starts_with("relay://") {
+                                                Some(u.clone())
+                                            } else {
+                                                None
+                                            }
+                                        })
+                                        .collect();
+                                    if !tcp_addrs.is_empty() || !relay_urls.is_empty() {
+                                        info!(
+                                            "Global discovery: updating {} with {} tcp + {} relay addr(s)",
+                                            peer_id,
+                                            tcp_addrs.len(),
+                                            relay_urls.len()
+                                        );
+                                        query_handle.update_addresses(*peer_id, tcp_addrs, relay_urls);
+                                    }
+                                }
+                                Err(e) => {
+                                    debug!("Global discovery query for {} failed: {}", peer_id, e);
+                                }
+                            }
                         }
                     }
                 }
