@@ -8,7 +8,7 @@ use std::sync::atomic::{AtomicI32, Ordering};
 
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
-use tracing::{debug, warn, Level};
+use tracing::{debug, info, warn, Level};
 use tracing_subscriber::{layer::SubscriberExt, Layer as _};
 
 use syncthing_core::types::Config;
@@ -182,6 +182,13 @@ async fn main() -> Result<()> {
                             (tokio::spawn(async {}), SocketAddr::from(([0, 0, 0, 0], 0)))
                         }
                     };
+                    let shutdown_tx = startup.shutdown_tx.clone();
+                    tokio::spawn(async move {
+                        tokio::signal::ctrl_c().await.ok();
+                        info!("Received SIGINT, initiating graceful shutdown...");
+                        let _ = shutdown_tx.send(true);
+                    });
+
                     let daemon_result = startup.future.await;
                     let _ = api_handle.await;
                     daemon_result?;
