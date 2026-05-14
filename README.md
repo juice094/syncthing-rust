@@ -8,6 +8,16 @@
 
 A Rust implementation of the [Syncthing](https://syncthing.net/) protocol stack, designed for **zero-runtime-dependency** deployment and wire-compatible interoperability with the official Go Syncthing daemon.
 
+**📦 Latest Release: [v0.2.6](./RELEASES.md)** — Runtime Safety Hardening + Cross-Version Interop Verified
+
+| Platform | Binary | Size |
+|----------|--------|------|
+| Windows x64 | `syncthing-v0.2.6-x86_64-pc-windows-msvc.exe` | ~12 MB |
+| Linux x64 | `syncthing-v0.2.6-x86_64-unknown-linux-gnu` | ~11 MB |
+| Stress Test (Win) | `stress_test-v0.2.6-x86_64-pc-windows-msvc.exe` | ~6.6 MB |
+
+> 💡 [Build from source](#quick-start) if you need a different target or want to audit the code.
+
 > ⚠️ **Current stage (2026-05-14 post-v0.2.6)**: **Alpha — core sync chain verified, runtime safety hardened, cross-version interop proven.**
 >
 > - ✅ **Connection layer stable**: 9h+ stress test, 758 connection cycles, 0 deadlocks, 0 panics (T-F1 fix verified).
