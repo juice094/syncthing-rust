@@ -1,6 +1,8 @@
 # Changelog
 
-## [Unreleased] — v0.2.6（运行时安全 hotfix）
+## [Unreleased]
+
+## [0.2.6] — 2026-05-14（运行时安全 hotfix）
 
 ### 🎯 Headline: 运行时安全加固 — 防止资源耗尽雪崩
 

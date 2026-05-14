@@ -209,29 +209,34 @@ impl FilteredSubscriber {
     /// If a filter is set, events not matching the filter are skipped.
     pub async fn recv(&mut self) -> Result<Event> {
         loop {
-            tokio::select! {
-                result = self.receiver.recv() => {
-                    match result {
-                        Ok(event) => {
-                            if self.filter.is_empty() || self.matches_filter(&event) {
-                                return Ok(event);
-                            }
-                            // Event doesn't match filter, continue waiting
+            let recv_fut = self.receiver.recv();
+            let result = if let Some(shutdown_rx) = self.shutdown.as_mut() {
+                tokio::select! {
+                    result = recv_fut => result,
+                    _ = shutdown_rx.changed() => {
+                        if *shutdown_rx.borrow() {
+                            return Err(SyncthingError::internal(
+                                "Event subscriber shut down".to_string(),
+                            ));
                         }
-                        Err(e) => {
-                            return Err(SyncthingError::internal(format!(
-                                "Event receiver error: {}",
-                                e
-                            )));
-                        }
+                        continue;
                     }
                 }
-                _ = self.shutdown.as_mut().unwrap().changed(), if self.shutdown.is_some() => {
-                    if *self.shutdown.as_ref().unwrap().borrow() {
-                        return Err(SyncthingError::internal(
-                            "Event subscriber shut down".to_string(),
-                        ));
+            } else {
+                recv_fut.await
+            };
+            match result {
+                Ok(event) => {
+                    if self.filter.is_empty() || self.matches_filter(&event) {
+                        return Ok(event);
                     }
+                    // Event doesn't match filter, continue waiting
+                }
+                Err(e) => {
+                    return Err(SyncthingError::internal(format!(
+                        "Event receiver error: {}",
+                        e
+                    )));
                 }
             }
         }
