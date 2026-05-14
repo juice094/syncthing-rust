@@ -65,7 +65,13 @@ impl ConnectionManager {
                                 // local_larger → 保留 outgoing（新）
                                 !local_smaller
                             }
-                            _ => unreachable!(),
+                            _ => {
+                                warn!(
+                                    "Unexpected connection type combination in race resolution: old={:?}, new={:?}",
+                                    old_conn_type, new_conn_type
+                                );
+                                false
+                            }
                         }
                     };
 

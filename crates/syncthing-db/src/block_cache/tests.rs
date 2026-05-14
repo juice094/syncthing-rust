@@ -4,7 +4,7 @@ use tempfile::TempDir;
 fn create_test_block_store() -> (CachedBlockStore, TempDir) {
     let temp_dir = TempDir::new().unwrap();
     let store = SledStore::open(temp_dir.path()).unwrap();
-    let block_store = CachedBlockStore::new(store, 1024 * 1024); // 1MB cache
+    let block_store = CachedBlockStore::new(store, 1024 * 1024).unwrap(); // 1MB cache
     (block_store, temp_dir)
 }
 
@@ -91,7 +91,7 @@ async fn test_cache_functionality() {
 async fn test_cache_eviction() {
     let temp_dir = TempDir::new().unwrap();
     let sled_store = SledStore::open(temp_dir.path()).unwrap();
-    let store = CachedBlockStore::new(sled_store, 100); // Very small cache
+    let store = CachedBlockStore::new(sled_store, 100).unwrap(); // Very small cache
 
     // Store multiple blocks that exceed cache size
     for i in 0..10 {

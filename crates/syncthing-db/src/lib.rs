@@ -68,7 +68,7 @@ pub fn create_block_store<P: AsRef<std::path::Path>>(
     path: P,
 ) -> crate::kv::Result<CachedBlockStore> {
     let store = SledStore::open(path)?;
-    Ok(CachedBlockStore::new(store, DEFAULT_CACHE_SIZE))
+    CachedBlockStore::new(store, DEFAULT_CACHE_SIZE)
 }
 
 #[cfg(test)]
@@ -81,7 +81,7 @@ mod integration_tests {
     async fn test_full_workflow() {
         let temp_dir = tempfile::tempdir().unwrap();
         let sled_store = SledStore::open(temp_dir.path()).unwrap();
-        let block_store = CachedBlockStore::new(sled_store, 1024 * 1024);
+        let block_store = CachedBlockStore::new(sled_store, 1024 * 1024).unwrap();
 
         let folder = FolderId::new("test-folder");
 
@@ -137,7 +137,7 @@ mod integration_tests {
     async fn test_block_integrity() {
         let temp_dir = tempfile::tempdir().unwrap();
         let sled_store = SledStore::open(temp_dir.path()).unwrap();
-        let block_store = CachedBlockStore::new(sled_store, 1024 * 1024);
+        let block_store = CachedBlockStore::new(sled_store, 1024 * 1024).unwrap();
 
         let data = b"important data that must be stored correctly";
         let hash = BlockHash::from_data(data);
@@ -157,7 +157,7 @@ mod integration_tests {
     async fn test_delta_updates() {
         let temp_dir = tempfile::tempdir().unwrap();
         let sled_store = SledStore::open(temp_dir.path()).unwrap();
-        let block_store = CachedBlockStore::new(sled_store, 1024 * 1024);
+        let block_store = CachedBlockStore::new(sled_store, 1024 * 1024).unwrap();
 
         let folder = FolderId::new("test-folder");
 
