@@ -35,6 +35,7 @@
 
 > **当前限制（务必阅读）**：
 > - **§1 ClusterConfig 首次握手 10s 超时**：首次连接约 12s 才完成 ClusterConfig 交换（自动重连第二轮兜底）。
+> - **§7 运行时安全缺口**（v0.2.6 修复中）：配置热重载无 debounce（notify 事件风暴下可能死循环）；daemon 日志仅按天轮转（无单文件大小上限）；网络层存在多处 `unbounded_channel`。详见 [`docs/KNOWN_ISSUES.md`](./docs/KNOWN_ISSUES.md) §7。
 > - 72h 压测在 Windows 桌面不可行（休眠杀进程），需 Linux 平台。
 > - Go Syncthing 完整文件同步互操作仅 2026-04-11 手工验证一次，无自动化。
 

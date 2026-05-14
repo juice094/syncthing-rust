@@ -1,5 +1,33 @@
 # Changelog
 
+## [Unreleased] — v0.2.6（运行时安全 hotfix）
+
+### 🎯 Headline: 运行时安全加固 — 防止资源耗尽雪崩
+
+`INC-20260514-001` 事故复盘后系统性代码审查发现：配置热重载 watcher 无 debounce、
+日志无单日上限、多处 `unbounded_channel`、生产代码 `panic!` 路径、部分 loop 无优雅终止。
+v0.2.6 为纯修复版本，零功能新增。
+
+### 🔒 Security / Runtime Safety
+
+- **H-1 Config hot-reload debounce** (`daemon_runner.rs`, `config.rs`):
+  增加 500ms debounce（重置计时器模式），避免 `notify` 事件风暴导致 100μs 级死循环。
+  热重载日志从 `info!` 降为 `debug!`；`JsonConfigStream` 对比 mtime，无变化跳过 reload。
+- **H-2 Daemon log rotation by size/hour** (`main.rs`):
+  将 `Rotation::DAILY` 改为 `Rotation::HOURLY` 或 size-based（100MB），
+  防止单日内日志无限膨胀（事故中 19h 21G）。
+- **H-3 Bounded channels** (`syncthing-net`, `syncthing-sync`, `daemon_runner`):
+  将 7 处 `unbounded_channel()` 替换为有界 `channel(1024)`，发送端改用 `try_send`，
+  满时丢弃并 `warn!`。消除对端恶意发包 / 事件风暴导致的 OOM 风险。
+- **H-4 Dropped receiver cleanup** (`relay_listener`, `tcp_transport`, `bep_adapter`):
+  移除或修复丢弃 `_event_rx` 但仍用 `event_tx` 发送的无界 channel，避免内存泄漏。
+- **H-5 Panic elimination** (`events.rs`, `block_cache`, `derp/server`, `registry`):
+  将对外部输入的 `panic!` / `unreachable!()` 全部改为 `error! + Err` 返回。
+- **H-6 Graceful shutdown for interval loops** (`daemon_runner`, `discovery_tasks`, `relay_listener`, `api/events`):
+  为纯 `loop { interval.tick().await }` 增加 `select! { _ = shutdown.changed() => break }`。
+
+---
+
 ## [0.2.5] — 2026-05-13
 
 ### 🎯 Headline: End-to-end sync chain unblocked

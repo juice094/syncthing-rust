@@ -2,9 +2,9 @@
 
 本目录包含 `syncthing-rust` 项目的设计文档、验证报告、计划、运维指南与历史归档。
 
-> ✅ **当前阶段（2026-05-13 post-T2.6）**：核心 sync 链路已打通，e2e_sync 测试通过。  
-> **快速入口**: [plans/NEXT_STEPS_2026-05-13.md](plans/NEXT_STEPS_2026-05-13.md) — 当前活跃路线图（T2 全部完成，准备 v0.2.5 patch）  
-> **历史缺陷追溯**: [`KNOWN_ISSUES.md`](KNOWN_ISSUES.md) §2 含 T2.6 修复 RCA
+> ✅ **当前阶段（2026-05-14 post-v0.2.5）**：v0.2.5 已发布，端到端 sync 验证通过；正在进行 v0.2.6 运行时安全 hotfix。  
+> **快速入口**: [plans/NEXT_STEPS_2026-05-14.md](plans/NEXT_STEPS_2026-05-14.md) — 当前活跃路线图（v0.2.6 hotfix H-1~H-6）  
+> **历史缺陷追溯**: [`KNOWN_ISSUES.md`](KNOWN_ISSUES.md) §2 含 T2.6 RCA；§7 含运行时安全审查（INC-20260514-001）
 
 ---
 
@@ -47,7 +47,8 @@ docs/
 
 | 文档 | 内容 | 状态 |
 |------|------|------|
-| [NEXT_STEPS_2026-05-13.md](plans/NEXT_STEPS_2026-05-13.md) | v0.2.4 发布后活动计划（T1/T2/T3 三段）| ✅ 最新 |
+| [NEXT_STEPS_2026-05-14.md](plans/NEXT_STEPS_2026-05-14.md) | v0.2.6 hotfix 行动计划（H-1~H-6，运行时安全）| ✅ 最新 |
+| [NEXT_STEPS_2026-05-13.md](plans/NEXT_STEPS_2026-05-13.md) | v0.2.4→v0.2.5 发布周期归档 | 🗃️ 归档 |
 | [POST_V0_2_0_ROADMAP.md](plans/POST_V0_2_0_ROADMAP.md) | 战略级路线图（P0~P5 矩阵 + ADR）| 🟢 活跃 |
 | [TUNING_PLAN_2026-05-11.md](plans/TUNING_PLAN_2026-05-11.md) | 横向调优计划（T-A~T-G） | 🟢 活跃 |
 | [PHASE4_PLAN.md](plans/PHASE4_PLAN.md) | Phase 4 目标（已被 NEXT_STEPS 覆盖）| 🗃️ 归档 |
@@ -103,7 +104,7 @@ docs/
 
 - **新协作者**: 先看 [`reports/IMPLEMENTATION_SUMMARY.md`](reports/IMPLEMENTATION_SUMMARY.md) 了解架构，再看根目录 `README.md` 编译运行。
 - **架构决策**: [`design/ARCHITECTURE_DECISIONS.md`](design/ARCHITECTURE_DECISIONS.md) 是所有粗粒度架构决策的统一入口。
-- **当前开发重点**: [`plans/NEXT_STEPS_2026-05-13.md`](plans/NEXT_STEPS_2026-05-13.md) 是 v0.2.4 后的活动路线图，含 T1/T2/T3 三段计划。
+- **当前开发重点**: [`plans/NEXT_STEPS_2026-05-14.md`](plans/NEXT_STEPS_2026-05-14.md) 是 v0.2.6 hotfix 路线图，含 H-1~H-6 运行时安全修复。
 - **部署使用**: 跨网络同步看 [`operations/TAILSCALE_GUIDE.md`](operations/TAILSCALE_GUIDE.md)；代理转发看 [`operations/PROXY_GUIDE.md`](operations/PROXY_GUIDE.md)。
 - **稳定性证据**: [`reports/STRESS_TEST_REPORT_2026-05-13.md`](reports/STRESS_TEST_REPORT_2026-05-13.md) 含 9h+ 压测分析。
 - **历史追溯**: 需要了解某个决策的背景时，查阅 `archive/` 中的工作日报。
