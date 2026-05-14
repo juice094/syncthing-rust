@@ -433,6 +433,7 @@ pub async fn start_daemon(
     let future: std::pin::Pin<Box<dyn std::future::Future<Output = Result<()>> + Send>> =
         Box::pin(async move {
             let mut interval = tokio::time::interval(Duration::from_secs(1));
+            let mut tick_count = 0u64;
             loop {
                 tokio::select! {
                     _ = shutdown_rx.changed() => {
@@ -442,7 +443,9 @@ pub async fn start_daemon(
                         }
                     }
                     _ = interval.tick() => {
-                        // Clean up finished session handles
+                        tick_count += 1;
+
+                        // 1. Clean up finished session handles
                         let finished: Vec<DeviceId> = session_handles_clone
                             .iter()
                             .filter(|entry| entry.value().is_finished())
@@ -450,6 +453,23 @@ pub async fn start_daemon(
                             .collect();
                         for d in finished {
                             session_handles_clone.remove(&d);
+                        }
+
+                        // 2. T3.1b: 每 60s 检查"有连接但无 BepSession"的设备并尝试重连
+                        if tick_count % 60 == 0 {
+                            let connected = handle.connected_devices();
+                            for device_id in connected {
+                                let has_session = session_handles_clone.contains_key(&device_id);
+                                if !has_session {
+                                    warn!(
+                                        "Device {} has alive connection but no BepSession; triggering reconnect",
+                                        device_id
+                                    );
+                                    let _ = handle
+                                        .reconnect_device_by_id(device_id)
+                                        .await;
+                                }
+                            }
                         }
                     }
                 }
