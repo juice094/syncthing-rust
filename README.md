@@ -8,13 +8,15 @@
 
 A Rust implementation of the [Syncthing](https://syncthing.net/) protocol stack, designed for **zero-runtime-dependency** deployment and wire-compatible interoperability with the official Go Syncthing daemon.
 
-**📦 Latest Release: [v0.2.6](./RELEASES.md)** — Runtime Safety Hardening + Cross-Version Interop Verified
+**📦 Latest Release: [v0.2.6](https://github.com/juice094/syncthing-rust/releases/tag/v0.2.6)** — Runtime Safety Hardening + Cross-Version Interop Verified
 
 | Platform | Binary | Size |
 |----------|--------|------|
-| Windows x64 | `syncthing-v0.2.6-x86_64-pc-windows-msvc.exe` | ~12 MB |
-| Linux x64 | `syncthing-v0.2.6-x86_64-unknown-linux-gnu` | ~11 MB |
-| Stress Test (Win) | `stress_test-v0.2.6-x86_64-pc-windows-msvc.exe` | ~6.6 MB |
+| Windows x64 | [`syncthing-v0.2.6-x86_64-pc-windows-msvc.exe`](https://github.com/juice094/syncthing-rust/releases/download/v0.2.6/syncthing-v0.2.6-x86_64-pc-windows-msvc.exe) | ~12 MB |
+| Linux x64 | [`syncthing-v0.2.6-x86_64-unknown-linux-gnu`](https://github.com/juice094/syncthing-rust/releases/download/v0.2.6/syncthing-v0.2.6-x86_64-unknown-linux-gnu) | ~13 MB |
+| Stress Test (Win) | [`stress_test-v0.2.6-x86_64-pc-windows-msvc.exe`](https://github.com/juice094/syncthing-rust/releases/download/v0.2.6/stress_test-v0.2.6-x86_64-pc-windows-msvc.exe) | ~6.6 MB |
+| Stress Test (Linux) | [`stress_test-v0.2.6-x86_64-unknown-linux-gnu`](https://github.com/juice094/syncthing-rust/releases/download/v0.2.6/stress_test-v0.2.6-x86_64-unknown-linux-gnu) | ~6.8 MB |
+| Checksums | [`SHA256SUMS.txt`](https://github.com/juice094/syncthing-rust/releases/download/v0.2.6/SHA256SUMS.txt) | — |
 
 > 💡 [Build from source](#quick-start) if you need a different target or want to audit the code.
 

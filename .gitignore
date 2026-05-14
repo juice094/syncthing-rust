@@ -72,3 +72,8 @@ audit*.log
 # Local release binary staging area
 dist/
 stress-*.err
+
+# Release binaries (distributed via GitHub Releases, not git)
+releases/**/*.exe
+releases/**/syncthing-*
+releases/**/stress_test-*
