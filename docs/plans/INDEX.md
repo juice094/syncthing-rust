@@ -2,21 +2,23 @@
 
 > **维护原则**：计划不是墓碑，是活文档。过时计划必须归档，避免误导决策。
 > **最后审计**：2026-04-27，详见 [`PLAN_AUDIT_2026-04-27.md`](./PLAN_AUDIT_2026-04-27.md)
-> **最后更新**：2026-05-14（v0.2.5 发布后，INC-20260514-001 事故复盘，v0.2.6 hotfix 立项）
+> **最后更新**：2026-05-15（v0.2.6 发布后，双节点真实网络测试启动，Error-Budget 架构审计完成，Tailscale/Headscale 穿透方案确认，v0.3.0/v0.4.0 规划调整）
 
 ---
 
-## 当前有效计划（4 份）
+## 当前有效计划（5 份）
 
 | 文件 | 状态 | 说明 |
 |------|------|------|
-| [`NEXT_STEPS_2026-05-14.md`](./NEXT_STEPS_2026-05-14.md) | ✅ **最新** | **v0.2.6 hotfix 行动计划**。基于 `INC-20260514-001` 存储耗尽事故复盘，含 H-1~H-6 运行时安全修复（debounce / 日志上限 / 有界 channel / panic 清除 / shutdown select）。 |
+| [`NEXT_STEPS_2026-05-15.md`](./NEXT_STEPS_2026-05-15.md) | ✅ **最新** | **v0.2.6 发布后行动计划**。基于真实网络双节点测试 + Error-Budget 架构审计，含 Tailscale/Headscale 穿透方案、Transport Plugin RFC、v0.3.0 可观测性新增项、v0.4.0 政企合规路线图。 |
 | [`POST_V0_2_0_ROADMAP.md`](./POST_V0_2_0_ROADMAP.md) | ✅ 活跃 | **当前权威路线图**。制定日期 2026-04-26，审计修正后 2026-04-27。含优先级矩阵（P0~P5）、分阶段执行计划、决策记录（ADR）。 |
-| [`TUNING_PLAN_2026-05-11.md`](./TUNING_PLAN_2026-05-11.md) | ✅ 活跃 | **横向调优**。T-A~T-G 七大任务组。v0.2.4 周期完成 T-F1/F2/A1/B1/E1/G2，待执行 T-C/D3/F3（参考 NEXT_STEPS_2026-05-14）。 |
-| [`PHASE3_PLAN.md`](./PHASE3_PLAN.md) | ⚠️ 保留+勘误 | BepSession 硬化计划。3.1~3.3 已完成，3.4（72h stress test）⏳ 等待 v0.2.6 修复后再启动 Linux 长稳验证。 |
+| [`TUNING_PLAN_2026-05-11.md`](./TUNING_PLAN_2026-05-11.md) | ✅ 活跃 | **横向调优**。T-A~T-G 七大任务组。v0.2.4 周期完成 T-F1/F2/A1/B1/E1/G2，待执行 T-C/D3/F3（参考 NEXT_STEPS_2026-05-15）。 |
+| [`PHASE3_PLAN.md`](./PHASE3_PLAN.md) | ⚠️ 保留+勘误 | BepSession 硬化计划。3.1~3.3 已完成，3.4（72h stress test）⏳ 已调整为**双节点真实网络 72h**（v0.3.0 准入线）。 |
+| [`NEXT_STEPS_2026-05-14.md`](./NEXT_STEPS_2026-05-14.md) | ✅ 保留参考 | v0.2.6 hotfix 完成归档。H-1~H-6 已全部合并，CI 全绿。 |
 
 ## 已归档计划
 
+- [`NEXT_STEPS_2026-05-14.md`](./NEXT_STEPS_2026-05-14.md) — ✅ v0.2.6 hotfix 完成归档（H-1~H-6 已合并，CI 全绿），由 NEXT_STEPS_2026-05-15.md 接管
 - [`NEXT_STEPS_2026-05-13.md`](./NEXT_STEPS_2026-05-13.md) — ⚠️ 已被 NEXT_STEPS_2026-05-14.md 取代（v0.2.5 发布完成）
 - [`NEXT_STEPS_2026-05-12.md`](./NEXT_STEPS_2026-05-12.md) — ⚠️ 已被 NEXT_STEPS_2026-05-13.md 取代
 - [`NEXT_STEPS_2026-05-11.md`](./NEXT_STEPS_2026-05-11.md) — ⚠️ 已被 NEXT_STEPS_2026-05-12.md 取代
@@ -55,7 +57,7 @@ MVP_RECOVERY (Phase 1~3) ──→ PHASE3 (3.1~3.3 完成, 3.4 ⏳)
 
 ## 跨文件跳转速查
 
-- **当前该做什么？** → [`NEXT_STEPS_2026-05-13.md`](./NEXT_STEPS_2026-05-13.md)（T1/T2/T3 三段编排）
+- **当前该做什么？** → [`NEXT_STEPS_2026-05-15.md`](./NEXT_STEPS_2026-05-15.md)（P0: Headscale E2E + Transport Plugin RFC）
 - **战略级路线（P0~P5 矩阵 + ADR）？** → [`POST_V0_2_0_ROADMAP.md`](./POST_V0_2_0_ROADMAP.md)
 - **如何调优 / 压测 / 拆大文件？** → [`TUNING_PLAN_2026-05-11.md`](./TUNING_PLAN_2026-05-11.md)
 - **为什么 cargo audit 不再是 P0？** → [`PLAN_AUDIT_2026-04-27.md`](./PLAN_AUDIT_2026-04-27.md) §三、P0 评估
@@ -64,3 +66,5 @@ MVP_RECOVERY (Phase 1~3) ──→ PHASE3 (3.1~3.3 完成, 3.4 ⏳)
 - **历史计划为什么被归档？** → [`PLAN_AUDIT_2026-04-27.md`](./PLAN_AUDIT_2026-04-27.md) §一、逐份判定
 - **安全审计 / 接受债务 / 漏洞报告？** → [`../../SECURITY.md`](../../SECURITY.md)
 - **v0.2.4 周期单日归档？** → [`../reports/SESSION_SUMMARY_2026-05-12.md`](../reports/SESSION_SUMMARY_2026-05-12.md)
+- **Error-Budget 架构审计全文？** → [`../audit/ARCHITECTURE_AUDIT_2026-05-15.md`](../audit/ARCHITECTURE_AUDIT_2026-05-15.md)（待生成）
+- **双节点部署任务书？** → [`../../桌面/syncthing任务书.md`](../../桌面/syncthing任务书.md)（本地参考）
