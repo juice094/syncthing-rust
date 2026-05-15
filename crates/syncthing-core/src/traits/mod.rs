@@ -450,6 +450,13 @@ pub trait ConnectionManager: Send + Sync {
 
     /// Get connection info for a device
     fn get_connection_info(&self, device_id: &DeviceId) -> Option<ConnectionInfo>;
+
+    /// Connect to a device at the given addresses (C-UX-3: hot-add trigger)
+    async fn connect_to(
+        &self,
+        device_id: &DeviceId,
+        addresses: Vec<std::net::SocketAddr>,
+    ) -> Result<()>;
 }
 
 /// Folder database abstraction

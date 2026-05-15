@@ -191,4 +191,12 @@ impl syncthing_core::traits::ConnectionManager for ConnectionManagerHandle {
                 is_alive: conn.is_alive(),
             })
     }
+
+    async fn connect_to(
+        &self,
+        device_id: &syncthing_core::DeviceId,
+        addresses: Vec<std::net::SocketAddr>,
+    ) -> syncthing_core::Result<()> {
+        self.connect_to(*device_id, addresses).await
+    }
 }

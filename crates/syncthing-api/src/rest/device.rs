@@ -72,18 +72,27 @@ pub(crate) async fn add_device(
         ));
     }
 
+    let addresses: Vec<_> = request
+        .addresses
+        .unwrap_or_else(|| vec!["dynamic".to_string()])
+        .into_iter()
+        .map(|a| super::parse_address(&a))
+        .collect();
+
+    // C-UX-3: 提取 SocketAddr 用于热连接触发
+    let connect_addrs: Vec<std::net::SocketAddr> = addresses
+        .iter()
+        .filter_map(|a| match a {
+            syncthing_core::types::AddressType::Tcp(s) |
+            syncthing_core::types::AddressType::Quic(s) => s.parse().ok(),
+            _ => None,
+        })
+        .collect();
+
     let device = syncthing_core::types::Device {
         id: device_id,
         name: request.name,
-        addresses: request
-            .addresses
-            .unwrap_or_else(|| vec!["dynamic".to_string()])
-            .into_iter()
-            .map(|a| match a.as_str() {
-                "dynamic" => syncthing_core::types::AddressType::Dynamic,
-                _ => syncthing_core::types::AddressType::Tcp(a),
-            })
-            .collect(),
+        addresses,
         paused: false,
         introducer: request.introducer.unwrap_or(false),
     };
@@ -96,13 +105,29 @@ pub(crate) async fn add_device(
             "device not found".to_string(),
         ));
     };
-    match state.config_store.save(&config).await {
-        Ok(_) => Ok((
-            StatusCode::CREATED,
-            Json(DeviceResponse::from(device.clone())),
-        )),
-        Err(e) => Err((StatusCode::INTERNAL_SERVER_ERROR, format!("{}", e))),
+
+    // 保存配置
+    if let Err(e) = state.config_store.save(&config).await {
+        return Err((StatusCode::INTERNAL_SERVER_ERROR, format!("{}", e)));
     }
+
+    // C-UX-3: 热连接触发 — 保存成功后立即尝试连接
+    if let Some(cm) = state.connection_manager.clone() {
+        let device_id_clone = device.id;
+        tokio::spawn(async move {
+            if let Err(e) = cm.connect_to(&device_id_clone, connect_addrs).await {
+                tracing::debug!(
+                    "Background connect_to failed for {}: {}",
+                    device_id_clone, e
+                );
+            }
+        });
+    }
+
+    Ok((
+        StatusCode::CREATED,
+        Json(DeviceResponse::from(device.clone())),
+    ))
 }
 
 pub(crate) async fn remove_device(
@@ -165,10 +190,7 @@ pub(crate) async fn update_device(
     device.addresses = request
         .addresses
         .into_iter()
-        .map(|a| match a.as_str() {
-            "dynamic" => syncthing_core::types::AddressType::Dynamic,
-            _ => syncthing_core::types::AddressType::Tcp(a),
-        })
+        .map(|a| super::parse_address(&a))
         .collect();
     device.introducer = request.introducer;
 
@@ -214,7 +236,7 @@ impl From<syncthing_core::types::Device> for DeviceResponse {
             addresses: device
                 .addresses
                 .iter()
-                .map(|a| a.as_str().to_string())
+                .map(|a| a.to_string())
                 .collect(),
             introducer: device.introducer,
         }
