@@ -57,7 +57,15 @@ impl ConnectionState {
 }
 
 /// 地址类型
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+///
+/// C-UX-2: 序列化格式从 tagged enum 升级为人类可读的 URL 字符串：
+/// - `tcp://host:port`
+/// - `quic://host:port`
+/// - `relay://url`
+/// - `dynamic`
+///
+/// 反序列化同时兼容旧格式（`{"Tcp": "..."}` / `"Dynamic"`）和新格式。
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum AddressType {
     /// TCP地址
     Tcp(String),
@@ -70,7 +78,7 @@ pub enum AddressType {
 }
 
 impl AddressType {
-    /// 获取地址字符串
+    /// 获取地址字符串（不含 scheme）
     pub fn as_str(&self) -> &str {
         match self {
             AddressType::Tcp(addr) => addr,
@@ -83,7 +91,99 @@ impl AddressType {
 
 impl fmt::Display for AddressType {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.as_str())
+        match self {
+            AddressType::Tcp(addr) => write!(f, "tcp://{}", addr),
+            AddressType::Quic(addr) => write!(f, "quic://{}", addr),
+            AddressType::Relay(url) => write!(f, "relay://{}", url),
+            AddressType::Dynamic => write!(f, "dynamic"),
+        }
+    }
+}
+
+impl Serialize for AddressType {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        serializer.serialize_str(&self.to_string())
+    }
+}
+
+impl<'de> Deserialize<'de> for AddressType {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        struct AddressTypeVisitor;
+
+        impl<'de> serde::de::Visitor<'de> for AddressTypeVisitor {
+            type Value = AddressType;
+
+            fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+                write!(
+                    formatter,
+                    "a URL string (e.g. \"tcp://host:port\") or an object like {{\"Tcp\": \"host:port\"}}"
+                )
+            }
+
+            fn visit_str<E>(self, value: &str) -> Result<Self::Value, E>
+            where
+                E: serde::de::Error,
+            {
+                match value {
+                    "Dynamic" | "dynamic" => Ok(AddressType::Dynamic),
+                    _ => parse_address_str(value).map_err(serde::de::Error::custom),
+                }
+            }
+
+            fn visit_map<M>(self, mut map: M) -> Result<Self::Value, M::Error>
+            where
+                M: serde::de::MapAccess<'de>,
+            {
+                let key: String = map
+                    .next_key()?
+                    .ok_or_else(|| serde::de::Error::custom("empty address object"))?;
+                match key.as_str() {
+                    "Tcp" => {
+                        let value: String = map.next_value()?;
+                        Ok(AddressType::Tcp(value))
+                    }
+                    "Quic" => {
+                        let value: String = map.next_value()?;
+                        Ok(AddressType::Quic(value))
+                    }
+                    "Relay" => {
+                        let value: String = map.next_value()?;
+                        Ok(AddressType::Relay(value))
+                    }
+                    "Dynamic" => {
+                        let (): () = map.next_value()?;
+                        Ok(AddressType::Dynamic)
+                    }
+                    _ => Err(serde::de::Error::custom(format!(
+                        "unknown address type variant: {}",
+                        key
+                    ))),
+                }
+            }
+        }
+
+        deserializer.deserialize_any(AddressTypeVisitor)
+    }
+}
+
+fn parse_address_str(s: &str) -> Result<AddressType, String> {
+    if let Some(addr) = s.strip_prefix("tcp://") {
+        Ok(AddressType::Tcp(addr.to_string()))
+    } else if let Some(addr) = s.strip_prefix("quic://") {
+        Ok(AddressType::Quic(addr.to_string()))
+    } else if let Some(url) = s.strip_prefix("relay://") {
+        Ok(AddressType::Relay(url.to_string()))
+    } else {
+        Err(format!(
+            "Invalid address format '{}'. Expected one of: tcp://host:port, quic://host:port, relay://url, dynamic",
+            s
+        ))
     }
 }
 
