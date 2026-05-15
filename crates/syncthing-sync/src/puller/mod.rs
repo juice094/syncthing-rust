@@ -15,7 +15,7 @@ use tokio::io::AsyncWriteExt;
 use tracing::{debug, error, info, trace, warn};
 
 /// 临时文件后缀
-const TEMP_SUFFIX: &str = ".syncthing.tmp";
+const TEMP_SUFFIX: &str = "syncthing.tmp";
 
 /// 块数据源 trait
 #[async_trait::async_trait]
