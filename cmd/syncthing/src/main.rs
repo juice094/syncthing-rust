@@ -56,6 +56,9 @@ enum Commands {
         #[arg(short, long, default_value = "syncthing-rust")]
         device_name: String,
     },
+
+    /// 交互式初始化向导（生成 config.json）
+    Init,
 }
 
 /// 配置文件名
@@ -78,9 +81,21 @@ fn save_config(path: &PathBuf, config: &Config) -> anyhow::Result<()> {
     Ok(())
 }
 
+mod config_validation;
+mod init_wizard;
 mod logging_buffer;
+mod single_instance;
 mod tui;
 use syncthing::api_server;
+
+/// 单实例锁 Guard — 进程退出时自动删除 pid 文件
+struct SingleInstanceGuard(std::path::PathBuf);
+
+impl Drop for SingleInstanceGuard {
+    fn drop(&mut self) {
+        single_instance::release(&self.0);
+    }
+}
 
 /// Resolve listen/device_name from config file, overridden by CLI args.
 fn resolve_daemon_config(
@@ -97,6 +112,9 @@ fn resolve_daemon_config(
     } else {
         syncthing_core::types::Config::new()
     };
+
+    // C-UX-4: 配置验证 — 启动前快速失败
+    config_validation::validate_config(&config)?;
 
     // CLI overrides config (runtime-only, do NOT persist to disk)
     let listen = if cli_listen != "0.0.0.0:22001" {
@@ -126,6 +144,12 @@ async fn main() -> Result<()> {
     let config_dir = cli
         .config_dir
         .unwrap_or_else(syncthing_core::paths::default_config_dir);
+
+    // C-UX-5: 单实例锁
+    single_instance::acquire(&config_dir)
+        .map_err(|e| anyhow::anyhow!(e))?;
+    let _instance_guard = SingleInstanceGuard(config_dir.clone());
+
     let log_level = cli
         .log_level
         .parse::<Level>()
@@ -216,6 +240,9 @@ async fn main() -> Result<()> {
             tracing::subscriber::set_global_default(subscriber)?;
             let (listen, device_name) = resolve_daemon_config(&config_dir, listen, device_name)?;
             cmd_tui(&config_dir, &listen, &device_name, memory_buffer).await?;
+        }
+        Commands::Init => {
+            init_wizard::run_wizard(&config_dir)?;
         }
     }
 
