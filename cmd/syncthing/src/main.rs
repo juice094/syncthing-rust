@@ -56,6 +56,9 @@ enum Commands {
         #[arg(short, long, default_value = "syncthing-rust")]
         device_name: String,
     },
+
+    /// 交互式初始化向导（生成 config.json）
+    Init,
 }
 
 /// 配置文件名
@@ -79,6 +82,7 @@ fn save_config(path: &PathBuf, config: &Config) -> anyhow::Result<()> {
 }
 
 mod config_validation;
+mod init_wizard;
 mod logging_buffer;
 mod single_instance;
 mod tui;
@@ -236,6 +240,9 @@ async fn main() -> Result<()> {
             tracing::subscriber::set_global_default(subscriber)?;
             let (listen, device_name) = resolve_daemon_config(&config_dir, listen, device_name)?;
             cmd_tui(&config_dir, &listen, &device_name, memory_buffer).await?;
+        }
+        Commands::Init => {
+            init_wizard::run_wizard(&config_dir)?;
         }
     }
 
