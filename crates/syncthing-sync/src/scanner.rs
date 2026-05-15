@@ -70,7 +70,7 @@ impl Scanner {
 
         // 递归扫描目录
         match self
-            .scan_directory(&folder.id, path, &scan_root, &mut visited_paths, &matcher)
+            .scan_directory(&folder.id, path, &scan_root, Path::new(""), &mut visited_paths, &matcher)
             .await
         {
             Ok(files) => {
@@ -152,12 +152,15 @@ impl Scanner {
     }
 
     /// 递归扫描目录
+    ///
+    /// `relative_prefix` 随递归逐层累加，彻底避免 `Path::strip_prefix` 在 Windows UNC/混合分隔符下的平台差异。
     #[async_recursion::async_recursion]
     async fn scan_directory(
         &self,
         folder_id: &str,
         base_path: &Path,
         current_path: &Path,
+        relative_prefix: &Path,
         visited: &mut std::collections::HashSet<std::path::PathBuf>,
         matcher: &IgnoreMatcher,
     ) -> Result<Vec<FileInfo>> {
@@ -180,17 +183,19 @@ impl Scanner {
             let path = entry.path();
 
             // 跳过隐藏文件和特殊文件
-            if let Some(file_name) = path.file_name() {
-                let name = file_name.to_string_lossy();
-                if name.starts_with('.') || name.starts_with("~") || name.ends_with(".tmp") {
-                    trace!(path = %path.display(), "Skipping hidden/temp file");
-                    continue;
-                }
-                // 跳过 Syncthing 冲突文件
-                if name.contains(".sync-conflict-") {
-                    trace!(path = %path.display(), "Skipping conflict file");
-                    continue;
-                }
+            let file_name_os = match path.file_name() {
+                Some(name) => name,
+                None => continue,
+            };
+            let name = file_name_os.to_string_lossy();
+            if name.starts_with('.') || name.starts_with("~") || name.ends_with(".tmp") {
+                trace!(path = %path.display(), "Skipping hidden/temp file");
+                continue;
+            }
+            // 跳过 Syncthing 冲突文件
+            if name.contains(".sync-conflict-") {
+                trace!(path = %path.display(), "Skipping conflict file");
+                continue;
             }
 
             let metadata = entry.metadata().map_err(|e| {
@@ -200,11 +205,16 @@ impl Scanner {
                 )
             })?;
 
-            let relative_path = path
-                .strip_prefix(base_path)
-                .map_err(|e| SyncError::scan(folder_id.to_string(), format!("Path error: {}", e)))?
-                .to_string_lossy()
-                .replace('\\', "/");
+            // 随递归逐层构建相对路径，避免平台相关的 strip_prefix
+            let relative_path = if relative_prefix.as_os_str().is_empty() {
+                name.replace('\\', "/")
+            } else {
+                format!(
+                    "{}/{}",
+                    relative_prefix.to_string_lossy().replace('\\', "/"),
+                    name.replace('\\', "/")
+                )
+            };
 
             // 应用 .stignore 规则
             let is_dir = metadata.is_dir();
@@ -220,8 +230,10 @@ impl Scanner {
 
             if is_dir {
                 // 递归扫描子目录
+                let mut next_prefix = relative_prefix.to_path_buf();
+                next_prefix.push(file_name_os);
                 let sub_files = self
-                    .scan_directory(folder_id, base_path, &path, visited, matcher)
+                    .scan_directory(folder_id, base_path, &path, &next_prefix, visited, matcher)
                     .await?;
                 files.extend(sub_files);
 

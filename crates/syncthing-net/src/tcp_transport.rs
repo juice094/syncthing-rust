@@ -203,6 +203,7 @@ impl SyncthingTcpListener {
 
         // 设置设备ID并注册到管理器
         conn.set_device_id(device_id);
+        conn.set_state(syncthing_core::ConnectionState::ProtocolHandshakeComplete);
         manager.register_connection(device_id, conn).await?;
 
         info!("Incoming connection {} handled successfully", conn_id);
