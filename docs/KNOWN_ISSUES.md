@@ -258,11 +258,11 @@ File download completed file=hello.txt
 
 ---
 
-## §9. Windows 块传输中断：`is_alive()` 平台差异 + 路径处理缺陷（P0，v0.2.6 阻断）
+## §9. Windows 块传输中断：`is_alive()` 平台差异 + 路径处理缺陷（**已修复 ✅** v0.2.6-hotfix）
 
 > **来源**：DUAL_NODE_TEST_2026-05-15 真实网络测试（Windows ↔ Ubuntu via Tailscale）。
 
-### §9.1 Bug-1：`connected_devices()` 在 Windows 返回空（P0）
+### §9.1 Bug-1：`connected_devices()` 在 Windows 返回空（P0，**已修复 ✅**）
 
 **症状**：
 - BEP 连接建立成功，Index 正常收发
@@ -280,7 +280,7 @@ Windows 下 TLS 握手完成后，`is_alive()` 返回 `false`，但底层 TCP �
 
 **追踪**：`docs/reports/DUAL_NODE_TEST_2026-05-15.md` §5.1 / §6.1
 
-### §9.2 Bug-2：临时文件名双点号 `..syncthing.tmp`（P1）
+### §9.2 Bug-2：临时文件名双点号 `..syncthing.tmp`（P1，**已修复 ✅**）
 
 **症状**：Windows 下临时文件名为 `file.txt..syncthing.tmp`（双点号），可能导致最终重命名失败。
 
@@ -290,7 +290,7 @@ Windows 下 TLS 握手完成后，`is_alive()` 返回 `false`，但底层 TCP �
 
 **追踪**：`docs/reports/DUAL_NODE_TEST_2026-05-15.md` §5.1 / §6.2
 
-### §9.3 Bug-3：Scanner 反斜杠路径导致 `files_changed=0`（P1）
+### §9.3 Bug-3：Scanner 反斜杠路径导致 `files_changed=0`（P1，**已修复 ✅**）
 
 **症状**：Windows 下本地文件系统变更检测失败，`scan_folder` 返回 `files_changed=0`，本侧文件无法推送到对侧。
 
