@@ -78,6 +78,7 @@ fn save_config(path: &PathBuf, config: &Config) -> anyhow::Result<()> {
     Ok(())
 }
 
+mod config_validation;
 mod logging_buffer;
 mod single_instance;
 mod tui;
@@ -107,6 +108,9 @@ fn resolve_daemon_config(
     } else {
         syncthing_core::types::Config::new()
     };
+
+    // C-UX-4: 配置验证 — 启动前快速失败
+    config_validation::validate_config(&config)?;
 
     // CLI overrides config (runtime-only, do NOT persist to disk)
     let listen = if cli_listen != "0.0.0.0:22001" {
