@@ -104,3 +104,61 @@ jobs:
             --warm-up-time 1 --measurement-time 1 --sample-size 10 \
             --output-format bencher
         timeout-minutes: 10
+
+  release-check:
+    name: Release Compile Check
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: "release-${{ matrix.os }}"
+      - run: cargo check --release --workspace
+        timeout-minutes: 15
+
+  doc-check:
+    name: Documentation Compile Check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: "doc-check"
+      - run: cargo doc --no-deps --workspace
+        env:
+          RUSTDOCFLAGS: "-D warnings"
+        timeout-minutes: 10
+
+  e2e-test:
+    name: End-to-End Sync Test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: "e2e-test"
+      - run: cargo test --release -p syncthing --test e2e_sync
+        timeout-minutes: 5
+
+  file-size:
+    name: File Size Check (Production Code Only)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check Rust source files >600-line soft limit (excluding tests/benches)
+        run: |
+          echo "Checking Rust source files >600 lines..."
+          found=$(find crates cmd -path "*/src/*.rs" -not -name "tests.rs" -not -name "*test*.rs" -exec wc -l {} + | awk '$1 > 600 {print $1 " " $2}')
+          if [ -n "$found" ]; then
+            echo "::warning::Files exceeding 600-line soft limit:"
+            echo "$found"
+          else
+            echo "All production files within 600-line limit."
+          fi
