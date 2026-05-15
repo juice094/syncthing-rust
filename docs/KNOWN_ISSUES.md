@@ -17,7 +17,7 @@
 | 连接层稳定性 | ✅ 12h+ 单机压测验证（T-F1 死锁已修复） |
 | **端到端同步** | ✅ **已修复**（T2.6，见 §2） |
 | 跨版本互通 | ✅ **已验证**（2026-05-14，Rust v0.2.6 ↔ Go v2.1.0，自动化脚本就绪） |
-| 真实网络测试 | 🔵 **已启动**（WSL2 ↔ Gray-Cloud 双节点部署完成，校园网防火墙阻断 TCP 22001，Tailscale/Headscale 穿透方案确认） |
+| 真实网络测试 | ⚠️ **部分通过**（TLS/Hello/ClusterConfig/Index 已验证；Block Transfer 因 Windows `is_alive()` 平台差异中断，见 §9） |
 | 长跑（72h） | ⏳ 单机 12h 已验证；**双节点真实网络 72h** 为 v0.3.0 准入线 |
 | 政企合规 | ❌ **未通过**（无国密、无 Prometheus、无审计日志、无 Transport 插件，见 §8） |
 | 生产就绪度 | **alpha，已可用于研究 / 测试 / 个人私有部署，**不适用于政企生产**** |
@@ -258,6 +258,81 @@ File download completed file=hello.txt
 
 ---
 
+## §9. Windows 块传输中断：`is_alive()` 平台差异 + 路径处理缺陷（P0，v0.2.6 阻断）
+
+> **来源**：DUAL_NODE_TEST_2026-05-15 真实网络测试（Windows ↔ Ubuntu via Tailscale）。
+
+### §9.1 Bug-1：`connected_devices()` 在 Windows 返回空（P0）
+
+**症状**：
+- BEP 连接建立成功，Index 正常收发
+- `puller` 触发后临时文件创建（0 bytes），日志出现 `No connected devices`
+- `BlockSource::request_block()` 无法找到可用设备
+
+**根因**：
+`ConnectionManager::connected_devices()`（`crates/syncthing-net/src/manager/mod.rs:321-327`）使用 `conn.is_alive()` 过滤活跃连接。
+Windows 下 TLS 握手完成后，`is_alive()` 返回 `false`，但底层 TCP 连接实际存活（BepSession 仍能收发 Index）。
+
+**修复方向**：
+- 方案 A：`connected_devices()` 改为以 `BepSession` 存在为准，不再依赖 `is_alive()` 瞬时状态
+- 方案 B：修复 `is_alive()` 的 Windows 兼容性（改用 `try_write` / `try_read` / 显式心跳）
+- 方案 C：`BlockSource` 增加指数退避重试，不依赖 `connected_devices()` 瞬时快照
+
+**追踪**：`docs/reports/DUAL_NODE_TEST_2026-05-15.md` §5.1 / §6.1
+
+### §9.2 Bug-2：临时文件名双点号 `..syncthing.tmp`（P1）
+
+**症状**：Windows 下临时文件名为 `file.txt..syncthing.tmp`（双点号），可能导致最终重命名失败。
+
+**根因**：`crates/syncthing-sync/src/puller/mod.rs:211` 使用 `file_path.with_extension(TEMP_SUFFIX)`，其中 `TEMP_SUFFIX = ".syncthing.tmp"` 已包含点号，Rust `with_extension` 将其整体替换扩展名，产生双点号。
+
+**修复**：改为 `format!("{}.syncthing.tmp", file_path.display())` 或 `set_extension("syncthing.tmp")`。
+
+**追踪**：`docs/reports/DUAL_NODE_TEST_2026-05-15.md` §5.1 / §6.2
+
+### §9.3 Bug-3：Scanner 反斜杠路径导致 `files_changed=0`（P1）
+
+**症状**：Windows 下本地文件系统变更检测失败，`scan_folder` 返回 `files_changed=0`，本侧文件无法推送到对侧。
+
+**根因**：`crates/syncthing-sync/src/scanner.rs:207` 生成路径时使用平台原生分隔符 `\`，与内部统一 `/` 不匹配，`strip_prefix` 和相对路径计算失败。
+
+**修复**：Scanner 入口处统一将路径转换为正斜杠（或至少在相对路径计算时转换）。
+
+**追踪**：`docs/reports/DUAL_NODE_TEST_2026-05-15.md` §5.1 / §6.3
+
+---
+
+## §10. 配置 UX 灾难（P0，工程纪律问题）
+
+> **来源**：DUAL_NODE_TEST_2026-05-15 部署过程复盘。3.5 小时测试中 **~2 小时消耗在配置问题**，而非代码缺陷。
+
+**症状**：
+- 手工编辑 `config.json`，无 Schema 验证，启动后静默失败
+- Device ID 不匹配（对侧存在多个 syncthing 进程，无单实例锁提示）
+- 文件夹 ID / 设备列表不匹配（remote 已有 `test-folder`，脚本却配置 `cross-test`）
+- WSL2 ↔ Windows ↔ msys2 命令行引号转义地狱
+- Windows 路径反斜杠在 JSON 中需双重转义
+
+**根因**：
+- 配置为唯一 JSON 手工编辑方式，无 CLI 向导、无 REST 热更新
+- 启动时无 `validate_config()` 快速失败
+- 无单实例锁，重复启动导致 device ID 冲突
+- 无 `AddressType` 人类可读序列化（如 `"tcp://host:port"`）
+
+**修复方向（C-UX-1 ~ C-UX-5）**：
+
+| ID | 改进 | 说明 |
+|----|------|------|
+| C-UX-1 | CLI 初始化向导 | `syncthing-rust init` 交互式生成 config |
+| C-UX-2 | `AddressType` 序列化兼容 | 字符串形式 `"tcp://host:port"` 等 |
+| C-UX-3 | REST API `PUT /rest/config/devices` | 运行时热添加设备 |
+| C-UX-4 | 配置验证 + 快速失败 | 启动前检查 device ID、路径、地址格式 |
+| C-UX-5 | 单实例锁 | Windows `CreateMutex` / Unix `pidfile` |
+
+**追踪**：`docs/reports/DUAL_NODE_TEST_2026-05-15.md` §7 / `docs/ENGINEERING_DISCIPLINE.md` §5
+
+---
+
 ## 路线图影响
 
 按本文档现状（2026-05-15 Error-Budget 审计后）：
@@ -266,7 +341,7 @@ File download completed file=hello.txt
 |--------|---------|
 | **v0.2.5** | ✅ §2 已修复 — 已发布 |
 | **v0.2.6（hotfix）** | ✅ §7 运行时安全缺陷（H-1~H-6）：debounce + 日志上限 + 有界 channel + panic 清除 + shutdown select — 已合并 |
-| **v0.3.0** | §1 ClusterConfig race + §4 TestNode 文档 + §8 Transport Plugin + 双节点 72h（§3）+ Prometheus metrics + T3.1/T3.4 |
+| **v0.3.0** | §1 ClusterConfig race + §4 TestNode 文档 + §8 Transport Plugin + §9 Windows 块传输修复（Bug-1/2/3）+ §10 配置 UX（C-UX-1~5）+ 双节点 72h（§3）+ Prometheus metrics + T3.1/T3.4 |
 | **v0.4.0** | 国密 TLS（SM2/SM3/SM4）+ 证书外部化 + SQLite WAL + 审计日志 + 跨版本互通自动化 |
 
 v0.3.0 路线图详见 [`NEXT_STEPS_2026-05-15.md`](./plans/NEXT_STEPS_2026-05-15.md)。
