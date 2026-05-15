@@ -227,3 +227,130 @@
 
 - `syncthing-db` 深度绑定 `sled`，若未来需替换存储后端，新增抽象必须落在 `syncthing-core::traits::BlockStore`，禁止在 `syncthing-db` 内部暴露 sled 特有 API。
 - 禁止为消除 `cargo audit` warning 而引入 breaking change 依赖升级；允许接受 unmaintained 警告作为记录债务，但必须在 `docs/plans/` 中留下 ADR。
+
+---
+
+## Agent Skill 注册：syncthing-rust 双节点测试协调
+
+> **Skill ID**：`skill-syncthing-dual-node-test`  
+> **生效版本**：v0.2.7+  
+> **注册时间**：2026-05-15  
+> **对侧节点**：Gray-Cloud (Ubuntu 22.04 VPS, Tailscale 100.127.13.26)  
+> **本侧节点**：Windows 11 (Tailscale 100.73.228.59)
+
+### 触发条件
+
+当用户消息包含以下关键词时，本 Skill 激活：
+- "格雷" / "Gray-Cloud" / "对侧" / "远端"
+- "双节点" / "真实网络" / "E2E" / "端到端"
+- "压测" / "压力测试" / "耐久" / "72h" / "stress"
+- "编译二进制" / "推送" / "发布 Release"
+- "接收资料" / "日志分析" / "排查"
+
+### 本侧能力边界
+
+| 能力 | 状态 | 说明 |
+|------|------|------|
+| 编译 Windows 二进制 | ✅ | `cargo build --release` → `target/release/syncthing.exe` (~12.6MB) |
+| 编译 Linux 二进制 | ✅ | WSL2 `cargo build --release` → `target/release/syncthing` (~13.6MB) |
+| 生成交互式配置 | ✅ | `syncthing.exe init` wizard，生成 config.json + cert.pem + key.pem |
+| 启动/停止/重启节点 | ✅ | `Start-Process` / `Stop-Process`，指定 `--config-dir` |
+| 监控连接状态 | ✅ | `netstat -ano` + `tasklist` + `Get-NetTCPConnection` |
+| 生成操作手册/报告 | ✅ | Markdown 报告，base64 编码写入 Windows 文件系统 |
+| 接收格雷侧日志分析 | ⚠️ 间接 | 用户转发日志文本，本机进行 grep/模式分析 |
+| 直接 SSH/SCP 到格雷 | ❌ | 无网络直达能力，必须通过用户中转 |
+
+### 标准操作流程（SOP）
+
+```
+Step 1: 版本对齐
+    └─ 确认双方使用同一 Git tag（如 v0.2.7），若不一致则重新编译推送
+
+Step 2: 生成本侧配置
+    └─ 运行 `syncthing.exe init --config-dir <dir>`
+    └─ 输入：设备名、同步路径（必须为 config-dir 子目录，如 `<dir>\sync`）、对侧 Device ID、对侧地址
+    └─ 修改 folder ID 匹配对侧（如 `test-folder`）
+    └─ 提取本侧 Device ID（以 cert.pem 为准，非 wizard 打印值）
+
+Step 3: 启动本侧节点
+    └─ `Start-Process syncthing.exe -ArgumentList "run","--config-dir",...`
+    └─ 确认 PID 存在、端口 22001/8385 监听
+
+Step 4: 与格雷侧交换信息
+    └─ 向用户发送：本侧 Device ID、Tailscale IP、监听端口、Folder ID
+    └─ 从用户接收：格雷侧 Device ID、Tailscale IP、Folder ID
+
+Step 5: 等待格雷侧配置完成
+    └─ 格雷侧更新 config.json 中的 devices + folders.devices
+    └─ 格雷侧启动守护进程
+
+Step 6: 验证连接建立
+    └─ `netstat -ano | grep 100.127.13.26`
+    └─ 目标：ESTABLISHED 稳定保持 20s+
+    └─ 若 SYN_SENT 挂死 → 检查 Tailscale / 防火墙 / 对侧监听地址
+
+Step 7: 执行测试任务
+    └─ 在 sync 目录放置测试文件，观察双向同步
+    └─ 根据 GRAY_CLOUD_OPS_MANUAL_v0.2.7.md 执行 Task 2~5
+
+Step 8: 收集结果与报告
+    └─ 验证文件内容一致性
+    └─ 更新 `docs/reports/DUAL_NODE_TEST_*.md`
+    └─ git commit + push
+```
+
+### 待测试任务清单（P0 → P2）
+
+| 优先级 | 任务 | 触发条件 | 验收标准 |
+|--------|------|----------|----------|
+| **P0** | 72h 耐久测试 | 用户指令"开始耐久测试" | 72h 无 panic、RSS 增长 < 50%、文件最终一致、重连成功率 > 95% |
+| **P0** | 大文件压测 | 用户指令"压测大文件" | 10MB/100MB/500MB 文件双向同步成功，无 Block 丢失 |
+| **P1** | 网络抖动/断线重连 | 用户指令"测试断线重连" | 10 次模拟断线，连接恢复率 100%，Index 续传正确 |
+| **P1** | 内存泄漏监控 | 耐久测试并行执行 | 每 5 分钟记录 RSS，无持续增长趋势 |
+| **P2** | 元数据排除验证 | Task 1 部署 `.stignore` 后 | `db.syncthing.tmp`、`config.syncthing.tmp` 等不再出现 |
+
+### 与格雷侧协作通信协议
+
+**信息交换格式**（用户中转）：
+
+```markdown
+**格雷 → 宿**
+- 守护进程 PID：`<pid>`
+- Device ID：`<device-id>`
+- 监听地址：`0.0.0.0:22001`
+- Folder ID：`test-folder`
+- 日志片段：```...```
+
+**宿 → 格雷**
+- 守护进程 PID：`<pid>`
+- Device ID：`<device-id>`（以证书为准）
+- Tailscale IP：`100.73.228.59`
+- 同步目录：`C:\...\sync`
+- 操作手册：`docs/GRAY_CLOUD_OPS_MANUAL_v0.2.7.md`
+```
+
+### 已知限制与风险
+
+| 限制 | 影响 | 规避方法 |
+|------|------|---------|
+| WSL2 `/mnt/c` 挂载不稳定 | Bash 无法直接 `ls/cp` Windows 路径 | 全部文件操作走 PowerShell (`powershell.exe -Command ...`) |
+| Bash/PowerShell 引号转义地狱 | 长内容（脚本/配置）写入失败 | 使用 base64 编码 → PowerShell `[Convert]::FromBase64String` 解码写入 |
+| Windows 日志捕获困难 | `Start-Process -RedirectStandardError` 常为空 | 依赖 `netstat` + API + 文件系统检查代替日志诊断 |
+| API 端点空引用异常 | `/rest/system/connections` 可能 500 | 使用 `netstat` 和 `tasklist` 替代 |
+| 无法直达格雷网络 | 不能 SSH/SCP 到对侧 | 所有资料通过用户消息中转 |
+| Device ID 证书陷阱 | `local_device_id` 会被 cert.pem 覆盖 | **始终以证书/API 为准确认 Device ID**，init wizard 打印值仅供参考 |
+
+### 相关文件索引
+
+| 文件 | 用途 |
+|------|------|
+| `docs/GRAY_CLOUD_OPS_MANUAL_v0.2.7.md` | 格雷侧完整操作手册（自动化脚本、API 速查、紧急上报） |
+| `docs/reports/DUAL_NODE_TEST_2026-05-15.md` | 双节点测试报告（含时间线、Bug 分析、修复记录） |
+| `.github/workflows/ci.yml` | CI 配置（含 e2e-test、release-check、doc-check） |
+| `cmd/syncthing/src/init_wizard.rs` | 交互式配置生成向导 |
+| `crates/syncthing-sync/src/scanner.rs` | Scanner 逻辑（已知缺陷：无自动元数据排除） |
+| `crates/syncthing-net/src/tcp_transport.rs` | TCP 传输 + 连接状态设置 |
+
+---
+
+**冻结声明**：本 Skill 涉及的 SOP 和任务清单随 v0.2.7 验证通过而固化。后续版本若引入新的网络传输层（QUIC/WebSocket）或配置格式变更，需同步更新本 Skill 中的地址格式和连接检查命令。
