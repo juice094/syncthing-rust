@@ -9,7 +9,7 @@
 //! [n bytes: payload]
 //! ```
 //!
-//! 参考: https://tailscale.com/kb/1232/derp-servers
+//! 参考: <https://tailscale.com/kb/1232/derp-servers>
 
 use bytes::{Buf, BufMut, BytesMut};
 use syncthing_core::{DeviceId, Result, SyncthingError};

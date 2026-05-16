@@ -16,6 +16,22 @@ use tracing::{debug, error, info, trace};
 /// 块大小（128KB，与 Syncthing 默认一致）
 const DEFAULT_BLOCK_SIZE: i32 = 128 * 1024;
 
+/// Scanner 默认排除的文件/目录名（与 Go Syncthing 对齐）
+/// 这些条目在 .stignore 加载前生效，防止元数据被索引和同步。
+const DEFAULT_IGNORED_NAMES: &[&str] = &[
+    ".stfolder",
+    ".stversions",
+    ".stignore",
+    "config.json",
+    "cert.pem",
+    "key.pem",
+    "db",
+    "logs",
+];
+
+/// Scanner 默认排除的文件后缀模式
+const DEFAULT_IGNORED_SUFFIXES: &[&str] = &[".syncthing.tmp", "~syncthing~"];
+
 /// 文件夹扫描器
 pub struct Scanner {
     db: Arc<dyn LocalDatabase>,
@@ -70,7 +86,14 @@ impl Scanner {
 
         // 递归扫描目录
         match self
-            .scan_directory(&folder.id, path, &scan_root, Path::new(""), &mut visited_paths, &matcher)
+            .scan_directory(
+                &folder.id,
+                path,
+                &scan_root,
+                Path::new(""),
+                &mut visited_paths,
+                &matcher,
+            )
             .await
         {
             Ok(files) => {
@@ -158,7 +181,7 @@ impl Scanner {
     async fn scan_directory(
         &self,
         folder_id: &str,
-        base_path: &Path,
+        _base_path: &Path,
         current_path: &Path,
         relative_prefix: &Path,
         visited: &mut std::collections::HashSet<std::path::PathBuf>,
@@ -188,6 +211,20 @@ impl Scanner {
                 None => continue,
             };
             let name = file_name_os.to_string_lossy();
+
+            // 默认排除 syncthing 元数据（D-1 修复）
+            if DEFAULT_IGNORED_NAMES.iter().any(|&ignored| name == ignored) {
+                trace!(path = %path.display(), "Skipping default ignored syncthing metadata");
+                continue;
+            }
+            if DEFAULT_IGNORED_SUFFIXES
+                .iter()
+                .any(|&suffix| name.ends_with(suffix))
+            {
+                trace!(path = %path.display(), "Skipping default ignored suffix");
+                continue;
+            }
+
             if name.starts_with('.') || name.starts_with("~") || name.ends_with(".tmp") {
                 trace!(path = %path.display(), "Skipping hidden/temp file");
                 continue;
@@ -233,7 +270,7 @@ impl Scanner {
                 let mut next_prefix = relative_prefix.to_path_buf();
                 next_prefix.push(file_name_os);
                 let sub_files = self
-                    .scan_directory(folder_id, base_path, &path, &next_prefix, visited, matcher)
+                    .scan_directory(folder_id, _base_path, &path, &next_prefix, visited, matcher)
                     .await?;
                 files.extend(sub_files);
 

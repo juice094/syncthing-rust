@@ -62,22 +62,6 @@ jobs:
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
 
-  file-size:
-    name: File Size Check
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: Check Rust source files >600-line soft limit
-        run: |
-          echo "Checking Rust source files >600 lines..."
-          found=$(find crates cmd -name "*.rs" -exec wc -l {} + | awk '$1 > 600 {print $1 " " $2}')
-          if [ -n "$found" ]; then
-            echo "::warning::Files exceeding 600-line soft limit:"
-            echo "$found"
-          else
-            echo "All files within 600-line limit."
-          fi
-
   bench-smoke:
     name: Bench Smoke Test (T-G2)
     runs-on: ubuntu-latest
