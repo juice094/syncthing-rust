@@ -333,6 +333,23 @@ Windows 下 TLS 握手完成后，`is_alive()` 返回 `false`，但底层 TCP �
 
 ---
 
+## §11. Scanner 不自动排除元数据文件（P1，D-1）— **已修复 ✅**
+
+> **修复 commit**：`d6d8c01`（PR #1，2026-05-16）
+
+**症状**：`scanner` 将 syncthing 自身产生的元数据文件/目录当作普通文件索引并同步，包括 `config.json`、`cert.pem`、`key.pem`、`db/`、`logs/`、`*.syncthing.tmp`、`.stfolder` 等。当同步目录与配置目录重合时，递归扫描导致同步爆炸（`Pull error: Is a directory`）。
+
+**修复**：
+- `scanner.rs` 新增 `DEFAULT_IGNORED_NAMES`（`.stfolder`、`.stversions`、`.stignore`、`config.json`、`cert.pem`、`key.pem`、`db`、`logs`）
+- 新增 `DEFAULT_IGNORED_SUFFIXES`（`.syncthing.tmp`、`~syncthing~`）
+- 在 `scan_directory` 中先于 `.stignore` 检查应用默认排除
+
+**验证**：CI 全部通过（Formatting / Clippy Ubuntu+Windows / Test Ubuntu+Windows / Release Check / Doc Check / E2E Sync Test / Security Audit / Bench Smoke）。
+
+**追踪**：`DUAL_NODE_TEST_2026-05-15.md` §12.4 D-1
+
+---
+
 ## 路线图影响
 
 按本文档现状（2026-05-15 Error-Budget 审计后）：
@@ -341,7 +358,7 @@ Windows 下 TLS 握手完成后，`is_alive()` 返回 `false`，但底层 TCP �
 |--------|---------|
 | **v0.2.5** | ✅ §2 已修复 — 已发布 |
 | **v0.2.6（hotfix）** | ✅ §7 运行时安全缺陷（H-1~H-6）：debounce + 日志上限 + 有界 channel + panic 清除 + shutdown select — 已合并 |
-| **v0.3.0** | §1 ClusterConfig race + §4 TestNode 文档 + §8 Transport Plugin + §9 Windows 块传输修复（Bug-1/2/3）+ §10 配置 UX（C-UX-1~5）+ 双节点 72h（§3）+ Prometheus metrics + T3.1/T3.4 |
+| **v0.3.0** | ✅ §11 Scanner 默认排除元数据 — 已修复 / §1 ClusterConfig race + §4 TestNode 文档 + §8 Transport Plugin + §9 Windows 块传输修复（Bug-1/2/3）+ §10 配置 UX（C-UX-1~5）+ 双节点 72h（§3）+ Prometheus metrics + T3.1/T3.4 |
 | **v0.4.0** | 国密 TLS（SM2/SM3/SM4）+ 证书外部化 + SQLite WAL + 审计日志 + 跨版本互通自动化 |
 
 v0.3.0 路线图详见 [`NEXT_STEPS_2026-05-15.md`](./plans/NEXT_STEPS_2026-05-15.md)。
