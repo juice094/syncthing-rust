@@ -3,24 +3,24 @@
 [![Rust](https://img.shields.io/badge/rust-1.85%2B-orange?logo=rust)](https://www.rust-lang.org)
 [![Tests](https://img.shields.io/badge/tests-296%20passed-brightgreen)]()
 [![Clippy](https://img.shields.io/badge/clippy-0%20warnings-brightgreen)]()
-[![Version](https://img.shields.io/badge/version-v0.2.6-blue)]()
+[![Version](https://img.shields.io/badge/version-v0.2.8-blue)]()
 [![License](https://img.shields.io/badge/license-MIT-blue)](./LICENSE)
 
 A Rust implementation of the [Syncthing](https://syncthing.net/) protocol stack, designed for **zero-runtime-dependency** deployment and wire-compatible interoperability with the official Go Syncthing daemon.
 
-**📦 Latest Release: [v0.2.6](https://github.com/juice094/syncthing-rust/releases/tag/v0.2.6)** — Runtime Safety Hardening + Cross-Version Interop Verified
+**📦 Latest Release: [v0.2.8](https://github.com/juice094/syncthing-rust/releases/tag/v0.2.8)** — Runtime Safety Hardening + Cross-Version Interop Verified
 
 | Platform | Binary | Size |
 |----------|--------|------|
-| Windows x64 | [`syncthing-v0.2.6-x86_64-pc-windows-msvc.exe`](https://github.com/juice094/syncthing-rust/releases/download/v0.2.6/syncthing-v0.2.6-x86_64-pc-windows-msvc.exe) | ~12 MB |
-| Linux x64 | [`syncthing-v0.2.6-x86_64-unknown-linux-gnu`](https://github.com/juice094/syncthing-rust/releases/download/v0.2.6/syncthing-v0.2.6-x86_64-unknown-linux-gnu) | ~13 MB |
-| Stress Test (Win) | [`stress_test-v0.2.6-x86_64-pc-windows-msvc.exe`](https://github.com/juice094/syncthing-rust/releases/download/v0.2.6/stress_test-v0.2.6-x86_64-pc-windows-msvc.exe) | ~6.6 MB |
-| Stress Test (Linux) | [`stress_test-v0.2.6-x86_64-unknown-linux-gnu`](https://github.com/juice094/syncthing-rust/releases/download/v0.2.6/stress_test-v0.2.6-x86_64-unknown-linux-gnu) | ~6.8 MB |
-| Checksums | [`SHA256SUMS.txt`](https://github.com/juice094/syncthing-rust/releases/download/v0.2.6/SHA256SUMS.txt) | — |
+| Windows x64 | [`syncthing-v0.2.8-x86_64-pc-windows-msvc.exe`](https://github.com/juice094/syncthing-rust/releases/download/v0.2.8/syncthing-v0.2.8-x86_64-pc-windows-msvc.exe) | ~12 MB |
+| Linux x64 | [`syncthing-v0.2.8-x86_64-unknown-linux-gnu`](https://github.com/juice094/syncthing-rust/releases/download/v0.2.8/syncthing-v0.2.8-x86_64-unknown-linux-gnu) | ~13 MB |
+| Stress Test (Win) | [`stress_test-v0.2.8-x86_64-pc-windows-msvc.exe`](https://github.com/juice094/syncthing-rust/releases/download/v0.2.8/stress_test-v0.2.8-x86_64-pc-windows-msvc.exe) | ~6.6 MB |
+| Stress Test (Linux) | [`stress_test-v0.2.8-x86_64-unknown-linux-gnu`](https://github.com/juice094/syncthing-rust/releases/download/v0.2.8/stress_test-v0.2.8-x86_64-unknown-linux-gnu) | ~6.8 MB |
+| Checksums | [`SHA256SUMS.txt`](https://github.com/juice094/syncthing-rust/releases/download/v0.2.8/SHA256SUMS.txt) | — |
 
 > 💡 [Build from source](#quick-start) if you need a different target or want to audit the code.
 
-> ⚠️ **Current stage (2026-05-15 post-v0.2.6)**: **Alpha — core sync chain verified, runtime safety hardened, cross-version interop proven, real-world network constraints identified.**
+> ⚠️ **Current stage (2026-05-15 post-v0.2.8)**: **Alpha — core sync chain verified, runtime safety hardened, cross-version interop proven, real-world network constraints identified.**
 >
 > - ✅ **Connection layer stable**: 12h+ single-node endurance, 0 deadlocks, 0 panics, logs 6 KB (v0.2.6 hardening verified).
 > - ✅ **Protocol layer correct**: TLS, BEP Hello, ClusterConfig, Index encode/decode all working.
@@ -194,7 +194,7 @@ docs/
 | `FileSystemDatabase` storage | Per-file JSON (O(N) syscalls) | T-C (v0.4.0) |
 | criterion benchmarks | **Skeleton ready** (4 benches) | T-A1 (P1) |
 | 72h stress test | Single-node 12h validated; **dual-node real-network 72h** pending | T-F1 (P0) |
-| Cross-version interop | **Verified** (Rust v0.2.6 ↔ Go v2.1.0) | Automation in `scripts/cross_version_test.sh` |
+| Cross-version interop | **Verified** (Rust v0.2.8 ↔ Go v2.1.0) | Automation in `scripts/cross_version_test.sh` |
 | Prometheus metrics | **None** | O-1 (v0.3.0 P0) |
 | Transport plugin abstraction | **None** | T-Net-2 (v0.3.0 P0) |
 | Enterprise/FIPS/SM crypto | **None** | v0.4.0 roadmap |

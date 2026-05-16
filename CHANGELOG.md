@@ -2,8 +2,34 @@
 
 ## [Unreleased]
 
-### 🔬 Interop
-- **Cross-version interop verified** (2026-05-14): Rust v0.2.6 ↔ Go syncthing v2.1.0.
+## [0.2.8] — 2026-05-16（Scanner 元数据排除 + CI/文档清理）
+
+### 🎯 Headline: Scanner 默认排除 syncthing 元数据，消除新手部署陷阱
+
+修复 DUAL_NODE_TEST_2026-05-15 **D-1**：Scanner 不自动排除元数据文件。
+同步目录与配置目录重合时，`db/`、`logs/`、`config.json` 等被索引并同步，
+导致 `Pull error: Is a directory` 递归灾难。
+
+### 🔧 Fixes
+- **Scanner 默认排除列表** (`syncthing-sync/src/scanner.rs`):
+  - 硬编码排除 `.stfolder`、`.stversions`、`.stignore`、`config.json`、
+    `cert.pem`、`key.pem`、`db`、`logs`
+  - 硬编码排除后缀 `.syncthing.tmp`、`~syncthing~`
+  - 在 `.stignore` 检查之前生效，确保元数据永不进入索引
+
+### 🏗️ Engineering Debt
+- 修复 pre-existing clippy error: `clippy::only_used_in_recursion` (`scanner.rs`)
+- 修复 6 个 pre-existing rustdoc warnings（未闭合 HTML tag、私有文档链接、裸 URL）
+- 修复 CI workflow 中重复的 `file-size` job 导致 YAML 解析失败
+- `cargo fmt --all` 清理 4 个 pre-existing 格式问题文件
+
+### ✅ Verification
+- CI 全部 11 个 job 通过（含 Windows Clippy/Test/Release）
+- 本地 `cargo test --workspace`：309 passed, 0 failed
+
+---
+
+## [0.2.6] — 2026-05-14（运行时安全 hotfix）
   TLS 1.3 handshake, BEP Hello/ClusterConfig/Index exchange, and file sync
   (1× text + 3× binary files) all pass on local loopback.
   `scripts/cross_version_test.sh` rewritten with platform-aware config generation
