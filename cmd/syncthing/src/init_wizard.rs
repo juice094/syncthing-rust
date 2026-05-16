@@ -31,13 +31,11 @@ pub fn run_wizard(config_dir: &PathBuf) -> anyhow::Result<()> {
     println!();
 
     // 1. 设备名称
-    let device_name = prompt(
-        "1. 本设备名称", Some("syncthing-rust"));
+    let device_name = prompt("1. 本设备名称", Some("syncthing-rust"));
 
     // 2. 同步文件夹路径
     let folder_path = loop {
-        let path = prompt(
-            "2. 同步文件夹路径（绝对路径）", None);
+        let path = prompt("2. 同步文件夹路径（绝对路径）", None);
         if path.is_empty() {
             println!("   错误：路径不能为空\n");
             continue;
@@ -58,8 +56,7 @@ pub fn run_wizard(config_dir: &PathBuf) -> anyhow::Result<()> {
 
     // 3. 对侧设备 ID
     let peer_id = loop {
-        let id = prompt(
-            "3. 对侧设备 ID（如 XXXXXXX-XXXXXXX-...）", None);
+        let id = prompt("3. 对侧设备 ID（如 XXXXXXX-XXXXXXX-...）", None);
         if id.is_empty() {
             println!("   错误：设备 ID 不能为空\n");
             continue;
@@ -74,7 +71,9 @@ pub fn run_wizard(config_dir: &PathBuf) -> anyhow::Result<()> {
     // 4. 对侧地址
     let peer_addr = loop {
         let addr = prompt(
-            "4. 对侧地址（如 192.168.1.100:22001 或 tailscale IP）", None);
+            "4. 对侧地址（如 192.168.1.100:22001 或 tailscale IP）",
+            None,
+        );
         if addr.is_empty() {
             println!("   错误：地址不能为空\n");
             continue;
@@ -141,7 +140,10 @@ pub fn run_wizard(config_dir: &PathBuf) -> anyhow::Result<()> {
     println!();
     println!("下一步:");
     println!("  1. 在对侧设备上运行相同的向导，输入本侧设备 ID");
-    println!("  2. 启动服务: syncthing run --config-dir {}", config_dir.display());
+    println!(
+        "  2. 启动服务: syncthing run --config-dir {}",
+        config_dir.display()
+    );
     println!();
 
     Ok(())
@@ -149,7 +151,12 @@ pub fn run_wizard(config_dir: &PathBuf) -> anyhow::Result<()> {
 
 fn random_api_key() -> String {
     use rand::Rng;
-    let chars: Vec<char> = (b'a'..=b'z').chain(b'0'..=b'9').map(|c| c as char).collect();
+    let chars: Vec<char> = (b'a'..=b'z')
+        .chain(b'0'..=b'9')
+        .map(|c| c as char)
+        .collect();
     let mut rng = rand::thread_rng();
-    (0..32).map(|_| chars[rng.gen_range(0..chars.len())]).collect()
+    (0..32)
+        .map(|_| chars[rng.gen_range(0..chars.len())])
+        .collect()
 }

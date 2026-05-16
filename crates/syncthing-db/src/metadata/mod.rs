@@ -131,7 +131,7 @@ fn make_device_file_key(device_id: &str, folder: &FolderId, name: &str) -> Vec<u
 }
 
 /// Key for block index
-/// Format: block/<hash>
+/// Format: block/\<hash\>
 pub fn make_block_key(hash: &BlockHash) -> Vec<u8> {
     let mut key = b"block/".to_vec();
     key.extend_from_slice(hash.as_bytes());

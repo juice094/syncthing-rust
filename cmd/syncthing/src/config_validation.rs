@@ -3,17 +3,14 @@
 pub fn validate_config(config: &syncthing_core::types::Config) -> anyhow::Result<()> {
     use std::collections::HashSet;
     use std::net::SocketAddr;
-    use syncthing_core::DeviceId;
     use std::str::FromStr;
+    use syncthing_core::DeviceId;
 
     // 1. 验证 local_device_id（如果存在）
     if let Some(local_id) = &config.local_device_id {
         let id_str = local_id.to_string();
         if let Err(e) = DeviceId::from_str(&id_str) {
-            anyhow::bail!(
-                "Invalid local_device_id '{}': {}",
-                id_str, e
-            );
+            anyhow::bail!("Invalid local_device_id '{}': {}", id_str, e);
         }
     }
 
@@ -24,7 +21,8 @@ pub fn validate_config(config: &syncthing_core::types::Config) -> anyhow::Result
         if let Err(e) = DeviceId::from_str(&id_str) {
             anyhow::bail!(
                 "Invalid device ID for '{}': {}",
-                dev.name.as_deref().unwrap_or("unnamed"), e
+                dev.name.as_deref().unwrap_or("unnamed"),
+                e
             );
         }
         if !seen_ids.insert(dev.id) {
@@ -38,7 +36,8 @@ pub fn validate_config(config: &syncthing_core::types::Config) -> anyhow::Result
                     if s.parse::<SocketAddr>().is_err() {
                         anyhow::bail!(
                             "Invalid TCP address for device '{}': {}",
-                            dev.name.as_deref().unwrap_or("unnamed"), s
+                            dev.name.as_deref().unwrap_or("unnamed"),
+                            s
                         );
                     }
                 }
@@ -54,7 +53,8 @@ pub fn validate_config(config: &syncthing_core::types::Config) -> anyhow::Result
                     if s.parse::<SocketAddr>().is_err() {
                         anyhow::bail!(
                             "Invalid QUIC address for device '{}': {}",
-                            dev.name.as_deref().unwrap_or("unnamed"), s
+                            dev.name.as_deref().unwrap_or("unnamed"),
+                            s
                         );
                     }
                 }

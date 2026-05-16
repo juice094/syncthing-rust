@@ -83,8 +83,8 @@ pub(crate) async fn add_device(
     let connect_addrs: Vec<std::net::SocketAddr> = addresses
         .iter()
         .filter_map(|a| match a {
-            syncthing_core::types::AddressType::Tcp(s) |
-            syncthing_core::types::AddressType::Quic(s) => s.parse().ok(),
+            syncthing_core::types::AddressType::Tcp(s)
+            | syncthing_core::types::AddressType::Quic(s) => s.parse().ok(),
             _ => None,
         })
         .collect();
@@ -118,7 +118,8 @@ pub(crate) async fn add_device(
             if let Err(e) = cm.connect_to(&device_id_clone, connect_addrs).await {
                 tracing::debug!(
                     "Background connect_to failed for {}: {}",
-                    device_id_clone, e
+                    device_id_clone,
+                    e
                 );
             }
         });
@@ -233,11 +234,7 @@ impl From<syncthing_core::types::Device> for DeviceResponse {
         Self {
             id: device.id.to_string(),
             name: device.name.unwrap_or_default(),
-            addresses: device
-                .addresses
-                .iter()
-                .map(|a| a.to_string())
-                .collect(),
+            addresses: device.addresses.iter().map(|a| a.to_string()).collect(),
             introducer: device.introducer,
         }
     }
