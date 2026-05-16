@@ -146,8 +146,7 @@ async fn main() -> Result<()> {
         .unwrap_or_else(syncthing_core::paths::default_config_dir);
 
     // C-UX-5: 单实例锁
-    single_instance::acquire(&config_dir)
-        .map_err(|e| anyhow::anyhow!(e))?;
+    single_instance::acquire(&config_dir).map_err(|e| anyhow::anyhow!(e))?;
     let _instance_guard = SingleInstanceGuard(config_dir.clone());
 
     let log_level = cli

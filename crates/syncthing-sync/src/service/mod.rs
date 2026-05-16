@@ -5,12 +5,12 @@
 //! T2.3 (2026-05-13): 按职责拆分为四个子模块。本文件仅保留 `SyncService` 与
 //! `FolderTaskHandles` 结构体定义、字段、以及子模块声明。所有方法实现在：
 //!
-//! - [`lifecycle`] — `new` / `with_*` builders / `start` / `stop` / `run` /
+//! - `lifecycle` — `new` / `with_*` builders / `start` / `stop` / `run` /
 //!   accessors + 内部 `init_folders`/`add_folder_internal`/`start_folder_loops`/
 //!   `start_folder_internal` 帮助函数
-//! - [`sync_manager`] — `impl SyncManager for SyncService`（公开 CRUD + 触发）
-//! - [`network_bridge`] — BEP 网络层回调（`handle_index` / `handle_block_request` 等）
-//! - [`sync_model`] — `impl syncthing_core::traits::SyncModel for SyncService`（FFI 边界）
+//! - `sync_manager` — `impl SyncManager for SyncService`（公开 CRUD + 触发）
+//! - `network_bridge` — BEP 网络层回调（`handle_index` / `handle_block_request` 等）
+//! - `sync_model` — `impl syncthing_core::traits::SyncModel for SyncService`（FFI 边界）
 //!
 //! 详见 `docs/drafts/RFC-001-service-split.md`。
 
