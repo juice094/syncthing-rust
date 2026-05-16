@@ -3,6 +3,8 @@ name: Build Release Binary
 on:
   push:
     branches: [main]
+    tags:
+      - 'v[0-9]+.[0-9]+.[0-9]+'
   workflow_dispatch:
 
 permissions:
@@ -45,10 +47,10 @@ jobs:
       - name: Upload to Release
         uses: softprops/action-gh-release@v1
         with:
-          tag_name: latest
-          name: "Latest Build"
-          body: "Auto-built from main branch"
-          prerelease: true
+          tag_name: ${{ github.ref_name }}
+          name: "Release ${{ github.ref_name }}"
+          body: "Auto-built from ${{ github.ref_name }}"
+          prerelease: ${{ contains(github.ref_name, 'alpha') || contains(github.ref_name, 'beta') || contains(github.ref_name, 'rc') }}
           files: dist/syncthing-x86_64-linux
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -85,10 +87,10 @@ jobs:
       - name: Upload to Release
         uses: softprops/action-gh-release@v1
         with:
-          tag_name: latest
-          name: "Latest Build"
-          body: "Auto-built from main branch"
-          prerelease: true
+          tag_name: ${{ github.ref_name }}
+          name: "Release ${{ github.ref_name }}"
+          body: "Auto-built from ${{ github.ref_name }}"
+          prerelease: ${{ contains(github.ref_name, 'alpha') || contains(github.ref_name, 'beta') || contains(github.ref_name, 'rc') }}
           files: dist/syncthing-x86_64-windows.exe
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
