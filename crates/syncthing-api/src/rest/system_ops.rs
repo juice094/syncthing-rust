@@ -170,6 +170,7 @@ pub(crate) async fn system_shutdown() -> impl IntoResponse {
 }
 
 #[derive(Debug, Deserialize)]
+// NOTE: Fields accessed via serde deserialization, not direct construction
 #[allow(dead_code)]
 pub struct PauseResumeRequest {
     #[serde(default)]

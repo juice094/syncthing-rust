@@ -1,5 +1,5 @@
 //! 同步进度条组件
-
+// NOTE: Widget reserved for future TUI enhancements (v0.3.0+)
 #![allow(dead_code)]
 
 //!

@@ -26,6 +26,7 @@ pub enum TuiEvent {
     DeviceDisconnected {
         device_id: syncthing_core::DeviceId,
     },
+    // TODO(v0.3.0): TUI real-time sync progress bar
     #[allow(dead_code)]
     SyncProgress {
         folder: String,

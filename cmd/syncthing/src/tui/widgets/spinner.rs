@@ -1,4 +1,5 @@
 //! 动画加载指示器
+// NOTE: Widget reserved for future TUI enhancements (v0.3.0+)
 #![allow(dead_code)]
 //!
 //! 基于 frame_counter 实现，不依赖额外定时器。
