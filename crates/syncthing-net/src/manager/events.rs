@@ -14,13 +14,9 @@ impl ConnectionManager {
             .event_rx
             .write()
             .take()
-            .expect("event receiver already taken");
+            .expect("INVARIANT: spawn_event_handler called only once");
 
-        let weak = self
-            .self_weak
-            .read()
-            .clone()
-            .expect("self_weak set during ConnectionManager::new");
+        let weak = self.self_weak();
 
         tokio::spawn(async move {
             while let Some(event) = event_rx.recv().await {
@@ -70,11 +66,7 @@ impl ConnectionManager {
     pub(crate) fn spawn_maintenance_task(&self) {
         let interval_duration = self.config.heartbeat_interval;
 
-        let weak = self
-            .self_weak
-            .read()
-            .clone()
-            .expect("self_weak set during ConnectionManager::new");
+        let weak = self.self_weak();
 
         let handle = tokio::spawn(async move {
             let mut ticker = interval(interval_duration);

@@ -371,7 +371,7 @@ impl BepConnection {
                 .lock()
                 .await
                 .take()
-                .expect("read_half already taken");
+                .expect("INVARIANT: start_reader called only once per connection");
             loop {
                 // 读取 2 字节 header length
                 let mut hdr_len_buf = [0u8; 2];
@@ -512,7 +512,7 @@ impl BepConnection {
                 .lock()
                 .await
                 .take()
-                .expect("write_half already taken");
+                .expect("INVARIANT: start_writer called only once per connection");
             let mut rx = message_rx.lock().await;
 
             while let Some(msg) = rx.recv().await {

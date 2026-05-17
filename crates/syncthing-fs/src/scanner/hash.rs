@@ -25,7 +25,9 @@ fn hash_pool() -> &'static rayon::ThreadPool {
             .num_threads(num_cpus::get().max(2))
             .thread_name(|i| format!("hash-worker-{}", i))
             .build()
-            .expect("hash thread pool")
+            // INVARIANT: ThreadPoolBuilder fails only on resource exhaustion (OOM).
+            // At process startup this is non-recoverable; crash is appropriate.
+            .expect("rayon ThreadPoolBuilder: resource exhaustion at startup")
     })
 }
 

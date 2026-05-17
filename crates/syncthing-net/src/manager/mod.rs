@@ -49,6 +49,7 @@ pub struct ConnectionManager {
     pub(crate) config: ConnectionManagerConfig,
     /// 本地设备身份（抽象层，解耦具体密码学方案）
     /// 保留 Arc 引用以维持 trait object 生命周期；local_device_id 已缓存
+    // TODO(v0.3.0): 当 ConnectionManager 需要动态身份切换时激活
     #[allow(dead_code)]
     pub(crate) identity: Arc<dyn Identity>,
     /// 本地设备ID（从 identity 缓存，避免虚函数调用）
@@ -90,6 +91,15 @@ pub struct ConnectionManager {
 }
 
 impl ConnectionManager {
+    /// 获取已初始化的 self_weak。
+    /// INVARIANT: `self_weak` 在 `Arc::new_cyclic` 中设置，永远不会为 `None`。
+    pub(crate) fn self_weak(&self) -> Weak<ConnectionManager> {
+        self.self_weak
+            .read()
+            .clone()
+            .expect("INVARIANT: self_weak set in Arc::new_cyclic during ConnectionManager::new")
+    }
+
     /// 创建新的连接管理器
     pub fn new(
         config: ConnectionManagerConfig,
@@ -165,7 +175,7 @@ impl ConnectionManager {
             self.transport_registry
                 .read()
                 .as_ref()
-                .expect("just set above")
+                .expect("INVARIANT: registry just written above")
                 .schemes()
         );
     }
@@ -328,11 +338,7 @@ impl ConnectionManager {
 
     /// 启动网络监控任务
     pub fn start_netmon(&self, mut rx: mpsc::Receiver<NetChangeEvent>) {
-        let weak = self
-            .self_weak
-            .read()
-            .clone()
-            .expect("self_weak set during ConnectionManager::new");
+        let weak = self.self_weak();
         let handle = tokio::spawn(async move {
             while let Some(event) = rx.recv().await {
                 if let Some(manager) = weak.upgrade() {
@@ -443,11 +449,7 @@ impl ConnectionManager {
         );
 
         // 延迟后重连
-        let weak = self
-            .self_weak
-            .read()
-            .clone()
-            .expect("self_weak set during ConnectionManager::new");
+        let weak = self.self_weak();
         tokio::spawn(async move {
             sleep(backoff).await;
 
