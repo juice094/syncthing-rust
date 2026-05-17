@@ -15,7 +15,9 @@ use crate::connection::{BepConnection, ConnectionEvent, Message};
 use crate::protocol::MessageHeader;
 use syncthing_core::{Result, SyncthingError};
 
-use super::{DEFAULT_MESSAGE_TIMEOUT, HEARTBEAT_INTERVAL, MAX_BEP_HEADER_SIZE, MAX_BEP_MESSAGE_SIZE};
+use super::{
+    DEFAULT_MESSAGE_TIMEOUT, HEARTBEAT_INTERVAL, MAX_BEP_HEADER_SIZE, MAX_BEP_MESSAGE_SIZE,
+};
 
 impl BepConnection {
     /// 启动读取任务

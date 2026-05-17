@@ -1,8 +1,8 @@
 use std::sync::atomic::Ordering;
 
 use super::*;
-use syncthing_core::ConnectionType;
 use crate::protocol::MessageType;
+use syncthing_core::ConnectionType;
 
 struct MockHandler {
     index_calls: tokio::sync::Mutex<Vec<(String, DeviceId)>>,
