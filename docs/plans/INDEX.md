@@ -67,4 +67,4 @@ MVP_RECOVERY (Phase 1~3) ──→ PHASE3 (3.1~3.3 完成, 3.4 ⏳)
 - **安全审计 / 接受债务 / 漏洞报告？** → [`../../SECURITY.md`](../../SECURITY.md)
 - **v0.2.4 周期单日归档？** → [`../reports/SESSION_SUMMARY_2026-05-12.md`](../reports/SESSION_SUMMARY_2026-05-12.md)
 - **Error-Budget 架构审计全文？** → [`../audit/ARCHITECTURE_AUDIT_2026-05-15.md`](../audit/ARCHITECTURE_AUDIT_2026-05-15.md)（待生成）
-- **双节点部署任务书？** → [`../../桌面/syncthing任务书.md`](../../桌面/syncthing任务书.md)（本地参考）
+- **双节点部署任务书？** → ~~本地桌面文件，不纳入版本控制~~

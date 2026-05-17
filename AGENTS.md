@@ -6,13 +6,13 @@
 
 ## 项目定位
 
-`syncthing-rust` 是 P2P 文件同步的 Rust 替代实现。当前验证目标为 **Rust 新版 ↔ Rust 旧版（格雷侧）** 的 BEP 互通；Go Syncthing 互操作待后续验证。
+`syncthing-rust` 是 P2P 文件同步的 Rust 替代实现。当前验证目标为 **Rust 新版 ↔ Rust 旧版（格雷侧）** 的 BEP 互通；Go Syncthing 互操作已验证（2026-05-14）。
 
-- **当前状态**：v0.2.0 Beta，308 passed / 3 ignored / 0 failed，**0 clippy warnings**，**cargo audit: 3 unmaintained（已接受）**
+- **当前状态**：v0.2.8 Alpha，309 passed / 4 ignored / 0 failed，**0 clippy warnings**，**cargo audit: 3 unmaintained（已接受）**
 - **传输层**：TCP+TLS / HTTP CONNECT 代理 / SOCKS5 代理 / DERP 中继（自研协议）/ UPnP（PCP/NAT-PMP 骨架待实现）/ **Relay v1 并行拨号 ✅**
 - **发现层**：Local Discovery（UDP 广播骨架）⚠️ / STUN（公网 IP 查询）⚠️ / PortMapper（UPnP 主路径）⚠️ / **Global Discovery（HTTPS mTLS 客户端）✅** / **Relay Protocol v1（XDR + ParallelDialer 集成）✅**
 - **同步**：Pull 已验证；被动响应块请求（上传）已实现；主动 Push 调度待完善
-- **互操作**：旧版 Rust syncthing-rust ↔ 新版 Rust 待验证（格雷侧为 pre-fix 构建）；Go Syncthing 互操作待后续验证
+- **互操作**：旧版 Rust syncthing-rust ↔ 新版 Rust 待验证（格雷侧为 pre-fix 构建）；Go Syncthing 互操作已验证（2026-05-14，v0.2.6 ↔ v2.1.0）
 - **观测**：REST API 读写端点（兼容 Go 布局）+ 文件系统 watcher(1s debounce) + **TUI 实时状态（event bridge）✅** + **配置热重载 ✅**
 
 ## 架构讨论摘要
@@ -176,7 +176,7 @@
 
 - ✅ Phase E 架构债务清理：`rest.rs` + `manager.rs` 拆分，dead-code 警告消除
 - ✅ `cargo clippy --all-targets`：workspace 0 warnings
-- ✅ `cargo test --workspace`：294 passed, 0 failed, 3 ignored
+- ✅ `cargo test --workspace`：309 passed, 0 failed, 4 ignored
 
 ## 未来冻结项（明确不投入）
 

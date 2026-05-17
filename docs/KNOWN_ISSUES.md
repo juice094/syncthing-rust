@@ -1,7 +1,7 @@
 # Known Issues
 
 > **维护原则**：发现的缺陷必须显式登记，避免误判项目成熟度。  
-> **最后更新**：2026-05-15（双节点真实网络测试 + Error-Budget 架构审计后，Tailscale/Headscale 穿透方案确认）
+> **最后更新**：2026-05-16（v0.2.8 双节点真实网络测试通过 — Tailscale 双向文件同步验证）
 
 本文档列举当前已知未修复的功能性 / 行为性问题。  
 **这些问题决定了项目目前的"事实可用性"边界**。
@@ -17,7 +17,7 @@
 | 连接层稳定性 | ✅ 12h+ 单机压测验证（T-F1 死锁已修复） |
 | **端到端同步** | ✅ **已修复**（T2.6，见 §2） |
 | 跨版本互通 | ✅ **已验证**（2026-05-14，Rust v0.2.6 ↔ Go v2.1.0，自动化脚本就绪） |
-| 真实网络测试 | ⚠️ **部分通过**（TLS/Hello/ClusterConfig/Index 已验证；Block Transfer 因 Windows `is_alive()` 平台差异中断，见 §9） |
+| 真实网络测试 | ✅ **已通过**（v0.2.8，Tailscale 双向 TLS+BEP+Index+Block Transfer+Watcher，见 §12） |
 | 长跑（72h） | ⏳ 单机 12h 已验证；**双节点真实网络 72h** 为 v0.3.0 准入线 |
 | 政企合规 | ❌ **未通过**（无国密、无 Prometheus、无审计日志、无 Transport 插件，见 §8） |
 | 生产就绪度 | **alpha，已可用于研究 / 测试 / 个人私有部署，**不适用于政企生产**** |
@@ -333,6 +333,45 @@ Windows 下 TLS 握手完成后，`is_alive()` 返回 `false`，但底层 TCP �
 
 ---
 
+## §12. 双节点真实网络测试（v0.2.8）— **已通过 ✅**
+
+> **测试时间**：2026-05-16  
+> **测试环境**：Windows 11（校园网）↔ Ubuntu 22.04 VPS（公网），通过 Tailscale 虚拟内网  
+> **版本**：syncthing-rust v0.2.8
+
+### 测试结论
+
+v0.2.8 完成首次双节点真实网络环境下的完整文件同步验证。
+
+| 层级 | 验证项 | 状态 |
+|------|--------|------|
+| 网络层 | Tailscale 隧道连通（`100.127.13.26:22001`） | ✅ |
+| 传输层 | TCP 22001 监听 + 双向可达 | ✅ |
+| 安全层 | TLS 1.3 握手（双向证书验证） | ✅ |
+| 协议层 | BEP Hello 交换 | ✅ |
+| 协议层 | ClusterConfig 交换（共享文件夹协商） | ✅ |
+| 同步层 | Index 更新推送/接收 | ✅ |
+| 同步层 | Block Request/Response 传输 | ✅ |
+| 功能层 | Watcher 实时变更检测 | ✅ |
+| 功能层 | Scanner 默认排除元数据（D-1 修复验证） | ✅ |
+| 端到端 | Windows → Linux 文件同步 | ✅ `test-sync-v0.2.8.txt` |
+| 端到端 | Linux → Windows 文件同步 | ✅ `test-from-linux.txt` |
+
+### 已知限制（非缺陷）
+
+- Global Discovery 因网络环境无法访问 `discovery.syncthing.net`，不影响 Tailscale 直连
+- STUN/UPnP 在校园网防火墙后预期失败，Tailscale 已绕过
+- Relay 作为 fallback 可用但非必需（Tailscale 直连优先）
+
+### 遗留工作
+
+- **72h 耐久测试**：当前为功能验证通过，需进入 72 小时连续运行测试
+- **Prometheus metrics**：v0.3.0 准入线要求，待实现
+
+**追踪**：本次对话记录 / `DUAL_NODE_TEST_2026-05-16_v0.2.8.md`
+
+---
+
 ## §11. Scanner 不自动排除元数据文件（P1，D-1）— **已修复 ✅**
 
 > **修复 commit**：`d6d8c01`（PR #1，2026-05-16）
@@ -358,7 +397,7 @@ Windows 下 TLS 握手完成后，`is_alive()` 返回 `false`，但底层 TCP �
 |--------|---------|
 | **v0.2.5** | ✅ §2 已修复 — 已发布 |
 | **v0.2.6（hotfix）** | ✅ §7 运行时安全缺陷（H-1~H-6）：debounce + 日志上限 + 有界 channel + panic 清除 + shutdown select — 已合并 |
-| **v0.3.0** | ✅ §11 Scanner 默认排除元数据 — 已修复 / §1 ClusterConfig race + §4 TestNode 文档 + §8 Transport Plugin + §9 Windows 块传输修复（Bug-1/2/3）+ §10 配置 UX（C-UX-1~5）+ 双节点 72h（§3）+ Prometheus metrics + T3.1/T3.4 |
+| **v0.3.0** | ✅ §11 Scanner 默认排除元数据 — 已修复 / §1 ClusterConfig race + §4 TestNode 文档 + §8 Transport Plugin + §9 Windows 块传输修复（Bug-1/2/3）+ §10 配置 UX（C-UX-1~5）+ §12 双节点真实网络通过 + 双节点 72h + Prometheus metrics + T3.1/T3.4 |
 | **v0.4.0** | 国密 TLS（SM2/SM3/SM4）+ 证书外部化 + SQLite WAL + 审计日志 + 跨版本互通自动化 |
 
 v0.3.0 路线图详见 [`NEXT_STEPS_2026-05-15.md`](./plans/NEXT_STEPS_2026-05-15.md)。

@@ -20,17 +20,19 @@ A Rust implementation of the [Syncthing](https://syncthing.net/) protocol stack,
 
 > 💡 [Build from source](#quick-start) if you need a different target or want to audit the code.
 
-> ⚠️ **Current stage (2026-05-15 post-v0.2.8)**: **Alpha — core sync chain verified, runtime safety hardened, cross-version interop proven, real-world network constraints identified.**
+> ⚠️ **Current stage (2026-05-16 post-v0.2.8)**: **Alpha — dual-node real-network sync verified, runtime safety hardened, cross-version interop proven, Prometheus metrics implemented.**
 >
 > - ✅ **Connection layer stable**: 12h+ single-node endurance, 0 deadlocks, 0 panics, logs 6 KB (v0.2.6 hardening verified).
 > - ✅ **Protocol layer correct**: TLS, BEP Hello, ClusterConfig, Index encode/decode all working.
 > - ✅ **End-to-end sync working** (T2.6 fix, 2026-05-13): `e2e_sync` test passes. Single-file two-node sync completes in ~12s on loopback.
 > - ✅ **Runtime safety hardened** (v0.2.6, INC-20260514-001): config hot-reload debounce, log rotation by size/hour, all channels bounded, zero `panic!` on external input, graceful shutdown on all loops.
-> - ✅ **Cross-version interop verified** (2026-05-14): Rust v0.2.6 ↔ Go v2.1.0, TLS + BEP + file sync all pass. `scripts/cross_version_test.sh` automation ready.
-> - 🔵 **Real-world network testing initiated** (2026-05-15): dual-node deployment (WSL2 ↔ Gray-Cloud) ready; campus firewall blocks outbound TCP 22001; Tailscale/Headscale穿透方案确认为最务实路径.
+> - ✅ **Cross-version interop verified** (2026-05-14): Rust v0.2.8 ↔ Go v2.1.0, TLS + BEP + file sync all pass. `scripts/cross_version_test.sh` automation ready.
+> - ✅ **Dual-node real-network sync verified** (2026-05-16): Windows 11 (campus network) ↔ Ubuntu 22.04 VPS via Tailscale. Bidirectional file sync, Watcher real-time detection, and Scanner default metadata exclusion all validated.
+> - ✅ **Scanner metadata exclusion** (D-1, v0.2.8): `.stfolder`, `.stversions`, `.stignore`, `config.json`, `cert.pem`, `key.pem`, `db/`, `logs/`, `*.syncthing.tmp` auto-excluded from sync.
+> - 🔵 **Prometheus metrics endpoint** (`/metrics`): Code implemented, exposes 9 metrics (build info, uptime, connected devices, bytes sent/received, folder file counts). Deployment validation pending.
 > - ⏳ **72h endurance test** pending: single-node validated; **dual-node real-network 72h** required for v0.3.0 admission.
 >
-> **Not yet a drop-in Go Syncthing replacement**, and **not yet enterprise-ready** (no FIPS/SM crypto, no Prometheus metrics, no audit logging). Suitable for: BEP protocol research, Rust reference reading, controlled experiments, personal private deployment, and contributing fixes.
+> **Not yet a drop-in Go Syncthing replacement**, and **not yet enterprise-ready** (no FIPS/SM crypto, no audit logging). Suitable for: BEP protocol research, Rust reference reading, controlled experiments, personal private deployment, and contributing fixes.
 
 ---
 
@@ -130,11 +132,11 @@ Full tuning plan: [`docs/plans/TUNING_PLAN_2026-05-11.md`](docs/plans/TUNING_PLA
 | **Phase 3** | BepSession observability, Push/Pull E2E with remote peer | ✅ Complete (verified against Go v2.1.0, 2026-05-14) |
 | **Phase 3.5** | Connection stability, config persistence | ✅ Complete |
 | **Phase 4** | TUI hardening (event bridge, live sync state, config hot-reload) | ✅ Complete |
-| **Phase 5** | Zero-Tailscale interconnection (discovery results → ConnectionManager address pool) | 🔵 Core integrated; campus firewall identified; Tailscale/Headscale穿透验证 pending |
+| **Phase 5** | Zero-Tailscale interconnection (discovery results → ConnectionManager address pool) | ✅ Tailscale穿透验证完成 (2026-05-16); Windows ↔ Linux 双向文件同步通过 |
 | **Phase A** | Security debt acceptance (cargo audit) | ✅ Complete (`.cargo/audit.toml` created) |
-| **Phase B** | 72h stress test | 🟡 Single-node 12h validated; **dual-node real-network 72h** pending (Tailscale/Headscale deployment) |
+| **Phase B** | 72h stress test | 🟡 Single-node 12h validated; dual-node real-network 功能验证通过 (2026-05-16); **72h endurance run** pending |
 | **Phase C** | REST API write-path closure | ✅ Complete (override/revert implemented, scan `sub` supported, device pause/resume body active) |
-| **Phase D** | Observability infrastructure (Prometheus metrics, structured logging) | 🔵 RFC drafted; implementation pending v0.3.0 |
+| **Phase D** | Observability infrastructure (Prometheus metrics, structured logging) | 🔵 `/metrics` endpoint implemented (9 metrics); deployment validation pending |
 
 Phase 5 design: [`docs/design/NETWORK_DISCOVERY_DESIGN.md`](docs/design/NETWORK_DISCOVERY_DESIGN.md).
 
@@ -193,9 +195,9 @@ docs/
 | Scanner SHA-256 parallelism | Single-threaded | T-B1 (P1) |
 | `FileSystemDatabase` storage | Per-file JSON (O(N) syscalls) | T-C (v0.4.0) |
 | criterion benchmarks | **Skeleton ready** (4 benches) | T-A1 (P1) |
-| 72h stress test | Single-node 12h validated; **dual-node real-network 72h** pending | T-F1 (P0) |
+| 72h stress test | Single-node 12h validated; dual-node real-network功能验证通过 (2026-05-16); **72h endurance run** pending | T-F1 (P0) |
 | Cross-version interop | **Verified** (Rust v0.2.8 ↔ Go v2.1.0) | Automation in `scripts/cross_version_test.sh` |
-| Prometheus metrics | **None** | O-1 (v0.3.0 P0) |
+| Prometheus metrics | **`/metrics` endpoint implemented** (build info, uptime, devices, bytes, folder files) | O-1 (v0.3.0 P0, code done) |
 | Transport plugin abstraction | **None** | T-Net-2 (v0.3.0 P0) |
 | Enterprise/FIPS/SM crypto | **None** | v0.4.0 roadmap |
 

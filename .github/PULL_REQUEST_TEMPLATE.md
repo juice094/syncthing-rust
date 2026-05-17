@@ -35,7 +35,7 @@
 
 <!-- All items must pass before merge. -->
 
-- [ ] `cargo test --workspace` passes locally (308 tests)
+- [ ] `cargo test --workspace` passes locally (309 tests)
 - [ ] `cargo clippy --workspace --all-targets` reports **0 warnings**
 - [ ] `cargo fmt --check` passes (or I ran `cargo fmt`)
 - [ ] I have updated relevant documentation (`README.md`, `docs/`, `CHANGELOG.md` if applicable)

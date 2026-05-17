@@ -9,7 +9,7 @@
 | Version | Supported | Notes |
 |---------|-----------|-------|
 | `main`  | ✅ | Active development. Receives all fixes. |
-| v0.2.0 Beta | ✅ | Tagged Beta. Security fixes backported on request. |
+| v0.2.8 Alpha | ✅ | Current Alpha. Security fixes backported on request. |
 | < v0.2.0 | ❌ | Pre-release; no support. |
 
 ---
