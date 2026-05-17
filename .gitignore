@@ -77,3 +77,4 @@ stress-*.err
 releases/**/*.exe
 releases/**/syncthing-*
 releases/**/stress_test-*
+dist/
