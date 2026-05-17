@@ -54,6 +54,20 @@ fmt:
 doc:
     cargo doc --no-deps --workspace
 
+# Build all release binaries needed for stress testing
+build-release:
+    cargo build --release --bin syncthing
+    cargo build --release --bin syncthing-cli
+    cargo build --release --bin syncthing-monitor
+
+# Start two-node real-network stress test (Windows side)
+two-node-test remote-peer duration="72h":
+    powershell -ExecutionPolicy Bypass -File scripts/two-node-real-network-test.ps1 -RemotePeer {{remote-peer}} -Duration {{duration}}
+
+# Stop two-node test
+stop-two-node-test:
+    powershell -ExecutionPolicy Bypass -File scripts/stop-two-node-test.ps1
+
 # Clean build artifacts
 clean:
     cargo clean
