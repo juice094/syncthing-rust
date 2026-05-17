@@ -24,6 +24,7 @@ pub struct ErrorResponse {
 }
 
 #[derive(Debug, Deserialize)]
+// NOTE: Fields accessed via serde deserialization, not direct construction
 #[allow(dead_code)]
 pub struct DbScanRequest {
     pub folder: String,

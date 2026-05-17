@@ -15,6 +15,7 @@ use syncthing_core::{BlockHash, FileInfo, FileType, Result, SyncthingError};
 use crate::ignore::IgnorePatterns;
 
 /// Default block size for file hashing (128 KB)
+// NOTE: 仅在单元测试中使用；crate 公共 API 见 lib.rs::DEFAULT_BLOCK_SIZE
 #[allow(dead_code)]
 const DEFAULT_BLOCK_SIZE: usize = 128 * 1024;
 

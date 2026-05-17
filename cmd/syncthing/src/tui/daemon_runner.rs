@@ -36,9 +36,11 @@ pub struct DaemonStartup {
     pub future: std::pin::Pin<Box<dyn std::future::Future<Output = Result<()>> + Send>>,
     pub connection_handle: ConnectionManagerHandle,
     pub sync_service: Arc<SyncService>,
+    // TODO(v0.3.0): 用于优雅关闭时取消所有会话任务
     #[allow(dead_code)]
     pub session_handles: Arc<DashMap<DeviceId, JoinHandle<()>>>,
     pub device_id: DeviceId,
+    // TODO(v0.3.0): 用于优雅关闭全局发现服务
     #[allow(dead_code)]
     pub global_discovery_shutdown: Option<GlobalDiscoveryShutdown>,
     /// Daemon 优雅关闭信号发送端
