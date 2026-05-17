@@ -14,7 +14,7 @@
 | 维度 | 状态 |
 |------|------|
 | 功能完成度 | Phase 1~5 核心集成完成（BEP / Network / Sync / TUI / Discovery→CM） |
-| 测试 | 308 passed, 3 ignored, 0 failed |
+| 测试 | 309 passed, 4 ignored, 0 failed |
 | 静态检查 | 0 clippy warnings |
 | 安全审计 | **3 unmaintained warnings**（paste/instant/fxhash），均为上游传递依赖，无漏洞。`lru` 已自动消除（0.16.4）。 |
 | 外部阻塞 | 格雷端 BEP 互通验证（等待格雷确认网络状态） — 不阻塞开发主路径 |

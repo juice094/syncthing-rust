@@ -22,7 +22,7 @@ cargo test --workspace
 cargo clippy --workspace --all-targets
 ```
 
-- **Tests**: 308+ passed, 0 failed. New features require tests.
+- **Tests**: 309+ passed, 0 failed. New features require tests.
 - **Clippy**: 0 warnings. No exceptions.
 - **Doc-tests**: Public APIs must have runnable examples or doc comments.
 - **File size**: 600-line soft cap per file (CI warns; see [`AGENTS.md`](AGENTS.md) §代码健康 §2). Plan a split when nearing the limit.

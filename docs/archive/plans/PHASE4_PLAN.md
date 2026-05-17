@@ -78,8 +78,8 @@
 详见 `PHASE3_PLAN.md` 3.4 节。
 
 ### 交付物
-- Bash 压测脚本（`scripts/stress_test.sh`）
-- 结果分析脚本（`scripts/analyze_stress.py`）
+- ~~Bash 压测脚本（`scripts/stress_test.sh`）~~ — 历史文档引用，实际脚本为 `scripts/72h_stress_test.sh`
+- ~~结果分析脚本（`scripts/analyze_stress.py`）~~ — 未实现，分析通过 `scripts/72h_report.sh` 完成
 
 ### 验收标准
 - [ ] 72h 无不可恢复中断

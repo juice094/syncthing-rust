@@ -72,7 +72,7 @@ docs/
 | [IMPLEMENTATION_SUMMARY.md](reports/IMPLEMENTATION_SUMMARY.md) | 架构总览、crate 职责、当前实现状态 | 持续更新 |
 | [VERIFICATION_REPORT_BEP_2026-04-11.md](reports/VERIFICATION_REPORT_BEP_2026-04-11.md) | 首次跨网络 BEP 互操作测试（Tailscale） | 2026-04-11 |
 | [INTEROP_TEST_REPORT.md](reports/INTEROP_TEST_REPORT.md) | 本地互操作测试笔记 | 2026-04-11 |
-| [PROJECT_STATUS.md](reports/PROJECT_STATUS.md) | 滚动项目状态快照 | 🗃️ 可能过时 |
+| ~~PROJECT_STATUS.md~~ | ~~滚动项目状态快照~~ | ~~已移除，状态见 README.md 和 RELEASES.md~~ |
 
 ---
 

@@ -13,7 +13,7 @@
 |------|------|------|
 | 源代码行数 | 31,046 行 Rust | 152 文件 |
 | 注释率 | 约 4.5% | 偏低，关键路径需补 |
-| 测试代码 | 1,218 行内嵌；总 308 通过 | 0 失败 / 3 ignored |
+| 测试代码 | 1,218 行内嵌；总 309 通过 | 0 失败 / 4 ignored |
 | 静态检查 | 0 clippy warnings | baseline |
 | 大文件（>600 行软上限） | **12 个** | 触发 AGENTS.md §2 红线 |
 | unwrap/expect 出现 | 718 处（含测试） | 非测试代码待逐个审计 |
@@ -99,7 +99,7 @@
 
 ### 验收（T-B）
 - [x] `cargo check --workspace --all-targets` 0 warnings
-- [x] 308 测试通过 + 新增并发场景测试
+- [x] 309 测试通过 + 新增并发场景测试
 - [ ] `cargo bench scanner_1gb` **>= 2×** 加速（基线由 T-A1 建立）— 待 bench 实际跑
 
 ---
@@ -200,7 +200,7 @@
 
 ### 验收（T-E）
 - 12 个超大文件 → ≤ 4 个
-- 308 测试不退化
+- 309 测试不退化
 - 0 公共 API 变更
 
 ---
@@ -295,4 +295,4 @@ Week 2（按需）
 - [ ] T-D 完成：BEP 编解码不退化
 - [ ] T-E 完成：≤ 4 个文件超 600 行
 - [ ] T-F 完成：72h 压测 0 panic / RSS 增长 < 50% / 重连成功率 > 95%
-- [ ] 全部完成：`cargo test --workspace` 308+ 全通过；`cargo clippy` 0 warnings 保持
+- [ ] 全部完成：`cargo test --workspace` 309+ 全通过；`cargo clippy` 0 warnings 保持

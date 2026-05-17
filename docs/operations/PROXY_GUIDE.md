@@ -16,11 +16,11 @@
 # 2. 在启动 syncthing-rust 前设置环境变量
 # Windows CMD:
 set SOCKS5_PROXY=127.0.0.1:26561
-syncthing.exe --listen 0.0.0.0:22000
+syncthing.exe --listen 0.0.0.0:22001
 
 # PowerShell:
 $env:SOCKS5_PROXY = "127.0.0.1:26561"
-.\syncthing.exe --listen 0.0.0.0:22000
+.\syncthing.exe --listen 0.0.0.0:22001
 
 # Linux/macOS:
 export SOCKS5_PROXY=127.0.0.1:26561

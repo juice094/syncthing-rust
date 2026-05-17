@@ -35,7 +35,7 @@
 
 `config.json` 结构、字段名、默认值、序列化格式的任何变更必须：
 
-1. 更新 `docs/CONFIG_SCHEMA.md`（如不存在则创建）
+1. 更新 `docs/CONFIG_SCHEMA.md`（如不存在则创建；当前待生成）
 2. 提供迁移脚本或向后兼容 shim
 3. 在 PR 描述中显式列出“用户需要如何修改现有配置”
 4. 禁止静默变更默认值（如 `rescan_interval_secs` 从 3600 改 10 必须文档化）
@@ -49,7 +49,7 @@
 ```markdown
 ## Pre-Commit Checklist
 
-- [ ] **单元测试**：`cargo test --workspace` 全绿（295/295）
+- [ ] **单元测试**：`cargo test --workspace` 全绿（309/309）
 - [ ] **编译平台**：`cargo build --release` 在 Linux + Windows 均通过
 - [ ] **真实网络**：如修改 net/sync/api，提供双节点测试录屏或日志片段
 - [ ] **Windows 验证**：如修改路径/IO，提供 Windows 本机测试结果

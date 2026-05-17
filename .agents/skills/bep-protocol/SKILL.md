@@ -14,8 +14,8 @@ cargo clippy --workspace            # 0 warnings
 
 ## Status
 
-- Version: **v0.2.0 Beta**
-- Tests: 255+ passed, 0 clippy warnings
+- Version: **v0.2.8 Alpha**
+- Tests: 309+ passed, 0 clippy warnings
 - Transports: TCP+TLS ✅ / HTTP CONNECT ⚠️（代码完整，主流程未接入） / SOCKS5 ⚠️（同上） / DERP（自研协议，非 Syncthing 官方 Relay） / UPnP ⚠️（无自动续约） / NAT-PMP ❌ / PCP ❌
 
 ## BEP Messages
