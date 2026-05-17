@@ -7,6 +7,8 @@ description = "Block and metadata storage for Syncthing Rust"
 license = "MIT"
 
 
+publish = false
+
 [dependencies]
 syncthing-core = { path = "../syncthing-core" }
 
@@ -29,4 +31,4 @@ serde_json = { workspace = true }
 [dev-dependencies]
 tokio-test = "0.4"
 tempfile = { workspace = true }
-futures = "0.3"
+futures = { workspace = true }

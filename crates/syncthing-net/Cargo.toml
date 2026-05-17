@@ -3,6 +3,8 @@ name = "syncthing-net"
 version = "0.2.8"
 edition = "2021"
 
+publish = false
+
 [dependencies]
 syncthing-core = { path = "../syncthing-core" }
 
