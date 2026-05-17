@@ -58,6 +58,11 @@ if (-not (Test-Path $MonitorExe)) {
     Write-Error "syncthing-monitor.exe not found at $MonitorExe. Run: cargo build --release --bin syncthing-monitor"
 }
 
+$GenConfigExe = "$BinaryDir\gen_test_config.exe"
+if (-not (Test-Path $GenConfigExe)) {
+    Write-Error "gen_test_config.exe not found at $GenConfigExe. Run: cargo build --release --bin gen_test_config"
+}
+
 # Directories
 $LocalNodeDir = "$DataDir\node-local"
 $RemoteNodeDir = "$DataDir\node-remote"
@@ -75,7 +80,7 @@ Write-Host "Data dir:         $DataDir"
 Write-Host "Duration:         $Duration"
 Write-Host ""
 
-# ── Generate certificates ──
+# -- Generate certificates --
 function Generate-Cert([string]$configDir, [string]$name) {
     Write-Host "Generating certificate for $name ..."
     $certPath = "$configDir\cert.pem"
@@ -86,10 +91,12 @@ function Generate-Cert([string]$configDir, [string]$name) {
     if (Test-Path $keyPath) {
         Remove-Item $keyPath -Force
     }
-    & $CliExe --config-dir $configDir generate-cert --force | Out-Null
-    if ($LASTEXITCODE -ne 0) { throw "Certificate generation failed for $name" }
 
-    $output = & $CliExe --config-dir $configDir show-id 2>&1
+    $proc = Start-Process -FilePath $CliExe -ArgumentList @("--config-dir", $configDir, "generate-cert", "--force") `
+        -WindowStyle Hidden -Wait -PassThru
+    if ($proc.ExitCode -ne 0) { throw "Certificate generation failed for $name" }
+
+    $output = & $CliExe --config-dir $configDir show-id 2>&1 | Out-String
     if ($output -match "Device ID:\s+([A-Z0-9-]+)") {
         return $Matches[1]
     }
@@ -103,125 +110,108 @@ Write-Host "Local Device ID:  $LocalDeviceId"
 Write-Host "Remote Device ID: $RemoteDeviceId"
 Write-Host ""
 
-# ── Create configs ──
-function Create-Config([string]$path, [string]$listen, [string]$deviceName,
-                       [string]$peerId, [string]$peerAddr, [string]$syncPath) {
-    $config = @{
-        version = 1
-        listen_addr = $listen
-        device_name = $deviceName
-        folders = @(
-            @{
-                id = "stress-test"
-                label = "Stress Test Folder"
-                path = $syncPath.Replace("\", "/")
-                devices = @($peerId)
-                rescan_interval_secs = 10
-                versioning = @{ type = "" }
-            }
-        )
-        devices = @(
-            @{
-                id = $peerId
-                name = "peer"
-                addresses = @("tcp://$peerAddr")
-                paused = $false
-                introducer = $false
-            }
-        )
-        local_device_id = $null
-        gui = @{ enabled = $false; address = "127.0.0.1:8384"; api_key = "" }
-        options = @{ relays_enabled = $false }
-    } | ConvertTo-Json -Depth 10
-    $config | Set-Content -Path $path -Encoding UTF8
+# -- Create configs using gen_test_config --
+$GenConfigExe = "$BinaryDir\gen_test_config.exe"
+if (-not (Test-Path $GenConfigExe)) {
+    Write-Error "gen_test_config.exe not found at $GenConfigExe. Run: cargo build --release --bin gen_test_config"
 }
 
-Create-Config "$LocalNodeDir\config.json" "0.0.0.0:$LocalPort" "node-local" `
-    $RemoteDeviceId "$RemotePeer`:$RemotePort" $LocalSyncDir
+function Generate-Config([string]$outputDir, [string]$listen, [string]$deviceName,
+                         [string]$deviceId, [string]$peerId, [string]$peerAddr, [string]$syncPath) {
+    $proc = Start-Process -FilePath $GenConfigExe -ArgumentList @(
+        "--output-dir", $outputDir,
+        "--device-id", $deviceId,
+        "--peer-id", $peerId,
+        "--peer-addr", $peerAddr,
+        "--sync-path", $syncPath,
+        "--listen", $listen,
+        "--device-name", $deviceName
+    ) -WindowStyle Hidden -Wait -PassThru
+    if ($proc.ExitCode -ne 0) { throw "Config generation failed for $deviceName" }
+}
 
-Create-Config "$RemoteNodeDir\config.json" "0.0.0.0:$RemotePort" "node-remote" `
-    $LocalDeviceId "$env:COMPUTERNAME`:$LocalPort" $RemoteSyncDir
+Generate-Config $LocalNodeDir "0.0.0.0:$LocalPort" "node-local" `
+    $LocalDeviceId $RemoteDeviceId "$RemotePeer`:$RemotePort" $LocalSyncDir
+
+Generate-Config $RemoteNodeDir "0.0.0.0:$RemotePort" "node-remote" `
+    $RemoteDeviceId $LocalDeviceId "$env:COMPUTERNAME`:$LocalPort" $RemoteSyncDir
 
 Write-Host "Configs created." -ForegroundColor Green
 Write-Host ""
 
-# ── Package remote node for Linux ──
+# -- Package remote node for Linux --
 $RemoteDeployDir = "$DataDir\deploy-remote"
 New-Item -ItemType Directory -Force -Path $RemoteDeployDir | Out-Null
 
-# Copy remote node cert, key, config
 Copy-Item "$RemoteNodeDir\cert.pem" "$RemoteDeployDir\"
 Copy-Item "$RemoteNodeDir\key.pem" "$RemoteDeployDir\"
 Copy-Item "$RemoteNodeDir\config.json" "$RemoteDeployDir\"
 
-# Generate Linux start script
-$LinuxStartScript = @"
+# Generate Linux start script using single-quoted here-string to avoid PowerShell interpolation
+$generatedAt = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
+$linuxScript = @'
 #!/bin/bash
 # Auto-generated Linux start script for two-node stress test
-# Generated: $(Get-Date -Format "yyyy-MM-dd HH:mm:ss")
+# Generated: __GENERATED_AT__
 set -euo pipefail
 
-SCRIPT_DIR=\"\$(cd \"\$(dirname "\$0")\" && pwd)\"
-DATA_DIR=\"\$SCRIPT_DIR\"
-LOG_DIR=\"\$DATA_DIR/logs\"
-METRICS_DIR=\"\$DATA_DIR/metrics\"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+DATA_DIR="$SCRIPT_DIR"
+LOG_DIR="$DATA_DIR/logs"
+METRICS_DIR="$DATA_DIR/metrics"
 
-mkdir -p \"\$LOG_DIR\" \"\$METRICS_DIR\"
+mkdir -p "$LOG_DIR" "$METRICS_DIR"
 
-echo \"=== Starting Remote Node (Linux) ===\"
-echo \"Device ID: $RemoteDeviceId\"
-echo \"Peer:      $env:COMPUTERNAME :$LocalPort\"
-echo \"Listen:    0.0.0.0:$RemotePort\"
-echo \""
+echo "=== Starting Remote Node (Linux) ==="
+echo "Device ID: __REMOTE_DEVICE_ID__"
+echo "Peer:      __PEER_NAME__ :__LOCAL_PORT__"
+echo "Listen:    0.0.0.0:__REMOTE_PORT__"
+echo ""
 
-# Build syncthing from source if binary not present
-SYNCTHING_BIN=\"\$DATA_DIR/syncthing\"
-if [[ ! -x \"\$SYNCTHING_BIN\" ]]; then
-    echo \"syncthing binary not found. Building from source...\"
-    # Clone or use existing repo
-    if [[ -d \"/tmp/syncthing-rust\" ]]; then
-        cd \"/tmp/syncthing-rust\"
-        git pull
-    else
-        echo \"Please ensure syncthing-rust repo is cloned and run:\"
-        echo \"  cargo build --release --bin syncthing\"
-        echo \"Then copy target/release/syncthing to this directory.\"
-        exit 1
-    fi
-    cargo build --release --bin syncthing
-    cp target/release/syncthing \"\$SYNCTHING_BIN\"
+SYNCTHING_BIN="$DATA_DIR/syncthing"
+if [[ ! -x "$SYNCTHING_BIN" ]]; then
+    echo "syncthing binary not found at $SYNCTHING_BIN"
+    echo "Please build and copy it:"
+    echo "  cd /path/to/syncthing-rust"
+    echo "  cargo build --release --bin syncthing"
+    echo "  cp target/release/syncthing $DATA_DIR/"
+    exit 1
 fi
 
-# Start daemon
-nohup \"\$SYNCTHING_BIN\" run --config-dir \"\$DATA_DIR\" --listen \"0.0.0.0:$RemotePort\" >> \"\$LOG_DIR/daemon.log\" 2>&1 &
-echo \$! > \"\$DATA_DIR/daemon.pid\"
-echo \"Daemon started (PID: \$(cat \$DATA_DIR/daemon.pid))\"
+nohup "$SYNCTHING_BIN" run --config-dir "$DATA_DIR" --listen "0.0.0.0:__REMOTE_PORT__" >> "$LOG_DIR/daemon.log" 2>&1 &
+echo $! > "$DATA_DIR/daemon.pid"
+echo "Daemon started (PID: $(cat $DATA_DIR/daemon.pid))"
 
-# Start monitor if syncthing-monitor is available
-MONITOR_BIN=\"\$DATA_DIR/syncthing-monitor\"
-if [[ -x \"\$MONITOR_BIN\" ]]; then
-    nohup \"\$MONITOR_BIN\" \
-        --proc \"\$(cat \$DATA_DIR/daemon.pid)\" \
-        --log \"\$LOG_DIR/daemon.log\" \
-        --sync-dir \"\$DATA_DIR/sync\" \
+MONITOR_BIN="$DATA_DIR/syncthing-monitor"
+if [[ -x "$MONITOR_BIN" ]]; then
+    nohup "$MONITOR_BIN" \
+        --proc "$(cat $DATA_DIR/daemon.pid)" \
+        --log "$LOG_DIR/daemon.log" \
+        --sync-dir "$DATA_DIR/sync" \
         --interval 60s \
-        --output \"\$METRICS_DIR/monitor.csv\" \
-        --alerts \"\$METRICS_DIR/alerts.log\" \
-        >> \"\$LOG_DIR/monitor.log\" 2>&1 &
-echo \$! > \"\$DATA_DIR/monitor.pid\"
-    echo \"Monitor started\"
+        --output "$METRICS_DIR/monitor.csv" \
+        --alerts "$METRICS_DIR/alerts.log" \
+        >> "$LOG_DIR/monitor.log" 2>&1 &
+    echo $! > "$DATA_DIR/monitor.pid"
+    echo "Monitor started"
 fi
 
-echo \""
-echo \"To stop: kill \$(cat \$DATA_DIR/daemon.pid)\"
-echo \"Logs:    tail -f \$LOG_DIR/daemon.log\"
-echo \"Metrics: \$METRICS_DIR/monitor.csv\"
-"@
+echo ""
+echo "To stop: kill $(cat $DATA_DIR/daemon.pid)"
+echo "Logs:    tail -f $LOG_DIR/daemon.log"
+echo "Metrics: $METRICS_DIR/monitor.csv"
+'@
 
-$LinuxStartScript | Set-Content -Path "$RemoteDeployDir\start.sh" -Encoding UTF8
+$linuxScript = $linuxScript.Replace('__GENERATED_AT__', $generatedAt)
+$linuxScript = $linuxScript.Replace('__REMOTE_DEVICE_ID__', $RemoteDeviceId)
+$linuxScript = $linuxScript.Replace('__PEER_NAME__', $env:COMPUTERNAME)
+$linuxScript = $linuxScript.Replace('__LOCAL_PORT__', $LocalPort)
+$linuxScript = $linuxScript.Replace('__REMOTE_PORT__', $RemotePort)
 
-# Also create a README for the remote deployment
-$RemoteReadme = @"
+$linuxScript | Set-Content -Path "$RemoteDeployDir\start.sh" -Encoding UTF8
+
+# Generate remote README
+$readmeText = @"
 # Remote Node Deployment
 
 ## Prerequisites
@@ -231,7 +221,7 @@ $RemoteReadme = @"
 ## Setup
 1. Copy this entire directory to the Linux machine:
    ```
-   scp -r deploy-remote/ user@${RemotePeer}:/tmp/syncthing-test-node/
+   scp -r deploy-remote/ user@__REMOTE_PEER__:/tmp/syncthing-test-node/
    ```
 2. Build the syncthing binary on Linux:
    ```
@@ -248,9 +238,9 @@ $RemoteReadme = @"
    ```
 
 ## Configuration
-- Device ID: $RemoteDeviceId
-- Listen: 0.0.0.0:$RemotePort
-- Peer: $env:COMPUTERNAME ($LocalDeviceId) at $env:COMPUTERNAME:$LocalPort
+- Device ID: __REMOTE_DEVICE_ID__
+- Listen: 0.0.0.0:__REMOTE_PORT__
+- Peer: __PEER_NAME__ (__LOCAL_DEVICE_ID__) at __PEER_NAME__:__LOCAL_PORT__
 - Sync folder: ./sync/
 
 ## Monitoring
@@ -258,30 +248,40 @@ Local metrics: metrics/monitor.csv
 Alerts: metrics/alerts.log
 "@
 
-$RemoteReadme | Set-Content -Path "$RemoteDeployDir\README.md" -Encoding UTF8
+$readmeText = $readmeText.Replace('__REMOTE_PEER__', $RemotePeer)
+$readmeText = $readmeText.Replace('__REMOTE_DEVICE_ID__', $RemoteDeviceId)
+$readmeText = $readmeText.Replace('__REMOTE_PORT__', $RemotePort)
+$readmeText = $readmeText.Replace('__PEER_NAME__', $env:COMPUTERNAME)
+$readmeText = $readmeText.Replace('__LOCAL_DEVICE_ID__', $LocalDeviceId)
+$readmeText = $readmeText.Replace('__LOCAL_PORT__', $LocalPort)
+
+$readmeText | Set-Content -Path "$RemoteDeployDir\README.md" -Encoding UTF8
 
 Write-Host "Remote deployment package created: $RemoteDeployDir" -ForegroundColor Green
 Write-Host ""
 
-# ── Start local daemon ──
+# -- Start local daemon --
 Write-Host "[1/3] Starting local syncthing daemon ..." -ForegroundColor Yellow
 $daemonLog = "$LogDir\daemon.log"
+$daemonErrLog = "$LogDir\daemon.err.log"
 $daemonArgs = @("run", "--config-dir", $LocalNodeDir, "--listen", "0.0.0.0:$LocalPort")
 $daemonProcess = Start-Process -FilePath $SyncthingExe -ArgumentList $daemonArgs `
-    -RedirectStandardOutput $daemonLog -RedirectStandardError $daemonLog `
+    -RedirectStandardOutput $daemonLog -RedirectStandardError $daemonErrLog `
     -WindowStyle Hidden -PassThru
 $daemonProcess.Id | Set-Content -Path "$DataDir\daemon.pid" -NoNewline
 Write-Host "Daemon started (PID: $($daemonProcess.Id))"
-Write-Host "Log: $daemonLog"
+Write-Host "Log:  $daemonLog"
+Write-Host "Err:  $daemonErrLog"
 Write-Host ""
 
-# Wait for daemon to initialize and generate cert if needed
+# Wait for daemon to initialize
 Start-Sleep -Seconds 3
 
-# ── Start monitor ──
+# -- Start monitor --
 Write-Host "[2/3] Starting syncthing-monitor ..." -ForegroundColor Yellow
 $monitorCsv = "$MetricsDir\monitor.csv"
 $monitorLog = "$LogDir\monitor.log"
+$monitorErrLog = "$LogDir\monitor.err.log"
 $monitorArgs = @(
     "--proc", $daemonProcess.Id,
     "--log", $daemonLog,
@@ -292,7 +292,7 @@ $monitorArgs = @(
     "--json", "$MetricsDir\monitor.jsonl"
 )
 $monitorProcess = Start-Process -FilePath $MonitorExe -ArgumentList $monitorArgs `
-    -RedirectStandardOutput $monitorLog -RedirectStandardError $monitorLog `
+    -RedirectStandardOutput $monitorLog -RedirectStandardError $monitorErrLog `
     -WindowStyle Hidden -PassThru
 $monitorProcess.Id | Set-Content -Path "$DataDir\monitor.pid" -NoNewline
 Write-Host "Monitor started (PID: $($monitorProcess.Id))"
@@ -300,12 +300,11 @@ Write-Host "CSV:  $monitorCsv"
 Write-Host "JSON: $MetricsDir\monitor.jsonl"
 Write-Host ""
 
-# ── Start file churn ──
+# -- Start file churn --
 Write-Host "[3/3] Starting file churn ..." -ForegroundColor Yellow
 $churnLog = "$LogDir\churn.log"
 
-# Use a background job for file churn since it's pure PowerShell
-$churnJob = Start-Job -ScriptBlock {
+$churnJob = Start-Job -Name "churn" -ScriptBlock {
     param($syncDir, $logFile, $duration)
     $sw = [System.Diagnostics.Stopwatch]::StartNew()
     $maxDuration = if ($duration -match "^(\d+)([hms])$") {
@@ -332,7 +331,6 @@ $churnJob = Start-Job -ScriptBlock {
         [System.IO.File]::WriteAllBytes($file, $data)
         Add-Content -Path $logFile -Value ("[churn] CREATE {0} ({1} bytes)" -f (Split-Path $file -Leaf), $size)
 
-        # Modify older file
         if ($counter -gt 3) {
             $oldFile = Join-Path $syncDir ("file_{0:D4}.dat" -f ($counter - 3))
             if (Test-Path $oldFile) {
@@ -344,7 +342,6 @@ $churnJob = Start-Job -ScriptBlock {
             }
         }
 
-        # Delete oldest
         if ($counter -gt 6) {
             $oldFile = Join-Path $syncDir ("file_{0:D4}.dat" -f ($counter - 6))
             if (Test-Path $oldFile) {
@@ -363,13 +360,14 @@ Write-Host "Churn job started (Id: $($churnJob.Id))"
 Write-Host "Log: $churnLog"
 Write-Host ""
 
-# ── Summary ──
+# -- Summary --
 Write-Host "=== Test Orchestration Complete ===" -ForegroundColor Cyan
 Write-Host ""
 Write-Host "Local node:" -ForegroundColor White
 Write-Host "  Config:  $LocalNodeDir\config.json"
 Write-Host "  Sync:    $LocalSyncDir"
 Write-Host "  Log:     $daemonLog"
+Write-Host "  Err:     $daemonErrLog"
 Write-Host "  PID:     $($daemonProcess.Id)"
 Write-Host ""
 Write-Host "Remote node deploy package:" -ForegroundColor White
@@ -391,7 +389,7 @@ Write-Host "  Get-Content '$daemonLog' -Wait -Tail 20"
 Write-Host "  Get-Content '$monitorCsv' -Wait -Tail 5"
 Write-Host ""
 
-# Save a status file for later reference
+# Save status file
 $status = @{
     timestamp = (Get-Date -Format "o")
     local_pid = $daemonProcess.Id
