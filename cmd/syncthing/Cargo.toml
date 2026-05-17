@@ -3,6 +3,8 @@ name = "syncthing"
 version = "0.2.8"
 edition = "2021"
 
+publish = false
+
 [[bin]]
 name = "syncthing"
 path = "src/main.rs"
@@ -25,7 +27,7 @@ tracing-subscriber = { workspace = true }
 tracing-appender = { workspace = true }
 chrono = { workspace = true }
 clap = { version = "4.5", features = ["derive"] }
-anyhow = "1.0"
+anyhow = { workspace = true }
 bytes = { workspace = true }
 async-trait = { workspace = true }
 rand = { workspace = true }

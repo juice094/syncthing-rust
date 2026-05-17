@@ -7,6 +7,8 @@ description = "Filesystem abstraction and monitoring for Syncthing Rust"
 license = "MIT"
 
 
+publish = false
+
 [dependencies]
 syncthing-core = { path = "../syncthing-core" }
 
