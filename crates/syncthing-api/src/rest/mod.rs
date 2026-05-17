@@ -36,6 +36,7 @@ mod config;
 mod db;
 mod device;
 mod folder;
+mod metrics;
 mod system;
 mod system_ops;
 
@@ -101,7 +102,8 @@ async fn api_key_middleware(
     req: axum::extract::Request,
     next: Next,
 ) -> std::result::Result<axum::response::Response, axum::http::StatusCode> {
-    if req.uri().path() == "/rest/health" {
+    let path = req.uri().path();
+    if path == "/rest/health" || path == "/metrics" {
         return Ok(next.run(req).await);
     }
     // Allow loopback access without API key for local debugging
@@ -177,6 +179,7 @@ impl RestApi {
     pub fn build_router(state: ApiState) -> Router {
         let auth_layer = axum::middleware::from_fn_with_state(state.clone(), api_key_middleware);
         Router::new()
+            .route("/metrics", get(metrics::get_metrics))
             // Folder management
             .route("/rest/folders", get(list_folders).post(create_folder))
             .route(
