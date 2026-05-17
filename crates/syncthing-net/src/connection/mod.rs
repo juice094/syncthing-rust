@@ -86,9 +86,11 @@ pub struct BepConnection {
     /// 内部状态
     pub(super) inner: Arc<ConnectionInner>,
     /// 读取端
-    pub(super) read_half: Arc<Mutex<Option<tokio::io::ReadHalf<syncthing_core::traits::BoxedPipe>>>>,
+    pub(super) read_half:
+        Arc<Mutex<Option<tokio::io::ReadHalf<syncthing_core::traits::BoxedPipe>>>>,
     /// 写入端
-    pub(super) write_half: Arc<Mutex<Option<tokio::io::WriteHalf<syncthing_core::traits::BoxedPipe>>>>,
+    pub(super) write_half:
+        Arc<Mutex<Option<tokio::io::WriteHalf<syncthing_core::traits::BoxedPipe>>>>,
     /// 消息发送通道
     message_tx: mpsc::Sender<Message>,
     /// 事件发送器
