@@ -1,14 +1,14 @@
 # syncthing-rust
 
 [![Rust](https://img.shields.io/badge/rust-1.85%2B-orange?logo=rust)](https://www.rust-lang.org)
-[![Tests](https://img.shields.io/badge/tests-296%20passed-brightgreen)]()
+[![Tests](https://img.shields.io/badge/tests-309%20passed-brightgreen)]()
 [![Clippy](https://img.shields.io/badge/clippy-0%20warnings-brightgreen)]()
-[![Version](https://img.shields.io/badge/version-v0.2.8-blue)]()
+[![Version](https://img.shields.io/badge/version-v0.2.9--rc2-blue)]()
 [![License](https://img.shields.io/badge/license-MIT-blue)](./LICENSE)
 
 A Rust implementation of the [Syncthing](https://syncthing.net/) protocol stack, designed for **zero-runtime-dependency** deployment and wire-compatible interoperability with the official Go Syncthing daemon.
 
-**📦 Latest Release: [v0.2.8](https://github.com/juice094/syncthing-rust/releases/tag/v0.2.8)** — Runtime Safety Hardening + Cross-Version Interop Verified
+**📦 Latest Release: [v0.2.9-rc2](https://github.com/juice094/syncthing-rust/releases/tag/v0.2.9-rc2)** — Centralized Constants + Transport Plugin RFC + Dual-Node E2E Infrastructure
 
 | Platform | Binary | Size |
 |----------|--------|------|
@@ -20,17 +20,20 @@ A Rust implementation of the [Syncthing](https://syncthing.net/) protocol stack,
 
 > 💡 [Build from source](#quick-start) if you need a different target or want to audit the code.
 
-> ⚠️ **Current stage (2026-05-16 post-v0.2.8)**: **Alpha — dual-node real-network sync verified, runtime safety hardened, cross-version interop proven, Prometheus metrics implemented.**
+> ⚠️ **Current stage (2026-05-18 post-v0.2.9-rc2)**: **Alpha — WSL2↔Windows sync verified, real-network Tailscale E2E validated (one-way), Transport Plugin RFC drafted, centralized constants shipped.**
 >
 > - ✅ **Connection layer stable**: 12h+ single-node endurance, 0 deadlocks, 0 panics, logs 6 KB (v0.2.6 hardening verified).
 > - ✅ **Protocol layer correct**: TLS, BEP Hello, ClusterConfig, Index encode/decode all working.
 > - ✅ **End-to-end sync working** (T2.6 fix, 2026-05-13): `e2e_sync` test passes. Single-file two-node sync completes in ~12s on loopback.
 > - ✅ **Runtime safety hardened** (v0.2.6, INC-20260514-001): config hot-reload debounce, log rotation by size/hour, all channels bounded, zero `panic!` on external input, graceful shutdown on all loops.
 > - ✅ **Cross-version interop verified** (2026-05-14): Rust v0.2.8 ↔ Go v2.1.0, TLS + BEP + file sync all pass. `scripts/cross_version_test.sh` automation ready.
-> - ✅ **Dual-node real-network sync verified** (2026-05-16): Windows 11 (campus network) ↔ Ubuntu 22.04 VPS via Tailscale. Bidirectional file sync, Watcher real-time detection, and Scanner default metadata exclusion all validated.
+> - ✅ **WSL2↔Windows dual-node sync verified** (2026-05-18): Loopback two-node bidirectional file sync validated on same host. [`docs/reports/WSL2_WINDOWS_DUAL_NODE_E2E_2026-05-18.md`](docs/reports/WSL2_WINDOWS_DUAL_NODE_E2E_2026-05-18.md).
+> - ✅ **Real-network Tailscale E2E validated** (2026-05-18): Windows 11 ↔ Ubuntu 24.04 via Tailscale (`100.107.247.38` ↔ `100.127.13.26`). BEP handshake + one-way file sync confirmed. [`docs/reports/REAL_NETWORK_DUAL_NODE_E2E_2026-05-18.md`](docs/reports/REAL_NETWORK_DUAL_NODE_E2E_2026-05-18.md).
+> - ✅ **Transport Plugin RFC drafted** (v0.3.0 P0): Per-scheme dialing, config-driven transport registration, address pipeline preserving scheme. [`docs/rfc/TRANSPORT_PLUGIN_RFC.md`](docs/rfc/TRANSPORT_PLUGIN_RFC.md).
 > - ✅ **Scanner metadata exclusion** (D-1, v0.2.8): `.stfolder`, `.stversions`, `.stignore`, `config.json`, `cert.pem`, `key.pem`, `db/`, `logs/`, `*.syncthing.tmp` auto-excluded from sync.
-> - 🔵 **Prometheus metrics endpoint** (`/metrics`): Code implemented, exposes 9 metrics (build info, uptime, connected devices, bytes sent/received, folder file counts). Deployment validation pending.
-> - ⏳ **72h endurance test** pending: single-node validated; **dual-node real-network 72h** required for v0.3.0 admission.
+> - ✅ **Prometheus metrics endpoint** (`/metrics`): 9 metrics verified (build info, uptime, connected devices, bytes sent/received, folder file counts).
+> - ✅ **Centralized constants** (`syncthing-core/src/constants.rs`): All magic numbers (22001, 8385) consolidated, 6+ hardcoded sites eliminated.
+> - ⏳ **72h endurance test** pending: single-node 12h validated; WSL2↔Windows bidirectional + real-network one-way validated; **72h real-network endurance** required for v0.3.0 admission.
 >
 > **Not yet a drop-in Go Syncthing replacement**, and **not yet enterprise-ready** (no FIPS/SM crypto, no audit logging). Suitable for: BEP protocol research, Rust reference reading, controlled experiments, personal private deployment, and contributing fixes.
 
@@ -42,10 +45,10 @@ A Rust implementation of the [Syncthing](https://syncthing.net/) protocol stack,
 |-----------|-------|
 | BEP Protocol (TLS + Hello + ClusterConfig + Index + Request/Response) | ✅ Codec + handshake verified |
 | **End-to-end file sync (A→B actual transfer)** | ✅ **Working** (`e2e_sync` test passes; T2.6 fix) |
-| File-sync internal modules (puller / scanner / folder_model) unit tests | ✅ 295 unit tests passing |
+| File-sync internal modules (puller / scanner / folder_model) unit tests | ✅ 309 unit tests passing |
 | Network Discovery (Local + Global + STUN + UPnP + Relay v1) | ✅ Implementation complete; ParallelDialer with RTT scoring |
 | REST API (read + write, Go-layout compatible) | ✅ Read + write complete |
-| Tests | **295 unit + 1 e2e passing, 0 ignored** |
+| Tests | **309 unit + 2 e2e passing, 4 ignored** |
 | Lint | **0 clippy warnings** (incl. `await_holding_lock` + `manual_let_else`) |
 | Security audit | **3 unmaintained** upstream transitive deps (accepted debt, see `.cargo/audit.toml`) |
 | Binary size | ~12 MB (release, Windows x64) |
@@ -176,6 +179,8 @@ docs/
 | [`docs/design/ARCHITECTURE_DECISIONS.md`](docs/design/ARCHITECTURE_DECISIONS.md) | Architecture Decision Records (ADRs) |
 | [`docs/design/NETWORK_DISCOVERY_DESIGN.md`](docs/design/NETWORK_DISCOVERY_DESIGN.md) | Network discovery layer design |
 | [`docs/reports/IMPLEMENTATION_SUMMARY.md`](docs/reports/IMPLEMENTATION_SUMMARY.md) | Crate-level implementation status |
+| [`docs/reports/WSL2_WINDOWS_DUAL_NODE_E2E_2026-05-18.md`](docs/reports/WSL2_WINDOWS_DUAL_NODE_E2E_2026-05-18.md) | WSL2↔Windows loopback dual-node sync verification |
+| [`docs/reports/REAL_NETWORK_DUAL_NODE_E2E_2026-05-18.md`](docs/reports/REAL_NETWORK_DUAL_NODE_E2E_2026-05-18.md) | Real-network Tailscale dual-node E2E test report |
 | [`docs/reports/VERIFICATION_REPORT_BEP_2026-04-11.md`](docs/reports/VERIFICATION_REPORT_BEP_2026-04-11.md) | BEP interoperability test report |
 | [`docs/design/FEATURE_COMPARISON.md`](docs/design/FEATURE_COMPARISON.md) | Feature parity with Go Syncthing |
 | [`docs/plans/INDEX.md`](docs/plans/INDEX.md) | Plan document navigation and cross-references |
@@ -191,7 +196,7 @@ docs/
 |------------------------------|-------|--------|
 | Source lines (Rust) | ~32,000 / ~160 files | — |
 | Files exceeding 600-line soft cap | 12 | T-E (planned) |
-| `unwrap()/expect()` occurrences | ~720 (incl. tests) / **337 production** | T-F2 (P2) |
+| `unwrap()/expect()` occurrences | ~720 (incl. tests) / **~368 production** | T-F2 (P2) |
 | Scanner SHA-256 parallelism | Single-threaded | T-B1 (P1) |
 | `FileSystemDatabase` storage | Per-file JSON (O(N) syscalls) | T-C (v0.4.0) |
 | criterion benchmarks | **Skeleton ready** (4 benches) | T-A1 (P1) |
@@ -213,7 +218,7 @@ See [`CONTRIBUTING.md`](./CONTRIBUTING.md). Short version:
 
 ```powershell
 # Quick validation
-cargo test --workspace          # must pass: 296 passed
+cargo test --workspace          # must pass: 309 passed
 cargo clippy --workspace --all-targets  # must be 0 warnings
 
 # Or run the local health check script (Windows)
