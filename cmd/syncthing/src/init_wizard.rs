@@ -93,7 +93,7 @@ pub fn run_wizard(config_dir: &PathBuf) -> anyhow::Result<()> {
     // 6. 组装配置
     let config = Config {
         version: 1,
-        listen_addr: "0.0.0.0:22001".to_string(),
+        listen_addr: syncthing_core::constants::DEFAULT_LISTEN_ADDR.to_string(),
         device_name,
         folders: vec![Folder {
             id: "default".to_string(),

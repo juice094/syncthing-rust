@@ -2,6 +2,7 @@
 //!
 //! 提供核心的错误类型、设备ID定义和基础工具
 
+pub mod constants;
 pub mod device_id;
 pub mod error;
 pub mod identity;
