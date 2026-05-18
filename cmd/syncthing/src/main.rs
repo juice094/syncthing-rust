@@ -15,6 +15,9 @@ use syncthing_core::types::Config;
 
 use syncthing_sync::BlockSource;
 
+/// CLI default for listen address (references syncthing_core::constants).
+const CLI_DEFAULT_LISTEN: &str = syncthing_core::constants::DEFAULT_LISTEN_ADDR;
+
 /// Syncthing 命令行参数
 #[derive(Parser, Debug)]
 #[command(name = "syncthing")]
@@ -38,18 +41,18 @@ enum Commands {
     /// 运行 Syncthing 守护进程
     Run {
         /// 监听地址
-        #[arg(long, default_value = "0.0.0.0:22001")]
+        #[arg(long, default_value = CLI_DEFAULT_LISTEN)]
         listen: String,
 
         /// 设备名称
-        #[arg(short, long, default_value = "syncthing-rust")]
+        #[arg(short, long, default_value = syncthing_core::constants::DEFAULT_DEVICE_NAME)]
         device_name: String,
     },
 
     /// 启动 TUI 配置管理器
     Tui {
         /// 监听地址
-        #[arg(long, default_value = "0.0.0.0:22001")]
+        #[arg(long, default_value = CLI_DEFAULT_LISTEN)]
         listen: String,
 
         /// 设备名称
@@ -117,7 +120,7 @@ fn resolve_daemon_config(
     config_validation::validate_config(&config)?;
 
     // CLI overrides config (runtime-only, do NOT persist to disk)
-    let listen = if cli_listen != "0.0.0.0:22001" {
+    let listen = if cli_listen != CLI_DEFAULT_LISTEN {
         cli_listen
     } else {
         config.listen_addr.clone()
@@ -505,9 +508,10 @@ mod tests {
         config.devices.push(syncthing_core::types::Device {
             id: syncthing_core::DeviceId::default(),
             name: Some("test-device".to_string()),
-            addresses: vec![syncthing_core::types::AddressType::Tcp(
-                "127.0.0.1:22001".to_string(),
-            )],
+            addresses: vec![syncthing_core::types::AddressType::Tcp(format!(
+                "127.0.0.1:{}",
+                syncthing_core::constants::DEFAULT_BEP_PORT
+            ))],
             paused: false,
             introducer: false,
         });
@@ -539,7 +543,7 @@ mod tests {
 
         let path = tmp_dir.join("config.json");
         let mut config = Config::new();
-        config.listen_addr = "0.0.0.0:22001".to_string();
+        config.listen_addr = syncthing_core::constants::DEFAULT_LISTEN_ADDR.to_string();
         config.device_name = "syncthing-rust".to_string();
         save_config(&path, &config).expect("failed to save config");
 
@@ -555,7 +559,10 @@ mod tests {
 
         // Verify disk config is untouched
         let loaded = load_config(&path).expect("failed to load config");
-        assert_eq!(loaded.listen_addr, "0.0.0.0:22001");
+        assert_eq!(
+            loaded.listen_addr,
+            syncthing_core::constants::DEFAULT_LISTEN_ADDR
+        );
         assert_eq!(loaded.device_name, "syncthing-rust");
 
         let _ = std::fs::remove_dir_all(&tmp_dir);
@@ -580,8 +587,8 @@ mod tests {
         // For this test we verify that resolve_daemon_config does not break the old port.
         let (listen, _) = resolve_daemon_config(
             &tmp_dir,
-            "0.0.0.0:22001".to_string(),
-            "syncthing-rust".to_string(),
+            syncthing_core::constants::DEFAULT_LISTEN_ADDR.to_string(),
+            syncthing_core::constants::DEFAULT_DEVICE_NAME.to_string(),
         )
         .expect("failed to resolve config");
         // Because CLI arg equals default, it falls back to config value (the old 22000)

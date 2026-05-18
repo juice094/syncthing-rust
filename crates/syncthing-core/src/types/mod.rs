@@ -334,7 +334,7 @@ pub struct Config {
 }
 
 fn default_listen() -> String {
-    "0.0.0.0:22001".to_string()
+    crate::constants::DEFAULT_LISTEN_ADDR.to_string()
 }
 fn default_device_name() -> String {
     "syncthing-rust".to_string()
