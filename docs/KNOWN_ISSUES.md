@@ -300,6 +300,28 @@ Windows 下 TLS 握手完成后，`is_alive()` 返回 `false`，但底层 TCP �
 
 **追踪**：`docs/reports/DUAL_NODE_TEST_2026-05-15.md` §5.1 / §6.3
 
+### §9.4 Bug-4：大文件下载失败导致文件被删除（P0，**已修复 ✅** v0.2.9-rc4)
+
+**症状**：
+- 本地创建 1MB+ 文件，远程同步失败，临时文件 `large_file.syncthing.tmp` 残留（0 字节）
+- 随后本地 `large_file.bin` 被删除
+- API 显示 `globalBytes == localBytes`，但文件实际不存在
+
+**根因（双 bug 叠加）**：
+1. **临时文件命名与 block_server 不对齐**：puller 使用 `with_extension("syncthing.tmp")` 生成 `large_file.syncthing.tmp`，而 block_server 期望 `.syncthing.large_file.bin.tmp`。远程从临时文件恢复块请求时，block_server 找不到对应路径，导致请求失败。
+2. **下载失败后未清理临时文件**：`puller::download_file` 中任何块请求失败（超时/哈希校验失败/写入失败）均直接 `return Err(e)`，临时文件永远残留。残留的 0 字节临时文件导致远程索引与实际文件不一致，触发 conflict resolver 删除本地文件。
+
+**修复**（commit `43a4487`）：
+- `puller/mod.rs`：新增 `temp_path_for()` 函数，生成 `.syncthing.{filename}.tmp` 格式，与 block_server 对齐。
+- `puller/mod.rs`：新增 `cleanup_temp()` 辅助函数，在所有错误路径（块下载失败、哈希校验失败、写入失败、flush 失败、rename 失败）上调用，确保下载失败时删除残留临时文件。
+
+**验证**：
+- 2MB 文件传输本地验证通过，无 `.syncthing.tmp` 残留
+- syncthing-sync 单元测试 40/40 通过
+- Clippy 0 warnings
+
+**追踪**：`docs/reports/REAL_NETWORK_DUAL_NODE_E2E_2026-05-18.md` §4.4
+
 ---
 
 ## §10. 配置 UX 灾难（P0，工程纪律问题）
