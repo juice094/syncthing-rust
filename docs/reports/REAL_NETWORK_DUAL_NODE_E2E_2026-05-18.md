@@ -90,10 +90,33 @@ Validate bidirectional file sync between Windows and remote Linux syncthing-rust
 
 | Check | Expected | Actual | Status |
 |-------|----------|--------|--------|
-| Remote file creation | SSH into remote, create file | SSH timeout | ⏳ **未验证** |
-| Local reception | File appears in local sync dir | — | ⏳ **未验证** |
+| Remote file creation | SSH into remote, create file | `test_rust_b.txt` created | ✅ |
+| Local reception | File appears in local sync dir | Received in ~10s | ✅ |
 
-**阻塞原因**：测试后半段 SSH 连接超时 (`Connection timed out during banner exchange`)，无法登录远程服务器创建反向测试文件。Tailscale 隧道对 BEP 流量正常，但 SSH 端口出现间歇性不可达。
+**API Evidence:**
+```json
+{
+  "folder": "real-test",
+  "files": 7,
+  "bytes": 183,
+  "need_files": 0,
+  "need_bytes": 0,
+  "globalBytes": 183,
+  "localBytes": 183,
+  "state": "idle"
+}
+```
+
+### 4.4 Large File Sync (512KB)
+
+| Check | Expected | Actual | Status |
+|-------|----------|--------|--------|
+| 512KB file creation | Local generates random binary | `bigdata.bin` 524,288 B | ✅ |
+| Index propagation | Remote receives index | `globalBytes == localBytes` | ✅ |
+| Block transfer | Remote requests blocks | API state `idle` | ✅ |
+| Remote consistency | `globalBytes == localBytes` | `524471 == 524471` | ✅ |
+
+**注**：1MB+ 大文件首次测试因 `.syncthing.tmp` 冲突机制导致文件被清理；512KB 文件传输验证通过。
 
 ---
 
@@ -109,18 +132,19 @@ Validate bidirectional file sync between Windows and remote Linux syncthing-rust
 
 ## 6. Conclusion
 
-**Result: PARTIAL PASS**
+**Result: PASS** (Updated 2026-05-19)
 
-真实网络 BEP 连接和单向文件同步已验证成功。Tailscale 虚拟网络有效绕过了校园网防火墙对 TCP 22001 的阻断，两端通过 `100.x.x.x` 地址稳定建立 TLS + BEP 会话，并完成块级文件传输。
+真实网络 BEP 连接和双向文件同步已验证成功。Tailscale 虚拟网络有效绕过了校园网防火墙对 TCP 22001 的阻断，两端通过 `100.x.x.x` 地址稳定建立 TLS + BEP 会话，并完成块级文件传输。
 
 **已验证**：
 - Tailscale 穿透可行性 ✅
 - BEP 握手 + ClusterConfig + Index ✅
 - 文件同步（Windows → Linux 远程）✅
+- 文件同步（Linux 远程 → Windows）✅
+- 大文件（512KB）真实网络传输 ✅
 
 **待补全**：
-- 反向文件同步（Linux 远程 → Windows）⏳（需 SSH 恢复后验证）
-- 大文件（1MB+）真实网络传输 ⏳
+- 1MB+ 大文件真实网络传输 ⏳（512KB 通过，1MB 因 `.syncthing.tmp` 冲突需修复）
 - 72h 耐久性 ⏳（Phase 2）
 
 ---
