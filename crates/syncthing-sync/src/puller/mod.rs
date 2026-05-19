@@ -14,8 +14,16 @@ use tokio::fs;
 use tokio::io::AsyncWriteExt;
 use tracing::{debug, error, info, trace, warn};
 
-/// 临时文件后缀
-const TEMP_SUFFIX: &str = "syncthing.tmp";
+/// 生成与 block_server 对齐的临时文件路径
+/// 格式: `.syncthing.{filename}.tmp`
+fn temp_path_for(file_path: &Path) -> std::path::PathBuf {
+    let parent = file_path.parent().unwrap_or_else(|| Path::new("."));
+    let file_name = file_path
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("unknown");
+    parent.join(format!(".syncthing.{}.tmp", file_name))
+}
 
 /// 块数据源 trait
 #[async_trait::async_trait]
@@ -208,7 +216,18 @@ impl Puller {
         debug!(file = %file_info.name, size = file_info.size, blocks = file_info.blocks.len(), max_concurrent = max_concurrent_blocks, "Downloading file");
 
         let file_path = folder_path.join(&file_info.name);
-        let temp_path = file_path.with_extension(TEMP_SUFFIX);
+        let temp_path = temp_path_for(&file_path);
+
+        // 辅助函数：下载失败时清理临时文件
+        async fn cleanup_temp(path: &Path) {
+            if path.exists() {
+                if let Err(e) = fs::remove_file(path).await {
+                    warn!(path = %path.display(), error = %e, "Failed to cleanup temp file");
+                } else {
+                    debug!(path = %path.display(), "Cleaned up temp file after failed download");
+                }
+            }
+        }
 
         // 确保父目录存在
         if let Some(parent) = file_path.parent() {
@@ -245,10 +264,11 @@ impl Puller {
             let source = match &block_source {
                 Some(s) => s.clone(),
                 None => {
+                    cleanup_temp(&temp_path).await;
                     return Err(SyncError::pull(
                         file_info.name.clone(),
                         "No block source configured".to_string(),
-                    ))
+                    ));
                 }
             };
 
@@ -272,10 +292,12 @@ impl Puller {
                 Ok(Ok(result)) => result,
                 Ok(Err(e)) => {
                     error!(file = %file_info.name, error = %e, "Block download failed");
+                    cleanup_temp(&temp_path).await;
                     return Err(e);
                 }
                 Err(e) => {
                     error!(file = %file_info.name, error = %e, "Block download task panicked");
+                    cleanup_temp(&temp_path).await;
                     return Err(SyncError::pull(
                         file_info.name.clone(),
                         format!("Block download task panicked: {}", e),
@@ -288,16 +310,18 @@ impl Puller {
             // 验证块哈希
             let hash = sha2::Sha256::digest(&block_data);
             if hash.as_slice() != expected_hash.as_slice() {
+                cleanup_temp(&temp_path).await;
                 return Err(SyncError::ChecksumMismatch { offset });
             }
 
             // 写入文件
-            file.write_all(&block_data).await.map_err(|e| {
-                SyncError::pull(
+            if let Err(e) = file.write_all(&block_data).await {
+                cleanup_temp(&temp_path).await;
+                return Err(SyncError::pull(
                     file_info.name.clone(),
                     format!("Failed to write block: {}", e),
-                )
-            })?;
+                ));
+            }
 
             bytes_downloaded += block_data.len() as u64;
 
@@ -311,12 +335,13 @@ impl Puller {
         }
 
         // 刷新并关闭文件
-        file.flush().await.map_err(|e| {
-            SyncError::pull(
+        if let Err(e) = file.flush().await {
+            cleanup_temp(&temp_path).await;
+            return Err(SyncError::pull(
                 file_info.name.clone(),
                 format!("Failed to flush file: {}", e),
-            )
-        })?;
+            ));
+        }
         drop(file);
 
         // 设置文件权限（Unix）
@@ -324,21 +349,23 @@ impl Puller {
         {
             use std::os::unix::fs::PermissionsExt;
             let perms = std::fs::Permissions::from_mode(file_info.permissions);
-            fs::set_permissions(&temp_path, perms).await.map_err(|e| {
-                SyncError::pull(
+            if let Err(e) = fs::set_permissions(&temp_path, perms).await {
+                cleanup_temp(&temp_path).await;
+                return Err(SyncError::pull(
                     file_info.name.clone(),
                     format!("Failed to set permissions: {}", e),
-                )
-            })?;
+                ));
+            }
         }
 
         // 重命名为最终文件名
-        fs::rename(&temp_path, &file_path).await.map_err(|e| {
-            SyncError::pull(
+        if let Err(e) = fs::rename(&temp_path, &file_path).await {
+            cleanup_temp(&temp_path).await;
+            return Err(SyncError::pull(
                 file_info.name.clone(),
                 format!("Failed to rename file: {}", e),
-            )
-        })?;
+            ));
+        }
 
         // 设置修改时间（精确到纳秒）
         let modified = std::time::SystemTime::UNIX_EPOCH
