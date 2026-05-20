@@ -171,8 +171,10 @@ pub struct ParallelDialer {
     local_device_id: DeviceId,
     /// 设备名称（用于 Hello）
     device_name: String,
-    /// 底层连接器（可运行时替换，支持 Transport 热切换）
+    /// 默认连接器（向后兼容）
     connector: RwLock<Arc<dyn DialConnector>>,
+    /// Scheme → 连接器映射（支持多传输路由）
+    connectors: DashMap<String, Arc<dyn DialConnector>>,
     /// Relay 连接器（可选）
     relay_connector: Option<Arc<dyn RelayDialConnector>>,
 }
@@ -190,6 +192,7 @@ impl ParallelDialer {
             local_device_id,
             device_name,
             connector: RwLock::new(connector),
+            connectors: DashMap::new(),
             relay_connector: None,
         }
     }
@@ -209,6 +212,18 @@ impl ParallelDialer {
     /// 更换底层连接器（用于 Transport 注册后切换）
     pub fn set_connector(&self, connector: Arc<dyn DialConnector>) {
         *self.connector.write() = connector;
+    }
+
+    /// 注册 scheme-specific 连接器
+    pub fn register_connector(&self, scheme: impl Into<String>, connector: Arc<dyn DialConnector>) {
+        let scheme = scheme.into();
+        debug!("Registering dial connector for scheme: {}", scheme);
+        self.connectors.insert(scheme, connector);
+    }
+
+    /// 获取已注册的 scheme 列表
+    pub fn registered_schemes(&self) -> Vec<String> {
+        self.connectors.iter().map(|e| e.key().clone()).collect()
     }
 
     /// 获取或初始化某地址的评分记录
@@ -242,16 +257,40 @@ impl ParallelDialer {
         }
     }
 
-    /// 并发拨号
+    /// 并发拨号（向后兼容包装）
+    ///
+    /// 调用 `dial_with_schemes` 并传入 `None` 作为 scheme 列表，
+    /// 所有 direct 地址使用默认连接器。
+    pub async fn dial(
+        &self,
+        device_id: DeviceId,
+        addresses: Vec<SocketAddr>,
+        relay_urls: Vec<String>,
+        tls_config: &Arc<SyncthingTlsConfig>,
+        local_device_id: &DeviceId,
+    ) -> Result<Arc<BepConnection>, SyncthingError> {
+        self.dial_with_schemes(
+            device_id,
+            addresses,
+            None,
+            relay_urls,
+            tls_config,
+            local_device_id,
+        )
+        .await
+    }
+
+    /// 并发拨号（支持 scheme-aware 路由）
     ///
     /// 1. 按历史评分对地址排序（direct 与 relay 共同参与排序）
     /// 2. 取前 3 个候选并发拨号
     /// 3. 第一个成功握手者胜出，其余任务立即取消
     /// 4. 更新该地址的评分统计
-    pub async fn dial(
+    pub async fn dial_with_schemes(
         &self,
         device_id: DeviceId,
         addresses: Vec<SocketAddr>,
+        address_schemes: Option<Vec<String>>,
         relay_urls: Vec<String>,
         tls_config: &Arc<SyncthingTlsConfig>,
         _local_device_id: &DeviceId,
@@ -260,12 +299,17 @@ impl ParallelDialer {
             return Err(SyncthingError::connection("no addresses to dial"));
         }
 
-        // 构造候选列表：(is_relay, socket_addr, optional_relay_url, score)
-        let mut candidates: Vec<(bool, SocketAddr, Option<String>, AddressScore)> = Vec::new();
+        // 构造候选列表：(is_relay, socket_addr, optional_relay_url, score, scheme)
+        let mut candidates: Vec<(bool, SocketAddr, Option<String>, AddressScore, String)> =
+            Vec::new();
 
         // Direct candidates
-        for addr in &addresses {
-            candidates.push((false, *addr, None, self.get_or_create_score(*addr)));
+        for (i, addr) in addresses.iter().enumerate() {
+            let scheme = address_schemes
+                .as_ref()
+                .and_then(|v| v.get(i).cloned())
+                .unwrap_or_else(|| "tcp".to_string());
+            candidates.push((false, *addr, None, self.get_or_create_score(*addr), scheme));
         }
 
         // Relay candidates
@@ -283,15 +327,21 @@ impl ParallelDialer {
                         address_type: AddressTypePreference::Relay,
                     })
                     .clone();
-                candidates.push((true, relay_addr, Some(url.clone()), score));
+                candidates.push((
+                    true,
+                    relay_addr,
+                    Some(url.clone()),
+                    score,
+                    "relay".to_string(),
+                ));
             }
         }
 
         // 按评分降序排序
-        candidates.sort_by_key(|(_, _, _, s)| Reverse(s.score()));
+        candidates.sort_by_key(|(_, _, _, s, _)| Reverse(s.score()));
 
         // 最多并发 3 个
-        let top: Vec<(bool, SocketAddr, Option<String>, AddressScore)> =
+        let top: Vec<(bool, SocketAddr, Option<String>, AddressScore, String)> =
             candidates.into_iter().take(3).collect();
 
         info!(
@@ -300,14 +350,15 @@ impl ParallelDialer {
             addresses.len(),
             relay_urls.len(),
             top.iter()
-                .map(|(_, addr, _, s)| (*addr, s.score()))
+                .map(|(_, addr, _, s, _)| (*addr, s.score()))
                 .collect::<Vec<_>>()
         );
 
         // 启动并发拨号任务
         let mut tasks: FuturesUnordered<JoinHandle<DialResult>> = FuturesUnordered::new();
 
-        for (is_relay, addr, relay_url, _score) in &top {
+        for (is_relay, addr, relay_url, _score, scheme) in &top {
+            let scheme = scheme.clone();
             if *is_relay {
                 let relay_connector = match &self.relay_connector {
                     Some(c) => Arc::clone(c),
@@ -349,7 +400,11 @@ impl ParallelDialer {
 
                 tasks.push(handle);
             } else {
-                let connector = Arc::clone(&*self.connector.read());
+                let connector = self
+                    .connectors
+                    .get(&scheme)
+                    .map(|e| Arc::clone(&*e))
+                    .unwrap_or_else(|| Arc::clone(&*self.connector.read()));
                 let local_device_id = self.local_device_id;
                 let device_name = self.device_name.clone();
                 let tls_config = Arc::clone(tls_config);
@@ -363,11 +418,14 @@ impl ParallelDialer {
                     {
                         Ok(conn) => {
                             let rtt = start.elapsed();
-                            debug!("Dial to {} succeeded in {:?}", addr, rtt);
+                            debug!(
+                                "Dial to {} via scheme {} succeeded in {:?}",
+                                addr, scheme, rtt
+                            );
                             Ok((conn, addr, rtt))
                         }
                         Err(e) => {
-                            debug!("Dial to {} failed: {}", addr, e);
+                            debug!("Dial to {} via scheme {} failed: {}", addr, scheme, e);
                             Err(e)
                         }
                     }
@@ -401,7 +459,7 @@ impl ParallelDialer {
         }
 
         // 全部失败：为每个参与的地址记录失败（若尚未记录）
-        for (_, addr, _, _) in &top {
+        for (_, addr, _, _, _) in &top {
             self.record_failure(*addr);
         }
 

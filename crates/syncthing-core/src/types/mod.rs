@@ -273,6 +273,9 @@ pub struct Options {
     pub global_announce_enabled: bool,
     pub local_announce_enabled: bool,
     pub relays_enabled: bool,
+    /// 启用的传输层列表，如 ["tcp", "websocket", "relay"]
+    #[serde(default = "default_transports")]
+    pub transports: Vec<String>,
 }
 
 /// 版本控制配置
@@ -335,6 +338,9 @@ pub struct Config {
 
 fn default_listen() -> String {
     crate::constants::DEFAULT_LISTEN_ADDR.to_string()
+}
+fn default_transports() -> Vec<String> {
+    vec!["tcp".to_string()]
 }
 fn default_device_name() -> String {
     "syncthing-rust".to_string()

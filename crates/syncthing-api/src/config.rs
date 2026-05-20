@@ -48,6 +48,7 @@ impl MemoryConfigStore {
                 global_announce_enabled: true,
                 local_announce_enabled: true,
                 relays_enabled: true,
+                transports: vec!["tcp".to_string()],
             },
         }
     }
