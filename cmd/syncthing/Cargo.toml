@@ -51,5 +51,9 @@ axum = "0.7"
 arboard = "3.6.1"
 sysinfo = "0.30"
 
+[features]
+default = []
+websocket = ["syncthing-net/websocket"]
+
 [dev-dependencies]
 serial_test = "3.2"

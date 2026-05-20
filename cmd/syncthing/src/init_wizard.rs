@@ -124,6 +124,7 @@ pub fn run_wizard(config_dir: &PathBuf) -> anyhow::Result<()> {
             global_announce_enabled: false,
             local_announce_enabled: false,
             relays_enabled: false,
+            transports: vec!["tcp".to_string()],
         },
     };
 

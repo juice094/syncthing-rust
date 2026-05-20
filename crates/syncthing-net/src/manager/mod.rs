@@ -162,7 +162,16 @@ impl ConnectionManager {
 
     /// 设置传输层注册表（必须在 start() 之前调用）
     pub fn set_transport_registry(&self, registry: Arc<TransportRegistry>) {
-        // 若注册表包含默认传输，同步更新 ParallelDialer 的连接器
+        // 为注册表中每个传输注册 scheme-specific 连接器
+        for scheme in registry.schemes() {
+            if let Some(transport) = registry.get(scheme) {
+                let connector = Arc::new(
+                    crate::transport::bep_adapter::TransportBepConnector::new(transport),
+                );
+                self.parallel_dialer.register_connector(scheme, connector);
+            }
+        }
+        // 保留默认连接器作为回退
         if let Some(transport) = registry.default_transport() {
             let connector = Arc::new(crate::transport::bep_adapter::TransportBepConnector::new(
                 transport,

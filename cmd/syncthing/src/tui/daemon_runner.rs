@@ -150,7 +150,33 @@ pub async fn start_daemon(
 
     // Phase 2：注册 TransportRegistry，启用可插拔传输层
     let mut transport_registry = syncthing_net::transport::TransportRegistry::new();
-    transport_registry.register(Arc::new(syncthing_net::transport::RawTcpTransport::new()));
+
+    // 根据配置动态注册传输层
+    for scheme in &config.options.transports {
+        match scheme.as_str() {
+            "tcp" => {
+                transport_registry
+                    .register(Arc::new(syncthing_net::transport::RawTcpTransport::new()));
+                info!("Registered TCP transport");
+            }
+            #[cfg(feature = "websocket")]
+            "websocket" | "ws" => {
+                transport_registry.register(Arc::new(
+                    syncthing_net::transport::websocket::WebSocketTransport::new(),
+                ));
+                info!("Registered WebSocket transport");
+            }
+            _ => {
+                warn!("Unknown transport scheme '{}', skipping", scheme);
+            }
+        }
+    }
+
+    // 回退：若配置未指定任何传输层，默认注册 TCP
+    if transport_registry.schemes().is_empty() {
+        transport_registry.register(Arc::new(syncthing_net::transport::RawTcpTransport::new()));
+        info!("No transports configured, falling back to TCP");
+    }
 
     // Phase 3：注册 DERP relay 传输（用于 NAT 穿透失败时的中继回退）
     transport_registry.register(Arc::new(syncthing_net::derp::DerpTransport::new(device_id)));
