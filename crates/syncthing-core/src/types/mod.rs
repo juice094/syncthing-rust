@@ -195,6 +195,12 @@ pub struct FileInfo {
     pub symlink_target: Option<String>,
     /// 删除标记
     pub deleted: Option<bool>,
+    /// 最后修改者设备短 ID（BEP 兼容字段）
+    pub modified_by: Option<u64>,
+    /// 块列表哈希（用于快速比较块变化）
+    pub blocks_hash: Option<Vec<u8>>,
+    /// 无权限标记（BEP 兼容字段）
+    pub no_permissions: Option<bool>,
 }
 
 impl FileInfo {
@@ -213,6 +219,9 @@ impl FileInfo {
             blocks: Vec::new(),
             symlink_target: None,
             deleted: Some(false),
+            modified_by: None,
+            blocks_hash: None,
+            no_permissions: None,
         }
     }
 

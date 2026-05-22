@@ -56,18 +56,18 @@ impl From<syncthing_core::types::FileInfo> for WireFileInfo {
             modified_s: f.modified_s,
             deleted: f.deleted.unwrap_or(false),
             invalid: false,
-            no_permissions: false,
+            no_permissions: f.no_permissions.unwrap_or(false),
             version: Some(f.version.into()),
             sequence: f.sequence as i64,
             modified_ns: f.modified_ns,
-            modified_by: 0,
+            modified_by: f.modified_by.unwrap_or(0),
             block_size: f.block_size,
-            platform: None,
+            platform: None, // TODO: platform data conversion
             blocks: f.blocks.into_iter().map(Into::into).collect(),
             symlink_target: f.symlink_target.unwrap_or_default().into_bytes(),
-            blocks_hash: Vec::new(),
-            encrypted: Vec::new(),
-            previous_blocks_hash: Vec::new(),
+            blocks_hash: f.blocks_hash.unwrap_or_default(),
+            encrypted: Vec::new(), // TODO: encrypted data
+            previous_blocks_hash: Vec::new(), // TODO: previous blocks hash
         }
     }
 }
@@ -97,6 +97,9 @@ impl From<WireFileInfo> for syncthing_core::types::FileInfo {
                 Some(String::from_utf8_lossy(&f.symlink_target).to_string())
             },
             deleted: Some(f.deleted),
+            modified_by: if f.modified_by == 0 { None } else { Some(f.modified_by) },
+            blocks_hash: if f.blocks_hash.is_empty() { None } else { Some(f.blocks_hash) },
+            no_permissions: if f.no_permissions { Some(true) } else { None },
         }
     }
 }

@@ -9,7 +9,7 @@ use bytes::Bytes;
 use sha2::Digest;
 use std::path::Path;
 use std::sync::Arc;
-use syncthing_core::types::{BlockInfo, FileInfo, Folder};
+use syncthing_core::types::{BlockInfo, FileInfo, FileType, Folder};
 use tokio::fs;
 use tokio::io::AsyncWriteExt;
 use tracing::{debug, error, info, trace, warn};
@@ -130,16 +130,27 @@ impl Puller {
                 let result = if file_info.is_deleted() {
                     Self::delete_file(&folder_path, &file_info, &*db, &folder_id).await
                 } else {
-                    Self::download_file(
-                        &folder_path,
-                        &file_info,
-                        &*db,
-                        &events,
-                        &folder_id,
-                        block_source,
-                        max_concurrent_blocks,
-                    )
-                    .await
+                    match file_info.file_type {
+                        FileType::Directory => {
+                            Self::create_directory(&folder_path, &file_info).await
+                        }
+                        FileType::File => {
+                            Self::download_file(
+                                &folder_path,
+                                &file_info,
+                                &*db,
+                                &events,
+                                &folder_id,
+                                block_source,
+                                max_concurrent_blocks,
+                            )
+                            .await
+                        }
+                        FileType::Symlink => {
+                            warn!(file = %file_info.name, "Symlink sync not yet implemented, skipping");
+                            Ok(())
+                        }
+                    }
                 };
 
                 match &result {
@@ -227,6 +238,34 @@ impl Puller {
                     debug!(path = %path.display(), "Cleaned up temp file after failed download");
                 }
             }
+        }
+
+        // P1: 重命名优化——如果本地有相同块哈希的文件，直接复制
+        if let Some(source_path) = Self::find_local_copy_source(folder_path, file_info, db, folder_id).await? {
+            info!(file = %file_info.name, source = %source_path.display(), "Copying from local file (rename optimization)");
+            if let Some(parent) = file_path.parent() {
+                fs::create_dir_all(parent).await.map_err(|e| {
+                    SyncError::pull(file_info.name.clone(), format!("Failed to create parent directory: {}", e))
+                })?;
+            }
+            fs::copy(&source_path, &temp_path).await.map_err(|e| {
+                SyncError::pull(file_info.name.clone(), format!("Failed to copy from local source: {}", e))
+            })?;
+            fs::rename(&temp_path, &file_path).await.map_err(|e| {
+                SyncError::pull(file_info.name.clone(), format!("Failed to rename file: {}", e))
+            })?;
+            // 设置修改时间
+            let modified = std::time::SystemTime::UNIX_EPOCH
+                + std::time::Duration::from_secs(file_info.modified_s as u64)
+                + std::time::Duration::from_nanos(file_info.modified_ns as u64);
+            let mtime = filetime::FileTime::from_system_time(modified);
+            if let Err(e) = filetime::set_file_mtime(&file_path, mtime) {
+                warn!(file = %file_info.name, error = %e, "Failed to set file modification time");
+            }
+            if let Err(e) = db.update_file(folder_id, file_info.clone()).await {
+                warn!(file = %file_info.name, error = %e, "Failed to update database after local copy");
+            }
+            return Ok(());
         }
 
         // 确保父目录存在
@@ -390,6 +429,69 @@ impl Puller {
         Ok(())
     }
 
+    /// 查找本地具有相同块哈希的文件（重命名优化）
+    async fn find_local_copy_source(
+        folder_path: &Path,
+        file_info: &FileInfo,
+        db: &dyn LocalDatabase,
+        folder_id: &str,
+    ) -> Result<Option<std::path::PathBuf>> {
+        if file_info.blocks.is_empty() || file_info.is_deleted() {
+            return Ok(None);
+        }
+
+        let db_files = db.get_folder_files(folder_id).await?;
+        for db_file in db_files {
+            if db_file.is_deleted() || db_file.name == file_info.name {
+                continue;
+            }
+            if db_file.blocks.len() != file_info.blocks.len() {
+                continue;
+            }
+            let same_blocks = db_file
+                .blocks
+                .iter()
+                .zip(file_info.blocks.iter())
+                .all(|(a, b)| a.hash == b.hash);
+            if same_blocks {
+                let source_path = folder_path.join(&db_file.name);
+                if source_path.exists() && source_path.is_file() {
+                    return Ok(Some(source_path));
+                }
+            }
+        }
+        Ok(None)
+    }
+
+    /// 创建目录
+    async fn create_directory(
+        folder_path: &Path,
+        file_info: &FileInfo,
+    ) -> Result<()> {
+        let dir_path = folder_path.join(&file_info.name);
+
+        if dir_path.exists() {
+            if dir_path.is_dir() {
+                trace!(dir = %file_info.name, "Directory already exists");
+            } else {
+                return Err(SyncError::pull(
+                    file_info.name.clone(),
+                    format!("Path exists but is not a directory: {}", dir_path.display()),
+                ));
+            }
+        } else {
+            fs::create_dir_all(&dir_path).await.map_err(|e| {
+                SyncError::pull(
+                    file_info.name.clone(),
+                    format!("Failed to create directory: {}", e),
+                )
+            })?;
+            info!(dir = %file_info.name, "Directory created");
+        }
+
+        Ok(())
+    }
+
     /// 删除文件
     async fn delete_file(
         folder_path: &Path,
@@ -443,10 +545,13 @@ impl Puller {
                     needed.push(file_info);
                 }
             } else {
-                // 检查本地文件是否需要更新
+                // 检查本地文件/目录是否需要更新
                 let file_path = base_path.join(&file_info.name);
                 if !file_path.exists() {
                     needed.push(file_info);
+                } else if file_info.file_type == FileType::Directory {
+                    // 目录只需存在即可，不检查大小/修改时间
+                    trace!(dir = %file_info.name, "Directory exists, no update needed");
                 } else {
                     // 可以添加更多检查，如大小、修改时间等
                     let metadata = fs::metadata(&file_path).await?;

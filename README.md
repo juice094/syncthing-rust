@@ -1,9 +1,9 @@
 # syncthing-rust
 
 [![Rust](https://img.shields.io/badge/rust-1.85%2B-orange?logo=rust)](https://www.rust-lang.org)
-[![Tests](https://img.shields.io/badge/tests-309%20passed-brightgreen)]()
+[![Tests](https://img.shields.io/badge/tests-319%20passed-brightgreen)]()
 [![Clippy](https://img.shields.io/badge/clippy-0%20warnings-brightgreen)]()
-[![Version](https://img.shields.io/badge/version-v0.2.9--rc2-blue)]()
+[![Version](https://img.shields.io/badge/version-v0.2.8-blue)]()
 [![License](https://img.shields.io/badge/license-MIT-blue)](./LICENSE)
 
 A Rust implementation of the [Syncthing](https://syncthing.net/) protocol stack, designed for **zero-runtime-dependency** deployment and wire-compatible interoperability with the official Go Syncthing daemon.
@@ -20,7 +20,7 @@ A Rust implementation of the [Syncthing](https://syncthing.net/) protocol stack,
 
 > 💡 [Build from source](#quick-start) if you need a different target or want to audit the code.
 
-> ⚠️ **Current stage (2026-05-18 post-v0.2.9-rc2)**: **Alpha — WSL2↔Windows sync verified, real-network Tailscale E2E validated (one-way), Transport Plugin RFC drafted, centralized constants shipped.**
+> ⚠️ **Current stage (2026-05-22 post-v0.2.8)**: **Alpha — WSL2↔Windows sync verified, real-network Tailscale E2E validated, P0~P2 CRUD repair complete, 5/5 E2E CRUD tests passing.**
 >
 > - ✅ **Connection layer stable**: 12h+ single-node endurance, 0 deadlocks, 0 panics, logs 6 KB (v0.2.6 hardening verified).
 > - ✅ **Protocol layer correct**: TLS, BEP Hello, ClusterConfig, Index encode/decode all working.
@@ -33,6 +33,8 @@ A Rust implementation of the [Syncthing](https://syncthing.net/) protocol stack,
 > - ✅ **Scanner metadata exclusion** (D-1, v0.2.8): `.stfolder`, `.stversions`, `.stignore`, `config.json`, `cert.pem`, `key.pem`, `db/`, `logs/`, `*.syncthing.tmp` auto-excluded from sync.
 > - ✅ **Prometheus metrics endpoint** (`/metrics`): 9 metrics verified (build info, uptime, connected devices, bytes sent/received, folder file counts).
 > - ✅ **Centralized constants** (`syncthing-core/src/constants.rs`): All magic numbers (22001, 8385) consolidated, 6+ hardcoded sites eliminated.
+> - ✅ **P0~P2 CRUD repair complete** (2026-05-22): `.stignore` directory exclusion, rename/move optimization with local copy, `FileInfo` field backfill (`modified_by`, `blocks_hash`, `no_permissions`), `LocalIndexUpdated`→BEP `IndexUpdate` bridge fix. [`docs/reports/CRUD_REPAIR_E2E_2026-05-22.md`](docs/reports/CRUD_REPAIR_E2E_2026-05-22.md).
+> - ✅ **5/5 E2E CRUD tests passing**: create, modify, delete, rename, `.stignore` exclusion — all validated end-to-end.
 > - ⏳ **72h endurance test** pending: single-node 12h validated; WSL2↔Windows bidirectional + real-network one-way validated; **72h real-network endurance** required for v0.3.0 admission.
 >
 > **Not yet a drop-in Go Syncthing replacement**, and **not yet enterprise-ready** (no FIPS/SM crypto, no audit logging). Suitable for: BEP protocol research, Rust reference reading, controlled experiments, personal private deployment, and contributing fixes.
@@ -48,7 +50,7 @@ A Rust implementation of the [Syncthing](https://syncthing.net/) protocol stack,
 | File-sync internal modules (puller / scanner / folder_model) unit tests | ✅ 309 unit tests passing |
 | Network Discovery (Local + Global + STUN + UPnP + Relay v1) | ✅ Implementation complete; ParallelDialer with RTT scoring |
 | REST API (read + write, Go-layout compatible) | ✅ Read + write complete |
-| Tests | **309 unit + 2 e2e passing, 4 ignored** |
+| Tests | **~314 unit + 5 e2e passing, 2 ignored** |
 | Lint | **0 clippy warnings** (incl. `await_holding_lock` + `manual_let_else`) |
 | Security audit | **3 unmaintained** upstream transitive deps (accepted debt, see `.cargo/audit.toml`) |
 | Binary size | ~12 MB (release, Windows x64) |
@@ -179,6 +181,7 @@ docs/
 | [`docs/design/ARCHITECTURE_DECISIONS.md`](docs/design/ARCHITECTURE_DECISIONS.md) | Architecture Decision Records (ADRs) |
 | [`docs/design/NETWORK_DISCOVERY_DESIGN.md`](docs/design/NETWORK_DISCOVERY_DESIGN.md) | Network discovery layer design |
 | [`docs/reports/IMPLEMENTATION_SUMMARY.md`](docs/reports/IMPLEMENTATION_SUMMARY.md) | Crate-level implementation status |
+| [`docs/reports/CRUD_REPAIR_E2E_2026-05-22.md`](docs/reports/CRUD_REPAIR_E2E_2026-05-22.md) | P0~P2 CRUD repair and E2E validation report |
 | [`docs/reports/WSL2_WINDOWS_DUAL_NODE_E2E_2026-05-18.md`](docs/reports/WSL2_WINDOWS_DUAL_NODE_E2E_2026-05-18.md) | WSL2↔Windows loopback dual-node sync verification |
 | [`docs/reports/REAL_NETWORK_DUAL_NODE_E2E_2026-05-18.md`](docs/reports/REAL_NETWORK_DUAL_NODE_E2E_2026-05-18.md) | Real-network Tailscale dual-node E2E test report |
 | [`docs/reports/VERIFICATION_REPORT_BEP_2026-04-11.md`](docs/reports/VERIFICATION_REPORT_BEP_2026-04-11.md) | BEP interoperability test report |
@@ -218,7 +221,7 @@ See [`CONTRIBUTING.md`](./CONTRIBUTING.md). Short version:
 
 ```powershell
 # Quick validation
-cargo test --workspace          # must pass: 309 passed
+cargo test --workspace          # must pass: ~319 passed
 cargo clippy --workspace --all-targets  # must be 0 warnings
 
 # Or run the local health check script (Windows)

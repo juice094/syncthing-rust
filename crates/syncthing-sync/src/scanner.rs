@@ -82,7 +82,22 @@ impl Scanner {
 
         // 加载 .stignore（如果存在）—— 始终以 folder 根目录为基准
         let ignore_path = path.join(".stignore");
-        let matcher = IgnoreMatcher::load(&ignore_path);
+        let mut matcher = IgnoreMatcher::load(&ignore_path);
+        let file_rule_count = matcher.len();
+
+        // 同时加载配置中的 ignore_patterns（D-2 修复：此前完全未使用）
+        for pattern in &folder.ignore_patterns {
+            matcher.add_line(pattern);
+        }
+
+        info!(
+            folder_id = %folder.id,
+            stignore_path = %ignore_path.display(),
+            file_rules = file_rule_count,
+            config_rules = folder.ignore_patterns.len(),
+            total_rules = matcher.len(),
+            "Loaded ignore patterns"
+        );
 
         // 递归扫描目录
         match self
@@ -112,7 +127,7 @@ impl Scanner {
                             debug!(file = %db_file.name, "File was deleted");
                             let mut deleted_info = db_file.clone();
                             deleted_info.deleted = Some(true);
-                            deleted_info.blocks = vec![]; // BEP 协议要求 deleted 文件 block list 为空
+                            // NOTE: 暂时保留 blocks 用于重命名检测，检测后再清空
                             deleted_info.size = 0;
                             deleted_info.sequence = self.db.increment_sequence(&folder.id).await?;
                             deleted_info.version.increment(1); // 使用设备ID 1作为本地设备
@@ -141,6 +156,18 @@ impl Scanner {
                             new_info.version = Vector::new().with_counter(1, 1);
                             changed_files.push(new_info);
                         }
+                    }
+                }
+
+                // P1: 重命名检测——新文件与最近删除的文件块哈希相同
+                if sub.is_none() {
+                    changed_files = Self::detect_and_reorder_renames(changed_files);
+                }
+
+                // 清空已删除文件的 blocks（BEP 协议要求）
+                for file in &mut changed_files {
+                    if file.is_deleted() {
+                        file.blocks.clear();
                     }
                 }
             }
@@ -300,6 +327,9 @@ impl Scanner {
                     blocks: vec![],
                     symlink_target: None,
                     deleted: None,
+                    modified_by: None,
+                    blocks_hash: None,
+                    no_permissions: None,
                 });
             } else if metadata.is_file() {
                 // 计算文件哈希和块信息
@@ -337,6 +367,9 @@ impl Scanner {
                     blocks: vec![],
                     symlink_target: Some(target.to_string_lossy().to_string()),
                     deleted: None,
+                    modified_by: None,
+                    blocks_hash: None,
+                    no_permissions: None,
                 });
             }
         }
@@ -427,6 +460,9 @@ impl Scanner {
             blocks,
             symlink_target: None,
             deleted: None,
+            modified_by: None,
+            blocks_hash: None,
+            no_permissions: None,
         })
     }
 
@@ -458,6 +494,70 @@ impl Scanner {
         } else {
             true
         }
+    }
+
+    /// 检查两个文件的块哈希列表是否完全相同（用于重命名检测）
+    fn has_same_blocks(a: &FileInfo, b: &FileInfo) -> bool {
+        if a.blocks.len() != b.blocks.len() || a.blocks.is_empty() {
+            return false;
+        }
+        a.blocks
+            .iter()
+            .zip(b.blocks.iter())
+            .all(|(a_blk, b_blk)| a_blk.hash == b_blk.hash)
+    }
+
+    /// 检测重命名操作并重新排序 changed_files
+    ///
+    /// 当新文件的块哈希与某个已删除文件完全匹配时，识别为重命名。
+    /// 将新文件移到列表前面，确保接收端先创建新文件（可从旧文件复制内容），
+    /// 再删除旧文件。
+    fn detect_and_reorder_renames(changed_files: Vec<FileInfo>) -> Vec<FileInfo> {
+        let mut rename_targets: Vec<usize> = Vec::new();
+
+        for (idx, file) in changed_files.iter().enumerate() {
+            if file.is_deleted() || file.blocks.is_empty() {
+                continue;
+            }
+            // 查找相同块哈希的已删除文件
+            for (del_idx, del_file) in changed_files.iter().enumerate() {
+                if del_idx == idx {
+                    continue;
+                }
+                if del_file.is_deleted() && Self::has_same_blocks(del_file, file) {
+                    rename_targets.push(idx);
+                    info!(
+                        old_name = %del_file.name,
+                        new_name = %file.name,
+                        blocks = file.blocks.len(),
+                        "Detected rename: same block hashes"
+                    );
+                    break;
+                }
+            }
+        }
+
+        if rename_targets.is_empty() {
+            return changed_files;
+        }
+
+        // 重新排序：重命名的新文件在前，其余保持原顺序
+        let mut reordered = Vec::with_capacity(changed_files.len());
+        let mut added = vec![false; changed_files.len()];
+
+        for &idx in &rename_targets {
+            if !added[idx] {
+                reordered.push(changed_files[idx].clone());
+                added[idx] = true;
+            }
+        }
+        for (idx, file) in changed_files.into_iter().enumerate() {
+            if !added[idx] {
+                reordered.push(file);
+            }
+        }
+
+        reordered
     }
 
     /// 快速扫描（仅检查修改时间）
@@ -531,5 +631,137 @@ mod tests {
         let result = scanner.scan_folder(&folder).await;
         assert!(result.is_ok());
         assert!(result.unwrap().is_empty());
+    }
+
+    #[test]
+    fn test_detect_rename_reorders_files() {
+        let old_file = FileInfo {
+            name: "old_name.txt".to_string(),
+            file_type: FileType::File,
+            size: 0,
+            permissions: 0,
+            modified_s: 0,
+            modified_ns: 0,
+            version: Vector::new(),
+            sequence: 1,
+            block_size: 0,
+            blocks: vec![BlockInfo {
+                size: 10,
+                hash: vec![1, 2, 3],
+                offset: 0,
+            }],
+            symlink_target: None,
+            deleted: Some(true),
+            modified_by: None,
+            blocks_hash: None,
+            no_permissions: None,
+        };
+
+        let new_file = FileInfo {
+            name: "new_name.txt".to_string(),
+            file_type: FileType::File,
+            size: 10,
+            permissions: 0,
+            modified_s: 0,
+            modified_ns: 0,
+            version: Vector::new(),
+            sequence: 2,
+            block_size: 0,
+            blocks: vec![BlockInfo {
+                size: 10,
+                hash: vec![1, 2, 3],
+                offset: 0,
+            }],
+            symlink_target: None,
+            deleted: None,
+            modified_by: None,
+            blocks_hash: None,
+            no_permissions: None,
+        };
+
+        let unchanged = FileInfo {
+            name: "unchanged.txt".to_string(),
+            file_type: FileType::File,
+            size: 5,
+            permissions: 0,
+            modified_s: 0,
+            modified_ns: 0,
+            version: Vector::new(),
+            sequence: 3,
+            block_size: 0,
+            blocks: vec![BlockInfo {
+                size: 5,
+                hash: vec![4, 5, 6],
+                offset: 0,
+            }],
+            symlink_target: None,
+            deleted: None,
+            modified_by: None,
+            blocks_hash: None,
+            no_permissions: None,
+        };
+
+        let input = vec![old_file.clone(), unchanged.clone(), new_file.clone()];
+        let result = Scanner::detect_and_reorder_renames(input);
+
+        // 新文件应排在最前面
+        assert_eq!(result[0].name, "new_name.txt");
+        // 其余保持原顺序
+        assert_eq!(result[1].name, "old_name.txt");
+        assert_eq!(result[2].name, "unchanged.txt");
+    }
+
+    #[test]
+    fn test_no_false_rename_for_different_blocks() {
+        let old_file = FileInfo {
+            name: "old.txt".to_string(),
+            file_type: FileType::File,
+            size: 0,
+            permissions: 0,
+            modified_s: 0,
+            modified_ns: 0,
+            version: Vector::new(),
+            sequence: 1,
+            block_size: 0,
+            blocks: vec![BlockInfo {
+                size: 10,
+                hash: vec![1, 2, 3],
+                offset: 0,
+            }],
+            symlink_target: None,
+            deleted: Some(true),
+            modified_by: None,
+            blocks_hash: None,
+            no_permissions: None,
+        };
+
+        let new_file = FileInfo {
+            name: "new.txt".to_string(),
+            file_type: FileType::File,
+            size: 10,
+            permissions: 0,
+            modified_s: 0,
+            modified_ns: 0,
+            version: Vector::new(),
+            sequence: 2,
+            block_size: 0,
+            blocks: vec![BlockInfo {
+                size: 10,
+                hash: vec![7, 8, 9], // 不同哈希
+                offset: 0,
+            }],
+            symlink_target: None,
+            deleted: None,
+            modified_by: None,
+            blocks_hash: None,
+            no_permissions: None,
+        };
+
+        let input = vec![old_file.clone(), new_file.clone()];
+        let result = Scanner::detect_and_reorder_renames(input);
+
+        // 顺序不变
+        assert_eq!(result[0].name, "old.txt");
+        assert_eq!(result[1].name, "new.txt");
     }
 }

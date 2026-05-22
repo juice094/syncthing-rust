@@ -52,6 +52,8 @@ pub mod watcher;
 
 // Re-export main types for convenience
 pub use filesystem::{atomic_write, NativeFileSystem};
+// SAFETY: IgnorePatterns is UNVERIFIED (Agent-B delivery). Use syncthing_sync::ignore::IgnoreMatcher instead.
+#[doc(hidden)]
 pub use ignore::{default_ignore_patterns, IgnorePatterns};
 pub use scanner::{
     hash_block, optimal_block_size, quick_scan, scan_directory, scan_file, verify_file,

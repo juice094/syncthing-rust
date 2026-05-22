@@ -344,5 +344,51 @@ pub fn install_bep_bridge(
         });
     });
 
+    // Spawn background task: forward LocalIndexUpdated events -> BEP IndexUpdate
+    // messages to all connected peers. Without this, scan_folder() changes never
+    // leave the local node.
+    let sync_service_e = Arc::clone(&sync_service);
+    let handle_e = handle.clone();
+    tokio::spawn(async move {
+        let mut subscriber = sync_service_e.events().subscribe();
+        loop {
+            match subscriber.recv().await {
+                Some(syncthing_sync::SyncEvent::LocalIndexUpdated { folder, mut files }) => {
+                    // BEP convention: deleted files must have empty blocks
+                    for file in &mut files {
+                        if file.is_deleted() {
+                            file.blocks.clear();
+                        }
+                    }
+                    let update = syncthing_core::types::IndexUpdate { folder, files };
+                    let config = sync_service_e.get_config().await.unwrap_or_default();
+                    for device_id in handle_e.connected_devices() {
+                        let shares_folder = config.folders.iter().any(|f| {
+                            f.id == update.folder && f.devices.contains(&device_id)
+                        });
+                        if !shares_folder {
+                            continue;
+                        }
+                        if let Some(conn) = handle_e.get_connection(&device_id) {
+                            if let Err(e) = conn.send_index_update(&update).await {
+                                warn!(
+                                    "[test-harness] Failed to send IndexUpdate to {}: {}",
+                                    device_id, e
+                                );
+                            } else {
+                                debug!(
+                                    "[test-harness] Sent IndexUpdate to {} for folder {}",
+                                    device_id, update.folder
+                                );
+                            }
+                        }
+                    }
+                }
+                Some(_) => {}
+                None => break,
+            }
+        }
+    });
+
     pending_responses
 }

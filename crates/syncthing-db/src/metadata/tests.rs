@@ -17,6 +17,9 @@ fn create_test_file_info(name: &str, size: u64) -> FileInfo {
         blocks: vec![],
         symlink_target: None,
         deleted: Some(false),
+        modified_by: None,
+        blocks_hash: None,
+        no_permissions: None,
     }
 }
 

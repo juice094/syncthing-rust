@@ -1,18 +1,20 @@
 # syncthing-rust
 
 [![Rust](https://img.shields.io/badge/rust-1.85%2B-orange?logo=rust)](https://www.rust-lang.org)
-[![Tests](https://img.shields.io/badge/tests-296%20passed-brightgreen)]()
+[![Tests](https://img.shields.io/badge/tests-319%20passed-brightgreen)]()
 [![Clippy](https://img.shields.io/badge/clippy-0%20warnings-brightgreen)]()
-[![Version](https://img.shields.io/badge/version-v0.2.5-blue)]()
+[![Version](https://img.shields.io/badge/version-v0.2.8-blue)]()
 [![License](https://img.shields.io/badge/license-MIT-blue)](./LICENSE)
 
 [Syncthing](https://syncthing.net/) 协议栈的 Rust 实现，设计目标为**零运行时依赖**部署，与官方 Go Syncthing 守护进程线级兼容互操作。
 
-> ⚠️ **当前阶段（2026-05-13 post-T2.6）**：**alpha — 核心 sync 链路已打通，但未到生产**。
+> ⚠️ **当前阶段（2026-05-22 post-v0.2.8）**：**alpha — P0~P2 CRUD 修复完成，5/5 E2E 测试通过，核心 sync 链路已打通**。
 > 
 > - ✅ **连接层稳定**：9h+ 压测 758 次连接周期，0 死锁、0 panic（T-F1 已修复）。
 > - ✅ **协议层正确**：TLS、BEP Hello、ClusterConfig、Index 编解码全部正常。
-> - ✅ **端到端同步已打通**（T2.6 修复，2026-05-13）：`e2e_sync` 测试通过，单文件双节点同步 ~12s 完成（TLS → Hello → ClusterConfig → Index → Block → 文件落地）。详细 RCA 见 [`docs/KNOWN_ISSUES.md`](./docs/KNOWN_ISSUES.md) §2。
+> - ✅ **P0~P2 CRUD 修复完成**（2026-05-22）：`.stignore` 目录排除、重命名本地复制优化、`FileInfo` 字段兼容（`modified_by`, `blocks_hash`, `no_permissions`）、`LocalIndexUpdated`→BEP `IndexUpdate` 桥接修复。详见 [`docs/reports/CRUD_REPAIR_E2E_2026-05-22.md`](docs/reports/CRUD_REPAIR_E2E_2026-05-22.md)。
+> - ✅ **5/5 E2E CRUD 测试通过**：增删改查 + `.stignore` 排除，端到端验证通过。
+> - ✅ **端到端同步已打通**（T2.6 修复，2026-05-13）：`e2e_sync` 测试通过，单文件双节点同步 ~12s 完成。详细 RCA 见 [`docs/KNOWN_ISSUES.md`](./docs/KNOWN_ISSUES.md) §2。
 > - ⏳ **72h 长跑、跨版本互通自动化** 仍未完成。
 >
 > **尚未达到 Go Syncthing 的替代水准**，但已适用于：研究 BEP 协议、参考 Rust 实现、做受控实验、参与开发。
@@ -28,7 +30,7 @@
 | 文件同步内部模块（puller / scanner / folder_model）单测 | ✅ 295 unit tests 全通过 |
 | 网络发现（Local + Global + STUN + UPnP + Relay v1） | ✅ 实现完成；ParallelDialer 带 RTT 评分 |
 | REST API（读写，兼容 Go 布局） | ✅ 读路径完整；写路径完成 |
-| 测试 | **295 unit + 1 e2e 通过，0 ignored** |
+| 测试 | **~314 unit + 5 e2e 通过，2 ignored** |
 | 代码检查 | **0 clippy warnings**（含 `await_holding_lock` + `manual_let_else`） |
 | 安全审计 | **3 unmaintained** 上游传递依赖（已接受债务，见 `.cargo/audit.toml`） |
 | 二进制体积 | ~12 MB（release，Windows x64） |
@@ -142,6 +144,7 @@ docs/
 | [`docs/README.md`](docs/README.md) | 文档导航 |
 | [`docs/design/ARCHITECTURE_DECISIONS.md`](docs/design/ARCHITECTURE_DECISIONS.md) | 架构决策记录（ADR） |
 | [`docs/design/NETWORK_DISCOVERY_DESIGN.md`](docs/design/NETWORK_DISCOVERY_DESIGN.md) | 网络发现层设计 |
+| [`docs/reports/CRUD_REPAIR_E2E_2026-05-22.md`](docs/reports/CRUD_REPAIR_E2E_2026-05-22.md) | P0~P2 CRUD 修复与 E2E 验证报告 |
 | [`docs/reports/IMPLEMENTATION_SUMMARY.md`](docs/reports/IMPLEMENTATION_SUMMARY.md) | Crate 级实现状态 |
 | [`docs/reports/VERIFICATION_REPORT_BEP_2026-04-11.md`](docs/reports/VERIFICATION_REPORT_BEP_2026-04-11.md) | BEP 互操作测试报告 |
 | [`docs/design/FEATURE_COMPARISON.md`](docs/design/FEATURE_COMPARISON.md) | 与 Go Syncthing 的功能对标 |
@@ -156,7 +159,7 @@ docs/
 见 [`CONTRIBUTING.md`](./CONTRIBUTING.md)。精简版：
 
 ```powershell
-cargo test --workspace          # 必须通过
+cargo test --workspace          # 必须通过: ~319 passed
 cargo clippy --all-targets      # 必须为 0 warnings
 
 # 或使用本地健康检查脚本（Windows）
