@@ -63,6 +63,9 @@ async fn test_pull_notify_wakeup() {
         }],
         symlink_target: None,
         deleted: Some(false),
+        modified_by: None,
+        blocks_hash: None,
+        no_permissions: None,
     };
 
     // 模拟远程索引已更新到 DB

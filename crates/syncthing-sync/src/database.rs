@@ -437,6 +437,9 @@ mod tests {
             blocks: vec![],
             symlink_target: None,
             deleted: None,
+            modified_by: None,
+            blocks_hash: None,
+            no_permissions: None,
         };
 
         db.update_file("test-folder", file.clone()).await.unwrap();

@@ -167,6 +167,9 @@ fn test_file_info_conversion() {
         }],
         symlink_target: None,
         deleted: Some(false),
+        modified_by: None,
+        blocks_hash: None,
+        no_permissions: None,
     };
 
     let wire: WireFileInfo = original.clone().into();

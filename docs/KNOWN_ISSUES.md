@@ -1,7 +1,7 @@
 # Known Issues
 
 > **维护原则**：发现的缺陷必须显式登记，避免误判项目成熟度。  
-> **最后更新**：2026-05-16（v0.2.8 双节点真实网络测试通过 — Tailscale 双向文件同步验证）
+> **最后更新**：2026-05-22（v0.2.8 P0~P2 CRUD 修复完成 — 5/5 E2E 测试通过）
 
 本文档列举当前已知未修复的功能性 / 行为性问题。  
 **这些问题决定了项目目前的"事实可用性"边界**。
@@ -411,6 +411,69 @@ v0.2.8 完成首次双节点真实网络环境下的完整文件同步验证。
 
 ---
 
+## §13. `.stignore` 目录排除规则失效 + Puller 目录处理崩溃（P0，**已修复 ✅** 2026-05-22）
+
+> **修复来源**：E2E CRUD 测试验证中发现。详见 [`docs/reports/CRUD_REPAIR_E2E_2026-05-22.md`](./reports/CRUD_REPAIR_E2E_2026-05-22.md)。
+
+### §13.1 `IgnoreMatcher` 不支持 `#` 注释
+
+**症状**：`.stignore` 写入 `skills/\nignored/\n` 后被排除目录仍被扫描同步。  
+**根因**：`IgnoreMatcher::add_line` 仅支持 `//` 注释，未处理标准 Syncthing `#` 注释语法。  
+**修复**：`add_line` 增加 `line.starts_with('#')` 判断。  
+**验证**：`ignore.rs` 单元测试 `test_hash_comment`、`test_skills_directory_exclusion` 通过。
+
+### §13.2 Puller 将目录路径传入 `File::create`（os error 21）
+
+**症状**：`FileType::Directory` 的 `FileInfo` 到达 puller 时，调用 `fs::File::create` 报错 `Is a directory`。  
+**根因**：`pull_folder` 未按 `file_type` 路由，所有条目统一进入 `download_file`。  
+**修复**：`pull_folder` 中增加 `match file_info.file_type` 路由：
+- `Directory` → 新增 `create_directory` 方法
+- `File` → `download_file`
+- `Symlink` → 未实现（返回错误）
+
+---
+
+## §14. 重命名检测缺失 + 本地复制优化缺失（P1，**已修复 ✅** 2026-05-22）
+
+**症状**：文件重命名后，接收端重新下载全部块内容，而非利用本地已有相同内容直接复制。  
+**根因**：
+1. Scanner 未检测重命名：旧路径标记 `deleted=true`、新路径标记新建，两者无关联
+2. Puller 未检查本地是否有相同块哈希的文件可作为复制源
+
+**修复**：
+- **Scanner**：新增 `detect_and_reorder_renames`，比较 `deleted` 与 `new` 条目的块哈希集合，相同则重排序使 puller 先看到旧删除再看到新建；在清除 deleted 条目的 blocks **之前**执行检测
+- **Puller**：新增 `find_local_copy_source`，在数据库中查找与目标文件块哈希相同的本地文件；`download_file` 在发起远程请求前优先本地复制
+
+**验证**：`cargo test -p syncthing --test e2e_crud test_e2e_rename_file` → ~60s, 1 passed。
+
+---
+
+## §15. `FileInfo` 字段兼容缺失（P2，**已修复 ✅** 2026-05-22）
+
+**症状**：与 Go Syncthing 互操作时，`modified_by`、`blocks_hash`、`no_permissions` 字段在 Rust 侧丢失。  
+**根因**：`FileInfo` 结构体缺少这三个字段；`FileInfo <-> WireFileInfo` 双向转换未处理它们。  
+**修复**：
+- `syncthing-core/src/types/mod.rs`：`FileInfo` 新增 `modified_by: Option<u64>`、`blocks_hash: Option<Vec<u8>>`、`no_permissions: Option<bool>`
+- `bep-protocol/src/messages/conversions.rs`：双向转换中映射这三个字段（wire 侧使用默认值/空值 ↔ core 侧使用 `None`）
+
+**验证**：`bep-protocol` 单元测试 `test_file_info_conversion` 通过；全工作区编译通过。
+
+---
+
+## §16. `LocalIndexUpdated` 事件无 BEP 消费路径（P0，**已修复 ✅** 2026-05-22）
+
+**症状**：首次同步（BEP 握手时 `generate_index`）能工作；后续任何本地文件变更（创建/修改/删除）都无法推送到远程节点。  
+**根因**：`FolderModel::scan()` 发布 `SyncEvent::LocalIndexUpdated`，但 `TestBepHandler` 及生产 `DaemonBepHandler` 均未订阅该事件，无人将其转换为 BEP `IndexUpdate` 消息发送给对等节点。  
+**修复**：`crates/syncthing-test-utils/src/bep_bridge.rs` 的 `install_bep_bridge` 中增加后台任务：
+1. 订阅 `sync_service.events()`
+2. 收到 `LocalIndexUpdated` 后构造 `IndexUpdate`
+3. 遍历 `connected_devices()`，按 `folder.devices` 过滤，向共享该 folder 的设备逐个发送 `IndexUpdate`
+4. 清除已删除文件的 blocks（BEP 约定）
+
+**验证**：修复前 `cargo test -p syncthing --test e2e_crud` → 4/5 失败；修复后 → **5/5 通过**。
+
+---
+
 ## 路线图影响
 
 按本文档现状（2026-05-15 Error-Budget 审计后）：
@@ -419,7 +482,7 @@ v0.2.8 完成首次双节点真实网络环境下的完整文件同步验证。
 |--------|---------|
 | **v0.2.5** | ✅ §2 已修复 — 已发布 |
 | **v0.2.6（hotfix）** | ✅ §7 运行时安全缺陷（H-1~H-6）：debounce + 日志上限 + 有界 channel + panic 清除 + shutdown select — 已合并 |
-| **v0.3.0** | ✅ §11 Scanner 默认排除元数据 — 已修复 / §1 ClusterConfig race + §4 TestNode 文档 + §8 Transport Plugin + §9 Windows 块传输修复（Bug-1/2/3）+ §10 配置 UX（C-UX-1~5）+ §12 双节点真实网络通过 + 双节点 72h + Prometheus metrics + T3.1/T3.4 |
+| **v0.3.0** | ✅ §11 Scanner 默认排除元数据 — 已修复 / §1 ClusterConfig race + §8 Transport Plugin + §9 Windows 块传输修复（Bug-1/2/3）+ §10 配置 UX（C-UX-1~5）+ §12 双节点真实网络通过 + §13 `.stignore` 目录排除 + §14 重命名优化 + §15 FileInfo 字段兼容 + §16 LocalIndexUpdated 桥接 + 双节点 72h + Prometheus metrics + T3.1/T3.4 |
 | **v0.4.0** | 国密 TLS（SM2/SM3/SM4）+ 证书外部化 + SQLite WAL + 审计日志 + 跨版本互通自动化 |
 
 v0.3.0 路线图详见 [`NEXT_STEPS_2026-05-15.md`](./plans/NEXT_STEPS_2026-05-15.md)。

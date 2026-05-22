@@ -59,6 +59,9 @@ async fn test_download_file_with_mock_source() {
         }],
         symlink_target: None,
         deleted: Some(false),
+        modified_by: None,
+        blocks_hash: None,
+        no_permissions: None,
     };
 
     let mock_source = Arc::new(MockBlockSource {
@@ -117,6 +120,9 @@ async fn test_check_needed_files_then_pull() {
         }],
         symlink_target: None,
         deleted: Some(false),
+        modified_by: None,
+        blocks_hash: None,
+        no_permissions: None,
     };
 
     // 模拟 index_handler 处理远程索引后更新 DB

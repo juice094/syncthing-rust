@@ -53,7 +53,8 @@ impl IgnoreMatcher {
     /// 解析单行规则
     pub fn add_line(&mut self, line: &str) {
         let line = line.trim();
-        if line.is_empty() || line.starts_with("//") {
+        // SAFETY: `#` 是标准 syncthing .stignore 注释语法；`//` 是历史遗留非标准语法
+        if line.is_empty() || line.starts_with("//") || line.starts_with('#') {
             return;
         }
 
@@ -109,6 +110,11 @@ impl IgnoreMatcher {
 
     pub fn is_empty(&self) -> bool {
         self.rules.is_empty()
+    }
+
+    /// 返回已加载的规则数量
+    pub fn len(&self) -> usize {
+        self.rules.len()
     }
 }
 
@@ -237,5 +243,60 @@ mod tests {
         m.add_line("*.log");
         assert!(m.matches("debug.log", false));
         assert_eq!(m.rules.len(), 1);
+    }
+
+    #[test]
+    fn test_hash_comment() {
+        let mut m = IgnoreMatcher::new();
+        m.add_line("# this is a standard syncthing comment");
+        m.add_line("*.log");
+        m.add_line("# another comment");
+        assert!(m.matches("debug.log", false));
+        assert!(!m.matches("debug.txt", false));
+        assert_eq!(m.rules.len(), 1);
+    }
+
+    #[test]
+    fn test_skills_directory_exclusion() {
+        let mut m = IgnoreMatcher::new();
+        m.add_line("skills/");
+        m.add_line("tools/");
+        m.add_line("vault/");
+
+        // 目录应被排除
+        assert!(m.matches("skills", true), "skills/ should match skills directory");
+        assert!(m.matches("tools", true), "tools/ should match tools directory");
+        assert!(m.matches("vault", true), "vault/ should match vault directory");
+
+        // 同名文件不应被排除
+        assert!(!m.matches("skills", false), "skills/ should NOT match skills file");
+        assert!(!m.matches("tools", false), "tools/ should NOT match tools file");
+
+        // 子目录中的同名目录也应被排除
+        assert!(m.matches("workspace/skills", true), "skills/ should match workspace/skills directory");
+        assert!(m.matches("deep/nested/vault", true), "vault/ should match deep/nested/vault directory");
+    }
+
+    #[test]
+    fn test_load_from_lines_with_hash_comments() {
+        let content = r#"# Syncthing ignore patterns
+*.tmp
+# Build directories
+target/
+
+# IDE files
+.idea/
+"#;
+
+        let mut m = IgnoreMatcher::new();
+        for line in content.lines() {
+            m.add_line(line);
+        }
+
+        assert_eq!(m.len(), 3);
+        assert!(m.matches("foo.tmp", false));
+        assert!(m.matches("target", true));
+        assert!(m.matches(".idea", true));
+        assert!(!m.matches("foo.txt", false));
     }
 }
