@@ -1,3 +1,10 @@
+---
+type: archive
+status: archived
+project: syncthing-rust
+tags: [archive, bep, handshake, plan]
+---
+
 # Master Agent 并行开发规划
 
 **项目**: Syncthing Rust 重构  

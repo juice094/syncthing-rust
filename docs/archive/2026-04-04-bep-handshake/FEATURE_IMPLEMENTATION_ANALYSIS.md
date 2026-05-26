@@ -1,3 +1,10 @@
+---
+type: archive
+status: archived
+project: syncthing-rust
+tags: [archive, bep, handshake]
+---
+
 # Syncthing Rust 功能实现角度分析报告
 
 **分析日期**: 2026-04-04  

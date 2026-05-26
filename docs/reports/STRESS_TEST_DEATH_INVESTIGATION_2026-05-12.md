@@ -1,3 +1,11 @@
+---
+type: report
+status: completed
+project: syncthing-rust
+date: 2026-05-12
+tags: [report, testing, stress-test]
+---
+
 # 72h Stress Test 进程死亡调查报告
 
 **调查时间**: 2026-05-12 12:00-13:20 UTC+8

@@ -1,3 +1,11 @@
+---
+type: report
+status: completed
+project: syncthing-rust
+date: 2026-05-18
+tags: [report, testing, e2e, network]
+---
+
 # Real-Network Dual-Node E2E Test Report
 
 > **Date:** 2026-05-18

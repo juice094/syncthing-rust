@@ -1,3 +1,10 @@
+---
+type: policy
+status: active
+project: syncthing-rust
+tags: [policy, engineering, discipline]
+---
+
 # 工程纪律规范
 
 > **生效日期**：2026-05-15  

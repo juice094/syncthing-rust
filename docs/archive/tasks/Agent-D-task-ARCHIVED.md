@@ -1,3 +1,10 @@
+---
+type: archive
+status: archived
+project: syncthing-rust
+tags: [archive, task]
+---
+
 # Agent-D Task: Network Layer
 
 ## ⚠️ CRITICAL RULES

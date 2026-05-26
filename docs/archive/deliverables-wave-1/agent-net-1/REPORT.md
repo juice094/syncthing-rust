@@ -1,3 +1,10 @@
+---
+type: archive
+status: archived
+project: syncthing-rust
+tags: [archive, deliverables, wave-1, report]
+---
+
 # Agent Report: Agent-Net-1
 
 ## Task: NET-001

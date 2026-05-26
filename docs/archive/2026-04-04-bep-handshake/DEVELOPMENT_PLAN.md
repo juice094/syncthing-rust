@@ -1,3 +1,10 @@
+---
+type: archive
+status: archived
+project: syncthing-rust
+tags: [archive, bep, handshake, plan]
+---
+
 # Syncthing Rust 功能实现开发计划
 
 **制定日期**: 2026-04-04  

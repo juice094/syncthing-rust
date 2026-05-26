@@ -1,3 +1,10 @@
+---
+type: design
+status: active
+project: syncthing-rust
+tags: [design, tui, ui]
+---
+
 # TUI Design — 美学与工程迭代方案
 
 > **基线**: `e6d59c9`，TUI 已有 4 Tab + 弹窗 + F5 daemon 控制 + 设备/文件夹增删。

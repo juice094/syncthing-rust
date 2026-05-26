@@ -1,3 +1,11 @@
+---
+type: report
+status: completed
+project: syncthing-rust
+date: 2026-04-11
+tags: [report, audit, testing]
+---
+
 # BEP 跨网络互通验证报告
 
 > 日期：2026-04-11  

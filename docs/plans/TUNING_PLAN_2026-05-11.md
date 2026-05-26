@@ -1,3 +1,11 @@
+---
+type: plan
+status: active
+project: syncthing-rust
+date: 2026-05-11
+tags: [plan, roadmap]
+---
+
 # 调优计划 · syncthing-rust（2026-05-11）
 
 > **定位**：在 [`POST_V0_2_0_ROADMAP.md`](./POST_V0_2_0_ROADMAP.md) 之外的 **横向调优补充**。本计划聚焦"功能已完成的代码如何变快、变稳、变干净"，不引入新功能。

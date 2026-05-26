@@ -1,3 +1,10 @@
+---
+type: archive
+status: archived
+project: syncthing-rust
+tags: [archive, bep, handshake, plan]
+---
+
 # BEP Handshake 修复计划
 
 ## 问题分析

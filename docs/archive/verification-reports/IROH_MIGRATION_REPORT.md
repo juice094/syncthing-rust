@@ -1,3 +1,10 @@
+---
+type: archive
+status: archived
+project: syncthing-rust
+tags: [archive, verification, report]
+---
+
 # Syncthing-Net Iroh 迁移报告
 
 **日期**: 2026-04-03  

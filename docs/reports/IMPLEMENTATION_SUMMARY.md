@@ -1,3 +1,10 @@
+---
+type: report
+status: active
+project: syncthing-rust
+tags: [report, audit, testing]
+---
+
 # syncthing-rust-rearch 项目实现总结
 
 > **项目说明**：基于 Rust 的 Syncthing 兼容实现，采用多 crate 工作区结构。目标是通过直接参照 Go Syncthing 源码，构建一个功能完整的去中心化文件同步 daemon。

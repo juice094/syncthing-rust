@@ -1,3 +1,10 @@
+---
+type: archive
+status: archived
+project: syncthing-rust
+tags: [archive, bep, handshake, verification]
+---
+
 # 子代理交付验收报告
 
 **验收日期**: 2026-04-04  

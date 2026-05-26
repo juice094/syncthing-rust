@@ -1,3 +1,10 @@
+---
+type: archive
+status: archived
+project: syncthing-rust
+tags: [archive, bep, handshake, task]
+---
+
 # 子代理集群任务分配计划
 
 > 基于 Go 原版 (syncthing-main) 与 Rust 实现的模块对比

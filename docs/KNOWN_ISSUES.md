@@ -1,3 +1,10 @@
+---
+type: tracker
+status: active
+project: syncthing-rust
+tags: [issues, bugs, tracker, syncthing-rust]
+---
+
 # Known Issues
 
 > **维护原则**：发现的缺陷必须显式登记，避免误判项目成熟度。  

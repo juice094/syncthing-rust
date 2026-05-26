@@ -1,3 +1,10 @@
+---
+type: archive
+status: archived
+project: syncthing-rust
+tags: [archive, plan]
+---
+
 # Syncthing-rust 项目改进计划 v0.2.0
 
 ## 项目现状

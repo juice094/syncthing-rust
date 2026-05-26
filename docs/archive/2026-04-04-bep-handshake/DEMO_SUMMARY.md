@@ -1,3 +1,10 @@
+---
+type: archive
+status: archived
+project: syncthing-rust
+tags: [archive, bep, handshake]
+---
+
 # Syncthing Rust 演示总结
 
 **演示程序**: `demo.exe`  

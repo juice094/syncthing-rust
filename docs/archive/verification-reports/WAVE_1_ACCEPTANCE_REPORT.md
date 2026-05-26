@@ -1,3 +1,10 @@
+---
+type: archive
+status: archived
+project: syncthing-rust
+tags: [archive, verification, report]
+---
+
 # Wave 1 验收报告
 
 **验收日期**: 2026-04-03  

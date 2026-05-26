@@ -1,3 +1,10 @@
+---
+type: archive
+status: archived
+project: syncthing-rust
+tags: [archive, bep, handshake]
+---
+
 # Syncthing Rust 与 Go 版本互通性修复总结
 
 ## 修复完成日期

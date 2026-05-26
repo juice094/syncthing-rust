@@ -1,3 +1,10 @@
+---
+type: plan
+status: active
+project: syncthing-rust
+tags: [plan, ops, gray-cloud]
+---
+
 # 格雷侧操作指南 · syncthing-rust 互通验证
 
 > **制定日期**: 2026-04-27

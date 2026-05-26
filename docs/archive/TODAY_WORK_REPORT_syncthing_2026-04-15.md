@@ -1,3 +1,11 @@
+---
+type: archive
+status: archived
+project: syncthing-rust
+date: 2026-04-15
+tags: [archive, history, report, work-log]
+---
+
 # 工作日志 — syncthing-rust 2026-04-15
 
 > 会话目标：整理仓库混乱、修复安全/依赖问题、验证 watcher 与长连接稳定性。

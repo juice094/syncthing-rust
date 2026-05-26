@@ -1,3 +1,11 @@
+---
+type: report
+status: completed
+project: syncthing-rust
+date: 2026-05-22
+tags: [report, testing, e2e]
+---
+
 # P0~P2 修复与 E2E CRUD 验证报告
 
 > **日期**：2026-05-22

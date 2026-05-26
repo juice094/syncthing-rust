@@ -1,3 +1,10 @@
+---
+type: plan
+status: active
+project: syncthing-rust
+tags: [plan, roadmap]
+---
+
 # Post-v0.2.0-beta 开发路线图
 
 > 📋 **计划索引**：[`docs/plans/INDEX.md`](./INDEX.md) — 查看所有计划文件关系与跳转速查

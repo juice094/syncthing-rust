@@ -1,3 +1,11 @@
+---
+type: report
+status: completed
+project: syncthing-rust
+date: 2026-05-15
+tags: [report, testing, e2e, network]
+---
+
 # 双节点真实网络 BEP E2E 测试报告
 
 > **测试日期**：2026-05-15  

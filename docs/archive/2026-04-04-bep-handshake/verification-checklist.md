@@ -1,3 +1,10 @@
+---
+type: archive
+status: archived
+project: syncthing-rust
+tags: [archive, bep, handshake]
+---
+
 # Master Agent 验收检查清单
 
 ## ⚠️ 验收原则

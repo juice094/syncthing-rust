@@ -1,3 +1,10 @@
+---
+type: policy
+status: active
+project: syncthing-rust
+tags: [ai, protocol, collaboration]
+---
+
 # AI Protocol · syncthing-rust
 
 > 跨架构状态同步锚点。CLI/Web/Claw 会话启动后优先读取。

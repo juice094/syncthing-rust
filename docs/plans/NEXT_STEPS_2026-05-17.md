@@ -1,3 +1,11 @@
+---
+type: plan
+status: active
+project: syncthing-rust
+date: 2026-05-17
+tags: [plan, roadmap]
+---
+
 # 后续任务清单 — 2026-05-17
 
 > 承接 [NEXT_STEPS_2026-05-15.md](./NEXT_STEPS_2026-05-15.md)

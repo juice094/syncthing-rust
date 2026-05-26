@@ -1,3 +1,10 @@
+---
+type: archive
+status: archived
+project: syncthing-rust
+tags: [archive, bep, handshake, task]
+---
+
 # 项目完善最终阶段任务分配
 
 > 目标：解决阻塞问题，实现与Go原版互通，完成端到端验证

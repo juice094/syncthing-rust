@@ -1,3 +1,10 @@
+---
+type: archive
+status: archived
+project: syncthing-rust
+tags: [archive, bep, handshake, report]
+---
+
 # Syncthing Rust 与 Go 版本互通性测试报告
 
 ## 测试日期

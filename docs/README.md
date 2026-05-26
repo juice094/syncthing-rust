@@ -1,3 +1,11 @@
+---
+title: Documentation Home
+type: index
+status: active
+project: syncthing-rust
+tags: [index, navigation, moc]
+---
+
 # Documentation
 
 本目录包含 `syncthing-rust` 项目的设计文档、验证报告、计划、运维指南与历史归档。

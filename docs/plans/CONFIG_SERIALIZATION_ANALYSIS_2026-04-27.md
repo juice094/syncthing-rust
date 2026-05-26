@@ -1,3 +1,11 @@
+---
+type: plan
+status: completed
+project: syncthing-rust
+date: 2026-04-27
+tags: [plan, roadmap]
+---
+
 # 配置序列化格式严格化分析 · 2026-04-27
 
 > **来源**: Gray-Cloud 分析助理（误发窗口，原文记录）

@@ -1,3 +1,10 @@
+---
+type: plan
+status: completed
+project: syncthing-rust
+tags: [plan, roadmap]
+---
+
 # Phase 3 Plan — BepSession Hardening & Production Validation
 
 > ⚠️ **勘误（2026-04-27）**：3.3 节"Cloud Go 节点双向验证"实际为**格雷侧远程节点**，当时误识别为 Go Syncthing，实际运行的是 pre-fix Rust 构建。验证结论"Push/Pull E2E 完成"对 Rust→Go 场景不具参考价值。

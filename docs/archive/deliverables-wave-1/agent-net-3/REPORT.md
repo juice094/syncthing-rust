@@ -1,3 +1,10 @@
+---
+type: archive
+status: archived
+project: syncthing-rust
+tags: [archive, deliverables, wave-1, report]
+---
+
 # Agent-Net-3 实现报告
 
 **Task ID**: NET-003  

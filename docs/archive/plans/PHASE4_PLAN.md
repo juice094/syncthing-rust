@@ -1,3 +1,10 @@
+---
+type: archive
+status: archived
+project: syncthing-rust
+tags: [archive, plan]
+---
+
 # Phase 4 Plan — TUI Hardening & Production Readiness
 
 > **基线**: Phase 3 已完成（`e8882ca`），Push/Pull E2E 双向验证通过。

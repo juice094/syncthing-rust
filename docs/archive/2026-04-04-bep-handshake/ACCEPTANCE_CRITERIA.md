@@ -1,3 +1,10 @@
+---
+type: archive
+status: archived
+project: syncthing-rust
+tags: [archive, bep, handshake]
+---
+
 # 子代理交付验收标准
 
 > **严格验收模式：不信任子代理声明，必须独立验证**

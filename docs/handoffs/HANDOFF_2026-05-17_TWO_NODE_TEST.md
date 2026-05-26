@@ -1,3 +1,11 @@
+---
+type: handoff
+status: completed
+project: syncthing-rust
+date: 2026-05-17
+tags: [handoff, session]
+---
+
 # Handoff: v0.2.8 Maintenance Round + Two-Node Real-Network Test Infrastructure
 
 **Date:** 2026-05-17

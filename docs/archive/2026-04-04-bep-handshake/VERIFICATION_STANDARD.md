@@ -1,3 +1,10 @@
+---
+type: archive
+status: archived
+project: syncthing-rust
+tags: [archive, bep, handshake, verification]
+---
+
 # 验收标准与验证流程
 
 ## 基本原则
