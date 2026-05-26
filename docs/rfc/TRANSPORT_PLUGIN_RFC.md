@@ -1,3 +1,10 @@
+---
+type: rfc
+status: draft
+project: syncthing-rust
+tags: [rfc, design]
+---
+
 # RFC: Transport Plugin Architecture
 
 > **Status**: Draft  

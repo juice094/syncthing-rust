@@ -1,3 +1,10 @@
+---
+type: guide
+status: active
+project: syncthing-rust
+tags: [ops, deployment, proxy, network]
+---
+
 # 出站代理（SOCKS5 / HTTP）使用指南
 
 > 目的：通过本地代理（如 Watt Toolkit / clash / v2rayN / shadowsocks）转发  

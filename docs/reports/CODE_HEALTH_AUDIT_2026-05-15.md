@@ -1,3 +1,11 @@
+---
+type: report
+status: completed
+project: syncthing-rust
+date: 2026-05-15
+tags: [report, audit, testing]
+---
+
 # Code Health and Decoupling Audit Report
 
 > Audit Date: 2026-05-15

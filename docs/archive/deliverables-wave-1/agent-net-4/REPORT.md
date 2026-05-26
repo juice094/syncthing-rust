@@ -1,3 +1,10 @@
+---
+type: archive
+status: archived
+project: syncthing-rust
+tags: [archive, deliverables, wave-1, report]
+---
+
 # Agent-Net-4 Implementation Report
 
 **Task ID**: NET-004  

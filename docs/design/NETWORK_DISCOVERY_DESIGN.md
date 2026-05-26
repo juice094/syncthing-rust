@@ -1,3 +1,10 @@
+---
+type: design
+status: active
+project: syncthing-rust
+tags: [design, network, discovery, nat]
+---
+
 # Syncthing-Rust 自建网络发现层设计文档
 
 > **版本**: v0.1.0-draft  

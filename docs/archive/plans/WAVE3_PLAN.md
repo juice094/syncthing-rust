@@ -1,3 +1,10 @@
+---
+type: archive
+status: archived
+project: syncthing-rust
+tags: [archive, plan]
+---
+
 # Wave 3 子集群执行计划
 
 **目标**: 连接管理与运行时基础设施（Connection Management & Runtime）  

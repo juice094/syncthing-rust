@@ -1,3 +1,11 @@
+---
+type: report
+status: completed
+project: syncthing-rust
+date: 2026-05-11
+tags: [report, audit, safety, rust]
+---
+
 # Unwrap/Expect Audit Report (T-F2)
 
 **Date**: 2026-05-11  

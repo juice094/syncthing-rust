@@ -1,3 +1,10 @@
+---
+type: archive
+status: archived
+project: syncthing-rust
+tags: [archive, history]
+---
+
 # 格雷 72h 持久化测试指南
 
 > 对应版本: [v0.1.0](https://github.com/juice094/syncthing-rust/releases/tag/v0.1.0)

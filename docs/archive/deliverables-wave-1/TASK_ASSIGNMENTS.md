@@ -1,3 +1,10 @@
+---
+type: archive
+status: archived
+project: syncthing-rust
+tags: [archive, deliverables, wave-1, task]
+---
+
 # Wave 1 任务分配
 
 **启动时间**: 2026-04-03  

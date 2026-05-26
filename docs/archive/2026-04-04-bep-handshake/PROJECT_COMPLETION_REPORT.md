@@ -1,3 +1,10 @@
+---
+type: archive
+status: archived
+project: syncthing-rust
+tags: [archive, bep, handshake, report]
+---
+
 # 项目完善最终报告
 
 **完成日期**: 2026-04-04  

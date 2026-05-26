@@ -1,3 +1,10 @@
+---
+type: report
+status: completed
+project: syncthing-rust
+tags: [report, audit, testing]
+---
+
 # Rust-Go 互操作测试报告
 
 **测试日期**: 2026-04-09  

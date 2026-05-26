@@ -1,3 +1,11 @@
+---
+type: plan
+status: completed
+project: syncthing-rust
+date: 2026-04-27
+tags: [plan, roadmap]
+---
+
 # 离线交接文档 · syncthing-rust 互通验证
 
 > **制定日期**: 2026-04-27

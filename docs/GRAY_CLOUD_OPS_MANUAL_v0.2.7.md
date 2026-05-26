@@ -1,3 +1,10 @@
+---
+type: guide
+status: active
+project: syncthing-rust
+tags: [ops, manual, gray-cloud]
+---
+
 # Gray-Cloud 操作手册 — syncthing-rust v0.2.7
 
 > **生成时间**：2026-05-15

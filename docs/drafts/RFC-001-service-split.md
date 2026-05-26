@@ -1,3 +1,10 @@
+---
+type: draft
+status: draft
+project: syncthing-rust
+tags: [draft, rfc]
+---
+
 # RFC-001: `syncthing-sync::service::SyncService` 业务拆分
 
 **状态**: Draft → Accepted (2026-05-13)  

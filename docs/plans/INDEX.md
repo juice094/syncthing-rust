@@ -1,3 +1,10 @@
+---
+type: plan
+status: active
+project: syncthing-rust
+tags: [plan, roadmap]
+---
+
 # 计划文件索引 · syncthing-rust
 
 > **维护原则**：计划不是墓碑，是活文档。过时计划必须归档，避免误导决策。

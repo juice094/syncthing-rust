@@ -1,3 +1,10 @@
+---
+type: design
+status: active
+project: syncthing-rust
+tags: [design, architecture, adr]
+---
+
 # Architecture Decisions
 
 > **权威状态源**：本文档汇总 syncthing-rust 的所有粗粒度架构决策。

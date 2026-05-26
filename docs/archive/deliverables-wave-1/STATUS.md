@@ -1,3 +1,10 @@
+---
+type: archive
+status: archived
+project: syncthing-rust
+tags: [archive, deliverables, wave-1]
+---
+
 # Wave 1 执行状态看板
 
 **Master Agent**: Session Active  

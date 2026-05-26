@@ -1,3 +1,11 @@
+---
+type: report
+status: completed
+project: syncthing-rust
+date: 2026-05-13
+tags: [report, testing, stress-test]
+---
+
 # Stress Test 9h11m 完整分析报告
 
 > 测试期：2026-05-12 13:07:49 → 2026-05-12 22:18:51（CST，本地时间）  

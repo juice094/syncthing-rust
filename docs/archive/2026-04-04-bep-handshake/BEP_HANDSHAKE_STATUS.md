@@ -1,3 +1,10 @@
+---
+type: archive
+status: archived
+project: syncthing-rust
+tags: [archive, bep, handshake]
+---
+
 # BEP 握手修复状态报告
 
 ## 🎉 最终状态（2026-04-04 21:30）

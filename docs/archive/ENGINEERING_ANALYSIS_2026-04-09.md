@@ -1,3 +1,11 @@
+---
+type: archive
+status: archived
+project: syncthing-rust
+date: 2026-04-09
+tags: [archive, history]
+---
+
 # syncthing-rust 工程化全面分析报告
 
 > 日期: 2026-04-09  

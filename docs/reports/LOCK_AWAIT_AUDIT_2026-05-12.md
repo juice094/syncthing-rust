@@ -1,3 +1,11 @@
+---
+type: report
+status: completed
+project: syncthing-rust
+date: 2026-05-12
+tags: [report, audit, concurrency, safety]
+---
+
 # Cross-Await Lock Holding Audit — 2026-05-12
 
 ## 背景

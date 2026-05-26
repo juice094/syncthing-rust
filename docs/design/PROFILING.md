@@ -1,3 +1,10 @@
+---
+type: design
+status: active
+project: syncthing-rust
+tags: [design, performance, profiling]
+---
+
 # Profiling Guide · syncthing-rust
 
 > **目标**：建立可重复的性能采集流程。本文档不替代 criterion 基准（见 `TUNING_PLAN_2026-05-11.md` T-A1），它解决"如何看到热点在哪里"。

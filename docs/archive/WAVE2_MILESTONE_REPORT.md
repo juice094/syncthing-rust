@@ -1,3 +1,10 @@
+---
+type: archive
+status: archived
+project: syncthing-rust
+tags: [archive, history, report, milestone]
+---
+
 # Wave 2 里程碑报告
 
 **日期**: 2026-04-09  

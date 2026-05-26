@@ -1,3 +1,10 @@
+---
+type: archive
+status: archived
+project: syncthing-rust
+tags: [archive, bep, handshake]
+---
+
 # Syncthing Rust vs Go 原版 - 兼容性与流程验证比较
 
 **分析日期**: 2026-04-04  

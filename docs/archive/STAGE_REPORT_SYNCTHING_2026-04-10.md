@@ -1,3 +1,11 @@
+---
+type: archive
+status: archived
+project: syncthing-rust
+date: 2026-04-10
+tags: [archive, history, report]
+---
+
 # syncthing-rust-rearch 阶段性报告
 
 **日期**: 2026-04-10  

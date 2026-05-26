@@ -1,3 +1,10 @@
+---
+type: archive
+status: archived
+project: syncthing-rust
+tags: [archive, history]
+---
+
 # GitHub 页面优化指南 — syncthing-rust
 
 > 以下内容仅针对 `syncthing-rust` 仓库的 GitHub 页面优化。

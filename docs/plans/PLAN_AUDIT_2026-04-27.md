@@ -1,3 +1,11 @@
+---
+type: plan
+status: completed
+project: syncthing-rust
+date: 2026-04-27
+tags: [plan, roadmap]
+---
+
 # 计划审计报告 · syncthing-rust
 
 > 📋 **计划索引**: [`INDEX.md`](./INDEX.md) — 所有计划文件关系与跳转速查

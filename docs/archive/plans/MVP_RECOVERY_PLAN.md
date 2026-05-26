@@ -1,3 +1,10 @@
+---
+type: archive
+status: archived
+project: syncthing-rust
+tags: [archive, plan]
+---
+
 # MVP 修复计划：让 syncthing-rust 真正跑起来
 
 ## 现状诊断（基于代码审计）

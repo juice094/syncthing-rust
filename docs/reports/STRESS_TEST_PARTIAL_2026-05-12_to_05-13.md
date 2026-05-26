@@ -1,3 +1,11 @@
+---
+type: report
+status: completed
+project: syncthing-rust
+date: 2026-05-12
+tags: [report, testing, stress-test]
+---
+
 # Stress Test 部分运行报告（2026-05-12 → 2026-05-13）
 
 > 状态：**意外终止**（非崩溃，疑似系统休眠/进程脱离）  

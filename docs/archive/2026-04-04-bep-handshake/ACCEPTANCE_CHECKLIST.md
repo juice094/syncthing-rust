@@ -1,3 +1,10 @@
+---
+type: archive
+status: archived
+project: syncthing-rust
+tags: [archive, bep, handshake]
+---
+
 # 强制验收检查清单
 
 **适用范围**: 所有子代理交付  

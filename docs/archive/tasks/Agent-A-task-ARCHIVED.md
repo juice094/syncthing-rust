@@ -1,3 +1,10 @@
+---
+type: archive
+status: archived
+project: syncthing-rust
+tags: [archive, task]
+---
+
 # Agent-A Task: BEP Protocol Implementation
 
 ## ⚠️ CRITICAL RULES

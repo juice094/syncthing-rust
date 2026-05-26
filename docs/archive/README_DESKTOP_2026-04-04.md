@@ -1,3 +1,11 @@
+---
+type: archive
+status: archived
+project: syncthing-rust
+date: 2026-04-04
+tags: [archive, history]
+---
+
 # Syncthing Rust
 
 Syncthing 的 Rust 重构实现 - 一个连续文件同步程序。

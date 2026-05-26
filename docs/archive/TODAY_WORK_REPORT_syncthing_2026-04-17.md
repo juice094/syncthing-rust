@@ -1,3 +1,11 @@
+---
+type: archive
+status: archived
+project: syncthing-rust
+date: 2026-04-17
+tags: [archive, history, report, work-log]
+---
+
 # Work Report — 2026-04-17
 
 ## Session Focus

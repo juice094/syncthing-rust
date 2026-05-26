@@ -1,3 +1,10 @@
+---
+type: guide
+status: active
+project: syncthing-rust
+tags: [ops, deployment, tailscale, vpn]
+---
+
 # 与 Tailscale 协同部署指南
 
 > 目的：用 Tailscale 提供的零配置 NAT 穿透 + WireGuard 加密 + Magic DNS，  

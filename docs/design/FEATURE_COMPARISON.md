@@ -1,3 +1,10 @@
+---
+type: design
+status: active
+project: syncthing-rust
+tags: [design, comparison, go]
+---
+
 # syncthing-rust-rearch vs Go Syncthing 功能比对
 
 **比对日期**: 2026-04-09  

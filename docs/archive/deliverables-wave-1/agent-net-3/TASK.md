@@ -1,3 +1,10 @@
+---
+type: archive
+status: archived
+project: syncthing-rust
+tags: [archive, deliverables, wave-1, task]
+---
+
 # TASK ASSIGNMENT: Agent-Net-3
 
 **Task ID**: NET-003  

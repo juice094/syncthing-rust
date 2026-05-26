@@ -1,3 +1,10 @@
+---
+type: archive
+status: archived
+project: syncthing-rust
+tags: [archive, bep, handshake, task]
+---
+
 # 最终实现任务分配
 
 > 目标：将项目完成度从 55-60% 提升到 75-80%
