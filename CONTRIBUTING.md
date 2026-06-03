@@ -1,105 +1,154 @@
 # Contributing to syncthing-rust
 
-> **Scope**: This project is a single-maintainer Windows workspace. Contributions are welcome, but review bandwidth is limited. Open an issue before large changes.
+> syncthing-rust is a single-maintainer project (Bus Factor = 1). Your participation matters. Open an issue before large changes — review bandwidth is limited but every well-scoped contribution is valued.
+
+## Project Health
+
+| Metric | Status |
+|:---|:---|
+| Version | v0.2.10-rc3 |
+| Tests | 382 passed / 0 failed |
+| Clippy | 0 warnings |
+| License | MIT (dual: commercial available) |
+| Rust | 1.85+ |
 
 ---
 
-## Prerequisites
+## 5-Minute Quick Start
 
-- **Rust** 1.85+ (`rustup update stable`)
-- **PowerShell** (Windows) or **Bash** (Linux/macOS)
-- **Git** with LFS if working with large test fixtures
+### Requirements
 
----
-
-## Quality Gates (Mandatory)
-
-Every PR must satisfy:
+- **Rust**: 1.85.0+ (`rustc --version`)
+- **OS**: Windows 10/11 (primary), Linux/macOS community support
 
 ```powershell
-cargo check --workspace
-cargo test --workspace
-cargo clippy --workspace --all-targets
+git clone https://github.com/juice094/syncthing-rust.git
+cd syncthing-rust
+cargo build --release
+cargo test --all
 ```
 
-- **Tests**: 309+ passed, 0 failed. New features require tests.
-- **Clippy**: 0 warnings. No exceptions.
-- **Doc-tests**: Public APIs must have runnable examples or doc comments.
-- **File size**: 600-line soft cap per file (CI warns; see [`AGENTS.md`](AGENTS.md) §代码健康 §2). Plan a split when nearing the limit.
+### First Experience
+
+```powershell
+# Generate device identity + config
+cargo run -- init
+
+# Start daemon
+cargo run -- run --config-dir ~/.syncthing
+
+# CLI health check
+cargo run -p syncthing-cli -- status
+```
 
 ---
 
-## Performance & Tuning Workflow
+## I Want To Contribute... (Decision Matrix)
 
-Before claiming a performance improvement:
-
-1. **Establish baseline**: run `cargo bench -p <crate>` against `main` and commit the criterion baseline (or post numbers in the PR).
-2. **Apply change** and re-run the same benchmark on the same machine.
-3. **Report delta**: include the criterion output (`change: ...`) in the PR description.
-4. **Avoid regressions**: changes that don't address performance must not slow hot paths (scanner / BEP encode-decode / puller) by more than 5%.
-
-Profiling:
-
-- Flamegraph: `cargo flamegraph -p syncthing --bin stress_test --release` (see `docs/design/PROFILING.md` once T-A2 lands).
-- Heap: `dhat-rs` (feature-gated build).
-
-Current tuning roadmap: [`docs/plans/TUNING_PLAN_2026-05-11.md`](docs/plans/TUNING_PLAN_2026-05-11.md). Open issues referencing T-A/T-B/T-C/... task IDs.
+| What | Entry | Key Files | Must Read |
+|:---|:---|:---|:---|
+| **Report bug** | [New Issue](https://github.com/juice094/syncthing-rust/issues/new) | — | This file "Commit Convention" |
+| **Fix bug** | [open issues](https://github.com/juice094/syncthing-rust/issues) | `crates/` matching module | [AGENTS.md](AGENTS.md) |
+| **Add feature** | Open Issue first | `crates/syncthing-core/src/traits/` | Architecture below |
+| **Improve docs** | Edit `.md` files directly | `README.md`, `AGENTS.md` | — |
+| **Refactor** | Open Issue first | — | [AGENTS.md](AGENTS.md) "Crate boundary hygiene" |
 
 ---
 
-## Workflow
+## Code Checklist
 
-1. **Fork** → **Branch** (`feat/<name>` or `fix/<name>`) → **Commit** → **PR**.
-2. **Commit messages**: Use [Conventional Commits](https://www.conventionalcommits.org/).
-   - `feat(net): add IPv6 multicast to LocalDiscovery`
-   - `fix(sync): resolve block size mismatch in ManagerBlockSource`
-   - `docs(readme): update quick start for PowerShell`
-3. **PR description**: Include "What", "Why", and "How verified".
+Before submitting a PR:
+
+- [ ] `cargo test --all` — all green
+- [ ] `cargo check --all` — zero warnings
+- [ ] New public API has doc comment
+- [ ] New error paths are logged (not silent)
+- [ ] No production `unwrap()` (test code only)
+
+### Commit Convention (Conventional Commits)
+
+```
+feat:     New feature
+fix:      Bug fix
+docs:     Documentation
+refactor: Refactor (no behavior change)
+test:     Tests
+chore:    Build/tooling
+perf:     Performance
+```
+
+Example:
+
+```
+fix(sync): Windows rename fallback with exponential backoff
+
+On Windows, fs::rename(tmp, real) fails with ERROR_SHARING_VIOLATION
+when the target is opened by editors/AV/desktop search.
+- Add rename_with_retry() with 3-layer fallback
+- Unit tests cover normal, target-exists, and conflict scenarios
+```
+
+---
+
+## Coding Standards
+
+- Run `cargo fmt` before committing
+- Log levels: `trace` for block-level, `debug` for state transitions, `info` for lifecycle, `warn` for recoverable, `error` for failures
+- Async: `tokio` only; no `async-std`
+- Error handling: prefer `thiserror`/`anyhow`; no bare `unwrap` in production paths
+- File size: 600-line soft cap per file
+
+---
+
+## Crate Map
+
+| Crate | Purpose | Must Not |
+|:---|:---|:---|
+| `syncthing-core` | Traits + types only | No concrete impls |
+| `bep-protocol` | Wire format (prost) | No I/O |
+| `syncthing-net` | Transport, sessions, discovery | No sync logic |
+| `syncthing-sync` | Scanner, puller, folder model | No wire format |
+| `syncthing-fs` | Filesystem abstraction | No sync logic |
+| `syncthing-db` | Storage backend | No sync logic |
+| `syncthing-api` | REST + WebSocket | No sync logic |
+| `syncthing-versioner` | File versioning | No FS I/O |
+
+---
+
+## Architecture Reference
+
+| Document | Content |
+|:---|:---|
+| [`AGENTS.md`](AGENTS.md) | Project conventions, safety rules, progress log |
+| [`docs/plans/`](docs/plans/) | Implementation plans and situation reports |
+| [`scripts/cloud-deploy.sh`](scripts/cloud-deploy.sh) | Automated cloud deployment |
 
 ---
 
 ## Architecture Constraints
 
-Read [`docs/design/ARCHITECTURE_DECISIONS.md`](docs/design/ARCHITECTURE_DECISIONS.md) before modifying core logic.
+Read [`AGENTS.md`](AGENTS.md) before modifying core logic.
 
 - **`syncthing-core` is read-only** for downstream crates. Do not add dependencies or change public APIs without an ADR.
-- **Rust core modules are not outsourced to sub-agents**. Human or primary-agent authored only.
-- **Adapter layers / bridges** must live in independent processes (`cmd/`) and remain zero-intrusive to core crates.
-
----
-
-## Code Style
-
-- Run `cargo fmt` before committing.
-- Prefer `thiserror` / `anyhow` for error handling; avoid bare `unwrap` in production paths.
-- Log levels: `trace` for per-block/per-packet noise, `debug` for state transitions, `info` for lifecycle events, `warn` for recoverable anomalies, `error` for user-visible failures.
-- Async boundaries: `tokio` only; no `async-std`.
-
----
-
-## Testing Guidelines
-
-- **Unit tests**: Co-located in `src/` via `#[cfg(test)]`.
-- **Integration tests**: `acceptance-tests/` for multi-crate scenarios.
-- **Mocking**: Use `syncthing-test-utils::MemoryPipe` for BEP transport tests; avoid network I/O in unit tests.
-- **Windows-specific**: UDP port tests use ephemeral ports to avoid `10048` conflicts.
-
----
-
-## Communication
-
-- **Bug reports**: Include `cargo test --workspace` output, OS version, and minimal reproduction.
-- **Feature requests**: Reference the [7-dimension evaluation framework](docs/design/ARCHITECTURE_DECISIONS.md#技术选型评估框架) (SDK maturity, dev efficiency, distribution cost, tech-stack consistency, maintenance cost, dependency risk, type safety).
-- **Security issues**: Do not open public issues. Email the maintainer directly.
+- **Crate boundary hygiene**: Core = traits + types only. No concrete implementations leak into core.
+- **Platform-agnostic core**: Symlink, xattr, ownership behind trait abstractions with `#[cfg]` implementations.
 
 ---
 
 ## Frozen Items
 
-The following are **stage-frozen** (high cost / low value at v0.2.0). Do not implement without prior discussion:
+The following are **stage-frozen** (high cost / low value at v0.2.x). Do not implement without prior discussion:
 
 - Consensus algorithms
 - Reputation systems
-- Custom cryptographic channel rebuilds beyond rustls TLS 1.3
+- Custom cryptography beyond rustls TLS 1.3
 
-See [`docs/design/ARCHITECTURE_DECISIONS.md`](docs/design/ARCHITECTURE_DECISIONS.md) AD-001 for rationale.
+---
+
+## Communication
+
+- **Bug reports**: [GitHub Issues](https://github.com/juice094/syncthing-rust/issues/new)
+- **Feature requests**: [GitHub Discussions](https://github.com/juice094/syncthing-rust/discussions)
+- **Commercial support**: See [LICENSE-COMMERCIAL.md](LICENSE-COMMERCIAL.md)
+
+Thank you for contributing!

@@ -2,6 +2,39 @@
 
 ## [Unreleased]
 
+## [0.2.10-rc3] — 2026-06-03（Phase 0 Complete + Production Readiness）
+
+### Headline: 382 tests, 0 failures. BEP protocol hardened, E2E sync verified, production-ready foundations.
+
+### Protocol
+- **Hello→prost**: Replaced 180 lines of hand-written protobuf with `#[derive(prost::Message)]`
+- **LZ4 write compression**: Payload compression on the write path (4B size prefix + LZ4 block)
+- **wire_compat**: 10 protobuf wire-format conformance tests
+
+### Sync Core
+- **rename_with_retry**: 3-layer Windows rename fallback (remove→rename→exponential backoff)
+- **Local push on reconnect**: Files created while peer is offline are now pushed on reconnection
+- **Scanner logging**: `scanned/new/modified/changed` counters for diagnostics
+- **Watcher feedback loop fix**: `.syncthing.*.tmp` events filtered; 5s debounce + 5s min scan gap
+
+### Ignore Patterns
+- `**/` arbitrary-depth matching
+- `//`→`#` comment syntax (Go Syncthing compatibility)
+- `#include` checked before `#` comment parsing
+
+### Versioning
+- **New crate**: `syncthing-versioner`
+- **SimpleVersioner**: keep=N, `.stversions/` archive, auto-pruning
+- **StaggeredVersioner**: 4 time windows (30s/1h/1d/1w), maxAge configurable
+
+### Connection Stability
+- **Reconnect backoff fix**: `retry_count` independent map prevents reset to 1
+- **TCP keepalive**: SO_KEEPALIVE 60s idle / 10s interval / 3 probes on all connections
+
+### Operations
+- **cloud-deploy.sh**: One-command cloud deployment (--full/--compile-only/--deploy-only)
+- **Dual-license**: MIT + commercial license available
+
 ## [0.2.8] — 2026-05-16（Scanner 元数据排除 + CI/文档清理）
 
 ### 🎯 Headline: Scanner 默认排除 syncthing 元数据，消除新手部署陷阱

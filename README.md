@@ -9,6 +9,7 @@
 [![Rust](https://img.shields.io/badge/rust-1.85%2B-orange?logo=rust)](https://www.rust-lang.org)
 [![Tests](https://img.shields.io/badge/tests-382%20passed-brightgreen)](https://github.com/juice094/syncthing-rust/actions)
 [![Version](https://img.shields.io/badge/version-v0.2.10--rc3-blue)](https://github.com/juice094/syncthing-rust/releases)
+[![License](https://img.shields.io/badge/license-MIT%20%2B%20Commercial-blue)](./LICENSE)
 [![License](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 
 </div>
