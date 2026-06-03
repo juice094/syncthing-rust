@@ -123,7 +123,7 @@ pub fn run_wizard(config_dir: &PathBuf) -> anyhow::Result<()> {
             listen_addresses: vec![],
             global_announce_enabled: false,
             local_announce_enabled: false,
-            relays_enabled: false,
+            relays_enabled: true,
             transports: vec!["tcp".to_string()],
         },
     };
