@@ -16,6 +16,13 @@ impl ConnectionManager {
         addresses: Vec<SocketAddr>,
         relay_urls: Vec<String>,
     ) -> syncthing_core::Result<()> {
+        // 持久化地址和 relay URL（必须在 is_connected 检查之前，
+        // 否则已有直连时 relay URL 不会被存储，断开后 dial 无 relay 候选）
+        self.device_addresses.insert(device_id, addresses.clone());
+        if !relay_urls.is_empty() {
+            self.device_relay_urls.insert(device_id, relay_urls.clone());
+        }
+
         // 检查是否已连接
         if self.is_connected(&device_id) {
             debug!("Device {} is already connected", device_id);
@@ -29,12 +36,6 @@ impl ConnectionManager {
                 debug!("Connection to {} is already pending", device_id);
                 return Ok(());
             }
-        }
-
-        // 存储地址
-        self.device_addresses.insert(device_id, addresses.clone());
-        if !relay_urls.is_empty() {
-            self.device_relay_urls.insert(device_id, relay_urls.clone());
         }
 
         // 继承已有重试次数（如果存在）
