@@ -11,7 +11,7 @@ fn test_hello_encode_decode() {
     };
 
     let encoded = hello.encode_to_vec();
-    let decoded = Hello::decode(&encoded).unwrap();
+    let decoded = Hello::decode(encoded.as_slice()).unwrap();
 
     assert_eq!(decoded.device_name, hello.device_name);
     assert_eq!(decoded.client_name, hello.client_name);
@@ -21,8 +21,8 @@ fn test_hello_encode_decode() {
 }
 
 #[test]
-fn test_hello_default() {
-    let hello = Hello::default();
+fn test_hello_default_rust_client() {
+    let hello = Hello::default_rust_client();
     assert_eq!(hello.client_name, "syncthing-rust");
     assert_eq!(hello.client_version, "0.1.0");
     assert_eq!(hello.num_connections, 1);
@@ -50,35 +50,6 @@ fn test_empty_hello() {
 
     let encoded = hello.encode_to_vec();
     assert!(encoded.is_empty());
-}
-
-#[test]
-fn test_varint_roundtrip() {
-    let test_values = [
-        0u64,
-        1,
-        127,
-        128,
-        255,
-        256,
-        16383,
-        16384,
-        65535,
-        65536,
-        u32::MAX as u64,
-    ];
-
-    for &value in &test_values {
-        let mut buf = BytesMut::new();
-        put_varint(&mut buf, value);
-        let (decoded, bytes_read) = read_varint(&buf).unwrap();
-        assert_eq!(
-            decoded, value,
-            "varint {} encoded to {:?}, decoded to {}",
-            value, buf, decoded
-        );
-        assert_eq!(bytes_read, buf.len());
-    }
 }
 
 #[test]

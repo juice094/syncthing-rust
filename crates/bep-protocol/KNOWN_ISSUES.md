@@ -83,6 +83,7 @@
 - [x] Hello message tests
 - [x] TLS handshake tests
 - [ ] Integration tests (missing)
+- [x] [wire_compat.rs](tests/wire_compat.rs) — 10 protocol conformance tests (2026-06-03)
 - [ ] Compatibility tests with Syncthing (missing)
 
 ### Integration Tests Needed
@@ -106,8 +107,8 @@
 ## TODO List
 
 ### High Priority
-1. [ ] Implement proper protobuf encoding (use `prost`)
-2. [ ] Add LZ4 compression support
+1. [x] Implement proper protobuf encoding (use `prost`) — Hello now uses prost::Message derive (2026-06-02)
+2. [x] Add LZ4 compression support — write side compression added in syncthing-net connection I/O (2026-06-02)
 3. [ ] Fix request/response matching
 4. [ ] Add integration tests with real Syncthing
 5. [ ] Verify protocol compliance

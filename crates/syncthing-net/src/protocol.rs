@@ -3,6 +3,7 @@
 //! 参考: syncthing/lib/protocol/*.go
 
 use bytes::Bytes;
+use prost::Message;
 use serde::Serialize;
 
 use bep_protocol::messages::Hello as BepHello;

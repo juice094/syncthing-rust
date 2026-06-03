@@ -5,7 +5,7 @@
 //! - `!pattern` 否定规则（不忽略）
 //! - `/pattern` 锚定到根目录
 //! - `pattern/` 仅匹配目录
-//! - `// comment` 注释
+//! - `# comment` 注释
 
 use tracing::{debug, trace};
 
@@ -53,8 +53,8 @@ impl IgnoreMatcher {
     /// 解析单行规则
     pub fn add_line(&mut self, line: &str) {
         let line = line.trim();
-        // SAFETY: `#` 是标准 syncthing .stignore 注释语法；`//` 是历史遗留非标准语法
-        if line.is_empty() || line.starts_with("//") || line.starts_with('#') {
+        // SAFETY: `#` 是标准 syncthing .stignore 唯一注释语法
+        if line.is_empty() || line.starts_with('#') {
             return;
         }
 
@@ -238,7 +238,7 @@ mod tests {
     #[test]
     fn test_comments_and_empty() {
         let mut m = IgnoreMatcher::new();
-        m.add_line("// this is a comment");
+        m.add_line("# this is a comment");
         m.add_line("");
         m.add_line("*.log");
         assert!(m.matches("debug.log", false));

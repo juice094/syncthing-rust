@@ -186,7 +186,21 @@ impl BepConnection {
                     return Err(SyncthingError::Serialization(e.to_string()));
                 }
                 let hdr_len = hdr_buf.len();
-                let msg_len = msg.payload.len();
+
+                // LZ4 compress payload if header requests it
+                let (payload, msg_len) = if msg.header.compressed && !msg.payload.is_empty() {
+                    let uncompressed = msg.payload.as_ref();
+                    let compressed = lz4::block::compress(uncompressed, None, false)
+                        .map_err(|e| SyncthingError::Serialization(format!("lz4 compress: {}", e)))?;
+                    let uncompressed_len = uncompressed.len() as u32;
+                    let mut payload = Vec::with_capacity(4 + compressed.len());
+                    payload.extend_from_slice(&uncompressed_len.to_be_bytes());
+                    payload.extend_from_slice(&compressed);
+                    let payload_len = payload.len();
+                    (payload, payload_len)
+                } else {
+                    (msg.payload.to_vec(), msg.payload.len())
+                };
 
                 // header length (2 bytes)
                 if let Err(e) = write_half.write_all(&(hdr_len as u16).to_be_bytes()).await {
@@ -201,8 +215,8 @@ impl BepConnection {
                     return Err(SyncthingError::Io(e));
                 }
                 // payload
-                if !msg.payload.is_empty() {
-                    if let Err(e) = write_half.write_all(&msg.payload).await {
+                if !payload.is_empty() {
+                    if let Err(e) = write_half.write_all(&payload).await {
                         return Err(SyncthingError::Io(e));
                     }
                 }

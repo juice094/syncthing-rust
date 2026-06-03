@@ -185,12 +185,12 @@ impl IgnorePatterns {
         for line in content.lines() {
             let trimmed = line.trim();
 
-            // Skip empty lines and // comments
-            if trimmed.is_empty() || trimmed.starts_with("//") {
+            // Skip empty lines
+            if trimmed.is_empty() {
                 continue;
             }
 
-            // Handle include directives
+            // Handle include directives (must check before # comment)
             if trimmed.starts_with("#include ") || trimmed.starts_with("@include ") {
                 if let Some(file) = trimmed.split_once(' ').map(|x| x.1) {
                     let file = file.trim();
@@ -201,7 +201,7 @@ impl IgnorePatterns {
                 continue;
             }
 
-            // Skip # comments (but not includes, which are handled above)
+            // Skip # comments
             if trimmed.starts_with('#') {
                 continue;
             }
@@ -386,6 +386,10 @@ impl Pattern {
         let is_root_only = chars.peek() == Some(&'/');
         if is_root_only {
             chars.next(); // consume '/'
+            // Also consume a second '/' if present (path separator at root level)
+            if chars.peek() == Some(&'/') {
+                chars.next();
+            }
         }
 
         // Build the pattern string
@@ -452,7 +456,8 @@ impl Pattern {
                         chars.next(); // consume second *
                         if chars.peek() == Some(&'/') {
                             chars.next(); // consume /
-                            regex_str.push_str("(?:.*/)?");
+                            // Match zero or more directory levels (arbitrary depth)
+                            regex_str.push_str("(?:.*/)*");
                         } else {
                             regex_str.push_str(".*");
                         }

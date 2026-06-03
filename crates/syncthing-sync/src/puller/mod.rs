@@ -10,13 +10,122 @@ use sha2::Digest;
 use std::path::Path;
 use std::sync::Arc;
 use syncthing_core::types::{BlockInfo, FileInfo, FileType, Folder};
+use syncthing_versioner::Versioner;
 use tokio::fs;
 use tokio::io::AsyncWriteExt;
 use tracing::{debug, error, info, trace, warn};
 
+/// 重试配置
+const RENAME_RETRY_BASE_DELAY_MS: u64 = 1000;
+const RENAME_RETRY_MAX_ATTEMPTS: u32 = 5;
+
+/// Windows-aware 原子重命名，带指数退避重试
+///
+/// 处理 Windows 上目标文件被其他进程锁定（杀毒软件、编辑器、桌面搜索等）
+/// 导致的 `ERROR_SHARING_VIOLATION` (32) 和 `ERROR_ACCESS_DENIED` (5)。
+///
+/// 策略:
+/// 1. 直接 rename
+/// 2. 失败 → remove(target) → rename
+/// 3. 仍失败 → 指数退避重试 (1s/2s/4s/8s)，最多 5 次
+/// 4. 最终失败 → 保留 .tmp，返回错误（下次 pull 周期再试）
+async fn rename_with_retry(temp_path: &Path, file_path: &Path, file_name: &str) -> Result<()> {
+    match fs::rename(temp_path, file_path).await {
+        Ok(()) => return Ok(()),
+        Err(e) => {
+            warn!(
+                file = %file_name,
+                error = %e,
+                raw_os_error = ?e.raw_os_error(),
+                "Initial rename failed, trying remove+rename fallback"
+            );
+        }
+    }
+
+    // Fallback: 先删目标再重命名
+    if file_path.exists() {
+        if let Err(e) = fs::remove_file(file_path).await {
+            warn!(
+                file = %file_name,
+                error = %e,
+                "Failed to remove target file before rename retry"
+            );
+        }
+    }
+
+    match fs::rename(temp_path, file_path).await {
+        Ok(()) => {
+            warn!(
+                file = %file_name,
+                "Rename succeeded after remove fallback"
+            );
+            return Ok(());
+        }
+        Err(e) => {
+            warn!(
+                file = %file_name,
+                error = %e,
+                raw_os_error = ?e.raw_os_error(),
+                "Rename failed after remove fallback, starting exponential backoff"
+            );
+        }
+    }
+
+    // 指数退避重试
+    let mut delay_ms = RENAME_RETRY_BASE_DELAY_MS;
+    for attempt in 1..=RENAME_RETRY_MAX_ATTEMPTS {
+        tokio::time::sleep(std::time::Duration::from_millis(delay_ms)).await;
+
+        // 每次重试前尝试删除目标（可能已解锁）
+        if file_path.exists() {
+            let _ = fs::remove_file(file_path).await;
+        }
+
+        match fs::rename(temp_path, file_path).await {
+            Ok(()) => {
+                warn!(
+                    file = %file_name,
+                    attempt = attempt,
+                    "Rename succeeded after retry"
+                );
+                return Ok(());
+            }
+            Err(e) => {
+                warn!(
+                    file = %file_name,
+                    attempt = attempt,
+                    delay_ms = delay_ms,
+                    error = %e,
+                    raw_os_error = ?e.raw_os_error(),
+                    "Rename retry failed"
+                );
+            }
+        }
+
+        delay_ms *= 2;
+    }
+
+    // 所有重试耗尽 —— 保留 .tmp，让下一次 pull 周期重试
+    error!(
+        file = %file_name,
+        temp = %temp_path.display(),
+        target = %file_path.display(),
+        "Rename exhausted all retries, preserving temp file for next pull cycle"
+    );
+
+    Err(SyncError::pull(
+        file_name.to_string(),
+        format!(
+            "Failed to rename file after {} retries (temp preserved at {})",
+            RENAME_RETRY_MAX_ATTEMPTS,
+            temp_path.display()
+        ),
+    ))
+}
+
 /// 生成与 block_server 对齐的临时文件路径
 /// 格式: `.syncthing.{filename}.tmp`
-fn temp_path_for(file_path: &Path) -> std::path::PathBuf {
+pub(crate) fn temp_path_for(file_path: &Path) -> std::path::PathBuf {
     let parent = file_path.parent().unwrap_or_else(|| Path::new("."));
     let file_name = file_path
         .file_name()
@@ -44,6 +153,7 @@ pub struct Puller {
     max_concurrent_downloads: usize,
     max_concurrent_blocks: usize,
     block_source: Option<Arc<dyn BlockSource>>,
+    versioner: Option<Arc<dyn Versioner>>,
 }
 
 impl Puller {
@@ -55,6 +165,7 @@ impl Puller {
             max_concurrent_downloads: 4,
             max_concurrent_blocks: 16,
             block_source: None,
+            versioner: None,
         }
     }
 
@@ -73,6 +184,12 @@ impl Puller {
     /// 设置块数据源
     pub fn with_block_source(mut self, source: Option<Arc<dyn BlockSource>>) -> Self {
         self.block_source = source;
+        self
+    }
+
+    /// 设置版本管理器
+    pub fn with_versioner(mut self, versioner: Option<Arc<dyn Versioner>>) -> Self {
+        self.versioner = versioner;
         self
     }
 
@@ -113,6 +230,7 @@ impl Puller {
             let folder_path = base_path.to_path_buf();
             let block_source = self.block_source.clone();
             let max_concurrent_blocks = self.max_concurrent_blocks;
+            let versioner = self.versioner.clone();
 
             let handle = tokio::spawn(async move {
                 let _permit = permit; // 持有直到任务完成
@@ -143,6 +261,7 @@ impl Puller {
                                 &folder_id,
                                 block_source,
                                 max_concurrent_blocks,
+                                versioner.as_ref(),
                             )
                             .await
                         }
@@ -223,6 +342,7 @@ impl Puller {
         folder_id: &str,
         block_source: Option<Arc<dyn BlockSource>>,
         max_concurrent_blocks: usize,
+        versioner: Option<&Arc<dyn Versioner>>,
     ) -> Result<()> {
         debug!(file = %file_info.name, size = file_info.size, blocks = file_info.blocks.len(), max_concurrent = max_concurrent_blocks, "Downloading file");
 
@@ -251,9 +371,13 @@ impl Puller {
             fs::copy(&source_path, &temp_path).await.map_err(|e| {
                 SyncError::pull(file_info.name.clone(), format!("Failed to copy from local source: {}", e))
             })?;
-            fs::rename(&temp_path, &file_path).await.map_err(|e| {
-                SyncError::pull(file_info.name.clone(), format!("Failed to rename file: {}", e))
-            })?;
+            // 在覆盖前存档旧版本
+            if let Some(v) = versioner {
+                if file_path.exists() {
+                    let _ = v.archive(&file_path).await;
+                }
+            }
+            rename_with_retry(&temp_path, &file_path, &file_info.name).await?;
             // 设置修改时间
             let modified = std::time::SystemTime::UNIX_EPOCH
                 + std::time::Duration::from_secs(file_info.modified_s as u64)
@@ -397,14 +521,17 @@ impl Puller {
             }
         }
 
-        // 重命名为最终文件名
-        if let Err(e) = fs::rename(&temp_path, &file_path).await {
-            cleanup_temp(&temp_path).await;
-            return Err(SyncError::pull(
-                file_info.name.clone(),
-                format!("Failed to rename file: {}", e),
-            ));
+        // 在覆盖前存档旧版本
+        if let Some(ref v) = versioner {
+            if file_path.exists() {
+                if let Err(e) = v.archive(&file_path).await {
+                    warn!(file = %file_info.name, error = %e, "Failed to archive old version");
+                }
+            }
         }
+
+        // 重命名为最终文件名
+        rename_with_retry(&temp_path, &file_path, &file_info.name).await?;
 
         // 设置修改时间（精确到纳秒）
         let modified = std::time::SystemTime::UNIX_EPOCH

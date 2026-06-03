@@ -6,8 +6,8 @@ fn bench_hello_encode_decode(c: &mut Criterion) {
     let hello = Hello::new("rust-node", "syncthing", "v0.2.6");
     c.bench_function("hello_encode_decode", |b| {
         b.iter(|| {
-            let encoded = hello.encode_to_bytes();
-            let _ = Hello::decode(black_box(&encoded)).unwrap();
+            let encoded = hello.encode_to_vec();
+            let _ = Hello::decode(black_box(encoded.as_slice())).unwrap();
         });
     });
 }

@@ -161,13 +161,24 @@ impl IndexHandler {
         // 如果是完整索引，检查本地是否有远程不存在的文件
         if is_full_index {
             let local_files = self.db.get_folder_files(&folder.id).await?;
+            let mut unpushed: Vec<FileInfo> = Vec::new();
             for local_file in local_files {
                 if !files.iter().any(|f| f.name == local_file.name) {
-                    // 远程没有这个文件
                     if !local_file.is_deleted() {
-                        debug!(file = %local_file.name, "File not in remote index, may need to upload");
+                        unpushed.push(local_file);
                     }
                 }
+            }
+            if !unpushed.is_empty() {
+                info!(
+                    folder = %folder.id,
+                    count = unpushed.len(),
+                    "Pushing local-only files not in remote index"
+                );
+                self.events.publish(SyncEvent::LocalIndexUpdated {
+                    folder: folder.id.clone(),
+                    files: unpushed,
+                });
             }
         }
 

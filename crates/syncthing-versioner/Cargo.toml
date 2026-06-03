@@ -1,0 +1,17 @@
+[package]
+name = "syncthing-versioner"
+version = "0.2.10"
+edition = "2021"
+description = "File versioning strategies for syncthing-rust"
+
+publish = false
+
+[dependencies]
+syncthing-core = { path = "../syncthing-core" }
+async-trait = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+chrono = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }
