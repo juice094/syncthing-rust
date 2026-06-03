@@ -533,9 +533,16 @@ v0.3.0 路线图详见 [`NEXT_STEPS_2026-05-15.md`](./plans/NEXT_STEPS_2026-05-1
 **影响**：不稳定网络环境下批量同步可能需多次重连才能完成。低延迟/直连环境无影响。
 
 **修复方向**（不保证实现时间）：
-- [ ] A: 添加 pull-level retry — 连接断开导致的文件失败自动重新入队（而非等待全量索引）
-- [ ] B: 支持 syncthing BEP Relay 协议 — 替代 Tailscale DERP 中继，降低延迟
-- [ ] C: 支持 QUIC transport — 连接迁移 + 0-RTT 重连 + 更好的丢包容忍
-- [ ] D: 用户侧网络优化 — Tailscale 直连（非 DERP）、校园防火墙白名单、手机热点临时绕过
+- [ ] A: 添加 pull-level retry — 连接断开导致的文件失败自动重新入队
+- [ ] B: 支持 syncthing BEP Relay 协议 — WebSocket on :443 穿透大多数防火墙
+- [ ] C: 支持 QUIC transport — 连接迁移 + 0-RTT + 更好的丢包容忍
+- [ ] D: 用户侧网络优化 — 端口转发、Tailscale 直连、防火墙白名单
+
+**Go 社区成熟方案参考**（2026-06-03 调研）：
+1. **TCP-only 模式**：Go 用户在关闭 QUIC 后切换到 `tcp4://` 地址格式，解决了 quic-go MTU probe 超时导致的频繁断连。syncthing-rust 已是 TCP-only，天然规避此问题。
+2. **端口转发 + Relay 回退**：至少一侧做端口转发（TCP+UDP 22000），开启 BEP Relay 作为防火墙穿透回退。Relay 使用 WebSocket over 443，可通过大多数企业/校园防火墙。
+3. **连接数调优**：Go 的 `numConnections` 和 `connectionPriorityCutoff` 可防止连接被误判优先级而剔除。syncthing-rust 尚无连接优先级系统（Phase 4 规划）。
+4. **VPN 干扰**：如果同时运行 WireGuard，syncthing 可能优先走慢速 VPN 隧道。Go 社区通过 `allowedNetworks` 配置限制发现范围解决。
+5. **静态端口 NAT**：OPNsense/pfSense 等企业级路由器需配置 Static Port NAT 以保持 UDP 打洞稳定。
 
 **追踪**：2026-06-03 E2E 测试中发现，`daemon.2026-06-03-12.log`。
