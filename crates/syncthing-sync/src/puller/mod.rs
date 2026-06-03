@@ -162,8 +162,8 @@ impl Puller {
         Self {
             db,
             events,
-            max_concurrent_downloads: 4,
-            max_concurrent_blocks: 16,
+            max_concurrent_downloads: 2,   // 保守默认 — 高延迟链路友好
+            max_concurrent_blocks: 4,     // 减少并发避免 HEAD-of-line blocking
             block_source: None,
             versioner: None,
         }

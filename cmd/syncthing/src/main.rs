@@ -311,7 +311,8 @@ impl ManagerBlockSource {
                 )
             })?;
 
-        let response = tokio::time::timeout(std::time::Duration::from_secs(30), rx)
+        // 120s — 高延迟 Tailscale 链路 (500ms RTT) + 大文件多块请求需要充足时间
+        let response = tokio::time::timeout(std::time::Duration::from_secs(120), rx)
             .await
             .map_err(|_| {
                 syncthing_sync::SyncError::pull(
