@@ -1,5 +1,27 @@
 # Releases
 
+## v0.2.10-rc3 — Phase 0 Complete + Production Readiness (2026-06-03)
+
+### Protocol
+- Hello→prost: 删除 180 行手写 protobuf, `#[derive(prost::Message)]`
+- LZ4 写入压缩: 4B 原始长度 + LZ4 block
+- `wire_compat.rs`: 10 个 BEP 协议一致性测试
+
+### Sync Core
+- `rename_with_retry`: Windows 3 层 rename 回退 (remove→rename→指数退避×5)
+- 本地文件主动推送: index_handler 发布 LocalIndexUpdated
+- Scanner 增强日志: scanned/new/modified/changed 计数器
+- Watcher 反馈循环修复: `.syncthing.*.tmp` 过滤 + 5s debounce
+
+### Versioning (New Crate)
+- `syncthing-versioner`: Simple (keep=N) + Staggered (4 时间窗口)
+
+### Connection Stability
+- `retry_count` 独立 map (不再被重置为 1)
+- TCP keepalive (SO_KEEPALIVE 60s/10s/3probes)
+
+### Tests: 382 passed, 0 failed
+
 ## v0.2.6 — Runtime Safety Hardening (2026-05-14)
 
 ### 🔒 Security & Stability Hotfix
