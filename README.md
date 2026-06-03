@@ -75,6 +75,7 @@ syncthing-rust/
 
 | 限制 | 影响 | 缓解 |
 |:---|:---|:---|
+| 高延迟/不稳定网络 | 大文件批量传输可能因防火墙断开 | 自动重连 + keepalive；网络优化见 [KNOWN_ISSUES §14](docs/KNOWN_ISSUES.md) |
 | 无 Symlink 同步 | 符号链接静默跳过 | v0.3.0 规划 |
 | 无 Web GUI | 仅 TUI | — |
 | 无 QUIC transport | 仅 TCP | 规划中 |
