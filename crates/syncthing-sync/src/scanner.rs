@@ -6,6 +6,7 @@ use crate::database::LocalDatabase;
 use crate::error::{Result, SyncError};
 use crate::events::{EventPublisher, SyncEvent};
 use crate::ignore::IgnoreMatcher;
+use crate::puller::temp_path_for;
 use sha2::{Digest, Sha256};
 use std::path::Path;
 use std::sync::Arc;
@@ -118,8 +119,8 @@ impl Scanner {
                     for db_file in db_files {
                         let full_path = path.join(&db_file.name);
                         if !full_path.exists() && !db_file.is_deleted() {
-                            // FIX: 检查是否正在下载中（临时文件存在）
-                            let temp_path = full_path.with_extension(".syncthing.tmp");
+                            // 检查是否正在下载中（临时文件存在）
+                            let temp_path = temp_path_for(&full_path);
                             if temp_path.exists() {
                                 debug!(file = %db_file.name, "File is being downloaded, skipping deleted check");
                                 continue;
@@ -137,11 +138,15 @@ impl Scanner {
                 }
 
                 // 检查变更的文件
+                let scanned_count = files.len();
+                let mut new_count = 0u64;
+                let mut modified_count = 0u64;
                 for file_info in files {
                     match self.db.get_file(&folder.id, &file_info.name).await? {
                         Some(existing) => {
                             if self.has_file_changed(&existing, &file_info) {
                                 debug!(file = %file_info.name, "File was modified");
+                                modified_count += 1;
                                 let mut new_info = file_info;
                                 new_info.sequence = self.db.increment_sequence(&folder.id).await?;
                                 new_info.version = existing.version.clone();
@@ -151,6 +156,7 @@ impl Scanner {
                         }
                         None => {
                             debug!(file = %file_info.name, "New file found");
+                            new_count += 1;
                             let mut new_info = file_info;
                             new_info.sequence = self.db.increment_sequence(&folder.id).await?;
                             new_info.version = Vector::new().with_counter(1, 1);
@@ -158,6 +164,14 @@ impl Scanner {
                         }
                     }
                 }
+                info!(
+                    folder_id = %folder.id,
+                    scanned = scanned_count,
+                    new = new_count,
+                    modified = modified_count,
+                    changed = changed_files.len(),
+                    "Scan file comparison complete"
+                );
 
                 // P1: 重命名检测——新文件与最近删除的文件块哈希相同
                 if sub.is_none() {
@@ -596,7 +610,7 @@ impl Scanner {
                 }
                 Err(_) => {
                     // 文件已被删除（但检查是否正在下载中）
-                    let temp_path = full_path.with_extension(".syncthing.tmp");
+                    let temp_path = temp_path_for(&full_path);
                     if temp_path.exists() {
                         debug!(file = %db_file.name, "File is being downloaded, skipping deleted check");
                         continue;

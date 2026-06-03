@@ -348,22 +348,25 @@ fn test_intermediate_double_star_gap() {
     assert!(patterns.is_ignored(Path::new("src/test.rs")));
     assert!(patterns.is_ignored(Path::new("src/a/test.rs")));
 
-    // This SHOULD match but CURRENTLY FAILS due to single-level **/ expansion
-    // Go Syncthing matches arbitrary depth. Record as known gap.
-    // assert!(patterns.is_ignored(Path::new("src/a/b/test.rs"))); // FIXME: gap
+    // Go Syncthing matches arbitrary depth — now fixed
+    assert!(patterns.is_ignored(Path::new("src/a/b/test.rs"))); // was FIXME: now works
 }
 
-/// Audit: // is treated as comment in current impl, but Go Syncthing does NOT
-/// support // comments. # is the only comment syntax.
+/// Go Syncthing only supports # comments, not //.
+/// `//build` is NOT a comment — it's parsed as a root-only pattern `/build`.
+/// The first / is is_root_only flag, and build is the pattern.
 #[test]
-fn test_double_slash_comment_semantic_gap() {
-    let content = "//network/share\n*.txt";
-    let patterns = IgnorePatterns::parse(content);
+fn test_double_slash_not_a_comment() {
+    // Parse: //build → is_root_only + pattern "build" (second / consumed, leaving build)
+    let mut patterns = IgnorePatterns::new();
+    patterns.add_pattern("//build").unwrap();
+    assert!(patterns.is_ignored(Path::new("build")));
+    assert!(!patterns.is_ignored(Path::new("src/build")));
 
-    // Current behavior: //network/share is skipped as comment
-    assert!(!patterns.is_ignored(Path::new("network/share")));
-    assert!(patterns.is_ignored(Path::new("file.txt")));
-
-    // In Go Syncthing, //network/share would be treated as a pattern
-    // (likely matching a path literally). This is a semantic difference.
+    // Also verify that // is not treated as comment in Parse
+    let content = "//build\n*.tmp";
+    let parsed = IgnorePatterns::parse(content);
+    assert!(parsed.is_ignored(Path::new("build")));
+    assert!(parsed.is_ignored(Path::new("file.tmp")));
+    assert_eq!(parsed.len(), 2, "expected 2 patterns (not a comment)");
 }

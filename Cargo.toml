@@ -9,6 +9,7 @@ members = [
     "crates/syncthing-db",
     "crates/syncthing-api",
     "crates/syncthing-test-utils",
+    "crates/syncthing-versioner",
     "crates/bep-protocol",
     "cmd/syncthing",
     "cmd/syncthing-mcp-bridge",
@@ -55,6 +56,7 @@ dashmap = "5.5"
 parking_lot = "0.12"
 notify = "8"
 tempfile = "3"
+socket2 = "0.5"
 walkdir = "2"
 
 # 可选传输层

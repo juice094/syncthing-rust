@@ -286,7 +286,8 @@ impl FileSystem for NativeFileSystem {
 
     /// Rename/move a file
     ///
-    /// On Windows, handles cross-device moves by copying and deleting.
+    /// On Windows, handles cross-device moves, sharing violations, and
+    /// access-denied errors by falling back to remove+rename.
     async fn rename(&self, from: &Path, to: &Path) -> Result<()> {
         let from_full = self.full_path(from);
         let to_full = self.full_path(to);
@@ -300,7 +301,7 @@ impl FileSystem for NativeFileSystem {
 
         // Try atomic rename first
         match fs::rename(&from_full, &to_full).await {
-            Ok(()) => Ok(()),
+            Ok(()) => return Ok(()),
             Err(e) => {
                 // If cross-device link error, do copy+delete
                 #[cfg(unix)]
@@ -309,9 +310,22 @@ impl FileSystem for NativeFileSystem {
                 }
 
                 #[cfg(windows)]
-                if e.raw_os_error() == Some(17) {
-                    // ERROR_NOT_SAME_DEVICE
-                    return copy_and_delete(&from_full, &to_full).await;
+                {
+                    let raw = e.raw_os_error();
+                    // ERROR_NOT_SAME_DEVICE (17): cross-device move
+                    if raw == Some(17) {
+                        return copy_and_delete(&from_full, &to_full).await;
+                    }
+                    // ERROR_SHARING_VIOLATION (32) or ERROR_ACCESS_DENIED (5):
+                    // target file locked by another process, try remove+rename
+                    if raw == Some(32) || raw == Some(5) {
+                        if to_full.exists() {
+                            let _ = fs::remove_file(&to_full).await;
+                        }
+                        return fs::rename(&from_full, &to_full)
+                            .await
+                            .map_err(SyncthingError::Io);
+                    }
                 }
 
                 Err(SyncthingError::Io(e))

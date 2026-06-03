@@ -1,6 +1,7 @@
 use super::*;
 use crate::database::MemoryDatabase;
 use crate::scanner::Scanner;
+use std::path::Path;
 use syncthing_core::types::BlockInfo;
 
 struct MockBlockSource {
@@ -76,6 +77,7 @@ async fn test_download_file_with_mock_source() {
         "test-folder",
         Some(mock_source),
         16,
+        None,
     )
     .await;
 
@@ -249,4 +251,98 @@ async fn test_e2e_sync_single_file_via_block_server() {
     // 验证数据库已更新
     let db_file = db_b.get_file("test", "test.txt").await.unwrap();
     assert!(db_file.is_some(), "File should be in database after pull");
+}
+
+// ── temp_path_for / rename_with_retry 单元测试 ──
+
+#[test]
+fn test_temp_path_for_basic() {
+    let path = Path::new("/folder/sub/file.md");
+    let temp = temp_path_for(path);
+    assert_eq!(
+        temp,
+        Path::new("/folder/sub/.syncthing.file.md.tmp")
+    );
+}
+
+#[test]
+fn test_temp_path_for_no_parent() {
+    let path = Path::new("file.txt");
+    let temp = temp_path_for(path);
+    assert_eq!(temp, Path::new(".syncthing.file.txt.tmp"));
+}
+
+#[test]
+fn test_temp_path_for_unicode_filename() {
+    let path = Path::new("/data/中文文件.txt");
+    let temp = temp_path_for(path);
+    assert_eq!(
+        temp,
+        Path::new("/data/.syncthing.中文文件.txt.tmp")
+    );
+}
+
+#[test]
+fn test_temp_path_for_deeply_nested() {
+    let path = Path::new("/a/b/c/d/file.txt");
+    let temp = temp_path_for(path);
+    assert_eq!(
+        temp,
+        Path::new("/a/b/c/d/.syncthing.file.txt.tmp")
+    );
+}
+
+/// 验证 rename_with_retry 在正常情况下成功
+#[tokio::test]
+async fn test_rename_with_retry_success() {
+    let dir = tempfile::tempdir().unwrap();
+    let temp_path = dir.path().join(".syncthing.test.txt.tmp");
+    let real_path = dir.path().join("test.txt");
+
+    // 创建 temp 文件
+    tokio::fs::write(&temp_path, b"hello rename").await.unwrap();
+
+    let result = rename_with_retry(&temp_path, &real_path, "test.txt").await;
+    assert!(result.is_ok(), "Rename should succeed: {:?}", result.err());
+    assert!(real_path.exists(), "Real file should exist after rename");
+    assert!(!temp_path.exists(), "Temp file should not exist after rename");
+
+    let content = tokio::fs::read_to_string(&real_path).await.unwrap();
+    assert_eq!(content, "hello rename");
+}
+
+/// 验证 rename_with_retry 在目标已存在时仍能成功（remove fallback）
+#[tokio::test]
+async fn test_rename_with_retry_target_exists() {
+    let dir = tempfile::tempdir().unwrap();
+    let temp_path = dir.path().join(".syncthing.test.txt.tmp");
+    let real_path = dir.path().join("test.txt");
+
+    // 目标文件先存在（模拟已有文件）
+    tokio::fs::write(&real_path, b"old content").await.unwrap();
+    // temp 文件是新的
+    tokio::fs::write(&temp_path, b"new content").await.unwrap();
+
+    let result = rename_with_retry(&temp_path, &real_path, "test.txt").await;
+    assert!(result.is_ok(), "Rename with target removal should succeed: {:?}", result.err());
+    assert!(real_path.exists());
+    assert!(!temp_path.exists());
+
+    let content = tokio::fs::read_to_string(&real_path).await.unwrap();
+    assert_eq!(content, "new content");
+}
+
+/// 验证 temp_path_for 生成的是父目录下的隐藏文件，而非修改扩展名
+#[test]
+fn test_temp_path_preserves_original_extension() {
+    // 重要：这验证了 scanner.rs 修复的正确性
+    // with_extension(".syncthing.tmp") 会产生 "foo.syncthing.tmp"
+    // temp_path_for 产生 ".syncthing.foo.md.tmp"
+    let path = Path::new("/dir/foo.md");
+    let temp = temp_path_for(path);
+
+    // 验证不是 with_extension 的错误行为
+    assert_ne!(temp, Path::new("/dir/foo.syncthing.tmp"));
+    // 验证是正确的格式
+    assert_eq!(temp, Path::new("/dir/.syncthing.foo.md.tmp"));
 }

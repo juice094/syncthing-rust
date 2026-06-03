@@ -38,7 +38,14 @@ impl FolderModel {
         block_source: Option<Arc<dyn BlockSource>>,
     ) -> Self {
         let scanner = Scanner::new(db.clone(), events.clone());
-        let puller = Puller::new(db.clone(), events.clone()).with_block_source(block_source);
+        let versioner: Option<Arc<dyn syncthing_versioner::Versioner>> =
+            folder.versioning.as_ref().and_then(|cfg| {
+                syncthing_versioner::create_versioner(cfg, std::path::Path::new(&folder.path))
+            })
+            .map(Arc::from);
+        let puller = Puller::new(db.clone(), events.clone())
+            .with_block_source(block_source)
+            .with_versioner(versioner);
         let folder_id = folder.id.clone();
         Self {
             folder,
@@ -118,13 +125,26 @@ impl FolderModel {
             }
         };
 
+        const WATCHER_DEBOUNCE: std::time::Duration = std::time::Duration::from_secs(5);
+        const MIN_SCAN_GAP: std::time::Duration = std::time::Duration::from_secs(5);
+
         let mut debounce_timer: Option<std::pin::Pin<Box<tokio::time::Sleep>>> = None;
+        let mut last_scan = tokio::time::Instant::now() - MIN_SCAN_GAP;
 
         loop {
             tokio::select! {
                 Some(event) = rx.recv() => {
-                    debug!(folder_id = %folder_id, event = ?event, "Watcher event received");
-                    debounce_timer = Some(Box::pin(tokio::time::sleep(std::time::Duration::from_secs(1))));
+                    // Skip events for syncthing temp files to break positive feedback
+                    let skip = event.paths.iter().any(|p| {
+                        let s = p.to_string_lossy();
+                        s.contains(".syncthing.") && s.ends_with(".tmp")
+                    });
+                    if skip {
+                        trace!(folder_id = %folder_id, "Skipping watcher event for syncthing temp");
+                        continue;
+                    }
+                    trace!(folder_id = %folder_id, event = ?event, "Watcher event received");
+                    debounce_timer = Some(Box::pin(tokio::time::sleep(WATCHER_DEBOUNCE)));
                 }
                 _ = async {
                     if let Some(ref mut timer) = debounce_timer {
@@ -134,11 +154,16 @@ impl FolderModel {
                     }
                 }, if debounce_timer.is_some() => {
                     debounce_timer = None;
+                    let elapsed = last_scan.elapsed();
+                    if elapsed < MIN_SCAN_GAP {
+                        trace!(folder_id = %folder_id, elapsed_s = elapsed.as_secs(), "Scan skipped: min gap");
+                        continue;
+                    }
                     info!(folder_id = %folder_id, "Debounced watcher scan triggered");
-                    debug!(folder_id = %folder_id, "Scan triggered by watcher debounce");
                     if let Err(e) = self.scan().await {
                         error!(folder_id = %folder_id, error = %e, "Watcher-triggered scan failed");
                     }
+                    last_scan = tokio::time::Instant::now();
                 }
                 _ = shutdown.changed() => {
                     if *shutdown.borrow() {
@@ -154,7 +179,7 @@ impl FolderModel {
     pub async fn start_pull_loop(&self, mut shutdown: tokio::sync::watch::Receiver<bool>) {
         info!(folder_id = %self.folder.id, "Starting pull loop");
 
-        let mut interval = tokio::time::interval(Duration::from_secs(10)); // 每10秒检查一次
+        let mut interval = tokio::time::interval(Duration::from_secs(10));
 
         loop {
             tokio::select! {
@@ -304,7 +329,7 @@ impl FolderModel {
             to: FolderStatus::Pulling,
         });
 
-        info!(folder_id = %self.folder.id, "Starting pull");
+        debug!(folder_id = %self.folder.id, "Starting pull");
 
         // 获取需要拉取的文件列表
         // 1. 先检查 pending_pulls（由远程索引触发）

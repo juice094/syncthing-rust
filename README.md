@@ -7,9 +7,8 @@
 零运行时依赖 · 与 Go 版 Syncthing 线路兼容 · 单静态二进制（~12 MB）
 
 [![Rust](https://img.shields.io/badge/rust-1.85%2B-orange?logo=rust)](https://www.rust-lang.org)
-[![Tests](https://img.shields.io/badge/tests-319%20passed-brightgreen)](https://github.com/juice094/syncthing-rust/actions)
-[![Clippy](https://img.shields.io/badge/clippy-0%20warnings-brightgreen)](https://github.com/juice094/syncthing-rust/actions)
-[![Version](https://img.shields.io/badge/version-v0.2.8-blue)](https://github.com/juice094/syncthing-rust/releases)
+[![Tests](https://img.shields.io/badge/tests-382%20passed-brightgreen)](https://github.com/juice094/syncthing-rust/actions)
+[![Version](https://img.shields.io/badge/version-v0.2.10--rc3-blue)](https://github.com/juice094/syncthing-rust/releases)
 [![License](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 
 </div>

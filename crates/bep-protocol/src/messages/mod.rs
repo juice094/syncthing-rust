@@ -4,11 +4,12 @@
 //! 所有 `prost::Message` 结构体的字段 tag 均与 Go 端 `internal/gen/bep/bep.pb.go`
 //! 严格对齐（2026-04-11 验证通过，参见 VERIFICATION_REPORT_BEP_2026-04-11.md）。
 
-use bytes::{BufMut, BytesMut};
+pub use prost::Message;
 
 /// Hello消息结构
 ///
-/// 对应Go版本中的Hello消息，用于协议协商
+/// 对应Go版本中的Hello消息（BEP v1），字段 tag 与 Go `internal/gen/bep/bep.pb.go` 严格对齐。
+///
 /// Protobuf定义:
 /// ```protobuf
 /// message Hello {
@@ -19,22 +20,21 @@ use bytes::{BufMut, BytesMut};
 ///     int64 timestamp = 5;
 /// }
 /// ```
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Clone, PartialEq, prost::Message)]
 pub struct Hello {
-    /// 设备名称
+    #[prost(string, tag = "1")]
     pub device_name: String,
-    /// 客户端名称
+    #[prost(string, tag = "2")]
     pub client_name: String,
-    /// 客户端版本
+    #[prost(string, tag = "3")]
     pub client_version: String,
-    /// 连接数
+    #[prost(int32, tag = "4")]
     pub num_connections: i32,
-    /// 时间戳（毫秒）
+    #[prost(int64, tag = "5")]
     pub timestamp: i64,
 }
 
 impl Hello {
-    /// 创建新的Hello消息
     pub fn new(
         device_name: impl Into<String>,
         client_name: impl Into<String>,
@@ -52,153 +52,8 @@ impl Hello {
         }
     }
 
-    /// 编码为Protobuf字节（零拷贝，返回 `Bytes`）
-    ///
-    /// TUNING_PLAN T-D1：避免 `encode_to_vec` 中的 `to_vec()` 拷贝。
-    pub fn encode_to_bytes(&self) -> bytes::Bytes {
-        let mut buf = BytesMut::new();
-
-        // field 1: device_name (string, tag = 1 << 3 | 2 = 10)
-        if !self.device_name.is_empty() {
-            buf.put_u8(0x0a); // tag: field 1, wire type 2 (length-delimited)
-            put_length_delimited(&mut buf, self.device_name.as_bytes());
-        }
-
-        // field 2: client_name (string, tag = 2 << 3 | 2 = 18)
-        if !self.client_name.is_empty() {
-            buf.put_u8(0x12); // tag: field 2, wire type 2
-            put_length_delimited(&mut buf, self.client_name.as_bytes());
-        }
-
-        // field 3: client_version (string, tag = 3 << 3 | 2 = 26)
-        if !self.client_version.is_empty() {
-            buf.put_u8(0x1a); // tag: field 3, wire type 2
-            put_length_delimited(&mut buf, self.client_version.as_bytes());
-        }
-
-        // field 4: num_connections (int32, tag = 4 << 3 | 0 = 32)
-        if self.num_connections != 0 {
-            buf.put_u8(0x20); // tag: field 4, wire type 0 (varint)
-            put_varint(&mut buf, self.num_connections as u64);
-        }
-
-        // field 5: timestamp (int64, tag = 5 << 3 | 0 = 40)
-        if self.timestamp != 0 {
-            buf.put_u8(0x28); // tag: field 5, wire type 0
-            put_varint(&mut buf, self.timestamp as u64);
-        }
-
-        buf.freeze()
-    }
-
-    /// 编码为Protobuf字节
-    ///
-    /// 手动实现Protobuf编码（简化版，不使用prost-build）
-    pub fn encode_to_vec(&self) -> Vec<u8> {
-        self.encode_to_bytes().to_vec()
-    }
-
-    /// 从Protobuf字节解码
-    pub fn decode(buf: &[u8]) -> crate::Result<Self> {
-        let mut hello = Hello {
-            device_name: String::new(),
-            client_name: String::new(),
-            client_version: String::new(),
-            num_connections: 0,
-            timestamp: 0,
-        };
-
-        let mut pos = 0;
-        while pos < buf.len() {
-            if pos >= buf.len() {
-                break;
-            }
-
-            let tag = buf[pos];
-            pos += 1;
-
-            let field_num = (tag >> 3) as i32;
-            let wire_type = tag & 0x07;
-
-            match (field_num, wire_type) {
-                (1, 2) => {
-                    // device_name
-                    let (len, bytes_read) = read_varint(&buf[pos..])?;
-                    pos += bytes_read;
-                    if pos + len as usize > buf.len() {
-                        return Err(crate::SyncthingError::protocol("truncated device_name"));
-                    }
-                    hello.device_name =
-                        String::from_utf8_lossy(&buf[pos..pos + len as usize]).to_string();
-                    pos += len as usize;
-                }
-                (2, 2) => {
-                    // client_name
-                    let (len, bytes_read) = read_varint(&buf[pos..])?;
-                    pos += bytes_read;
-                    if pos + len as usize > buf.len() {
-                        return Err(crate::SyncthingError::protocol("truncated client_name"));
-                    }
-                    hello.client_name =
-                        String::from_utf8_lossy(&buf[pos..pos + len as usize]).to_string();
-                    pos += len as usize;
-                }
-                (3, 2) => {
-                    // client_version
-                    let (len, bytes_read) = read_varint(&buf[pos..])?;
-                    pos += bytes_read;
-                    if pos + len as usize > buf.len() {
-                        return Err(crate::SyncthingError::protocol("truncated client_version"));
-                    }
-                    hello.client_version =
-                        String::from_utf8_lossy(&buf[pos..pos + len as usize]).to_string();
-                    pos += len as usize;
-                }
-                (4, 0) => {
-                    // num_connections
-                    let (val, bytes_read) = read_varint(&buf[pos..])?;
-                    pos += bytes_read;
-                    hello.num_connections = val as i32;
-                }
-                (5, 0) => {
-                    // timestamp
-                    let (val, bytes_read) = read_varint(&buf[pos..])?;
-                    pos += bytes_read;
-                    hello.timestamp = val as i64;
-                }
-                (_, 2) => {
-                    // unknown string field, skip
-                    let (len, bytes_read) = read_varint(&buf[pos..])?;
-                    pos += bytes_read + len as usize;
-                }
-                (_, 0) => {
-                    // unknown varint field, skip
-                    let (_, bytes_read) = read_varint(&buf[pos..])?;
-                    pos += bytes_read;
-                }
-                (_, 1) => {
-                    // unknown 64-bit field, skip
-                    pos += 8;
-                }
-                (_, 5) => {
-                    // unknown 32-bit field, skip
-                    pos += 4;
-                }
-                _ => {
-                    return Err(crate::SyncthingError::protocol(format!(
-                        "unknown wire type: {}",
-                        wire_type
-                    )));
-                }
-            }
-        }
-
-        Ok(hello)
-    }
-}
-
-impl Default for Hello {
-    fn default() -> Self {
+    /// Default Hello for tests and placeholder use
+    pub fn default_rust_client() -> Self {
         Self {
             device_name: String::new(),
             client_name: "syncthing-rust".to_string(),
@@ -207,48 +62,6 @@ impl Default for Hello {
             timestamp: 0,
         }
     }
-}
-
-/// 写入变长整数
-fn put_varint(buf: &mut BytesMut, mut value: u64) {
-    while value >= 0x80 {
-        buf.put_u8((value as u8) | 0x80);
-        value >>= 7;
-    }
-    buf.put_u8(value as u8);
-}
-
-/// 读取变长整数
-fn read_varint(buf: &[u8]) -> crate::Result<(u64, usize)> {
-    let mut result: u64 = 0;
-    let mut shift = 0;
-    let mut pos = 0;
-
-    loop {
-        if pos >= buf.len() {
-            return Err(crate::SyncthingError::protocol("truncated varint"));
-        }
-
-        let byte = buf[pos];
-        pos += 1;
-
-        result |= ((byte & 0x7f) as u64) << shift;
-        if (byte & 0x80) == 0 {
-            break;
-        }
-        shift += 7;
-        if shift >= 64 {
-            return Err(crate::SyncthingError::protocol("varint too large"));
-        }
-    }
-
-    Ok((result, pos))
-}
-
-/// 写入长度分隔的字段
-fn put_length_delimited(buf: &mut BytesMut, data: &[u8]) {
-    put_varint(buf, data.len() as u64);
-    buf.extend_from_slice(data);
 }
 
 // ============================================

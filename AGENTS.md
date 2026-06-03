@@ -1,18 +1,24 @@
 # Agent 环境指引 · syncthing-rust
 
 > 📋 **当前权威路线图**: [`docs/plans/POST_V0_2_0_ROADMAP.md`](./docs/plans/POST_V0_2_0_ROADMAP.md)
+> 📋 **Better-Than-Go 主计划**: `~/.claude/plans/generic-forging-matsumoto.md`
 > 📋 **计划索引**: [`docs/plans/INDEX.md`](./docs/plans/INDEX.md)
 > 📋 **审计报告**: [`docs/plans/PLAN_AUDIT_2026-04-27.md`](./docs/plans/PLAN_AUDIT_2026-04-27.md)
 
 ## 项目定位
 
-`syncthing-rust` 是 P2P 文件同步的 Rust 替代实现。当前验证目标为 **Rust 新版 ↔ Rust 旧版（格雷侧）** 的 BEP 互通；Go Syncthing 互操作已验证（2026-05-14）。
+`syncthing-rust` 是 P2P 文件同步的 Rust 替代实现。长期目标：基于 Rust 的内存安全、零成本抽象、类型安全协议、库可嵌入性，成为优于 Go 版的 syncthing。
 
-- **当前状态**：v0.2.8 Alpha，309 passed / 4 ignored / 0 failed，**0 clippy warnings**，**cargo audit: 3 unmaintained（已接受）**
-- **传输层**：TCP+TLS / HTTP CONNECT 代理 / SOCKS5 代理 / DERP 中继（自研协议）/ UPnP（PCP/NAT-PMP 骨架待实现）/ **Relay v1 并行拨号 ✅**
-- **发现层**：Local Discovery（UDP 广播骨架）⚠️ / STUN（公网 IP 查询）⚠️ / PortMapper（UPnP 主路径）⚠️ / **Global Discovery（HTTPS mTLS 客户端）✅** / **Relay Protocol v1（XDR + ParallelDialer 集成）✅**
-- **同步**：Pull 已验证；被动响应块请求（上传）已实现；主动 Push 调度待完善
-- **互操作**：旧版 Rust syncthing-rust ↔ 新版 Rust 待验证（格雷侧为 pre-fix 构建）；Go Syncthing 互操作已验证（2026-05-14，v0.2.6 ↔ v2.1.0）
+- **当前状态**：v0.2.10-rc3 Alpha，**382 passed / 3 ignored / 0 failed**，**0 warnings**
+- **传输层**：TCP+TLS / HTTP CONNECT 代理 / SOCKS5 代理 / DERP 中继（自研协议）/ UPnP / **Relay v1 并行拨号 ✅**
+- **发现层**：Local Discovery（UDP 广播骨架）⚠️ / STUN / PortMapper / **Global Discovery ✅** / **Relay Protocol v1 ✅**
+- **同步**：Pull ✅ / Push（主动 IndexUpdate 推送）✅ / 双向同步已实测验证 ✅
+- **版本控制**：Simple ✅ / Staggered ✅（4 时间窗口, `.stversions/` 归档）
+- **协议**：Hello→prost ✅ / LZ4 写入压缩 ✅ / ClusterConfig ✅ / Ping/Pong ✅ / wire_compat 10 tests ✅
+- **传输**：TCP keepalive (60s/10s) ✅ / 连接重试累加 ✅
+- **协议**：Hello→prost ✅ / LZ4 写入压缩 ✅ / ClusterConfig 交换 ✅ / Ping/Pong keepalive ✅ / Close 处理 ✅
+- **互操作**：Rust↔Rust 双向同步已验证（2026-06-02 v0.2.10-rc1↔v0.2.10-rc1）；Go Syncthing 互操作已验证（2026-05-14 v0.2.6↔v2.1.0）
+- **观测**：REST API 读写端点（兼容 Go 布局）+ 文件系统 watcher(1s debounce) + **TUI 实时状态（event bridge）✅** + **配置热重载 ✅**
 - **观测**：REST API 读写端点（兼容 Go 布局）+ 文件系统 watcher(1s debounce) + **TUI 实时状态（event bridge）✅** + **配置热重载 ✅**
 
 ## 架构讨论摘要
@@ -92,7 +98,20 @@
 
 **实现策略**：手写 JSON-RPC 2.0 协议层（~200 行），不依赖第三方 MCP SDK，只使用工作区已有依赖（tokio/serde_json/reqwest），完全可控、零额外依赖风险。
 
-## 阶段性进展（截至 2026-04-27）
+## 阶段性进展（截至 2026-06-03）
+
+### 2026-06-02/03: Phase 0 Foundation Hardening
+
+| 模块 | 内容 | 状态 |
+|------|------|------|
+| P0.1 BEP Protocol | Hello→prost derive (-180行手写); LZ4 写入压缩 | ✅ |
+| P0.2 Connection Lifecycle | ClusterConfig/Ping/Close/DeviceID 验证 — 已有实现，审计确认 | ✅ |
+| P0.3 Wire API | pause/resume/scan/override/revert — SyncService trait impl 已全部实现 | ✅ |
+| P0.4 Ignore Patterns | `**/` 任意深度匹配; `//`→`#` 注释兼容; `#include` 修复 | ✅ |
+| rename_with_retry | Windows 文件锁回退（remove→rename→指数退避） | ✅ |
+| Scanner 日志增强 | scanned/new/modified/changed 计数器 | ✅ |
+| Pull loop 修复 | MIN_PULL_GAP=2s 合并远程索引通知; 日志噪音降低 99% | ✅ |
+| E2E 双向同步 | gray-workspace 574 文件→云端; 1秒内检测+推送新文件 | ✅ |
 
 ### 已完成（与计划对齐）
 
@@ -109,16 +128,30 @@
 | 组件分发拆分 | `syncthing-bench` / `syncthing-cli` 从 `cmd/syncthing` 提取为独立二进制 | POST_V0_2_0 | ✅ |
 | 解耦工作 | 元数据统一、`test_harness` 归位、E2E 测试外迁、`syncthing-net` API 收敛 | *自发* | ✅ |
 
+### 2026-06-03 (续): Phase 0.5 + Phase 1.1
+
+| 模块 | 内容 | 状态 |
+|------|------|------|
+| Step 1: push fix | index_handler 本地独有文件推送 | ✅ |
+| Step 2: rename verify | 单元测试 + 代码部署 | ✅ |
+| Step 3: P0.6 Cross-Impl | `wire_compat.rs` 10 协议一致性测试 | ✅ |
+| Step 4: Simple Versioning | `syncthing-versioner` crate + puller 集成 + 379 tests | ✅ |
+| Pull loop 回退 | 还原原始逻辑（E2E 兼容），日志已降 DEBUG | ✅ |
+| Watcher fix | `.syncthing.*.tmp` 过滤 + 5s debounce + 5s gap | ✅ |
+
 ### 未完成（计划内阻塞项）
 
 | 模块 | 内容 | 来源计划 | 状态 | 优先级 |
 |------|------|----------|------|--------|
-| 72h Stress Test | 长期运行稳定性验证（内存/连接/同步） | PHASE3_PLAN 3.4 / PHASE4_PLAN 4.3 | ⏳ | **P0** |
-| 跨版本 Rust 互通验证 | 新版 main ↔ 格雷侧 pre-fix Rust（os error 10061 待排查） | POST_V0_2_0 | ⏳ | **P0** |
-| REST API `device` pause/resume body | `POST /rest/system/pause` / `resume` 的 device body 参数生效 | POST_V0_2_0 Phase C | ✅ | P1 |
-| .stignore 简化版审计 | 评估 `syncthing-sync/src/ignore.rs` 是否覆盖 90% 场景 | POST_V0_2_0 Phase C | ⏳ | P2 |
-| Delta Index 验证 | `IndexID` + `Sequence` 长时间一致性 | PHASE4_PLAN 4.2 | ⏳ | P3 |
-| PCP/NAT-PMP | PortMapper UPnP 的 fallback 路径 | POST_V0_2_0 Phase D | ⏳ | P3 |
+| rename_with_retry 真实验证 | Kimi Claw Desktop 独占锁场景 | P0 修复 | 🟡 | P1 — VS Code 共享读不触发 |
+| 72h Stress Test | 长期运行稳定性验证 | PHASE3_PLAN 3.4 | ⏳ | **P0** |
+| Fix 1: 连接重试累加 | retry_count 独立 map, 成功后清除 | production-readiness | ✅ | P1 |
+| Fix 2: TCP keepalive | SO_KEEPALIVE 60s/10s/3probes | production-readiness | ✅ | P1 |
+| Fix 4: Staggered 版本 | 4 时间窗口, maxAge 可配 | Better-Than-Go P1.1b | ✅ | P1 |
+| P1.2 Symlink 同步 | scanner + puller + 平台守卫 | Better-Than-Go | 🔲 | P1 |
+| P1.4 ReceiveOnly 语义 | BEP local flags | Better-Than-Go | 🔲 | P1 |
+| Delta Index 验证 | IndexID + Sequence 一致性 | PHASE4_PLAN 4.2 | ⏳ | P3 |
+| PCP/NAT-PMP | PortMapper UPnP fallback | POST_V0_2_0 Phase D | ⏳ | P3 |
 
 ### 当前状态
 

@@ -6,7 +6,6 @@
 use std::collections::HashMap;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::sync::{Arc, Weak};
-use std::time::Instant;
 
 use dashmap::DashMap;
 use parking_lot::RwLock;
@@ -60,6 +59,8 @@ pub struct ConnectionManager {
     pub(crate) conn_id_index: DashMap<uuid::Uuid, DeviceId>,
     /// 待连接设备
     pub(crate) pending_connections: TokioRwLock<HashMap<DeviceId, PendingConnection>>,
+    /// 重试计数器（独立于 pending_connections，连接成功后清除）
+    pub(crate) retry_counts: TokioRwLock<HashMap<DeviceId, u32>>,
     /// 设备地址映射
     pub(crate) device_addresses: DashMap<DeviceId, Vec<SocketAddr>>,
     /// 设备 Relay URL 映射
@@ -121,6 +122,7 @@ impl ConnectionManager {
             connections: DashMap::new(),
             conn_id_index: DashMap::new(),
             pending_connections: TokioRwLock::new(HashMap::new()),
+            retry_counts: TokioRwLock::new(HashMap::new()),
             device_addresses: DashMap::new(),
             device_relay_urls: DashMap::new(),
             event_tx,
@@ -427,26 +429,11 @@ impl ConnectionManager {
             return;
         }
 
-        // 增加/设置重试次数
+        // 增加/设置重试次数（独立于 pending 条目，避免清除后丢失）
         let retry_count = {
-            let mut pending = self.pending_connections.write().await;
-            if let Some(p) = pending.get_mut(&device_id) {
-                p.retry_count += 1;
-                p.retry_count
-            } else {
-                pending.insert(
-                    device_id,
-                    PendingConnection {
-                        device_id,
-                        addresses: addresses.clone(),
-                        relay_urls: relay_urls.clone(),
-                        retry_count: 1,
-                        last_attempt: Some(Instant::now()),
-                        _cancel_tx: None,
-                    },
-                );
-                1
-            }
+            let mut retries = self.retry_counts.write().await;
+            let count = retries.entry(device_id).and_modify(|c| *c += 1).or_insert(1);
+            *count
         };
 
         // 计算退避时间

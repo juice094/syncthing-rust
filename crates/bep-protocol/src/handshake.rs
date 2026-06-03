@@ -3,10 +3,10 @@
 //! 实现BEP协议的Hello消息交换
 //! 参考: syncthing/lib/protocol/bep_hello.go
 
-// bytes模块在此文件中不需要直接导入
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tracing::{debug, info};
 
+use prost::Message;
 use crate::messages::Hello;
 use crate::{Result, SyncthingError};
 
@@ -99,7 +99,9 @@ pub async fn recv_hello<R: AsyncRead + Unpin>(reader: &mut R) -> Result<Hello> {
     reader.read_exact(&mut buf).await?;
 
     // 解码Hello消息
-    let hello = Hello::decode(&buf[..])?;
+    let hello = Hello::decode(&buf[..]).map_err(|e| {
+        SyncthingError::protocol(format!("hello decode: {}", e))
+    })?;
 
     info!(
         "Hello received: device={} client={}/{} num_connections={} timestamp={}",

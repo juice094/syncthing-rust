@@ -214,11 +214,22 @@ impl SyncthingTcpListener {
 
     /// 配置TCP流选项
     fn configure_stream(stream: &TcpStream) -> Result<()> {
-        // 设置TCP_NODELAY（禁用Nagle算法）
         stream
             .set_nodelay(true)
             .map_err(|e| SyncthingError::connection(format!("failed to set TCP_NODELAY: {}", e)))?;
-
+        // TCP keepalive to prevent NAT/firewall silent drops (non-fatal)
+        if let Ok(sock) = std::io::Result::Ok(socket2::SockRef::from(stream)) {
+            let _ = sock.set_keepalive(true);
+            #[cfg(target_os = "linux")]
+            {
+                let _ = sock.set_tcp_keepalive(
+                    &socket2::TcpKeepalive::new()
+                        .with_time(std::time::Duration::from_secs(60))
+                        .with_interval(std::time::Duration::from_secs(10))
+                        .with_retries(3),
+                );
+            }
+        }
         Ok(())
     }
 }
