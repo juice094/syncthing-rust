@@ -2,6 +2,25 @@
 
 ## [Unreleased]
 
+## [0.2.10] — 2026-06-04（生产部署 + 灾备协议）
+
+### Headline: ROG-X ↔ Gray-Cloud 双端工作区同步上线，确立灾备恢复 SOP。
+
+### Operations
+- **生产部署**: ROG-X (Windows 11) ↔ Gray-Cloud (Ubuntu 24.04) BEP 双向同步 `.kimi_openclaw/workspace` ↔ `/root/.openclaw/workspace`
+- **WSL 交叉编译**: WSL Ubuntu 内 `cargo build --release` 产出 Linux ELF (14MB, 3m32s)，SCP 上传至云端
+- **systemd service**: `/etc/systemd/system/syncthing.service`，enabled + auto-restart
+- **git bundle 灾备**: `git bundle` → SCP → cloud `git clone` 重建权威 workspace，避免旧索引污染
+
+### Bug Fixes
+- **Stale DB index 误删**: 对侧格式化/重装后，本地 DB 残留旧索引导致 (a) puller 按 peer index 判断"对侧已删除"并批量删除本地文件（2043 files confirmed），(b) 对侧请求不存在文件返回 BEP error code 3 风暴。修复：确立双端 DB 重置 + git bundle 恢复协议
+- **Relay health check 阻塞 auto-dial**: relay pool TLS 深度健康检查在 auto-dial 之前执行，校网环境下卡住 ~2min。待优化为并行或超时降级
+
+### Configuration
+- **init wizard**: `relays_enabled: true`（已完成于 rc3）
+- **cloud config**: `local_device_id` 由 daemon 自动从 TLS cert 派生修正
+- **Tailscale IP 变更**: 云端格式化后 IP 100.127.13.26 → 100.113.140.121
+
 ## [0.2.10-rc3] — 2026-06-03（Phase 0 Complete + Production Readiness）
 
 ### Headline: 382 tests, 0 failures. BEP protocol hardened, E2E sync verified, production-ready foundations.
