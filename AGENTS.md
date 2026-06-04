@@ -15,9 +15,8 @@
 - **同步**：Pull ✅ / Push（主动 IndexUpdate 推送）✅ / 双向同步已实测验证 ✅
 - **版本控制**：Simple ✅ / Staggered ✅（4 时间窗口, `.stversions/` 归档）
 - **协议**：Hello→prost ✅ / LZ4 写入压缩 ✅ / ClusterConfig ✅ / Ping/Pong ✅ / wire_compat 10 tests ✅
-- **传输**：TCP keepalive (60s/10s) ✅ / 连接重试累加 ✅
-- **协议**：Hello→prost ✅ / LZ4 写入压缩 ✅ / ClusterConfig 交换 ✅ / Ping/Pong keepalive ✅ / Close 处理 ✅
-- **互操作**：Rust↔Rust 双向同步已验证（2026-06-02 v0.2.10-rc1↔v0.2.10-rc1）；Go Syncthing 互操作已验证（2026-05-14 v0.2.6↔v2.1.0）
+- **传输**：TCP keepalive (60s/10s) ✅ / 连接重试累加 ✅ / **BEP Relay v1 ✅**（10 relay 候选 + 直连竞速）
+- **互操作**：Rust↔Rust 双向 E2E ✅；Go Syncthing 互操作已验证 ✅
 - **观测**：REST API 读写端点（兼容 Go 布局）+ 文件系统 watcher(1s debounce) + **TUI 实时状态（event bridge）✅** + **配置热重载 ✅**
 - **观测**：REST API 读写端点（兼容 Go 布局）+ 文件系统 watcher(1s debounce) + **TUI 实时状态（event bridge）✅** + **配置热重载 ✅**
 
@@ -147,6 +146,7 @@
 | 72h Stress Test | 长期运行稳定性验证 | PHASE3_PLAN 3.4 | ⏳ | **P0** |
 | Fix 1: 连接重试累加 | retry_count 独立 map, 成功后清除 | production-readiness | ✅ | P1 |
 | Fix 2: TCP keepalive | SO_KEEPALIVE 60s/10s/3probes | production-readiness | ✅ | P1 |
+| Fix 3: BEP Relay v1 激活 | 5 行顺序 bug 修复 + init wizard 默认启用 | production-readiness | ✅ | P1 |
 | Fix 4: Staggered 版本 | 4 时间窗口, maxAge 可配 | Better-Than-Go P1.1b | ✅ | P1 |
 | P1.2 Symlink 同步 | scanner + puller + 平台守卫 | Better-Than-Go | 🔲 | P1 |
 | P1.4 ReceiveOnly 语义 | BEP local flags | Better-Than-Go | 🔲 | P1 |
