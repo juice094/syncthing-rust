@@ -2,6 +2,9 @@
 
 ## [Unreleased]
 
+### Bug Fixes
+- **sequence 竞态条件**: `FileSystemDatabase::increment_sequence` 的 read-modify-write 无锁保护。`tokio::fs::write` 先 truncate 再 write，并发 scanner+puller 在 truncate 和 write 之间读到空文件 → `"Invalid sequence: cannot parse integer from empty string"`。修复：新增 `seq_locks: DashMap<String, Arc<Mutex<()>>>` per-folder 互斥锁，`increment_sequence` 改为带锁的原子 read-increment-write。341 passed, 0 failed。
+
 ## [0.2.10] — 2026-06-04（生产部署 + 灾备协议）
 
 ### Headline: ROG-X ↔ Gray-Cloud 双端工作区同步上线，确立灾备恢复 SOP。
