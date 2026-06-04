@@ -8,7 +8,7 @@ tags: [issues, bugs, tracker, syncthing-rust]
 # Known Issues
 
 > **维护原则**：发现的缺陷必须显式登记，避免误判项目成熟度。  
-> **最后更新**：2026-06-03（v0.2.10-rc3 — Phase 0 完成，382 tests / 0 failures）
+> **最后更新**：2026-06-04（v0.2.10 — 生产部署，382 tests / 0 failures，§15 新增）
 
 本文档列举当前已知未修复的功能性 / 行为性问题。  
 **这些问题决定了项目目前的"事实可用性"边界**。
@@ -487,7 +487,7 @@ v0.2.8 完成首次双节点真实网络环境下的完整文件同步验证。
 |--------|---------|
 | **v0.2.5** | ✅ §2 已修复 — 已发布 |
 | **v0.2.6（hotfix）** | ✅ §7 运行时安全缺陷（H-1~H-6）：debounce + 日志上限 + 有界 channel + panic 清除 + shutdown select — 已合并 |
-| **v0.3.0** | ✅ §11 Scanner 默认排除元数据 — 已修复 / §1 ClusterConfig race + §8 Transport Plugin + §9 Windows 块传输修复（Bug-1/2/3）+ §10 配置 UX（C-UX-1~5）+ §12 双节点真实网络通过 + §13 `.stignore` 目录排除 + §14 重命名优化 + §15 FileInfo 字段兼容 + §16 LocalIndexUpdated 桥接 + 双节点 72h + Prometheus metrics + T3.1/T3.4 |
+| **v0.3.0** | ✅ §11 Scanner 默认排除元数据 — 已修复 / §1 ClusterConfig race + §8 Transport Plugin + §9 Windows 块传输修复（Bug-1/2/3）+ §10 配置 UX（C-UX-1~5）+ §12 双节点真实网络通过 + §13 `.stignore` 目录排除 + §14 重命名优化 + §15 FileInfo 字段兼容 + §16 LocalIndexUpdated 桥接 + §15 Stale DB 索引误删 + 双节点 72h + Prometheus metrics + T3.1/T3.4 |
 | **v0.4.0** | 国密 TLS（SM2/SM3/SM4）+ 证书外部化 + SQLite WAL + 审计日志 + 跨版本互通自动化 |
 
 v0.3.0 路线图详见 [`NEXT_STEPS_2026-05-15.md`](./plans/NEXT_STEPS_2026-05-15.md)。
@@ -546,3 +546,36 @@ v0.3.0 路线图详见 [`NEXT_STEPS_2026-05-15.md`](./plans/NEXT_STEPS_2026-05-1
 5. **静态端口 NAT**：OPNsense/pfSense 等企业级路由器需配置 Static Port NAT 以保持 UDP 打洞稳定。
 
 **追踪**：2026-06-03 E2E 测试中发现，`daemon.2026-06-03-12.log`。
+
+---
+
+## §15. 对侧格式化/重装后 DB 残留索引导致大量文件误删（严重 — 数据安全）
+
+**症状**：某一侧 syncthing 节点执行格式化/系统重装/workspace 清空后，对侧 DB 仍保留旧 session 的完整文件索引。重连后发生：
+1. 对侧（新装侧）发送仅含少量文件的 Index → 本侧 IndexHandler 将差异解释为"peer 已删除这些文件" → puller 批量删除本地文件
+2. 本侧发送旧 DB 的完整索引 → 对侧按索引请求文件 → 本侧返回 BEP error code 3 (NoSuchFile) — 文件已在磁盘上不存在 → 大量 `Block download failed` 错误
+
+**复现**：2026-06-04 云端格式化后首次重连。Windows 侧 DB 含 20644 条旧索引，云端仅 27 个文件。
+- Windows 侧 2043 个文件被 puller 误删（git status 显示 `D`）
+- 云端 puller 日志洪水级 `error code 3` 
+- 云端 `find_local_copy_source` 利用本地残余副本做了大量 rename optimization 拷贝，导致空目录结构蔓延
+
+**根因（已确认）**：
+1. DB 与磁盘实际文件无一致性校验机制 — 扫描器仅检测文件变更，不校验 DB 条目对应的文件是否仍存在
+2. IndexHandler 在收到对侧全量 Index 时，将"对侧不包含该文件"直接等同为"对侧已删除该文件"，触发本地删除
+3. 初始 Index 发送在首次扫描完成之前 — DB 中的过期条目在扫描器纠正前已通过 Index 传播到对侧
+
+**影响**：对侧格式化后自动重连可导致本侧大量文件被删除。需人工介入（DB 重置 + git 恢复）才能恢复。
+
+**已确立的灾备恢复协议**（参见 AGENTS.md Skill 注册）：
+1. 停止双端 syncthing
+2. 删除双端 `db/` 和 `syncthing.pid`
+3. 本侧 `git bundle create` → SCP → 对侧 `git clone`
+4. 双端重启，验证 0 error code 3
+
+**修复方向**（待实现）：
+- [ ] A: 扫描器增加 DB↔磁盘一致性校验 — 对 DB 中标记为"已同步"的文件检查 `Path::exists()`
+- [ ] B: IndexHandler 增加安全阈值 — 若对侧 Index 相比本地 DB 缺失超过 50% 条目，拒绝自动删除，改发警告并等待管理员确认
+- [ ] C: 首次连接握手时引入"generation"标记 — 检测对侧为全新实例后，本侧自动重置该 folder 的 DB
+
+**追踪**：2026-06-04 生产部署中发现，已通过 git bundle + DB reset 恢复。

@@ -18,7 +18,7 @@
 - **传输**：TCP keepalive (60s/10s) ✅ / 连接重试累加 ✅ / **BEP Relay v1 ✅**（10 relay 候选 + 直连竞速）
 - **互操作**：Rust↔Rust 双向 E2E ✅；Go Syncthing 互操作已验证 ✅
 - **观测**：REST API 读写端点（兼容 Go 布局）+ 文件系统 watcher(1s debounce) + **TUI 实时状态（event bridge）✅** + **配置热重载 ✅**
-- **观测**：REST API 读写端点（兼容 Go 布局）+ 文件系统 watcher(1s debounce) + **TUI 实时状态（event bridge）✅** + **配置热重载 ✅**
+- **运维**：systemd service ✅ / cloud-deploy.sh ✅ / WSL 交叉编译 ✅ / git bundle 灾备同步 ✅
 
 ## 架构讨论摘要
 
@@ -126,6 +126,18 @@
 | Phase E 架构债务 | `rest.rs` 1728→7 模块；`manager.rs` 1126→8 模块；dead-code 清理 | *自发* | ✅ |
 | 组件分发拆分 | `syncthing-bench` / `syncthing-cli` 从 `cmd/syncthing` 提取为独立二进制 | POST_V0_2_0 | ✅ |
 | 解耦工作 | 元数据统一、`test_harness` 归位、E2E 测试外迁、`syncthing-net` API 收敛 | *自发* | ✅ |
+
+### 2026-06-04: 生产部署 — ROG-X ↔ Gray-Cloud 双端工作区同步
+
+| 模块 | 内容 | 状态 |
+|------|------|------|
+| Cloud Rebuild | 云端格式化 → Tailscale IP 变更 (100.113.140.121→100.113.140.121) | ✅ |
+| WSL Cross-Compile | WSL Ubuntu 内 `cargo build --release` 产出 Linux ELF (14MB, 3m32s) | ✅ |
+| SCP Deploy | 二进制上传 `/usr/local/bin/syncthing` + systemd service | ✅ |
+| OpenClaw Workspace Sync | `C:\Users\22414\.kimi_openclaw\workspace` ↔ `/root/.openclaw/workspace` BEP 双向同步 | ✅ |
+| DB Reset Protocol | 旧 DB 残留索引导致 2043 文件被误删，确立对侧格式化后必须双端重置 DB 的操作流程 | ✅ |
+| Git Bundle 灾备 | `git bundle` → SCP → cloud `git clone` 恢复权威 workspace 快照 | ✅ |
+| Stale Index Bug | 发现并登记 §15：对侧重装后 DB 残留触发 NoSuchFile 风暴 + puller 误删本地文件 | ✅ |
 
 ### 2026-06-03 (续): Phase 0.5 + Phase 1.1
 
@@ -268,8 +280,8 @@
 > **Skill ID**：`skill-syncthing-dual-node-test`  
 > **生效版本**：v0.2.7+  
 > **注册时间**：2026-05-15  
-> **对侧节点**：Gray-Cloud (Ubuntu 22.04 VPS, Tailscale 100.127.13.26)  
-> **本侧节点**：Windows 11 (Tailscale 100.73.228.59)
+> **对侧节点**：Gray-Cloud (Ubuntu 24.04 VPS, Tailscale 100.113.140.121, systemd `syncthing.service`)  
+> **本侧节点**：Windows 11 (Tailscale 100.107.247.38)
 
 ### 触发条件
 
@@ -318,7 +330,7 @@ Step 5: 等待格雷侧配置完成
     └─ 格雷侧启动守护进程
 
 Step 6: 验证连接建立
-    └─ `netstat -ano | grep 100.127.13.26`
+    └─ `netstat -ano | grep 100.113.140.121`
     └─ 目标：ESTABLISHED 稳定保持 20s+
     └─ 若 SYN_SENT 挂死 → 检查 Tailscale / 防火墙 / 对侧监听地址
 
@@ -331,6 +343,16 @@ Step 8: 收集结果与报告
     └─ 更新 `docs/reports/DUAL_NODE_TEST_*.md`
     └─ git commit + push
 ```
+
+### 灾备恢复协议（对侧格式化/重装后）
+
+1. 停止双端 syncthing
+2. 删除双端 `db/` 和 `syncthing.pid`
+3. 本侧 `git bundle create workspace.bundle --all`
+4. SCP → 对侧 `git clone workspace.bundle workspace`
+5. 对侧 `systemctl start syncthing`
+6. 本侧启动 syncthing
+7. 验证：0 error code 3 + scans stable (files_changed=0)
 
 ### 待测试任务清单（P0 → P2）
 
@@ -357,7 +379,7 @@ Step 8: 收集结果与报告
 **宿 → 格雷**
 - 守护进程 PID：`<pid>`
 - Device ID：`<device-id>`（以证书为准）
-- Tailscale IP：`100.73.228.59`
+- Tailscale IP：`100.107.247.38`
 - 同步目录：`C:\...\sync`
 - 操作手册：`docs/GRAY_CLOUD_OPS_MANUAL_v0.2.7.md`
 ```
