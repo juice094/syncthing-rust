@@ -131,13 +131,16 @@
 
 | 模块 | 内容 | 状态 |
 |------|------|------|
-| Cloud Rebuild | 云端格式化 → Tailscale IP 变更 (100.113.140.121→100.113.140.121) | ✅ |
-| WSL Cross-Compile | WSL Ubuntu 内 `cargo build --release` 产出 Linux ELF (14MB, 3m32s) | ✅ |
+| Cloud Rebuild | 云端格式化 → Tailscale IP 变更 (100.127.13.26→100.113.140.121) | ✅ |
+| WSL Cross-Compile | WSL Ubuntu 内 `cargo build --release` 产出 Linux ELF (14MB, 5m48s) | ✅ |
 | SCP Deploy | 二进制上传 `/usr/local/bin/syncthing` + systemd service | ✅ |
 | OpenClaw Workspace Sync | `C:\Users\22414\.kimi_openclaw\workspace` ↔ `/root/.openclaw/workspace` BEP 双向同步 | ✅ |
 | DB Reset Protocol | 旧 DB 残留索引导致 2043 文件被误删，确立对侧格式化后必须双端重置 DB 的操作流程 | ✅ |
 | Git Bundle 灾备 | `git bundle` → SCP → cloud `git clone` 恢复权威 workspace 快照 | ✅ |
 | Stale Index Bug | 发现并登记 §15：对侧重装后 DB 残留触发 NoSuchFile 风暴 + puller 误删本地文件 | ✅ |
+| **Sequence Race Fix** | `FileSystemDatabase::increment_sequence` read-modify-write 竞态 → `seq_locks` per-folder Mutex (341 passed) | ✅ |
+| .stignore Sync Gap | `.stignore` 自身被排除规则排除，需手动 SCP 部署（已补充到灾备协议） | ✅ |
+| syncthing-ops Skill | 灾备恢复/异常诊断/新端部署/git 共存 四场景 SOP → `workspace/skills/registered/syncthing-ops/` | ✅ |
 
 ### 2026-06-03 (续): Phase 0.5 + Phase 1.1
 
