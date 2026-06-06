@@ -8,6 +8,7 @@ use std::path::Path;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use syncthing_core::types::{FileInfo, Folder, IndexID};
+use tokio::sync::Mutex;
 
 /// 本地数据库 trait
 #[async_trait::async_trait]
@@ -184,6 +185,10 @@ pub struct FileSystemDatabase {
     cache: DashMap<String, Vec<FileInfo>>,
     cache_size: Arc<AtomicUsize>,
     cache_cap: usize,
+    /// Per-folder mutex to serialize sequence read-modify-write.
+    /// Prevents the "empty string" parse error caused by concurrent
+    /// truncate-then-write in tokio::fs::write.
+    seq_locks: DashMap<String, Arc<Mutex<()>>>,
 }
 
 impl FileSystemDatabase {
@@ -193,7 +198,15 @@ impl FileSystemDatabase {
             cache: DashMap::new(),
             cache_size: Arc::new(AtomicUsize::new(0)),
             cache_cap: 100_000,
+            seq_locks: DashMap::new(),
         })
+    }
+
+    fn get_seq_lock(&self, folder: &str) -> Arc<Mutex<()>> {
+        self.seq_locks
+            .entry(folder.to_string())
+            .or_insert_with(|| Arc::new(Mutex::new(())))
+            .clone()
     }
 
     /// 随机驱逐一个 folder 的缓存，返回驱逐的文件数
@@ -371,6 +384,8 @@ impl LocalDatabase for FileSystemDatabase {
     }
 
     async fn get_sequence(&self, folder: &str) -> Result<u64> {
+        let seq_lock = self.get_seq_lock(folder);
+        let _lock = seq_lock.lock().await;
         let path = self.base_path.join(format!("seq_{}", folder));
         if !path.exists() {
             return Ok(0);
@@ -383,8 +398,18 @@ impl LocalDatabase for FileSystemDatabase {
     }
 
     async fn increment_sequence(&self, folder: &str) -> Result<u64> {
+        let seq_lock = self.get_seq_lock(folder);
+        let _lock = seq_lock.lock().await;
         let path = self.base_path.join(format!("seq_{}", folder));
-        let seq = self.get_sequence(folder).await? + 1;
+        let seq = if path.exists() {
+            let content = tokio::fs::read_to_string(&path).await?;
+            let current: u64 = content
+                .parse()
+                .map_err(|e| SyncError::database(format!("Invalid sequence: {}", e)))?;
+            current + 1
+        } else {
+            1
+        };
         tokio::fs::write(&path, seq.to_string()).await?;
         Ok(seq)
     }
