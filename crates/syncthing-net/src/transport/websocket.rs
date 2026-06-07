@@ -155,7 +155,7 @@ impl AsyncWrite for MergedPipe {
 /// 内部使用两个 `tokio::io::duplex` 管道：
 /// - `ws_to_bep`：WebSocket 收到 Binary → 桥接写入 → BEP 读取
 /// - `bep_to_ws`：BEP 写入 → 桥接读取 → WebSocket 发送 Binary
-/// 最终暴露给 BEP 层的是 `MergedPipe`（组合两个管道的各一端）。
+///   最终暴露给 BEP 层的是 `MergedPipe`（组合两个管道的各一端）。
 #[cfg(feature = "websocket")]
 pub struct WebSocketPipe {
     inner: MergedPipe,
@@ -182,10 +182,8 @@ impl WebSocketPipe {
             let recv_to_duplex = async {
                 while let Some(msg) = ws_rx.next().await {
                     match msg {
-                        Ok(Message::Binary(data)) => {
-                            if ws_to_bep.write_all(&data).await.is_err() {
-                                break;
-                            }
+                        Ok(Message::Binary(data)) if ws_to_bep.write_all(&data).await.is_err() => {
+                            break;
                         }
                         Ok(Message::Close(_)) => break,
                         Err(e) => {

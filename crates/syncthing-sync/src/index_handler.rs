@@ -163,10 +163,8 @@ impl IndexHandler {
             let local_files = self.db.get_folder_files(&folder.id).await?;
             let mut unpushed: Vec<FileInfo> = Vec::new();
             for local_file in local_files {
-                if !files.iter().any(|f| f.name == local_file.name) {
-                    if !local_file.is_deleted() {
-                        unpushed.push(local_file);
-                    }
+                if !files.iter().any(|f| f.name == local_file.name) && !local_file.is_deleted() {
+                    unpushed.push(local_file);
                 }
             }
             if !unpushed.is_empty() {

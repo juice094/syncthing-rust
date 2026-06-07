@@ -386,7 +386,7 @@ impl Pattern {
         let is_root_only = chars.peek() == Some(&'/');
         if is_root_only {
             chars.next(); // consume '/'
-            // Also consume a second '/' if present (path separator at root level)
+                          // Also consume a second '/' if present (path separator at root level)
             if chars.peek() == Some(&'/') {
                 chars.next();
             }
@@ -456,7 +456,7 @@ impl Pattern {
                         chars.next(); // consume second *
                         if chars.peek() == Some(&'/') {
                             chars.next(); // consume /
-                            // Match zero or more directory levels (arbitrary depth)
+                                          // Match zero or more directory levels (arbitrary depth)
                             regex_str.push_str("(?:.*/)*");
                         } else {
                             regex_str.push_str(".*");

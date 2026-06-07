@@ -59,7 +59,9 @@ async fn wait_for_dir(base: &std::path::Path, name: &str, timeout: Duration) -> 
 }
 
 /// 通用两节点初始化：创建 node-a / node-b，配置共享文件夹，建立连接
-async fn setup_two_node(folder_id: &str) -> (TestNode, TestNode, std::path::PathBuf, std::path::PathBuf) {
+async fn setup_two_node(
+    folder_id: &str,
+) -> (TestNode, TestNode, std::path::PathBuf, std::path::PathBuf) {
     let node_a = TestNode::new("crud-a").await.expect("create node a");
     let node_b = TestNode::new("crud-b").await.expect("create node b");
 
@@ -99,15 +101,14 @@ async fn test_e2e_create_file() {
         .await
         .expect("write");
 
-    node_a.sync_service.scan_folder("e2e-create").await.expect("scan");
+    node_a
+        .sync_service
+        .scan_folder("e2e-create")
+        .await
+        .expect("scan");
 
     assert!(
-        wait_for_file(&folder_b,
-            "create.txt",
-            &payload,
-            Duration::from_secs(30)
-        )
-        .await,
+        wait_for_file(&folder_b, "create.txt", &payload, Duration::from_secs(30)).await,
         "文件应同步到 node B"
     );
 
@@ -122,8 +123,14 @@ async fn test_e2e_modify_file() {
 
     // 先创建
     let v1 = b"version 1";
-    tokio::fs::write(folder_a.join("mutate.txt"), v1).await.expect("write v1");
-    node_a.sync_service.scan_folder("e2e-modify").await.expect("scan");
+    tokio::fs::write(folder_a.join("mutate.txt"), v1)
+        .await
+        .expect("write v1");
+    node_a
+        .sync_service
+        .scan_folder("e2e-modify")
+        .await
+        .expect("scan");
     assert!(
         wait_for_file(&folder_b, "mutate.txt", v1, Duration::from_secs(30)).await,
         "v1 应同步"
@@ -131,8 +138,14 @@ async fn test_e2e_modify_file() {
 
     // 再修改
     let v2 = b"version 2 - modified content";
-    tokio::fs::write(folder_a.join("mutate.txt"), v2).await.expect("write v2");
-    node_a.sync_service.scan_folder("e2e-modify").await.expect("scan");
+    tokio::fs::write(folder_a.join("mutate.txt"), v2)
+        .await
+        .expect("write v2");
+    node_a
+        .sync_service
+        .scan_folder("e2e-modify")
+        .await
+        .expect("scan");
     assert!(
         wait_for_file(&folder_b, "mutate.txt", v2, Duration::from_secs(30)).await,
         "v2 应同步覆盖旧内容"
@@ -149,8 +162,14 @@ async fn test_e2e_delete_file() {
 
     // 先创建
     let data = b"to be deleted";
-    tokio::fs::write(folder_a.join("gone.txt"), data).await.expect("write");
-    node_a.sync_service.scan_folder("e2e-delete").await.expect("scan");
+    tokio::fs::write(folder_a.join("gone.txt"), data)
+        .await
+        .expect("write");
+    node_a
+        .sync_service
+        .scan_folder("e2e-delete")
+        .await
+        .expect("scan");
     assert!(
         wait_for_file(&folder_b, "gone.txt", data, Duration::from_secs(30)).await,
         "文件应先同步到 B"
@@ -160,11 +179,13 @@ async fn test_e2e_delete_file() {
     tokio::fs::remove_file(folder_a.join("gone.txt"))
         .await
         .expect("delete");
-    node_a.sync_service.scan_folder("e2e-delete").await.expect("scan");
+    node_a
+        .sync_service
+        .scan_folder("e2e-delete")
+        .await
+        .expect("scan");
     assert!(
-        wait_for_file_gone(&folder_b, "gone.txt", Duration::from_secs(30)
-        )
-        .await,
+        wait_for_file_gone(&folder_b, "gone.txt", Duration::from_secs(30)).await,
         "删除应同步到 B"
     );
 
@@ -178,8 +199,14 @@ async fn test_e2e_rename_file() {
     let (node_a, node_b, folder_a, folder_b) = setup_two_node("e2e-rename").await;
 
     let data = b"same content after rename";
-    tokio::fs::write(folder_a.join("old.txt"), data).await.expect("write");
-    node_a.sync_service.scan_folder("e2e-rename").await.expect("scan");
+    tokio::fs::write(folder_a.join("old.txt"), data)
+        .await
+        .expect("write");
+    node_a
+        .sync_service
+        .scan_folder("e2e-rename")
+        .await
+        .expect("scan");
     assert!(
         wait_for_file(&folder_b, "old.txt", data, Duration::from_secs(30)).await,
         "old.txt 应同步到 B"
@@ -189,16 +216,18 @@ async fn test_e2e_rename_file() {
     tokio::fs::rename(folder_a.join("old.txt"), folder_a.join("new.txt"))
         .await
         .expect("rename");
-    node_a.sync_service.scan_folder("e2e-rename").await.expect("scan");
+    node_a
+        .sync_service
+        .scan_folder("e2e-rename")
+        .await
+        .expect("scan");
 
     assert!(
         wait_for_file(&folder_b, "new.txt", data, Duration::from_secs(30)).await,
         "new.txt 应出现在 B"
     );
     assert!(
-        wait_for_file_gone(&folder_b, "old.txt", Duration::from_secs(30)
-        )
-        .await,
+        wait_for_file_gone(&folder_b, "old.txt", Duration::from_secs(30)).await,
         "old.txt 应从 B 删除"
     );
 
@@ -218,7 +247,9 @@ async fn test_e2e_stignore_directory_exclusion() {
 
     // 创建应被排除的目录和文件
     let ignored = folder_a.join("ignored");
-    tokio::fs::create_dir(&ignored).await.expect("create ignored");
+    tokio::fs::create_dir(&ignored)
+        .await
+        .expect("create ignored");
     tokio::fs::write(ignored.join("secret.txt"), b"secret")
         .await
         .expect("write secret");
@@ -230,7 +261,11 @@ async fn test_e2e_stignore_directory_exclusion() {
         .await
         .expect("write public");
 
-    node_a.sync_service.scan_folder("e2e-ignore").await.expect("scan");
+    node_a
+        .sync_service
+        .scan_folder("e2e-ignore")
+        .await
+        .expect("scan");
 
     // 验证未排除的内容正常同步（使用异步等待，给足 30s）
     assert!(
@@ -238,7 +273,13 @@ async fn test_e2e_stignore_directory_exclusion() {
         "kept/ 目录应正常同步"
     );
     assert!(
-        wait_for_file(&folder_b, "kept/public.txt", b"public", Duration::from_secs(30)).await,
+        wait_for_file(
+            &folder_b,
+            "kept/public.txt",
+            b"public",
+            Duration::from_secs(30)
+        )
+        .await,
         "kept/public.txt 应同步"
     );
 

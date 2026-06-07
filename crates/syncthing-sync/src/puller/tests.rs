@@ -259,10 +259,7 @@ async fn test_e2e_sync_single_file_via_block_server() {
 fn test_temp_path_for_basic() {
     let path = Path::new("/folder/sub/file.md");
     let temp = temp_path_for(path);
-    assert_eq!(
-        temp,
-        Path::new("/folder/sub/.syncthing.file.md.tmp")
-    );
+    assert_eq!(temp, Path::new("/folder/sub/.syncthing.file.md.tmp"));
 }
 
 #[test]
@@ -276,20 +273,14 @@ fn test_temp_path_for_no_parent() {
 fn test_temp_path_for_unicode_filename() {
     let path = Path::new("/data/中文文件.txt");
     let temp = temp_path_for(path);
-    assert_eq!(
-        temp,
-        Path::new("/data/.syncthing.中文文件.txt.tmp")
-    );
+    assert_eq!(temp, Path::new("/data/.syncthing.中文文件.txt.tmp"));
 }
 
 #[test]
 fn test_temp_path_for_deeply_nested() {
     let path = Path::new("/a/b/c/d/file.txt");
     let temp = temp_path_for(path);
-    assert_eq!(
-        temp,
-        Path::new("/a/b/c/d/.syncthing.file.txt.tmp")
-    );
+    assert_eq!(temp, Path::new("/a/b/c/d/.syncthing.file.txt.tmp"));
 }
 
 /// 验证 rename_with_retry 在正常情况下成功
@@ -305,7 +296,10 @@ async fn test_rename_with_retry_success() {
     let result = rename_with_retry(&temp_path, &real_path, "test.txt").await;
     assert!(result.is_ok(), "Rename should succeed: {:?}", result.err());
     assert!(real_path.exists(), "Real file should exist after rename");
-    assert!(!temp_path.exists(), "Temp file should not exist after rename");
+    assert!(
+        !temp_path.exists(),
+        "Temp file should not exist after rename"
+    );
 
     let content = tokio::fs::read_to_string(&real_path).await.unwrap();
     assert_eq!(content, "hello rename");
@@ -324,7 +318,11 @@ async fn test_rename_with_retry_target_exists() {
     tokio::fs::write(&temp_path, b"new content").await.unwrap();
 
     let result = rename_with_retry(&temp_path, &real_path, "test.txt").await;
-    assert!(result.is_ok(), "Rename with target removal should succeed: {:?}", result.err());
+    assert!(
+        result.is_ok(),
+        "Rename with target removal should succeed: {:?}",
+        result.err()
+    );
     assert!(real_path.exists());
     assert!(!temp_path.exists());
 

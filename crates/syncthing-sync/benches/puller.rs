@@ -65,6 +65,9 @@ fn bench_pull_single_file(c: &mut Criterion) {
             blocks,
             symlink_target: None,
             deleted: Some(false),
+            modified_by: None,
+            blocks_hash: None,
+            no_permissions: None,
         };
 
         group.throughput(Throughput::Bytes(*size as u64));

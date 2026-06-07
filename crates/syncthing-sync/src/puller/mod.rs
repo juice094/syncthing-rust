@@ -162,8 +162,8 @@ impl Puller {
         Self {
             db,
             events,
-            max_concurrent_downloads: 2,   // 保守默认 — 高延迟链路友好
-            max_concurrent_blocks: 4,     // 减少并发避免 HEAD-of-line blocking
+            max_concurrent_downloads: 2, // 保守默认 — 高延迟链路友好
+            max_concurrent_blocks: 4,    // 减少并发避免 HEAD-of-line blocking
             block_source: None,
             versioner: None,
         }
@@ -334,6 +334,7 @@ impl Puller {
     }
 
     /// 下载单个文件
+    #[allow(clippy::too_many_arguments)]
     async fn download_file(
         folder_path: &Path,
         file_info: &FileInfo,
@@ -361,15 +362,23 @@ impl Puller {
         }
 
         // P1: 重命名优化——如果本地有相同块哈希的文件，直接复制
-        if let Some(source_path) = Self::find_local_copy_source(folder_path, file_info, db, folder_id).await? {
+        if let Some(source_path) =
+            Self::find_local_copy_source(folder_path, file_info, db, folder_id).await?
+        {
             info!(file = %file_info.name, source = %source_path.display(), "Copying from local file (rename optimization)");
             if let Some(parent) = file_path.parent() {
                 fs::create_dir_all(parent).await.map_err(|e| {
-                    SyncError::pull(file_info.name.clone(), format!("Failed to create parent directory: {}", e))
+                    SyncError::pull(
+                        file_info.name.clone(),
+                        format!("Failed to create parent directory: {}", e),
+                    )
                 })?;
             }
             fs::copy(&source_path, &temp_path).await.map_err(|e| {
-                SyncError::pull(file_info.name.clone(), format!("Failed to copy from local source: {}", e))
+                SyncError::pull(
+                    file_info.name.clone(),
+                    format!("Failed to copy from local source: {}", e),
+                )
             })?;
             // 在覆盖前存档旧版本
             if let Some(v) = versioner {
@@ -522,7 +531,7 @@ impl Puller {
         }
 
         // 在覆盖前存档旧版本
-        if let Some(ref v) = versioner {
+        if let Some(v) = versioner {
             if file_path.exists() {
                 if let Err(e) = v.archive(&file_path).await {
                     warn!(file = %file_info.name, error = %e, "Failed to archive old version");
@@ -591,10 +600,7 @@ impl Puller {
     }
 
     /// 创建目录
-    async fn create_directory(
-        folder_path: &Path,
-        file_info: &FileInfo,
-    ) -> Result<()> {
+    async fn create_directory(folder_path: &Path, file_info: &FileInfo) -> Result<()> {
         let dir_path = folder_path.join(&file_info.name);
 
         if dir_path.exists() {

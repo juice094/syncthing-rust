@@ -32,8 +32,7 @@ pub trait Versioner: Send + Sync {
     async fn archive(&self, file_path: &Path) -> syncthing_core::Result<()>;
 
     /// List all versions of the given file.
-    async fn get_versions(&self, file_path: &Path)
-        -> syncthing_core::Result<Vec<FileVersion>>;
+    async fn get_versions(&self, file_path: &Path) -> syncthing_core::Result<Vec<FileVersion>>;
 
     /// Restore a specific version.
     async fn restore(
@@ -61,9 +60,7 @@ pub fn create_versioner(cfg: &VersioningConfig, folder_path: &Path) -> Option<Bo
             )))
         }
         VersioningConfig::Staggered { params } => {
-            let max_age = params
-                .get("maxAge")
-                .and_then(|v| v.parse::<u32>().ok());
+            let max_age = params.get("maxAge").and_then(|v| v.parse::<u32>().ok());
             Some(Box::new(staggered::StaggeredVersioner::new(
                 folder_path.to_path_buf(),
                 max_age,

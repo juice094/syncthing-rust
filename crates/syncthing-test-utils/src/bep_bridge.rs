@@ -363,9 +363,10 @@ pub fn install_bep_bridge(
                     let update = syncthing_core::types::IndexUpdate { folder, files };
                     let config = sync_service_e.get_config().await.unwrap_or_default();
                     for device_id in handle_e.connected_devices() {
-                        let shares_folder = config.folders.iter().any(|f| {
-                            f.id == update.folder && f.devices.contains(&device_id)
-                        });
+                        let shares_folder = config
+                            .folders
+                            .iter()
+                            .any(|f| f.id == update.folder && f.devices.contains(&device_id));
                         if !shares_folder {
                             continue;
                         }

@@ -66,7 +66,7 @@ impl From<syncthing_core::types::FileInfo> for WireFileInfo {
             blocks: f.blocks.into_iter().map(Into::into).collect(),
             symlink_target: f.symlink_target.unwrap_or_default().into_bytes(),
             blocks_hash: f.blocks_hash.unwrap_or_default(),
-            encrypted: Vec::new(), // TODO: encrypted data
+            encrypted: Vec::new(),            // TODO: encrypted data
             previous_blocks_hash: Vec::new(), // TODO: previous blocks hash
         }
     }
@@ -97,8 +97,16 @@ impl From<WireFileInfo> for syncthing_core::types::FileInfo {
                 Some(String::from_utf8_lossy(&f.symlink_target).to_string())
             },
             deleted: Some(f.deleted),
-            modified_by: if f.modified_by == 0 { None } else { Some(f.modified_by) },
-            blocks_hash: if f.blocks_hash.is_empty() { None } else { Some(f.blocks_hash) },
+            modified_by: if f.modified_by == 0 {
+                None
+            } else {
+                Some(f.modified_by)
+            },
+            blocks_hash: if f.blocks_hash.is_empty() {
+                None
+            } else {
+                Some(f.blocks_hash)
+            },
             no_permissions: if f.no_permissions { Some(true) } else { None },
         }
     }
