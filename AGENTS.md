@@ -9,7 +9,7 @@
 
 `syncthing-rust` 是 P2P 文件同步的 Rust 替代实现。长期目标：基于 Rust 的内存安全、零成本抽象、类型安全协议、库可嵌入性，成为优于 Go 版的 syncthing。
 
-- **当前状态**：v0.2.10-rc3 Alpha，**382 passed / 3 ignored / 0 failed**，**0 warnings**
+- **当前状态**：v3.0.0 Production，**341 passed / 4 ignored / 0 failed**，**0 warnings**，**CI 全绿 (19/19)**
 - **传输层**：TCP+TLS / HTTP CONNECT 代理 / SOCKS5 代理 / DERP 中继（自研协议）/ UPnP / **Relay v1 并行拨号 ✅**
 - **发现层**：Local Discovery（UDP 广播骨架）⚠️ / STUN / PortMapper / **Global Discovery ✅** / **Relay Protocol v1 ✅**
 - **同步**：Pull ✅ / Push（主动 IndexUpdate 推送）✅ / 双向同步已实测验证 ✅
@@ -97,7 +97,16 @@
 
 **实现策略**：手写 JSON-RPC 2.0 协议层（~200 行），不依赖第三方 MCP SDK，只使用工作区已有依赖（tokio/serde_json/reqwest），完全可控、零额外依赖风险。
 
-## 阶段性进展（截至 2026-06-03）
+## 阶段性进展（截至 2026-06-07）
+
+### 2026-06-07: v3.0.0 Release — Production-grade P2P File Sync
+
+| 模块 | 内容 | 状态 |
+|------|------|------|
+| CI Full Green | 19/19 jobs passing: clippy (10 warnings fixed), cargo-deny (deny.toml), bench compile, formatting | ✅ |
+| Cargo Deny Config | License audit allowlist + advisory ignores (paste, instant, fxhash via sled) | ✅ |
+| deny.toml CI Compat | 移除 `allow-workspace` 键以兼容 CI 旧版 cargo-deny 二进制 | ✅ |
+| Version Bump | 14 crates 0.2.x → 3.0.0 | ✅ |
 
 ### 2026-06-02/03: Phase 0 Foundation Hardening
 

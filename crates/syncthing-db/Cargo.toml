@@ -1,6 +1,6 @@
 [package]
 name = "syncthing-db"
-version = "0.2.8"
+version = "3.0.0"
 edition = "2021"
 authors = ["juice094"]
 description = "Block and metadata storage for Syncthing Rust"
