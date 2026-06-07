@@ -42,7 +42,11 @@ fn hello_empty_fields_skipped() {
         timestamp: 0,
     };
     let encoded = hello.encode_to_vec();
-    assert_eq!(encoded.len(), 0, "All-default Hello should encode to 0 bytes");
+    assert_eq!(
+        encoded.len(),
+        0,
+        "All-default Hello should encode to 0 bytes"
+    );
 }
 
 #[test]
@@ -57,7 +61,11 @@ fn hello_wire_format_matches_spec() {
         timestamp: 0,
     };
     let encoded = hello.encode_to_vec();
-    assert_eq!(encoded, vec![0x0a, 0x01, 0x78], "Hello field 1 wire format mismatch");
+    assert_eq!(
+        encoded,
+        vec![0x0a, 0x01, 0x78],
+        "Hello field 1 wire format mismatch"
+    );
 }
 
 #[test]
@@ -85,14 +93,23 @@ fn hello_field_tags_are_correct() {
 #[test]
 fn header_roundtrip() {
     for (msg_type, compression) in [
-        (MessageType::ClusterConfig as i32, MessageCompression::None as i32),
+        (
+            MessageType::ClusterConfig as i32,
+            MessageCompression::None as i32,
+        ),
         (MessageType::Index as i32, MessageCompression::Lz4 as i32),
         (MessageType::Request as i32, MessageCompression::None as i32),
-        (MessageType::Response as i32, MessageCompression::None as i32),
+        (
+            MessageType::Response as i32,
+            MessageCompression::None as i32,
+        ),
         (MessageType::Ping as i32, MessageCompression::None as i32),
         (MessageType::Close as i32, MessageCompression::None as i32),
     ] {
-        let header = Header { r#type: msg_type, compression };
+        let header = Header {
+            r#type: msg_type,
+            compression,
+        };
         let encoded = header.encode_to_vec();
         let decoded = Header::decode(encoded.as_slice()).unwrap();
         assert_eq!(decoded.r#type, msg_type);
@@ -224,7 +241,9 @@ fn file_info_deleted_file_blocks_cleared() {
         deleted: true,
         invalid: false,
         no_permissions: false,
-        version: Some(WireVector { counters: vec![WireCounter { id: 1, value: 10 }] }),
+        version: Some(WireVector {
+            counters: vec![WireCounter { id: 1, value: 10 }],
+        }),
         sequence: 100,
         modified_ns: 0,
         modified_by: 0,
@@ -280,8 +299,16 @@ fn file_info_full_roundtrip_fuzz() {
             netbsd: None,
         }),
         blocks: vec![
-            WireBlockInfo { offset: 0, size: 131072, hash: vec![0x01; 32] },
-            WireBlockInfo { offset: 131072, size: 131072, hash: vec![0x02; 32] },
+            WireBlockInfo {
+                offset: 0,
+                size: 131072,
+                hash: vec![0x01; 32],
+            },
+            WireBlockInfo {
+                offset: 131072,
+                size: 131072,
+                hash: vec![0x02; 32],
+            },
         ],
         symlink_target: Vec::new(),
         blocks_hash: vec![0xcc; 32],

@@ -40,10 +40,22 @@ impl StaggeredVersioner {
         Self {
             versions_dir: folder_path.join(STVERSIONS_DIR),
             intervals: [
-                Interval { step_secs: 30, end_secs: 3600 },                    // 30s steps, first hour
-                Interval { step_secs: 3600, end_secs: 86400 },                 // 1h steps, next day
-                Interval { step_secs: 86400, end_secs: 30 * 86400 },           // 1d steps, next 30 days
-                Interval { step_secs: 7 * 86400, end_secs: max_age_secs },     // 1w steps, up to maxAge
+                Interval {
+                    step_secs: 30,
+                    end_secs: 3600,
+                }, // 30s steps, first hour
+                Interval {
+                    step_secs: 3600,
+                    end_secs: 86400,
+                }, // 1h steps, next day
+                Interval {
+                    step_secs: 86400,
+                    end_secs: 30 * 86400,
+                }, // 1d steps, next 30 days
+                Interval {
+                    step_secs: 7 * 86400,
+                    end_secs: max_age_secs,
+                }, // 1w steps, up to maxAge
             ],
         }
     }
@@ -78,22 +90,24 @@ impl Versioner for StaggeredVersioner {
 
         fs::create_dir_all(&self.versions_dir)
             .await
-            .map_err(|e| SyncthingError::Io(e))?;
+            .map_err(SyncthingError::Io)?;
 
         let timestamp = chrono::Utc::now().format("%Y%m%d-%H%M%S").to_string();
         let dest = self.version_path(file_path, &timestamp);
 
         fs::copy(file_path, &dest).await.map_err(|e| {
-            SyncthingError::io(format!("archive {} -> {}: {}", file_path.display(), dest.display(), e))
+            SyncthingError::io(format!(
+                "archive {} -> {}: {}",
+                file_path.display(),
+                dest.display(),
+                e
+            ))
         })?;
         debug!(src = %file_path.display(), dest = %dest.display(), "Archived (staggered)");
         Ok(())
     }
 
-    async fn get_versions(
-        &self,
-        file_path: &Path,
-    ) -> syncthing_core::Result<Vec<FileVersion>> {
+    async fn get_versions(&self, file_path: &Path) -> syncthing_core::Result<Vec<FileVersion>> {
         let name = file_path
             .file_name()
             .and_then(|n| n.to_str())
@@ -120,7 +134,7 @@ impl Versioner for StaggeredVersioner {
                 });
             }
         }
-        versions.sort_by(|a, b| a.version_time.cmp(&b.version_time));
+        versions.sort_by_key(|a| a.version_time);
         Ok(versions)
     }
 
@@ -146,7 +160,7 @@ impl Versioner for StaggeredVersioner {
             if !fname.starts_with(&prefix) {
                 continue;
             }
-            let meta = entry.metadata().await.map_err(|e| SyncthingError::Io(e))?;
+            let meta = entry.metadata().await.map_err(SyncthingError::Io)?;
             let mtime = meta.modified().unwrap_or(SystemTime::UNIX_EPOCH);
             let diff = mtime.duration_since(version_time).unwrap_or_default();
             if diff.as_secs() < 2 {
@@ -161,7 +175,10 @@ impl Versioner for StaggeredVersioner {
                 return Ok(());
             }
         }
-        Err(SyncthingError::internal(format!("version not found for {}", file_path.display())))
+        Err(SyncthingError::internal(format!(
+            "version not found for {}",
+            file_path.display()
+        )))
     }
 
     async fn clean(&self, _ctx: &CleanContext) -> syncthing_core::Result<()> {
@@ -248,7 +265,7 @@ impl StaggeredVersioner {
                 continue;
             }
             // Sort oldest first
-            versions.sort_by(|a, b| a.1.cmp(&b.1));
+            versions.sort_by_key(|a| a.1);
 
             let mut prev_age: Option<i64> = None;
             let mut to_remove: Vec<String> = Vec::new();
@@ -328,7 +345,11 @@ mod tests {
 
         // All versions should exist (intervals are large enough)
         let versions = v.get_versions(&test_file).await.unwrap();
-        assert!(versions.len() >= 4, "Expected >=4 versions, got {}", versions.len());
+        assert!(
+            versions.len() >= 4,
+            "Expected >=4 versions, got {}",
+            versions.len()
+        );
     }
 
     #[tokio::test]

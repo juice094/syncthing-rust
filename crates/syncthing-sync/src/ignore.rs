@@ -264,17 +264,38 @@ mod tests {
         m.add_line("vault/");
 
         // 目录应被排除
-        assert!(m.matches("skills", true), "skills/ should match skills directory");
-        assert!(m.matches("tools", true), "tools/ should match tools directory");
-        assert!(m.matches("vault", true), "vault/ should match vault directory");
+        assert!(
+            m.matches("skills", true),
+            "skills/ should match skills directory"
+        );
+        assert!(
+            m.matches("tools", true),
+            "tools/ should match tools directory"
+        );
+        assert!(
+            m.matches("vault", true),
+            "vault/ should match vault directory"
+        );
 
         // 同名文件不应被排除
-        assert!(!m.matches("skills", false), "skills/ should NOT match skills file");
-        assert!(!m.matches("tools", false), "tools/ should NOT match tools file");
+        assert!(
+            !m.matches("skills", false),
+            "skills/ should NOT match skills file"
+        );
+        assert!(
+            !m.matches("tools", false),
+            "tools/ should NOT match tools file"
+        );
 
         // 子目录中的同名目录也应被排除
-        assert!(m.matches("workspace/skills", true), "skills/ should match workspace/skills directory");
-        assert!(m.matches("deep/nested/vault", true), "vault/ should match deep/nested/vault directory");
+        assert!(
+            m.matches("workspace/skills", true),
+            "skills/ should match workspace/skills directory"
+        );
+        assert!(
+            m.matches("deep/nested/vault", true),
+            "vault/ should match deep/nested/vault directory"
+        );
     }
 
     #[test]

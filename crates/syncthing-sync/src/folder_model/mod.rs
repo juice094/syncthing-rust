@@ -38,8 +38,10 @@ impl FolderModel {
         block_source: Option<Arc<dyn BlockSource>>,
     ) -> Self {
         let scanner = Scanner::new(db.clone(), events.clone());
-        let versioner: Option<Arc<dyn syncthing_versioner::Versioner>> =
-            folder.versioning.as_ref().and_then(|cfg| {
+        let versioner: Option<Arc<dyn syncthing_versioner::Versioner>> = folder
+            .versioning
+            .as_ref()
+            .and_then(|cfg| {
                 syncthing_versioner::create_versioner(cfg, std::path::Path::new(&folder.path))
             })
             .map(Arc::from);

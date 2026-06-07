@@ -6,9 +6,9 @@
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tracing::{debug, info};
 
-use prost::Message;
 use crate::messages::Hello;
 use crate::{Result, SyncthingError};
+use prost::Message;
 
 /// Hello Magic Number (4 bytes, big-endian)
 pub const HELLO_MAGIC: u32 = 0x2EA7D90B;
@@ -99,9 +99,8 @@ pub async fn recv_hello<R: AsyncRead + Unpin>(reader: &mut R) -> Result<Hello> {
     reader.read_exact(&mut buf).await?;
 
     // 解码Hello消息
-    let hello = Hello::decode(&buf[..]).map_err(|e| {
-        SyncthingError::protocol(format!("hello decode: {}", e))
-    })?;
+    let hello = Hello::decode(&buf[..])
+        .map_err(|e| SyncthingError::protocol(format!("hello decode: {}", e)))?;
 
     info!(
         "Hello received: device={} client={}/{} num_connections={} timestamp={}",

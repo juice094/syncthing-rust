@@ -432,7 +432,10 @@ impl ConnectionManager {
         // 增加/设置重试次数（独立于 pending 条目，避免清除后丢失）
         let retry_count = {
             let mut retries = self.retry_counts.write().await;
-            let count = retries.entry(device_id).and_modify(|c| *c += 1).or_insert(1);
+            let count = retries
+                .entry(device_id)
+                .and_modify(|c| *c += 1)
+                .or_insert(1);
             *count
         };
 

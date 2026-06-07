@@ -138,7 +138,10 @@ impl ConnectionManager {
         {
             let mut pending = self.pending_connections.write().await;
             if pending.remove(&device_id).is_some() {
-                debug!("Cleared pending state for {} (connection established)", device_id);
+                debug!(
+                    "Cleared pending state for {} (connection established)",
+                    device_id
+                );
             }
         }
         {

@@ -190,8 +190,10 @@ impl BepConnection {
                 // LZ4 compress payload if header requests it
                 let (payload, msg_len) = if msg.header.compressed && !msg.payload.is_empty() {
                     let uncompressed = msg.payload.as_ref();
-                    let compressed = lz4::block::compress(uncompressed, None, false)
-                        .map_err(|e| SyncthingError::Serialization(format!("lz4 compress: {}", e)))?;
+                    let compressed =
+                        lz4::block::compress(uncompressed, None, false).map_err(|e| {
+                            SyncthingError::Serialization(format!("lz4 compress: {}", e))
+                        })?;
                     let uncompressed_len = uncompressed.len() as u32;
                     let mut payload = Vec::with_capacity(4 + compressed.len());
                     payload.extend_from_slice(&uncompressed_len.to_be_bytes());

@@ -46,7 +46,7 @@ impl Versioner for SimpleVersioner {
 
         fs::create_dir_all(&self.versions_dir)
             .await
-            .map_err(|e| SyncthingError::Io(e))?;
+            .map_err(SyncthingError::Io)?;
 
         let timestamp = chrono::Utc::now().format("%Y%m%d-%H%M%S").to_string();
         let dest = self.version_path(file_path, &timestamp);
@@ -72,10 +72,7 @@ impl Versioner for SimpleVersioner {
         Ok(())
     }
 
-    async fn get_versions(
-        &self,
-        file_path: &Path,
-    ) -> syncthing_core::Result<Vec<FileVersion>> {
+    async fn get_versions(&self, file_path: &Path) -> syncthing_core::Result<Vec<FileVersion>> {
         let name = file_path
             .file_name()
             .and_then(|n| n.to_str())
@@ -96,19 +93,15 @@ impl Versioner for SimpleVersioner {
             }
             if let Ok(meta) = entry.metadata().await {
                 versions.push(FileVersion {
-                    version_time: meta
-                        .modified()
-                        .unwrap_or(SystemTime::UNIX_EPOCH),
-                    mod_time: meta
-                        .modified()
-                        .unwrap_or(SystemTime::UNIX_EPOCH),
+                    version_time: meta.modified().unwrap_or(SystemTime::UNIX_EPOCH),
+                    mod_time: meta.modified().unwrap_or(SystemTime::UNIX_EPOCH),
                     size: meta.len(),
                 });
             }
         }
 
         // Sort newest first
-        versions.sort_by(|a, b| b.version_time.cmp(&a.version_time));
+        versions.sort_by_key(|b| std::cmp::Reverse(b.version_time));
         Ok(versions)
     }
 
@@ -139,11 +132,9 @@ impl Versioner for SimpleVersioner {
             if !fname.starts_with(&prefix) {
                 continue;
             }
-            let meta = entry.metadata().await.map_err(|e| SyncthingError::Io(e))?;
+            let meta = entry.metadata().await.map_err(SyncthingError::Io)?;
             let mtime = meta.modified().unwrap_or(SystemTime::UNIX_EPOCH);
-            let diff = mtime
-                .duration_since(version_time)
-                .unwrap_or_default();
+            let diff = mtime.duration_since(version_time).unwrap_or_default();
             if diff.as_secs() < 2 {
                 fs::copy(entry.path(), file_path).await.map_err(|e| {
                     SyncthingError::io(format!(
@@ -179,7 +170,7 @@ impl SimpleVersioner {
         }
 
         // Keep the `keep` newest, remove the rest
-        versions.sort_by(|a, b| b.version_time.cmp(&a.version_time));
+        versions.sort_by_key(|b| std::cmp::Reverse(b.version_time));
         for old in &versions[self.keep..] {
             let ts = chrono::DateTime::from_timestamp(
                 old.version_time
@@ -194,11 +185,7 @@ impl SimpleVersioner {
             let path = self.version_path(file_path, &ts);
             if path.exists() {
                 fs::remove_file(&path).await.map_err(|e| {
-                    SyncthingError::io(format!(
-                        "Failed to prune {}: {}",
-                        path.display(),
-                        e
-                    ))
+                    SyncthingError::io(format!("Failed to prune {}: {}", path.display(), e))
                 })?;
                 debug!(path = %path.display(), "Pruned old version");
             }
