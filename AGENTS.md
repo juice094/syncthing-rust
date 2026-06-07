@@ -9,7 +9,7 @@
 
 `syncthing-rust` 是 P2P 文件同步的 Rust 替代实现。长期目标：基于 Rust 的内存安全、零成本抽象、类型安全协议、库可嵌入性，成为优于 Go 版的 syncthing。
 
-- **当前状态**：v3.0.0 Production，**341 passed / 4 ignored / 0 failed**，**0 warnings**，**CI 全绿 (19/19)**
+- **当前状态**：v3.0.2 Production，**347 passed / 4 ignored / 0 failed**，**0 warnings**，**CI 全绿 (19/19)**
 - **传输层**：TCP+TLS / HTTP CONNECT 代理 / SOCKS5 代理 / DERP 中继（自研协议）/ UPnP / **Relay v1 并行拨号 ✅**
 - **发现层**：Local Discovery（UDP 广播骨架）⚠️ / STUN / PortMapper / **Global Discovery ✅** / **Relay Protocol v1 ✅**
 - **同步**：Pull ✅ / Push（主动 IndexUpdate 推送）✅ / 双向同步已实测验证 ✅
@@ -97,7 +97,20 @@
 
 **实现策略**：手写 JSON-RPC 2.0 协议层（~200 行），不依赖第三方 MCP SDK，只使用工作区已有依赖（tokio/serde_json/reqwest），完全可控、零额外依赖风险。
 
-## 阶段性进展（截至 2026-06-07）
+## 阶段性进展（截至 2026-06-07 会话末）
+
+### 2026-06-07 (S2): §15 Root Cause Fix + Text Merge Conflict Resolution  
+
+| 模块 | 内容 | 状态 |
+|------|------|------|
+| §15 Root Cause Fix | `index_handler` 忽略未知文件的远程删除标记，消除级联删除 | ✅ (`af229d5`) |
+| Gray-Desktop Deploy | 新格雷节点 (100.69.11.71, IYGOGGD-...) 配置同步上线 | ✅ |
+| Syncthing Status | ROG-X ↔ Gray BEP 双向同步正常 (52 files exchanged, 0 failed) | ✅ |
+| DB Reset Protocol | Gray 格式化后双端 DB 清空 + 重新索引验证通过 | ✅ |
+| Text File Merge | `crates/syncthing-sync/src/merge.rs`: 文本文件三路合并 | ✅ (`5bf3fe8`) |
+| Conflict Resolution | 可合并文本自动合并；重叠修改插入 git 风格冲突标记；二进制回退 RenameBoth | ✅ |
+| Dependencies | 新增 `similar = "2.6"` 用于行级 diff | ✅ |
+| CI | 扣减后全绿 (clippy, test, deny, fmt) | ✅ |
 
 ### 2026-06-07: v3.0.0 Release — Production-grade P2P File Sync
 

@@ -1,5 +1,19 @@
 # Changelog
 
+## [3.0.2] — 2026-06-07
+
+### Headline: Text file three-way merge for conflict resolution.
+
+#### Conflict Resolution
+- **Text file auto-merge**: When both sides modify the same `.md`/`.txt`/`.rs`/etc. file concurrently, non-overlapping changes (different paragraphs) are now auto-merged. Overlapping changes (same line) produce git-style conflict markers instead of `.sync-conflict-*` copies. Binary files fall back to RenameBoth (conflict copies). Uses `similar` crate for line-level diff. ([`5bf3fe8`](https://github.com/juice094/syncthing-rust/commit/5bf3fe8))
+
+## [3.0.1] — 2026-06-07
+
+### Headline: §15 stale-index cascade deletion root cause fixed.
+
+#### Bug Fixes
+- **§15 root cause**: `index_handler::process_files` was writing remote deletion markers to the local DB even for files never present locally. This caused the scanner to treat those DB entries as "local files were deleted" and emit `LocalIndexUpdated` with deletion flags back to the peer. On a peer with an empty/fresh DB, this triggered a cascade where the local node deleted its own files (the 2043-file mass deletion in KNOWN_ISSUES §15). Fix: ignore remote deletion markers for files that have no local DB record. ([`af229d5`](https://github.com/juice094/syncthing-rust/commit/af229d5))
+
 ## [3.0.0] — 2026-06-07
 
 ### Headline: Production-grade P2P file sync. BEP Relay v1 activated, sequence race fixed, CI fully green.
