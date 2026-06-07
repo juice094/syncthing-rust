@@ -150,9 +150,10 @@ impl IndexHandler {
                         self.db.update_file(&folder.id, remote_file.clone()).await?;
                         needed_files.push(remote_file.clone());
                     } else {
-                        // 远程删除，本地没有，添加删除标记
-                        debug!(file = %remote_file.name, "Recording remote deletion");
-                        self.db.update_file(&folder.id, remote_file.clone()).await?;
+                        // 远程删除，但本地从未有过此文件：不写入 DB。
+                        // 写入删除标记会导致本地 scanner 将此条目视为"本地文件被删除"，
+                        // 并向上游（包括发送该删除的对端）推送 IndexUpdate，触发 §15 级联删除。
+                        trace!(file = %remote_file.name, "Remote deletion for unknown file, ignoring");
                     }
                 }
             }
