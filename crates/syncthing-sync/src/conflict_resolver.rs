@@ -57,8 +57,12 @@ impl ConflictResolver {
             remote_version: remote.version.clone(),
         });
 
-        // 默认策略：重命名保留双方修改
-        let resolution = ConflictResolution::RenameBoth;
+        // 对可合并文本文件尝试自动合并，否则重命名保留双方
+        let resolution = if crate::merge::is_mergeable_text(&local.name) {
+            ConflictResolution::Merge
+        } else {
+            ConflictResolution::RenameBoth
+        };
         self.apply_resolution(folder, local, remote, folder_path, resolution)
             .await?;
 
@@ -165,7 +169,7 @@ impl ConflictResolver {
         Ok(())
     }
 
-    /// 合并文件（简化实现）
+    /// 合并文件（文本文件三向合并）
     async fn merge_files(
         &self,
         folder: &str,
@@ -173,6 +177,16 @@ impl ConflictResolver {
         remote: &FileInfo,
         folder_path: &Path,
     ) -> Result<()> {
+        use crate::merge::{is_mergeable_text, merge_text};
+
+        // 仅对已知文本类型尝试合并
+        if !is_mergeable_text(&local.name) {
+            warn!(file = %local.name, "Not a mergeable text file, using rename strategy");
+            return self
+                .rename_conflict_files(folder, local, remote, folder_path)
+                .await;
+        }
+
         let local_path = folder_path.join(&local.name);
 
         // 读取本地文件内容
@@ -183,17 +197,64 @@ impl ConflictResolver {
         };
 
         // 如果无法读取为文本，回退到重命名策略
-        if local_content.is_none() {
-            warn!(file = %local.name, "Cannot merge binary file, using rename strategy");
-            return self
-                .rename_conflict_files(folder, local, remote, folder_path)
-                .await;
+        let local_content = match local_content {
+            Some(c) => c,
+            None => {
+                warn!(file = %local.name, "Cannot read local file as text, using rename strategy");
+                return self
+                    .rename_conflict_files(folder, local, remote, folder_path)
+                    .await;
+            }
+        };
+
+        // 下载/读取远程文件内容
+        let remote_path = folder_path.join(&remote.name);
+        let remote_content = if remote_path.exists() {
+            fs::read_to_string(&remote_path).await.ok()
+        } else {
+            None
+        };
+
+        let remote_content = match remote_content {
+            Some(c) => c,
+            None => {
+                warn!(file = %local.name, "Cannot read remote file as text, using rename strategy");
+                return self
+                    .rename_conflict_files(folder, local, remote, folder_path)
+                    .await;
+            }
+        };
+
+        // 执行文本合并
+        let merged = merge_text(&local_content, &remote_content, &local.name);
+
+        // 写入合并结果
+        fs::write(&local_path, &merged.content).await.map_err(|e| {
+            SyncError::conflict(
+                local.name.clone(),
+                format!("Failed to write merged file: {}", e),
+            )
+        })?;
+
+        if merged.has_conflicts {
+            info!(
+                file = %local.name,
+                conflicts = merged.conflict_count,
+                "Merged with conflicts (marked in file)"
+            );
+            self.events.publish(SyncEvent::ConflictResolved {
+                folder: folder.to_string(),
+                item: local.name.clone(),
+                resolution: ConflictResolution::Merge,
+            });
+        } else {
+            info!(file = %local.name, "Auto-merged without conflicts");
         }
 
-        // 简化的合并策略：使用远程版本并标记为冲突
-        // 实际实现应该使用三向合并或类似算法
-        self.rename_conflict_files(folder, local, remote, folder_path)
-            .await
+        // 更新数据库为远程版本（合并后的文件由 puller 后续处理）
+        self.db.update_file(folder, remote.clone()).await?;
+
+        Ok(())
     }
 
     /// 批量检查冲突

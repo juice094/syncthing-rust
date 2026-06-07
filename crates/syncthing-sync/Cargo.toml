@@ -23,6 +23,7 @@ thiserror = { workspace = true }
 async-recursion = "1.0"
 notify = { workspace = true }
 filetime = "0.2"
+similar = "2.6"
 
 [dev-dependencies]
 tokio-test = "0.4"

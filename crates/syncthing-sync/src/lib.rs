@@ -15,6 +15,7 @@ pub mod folder_model;
 pub mod ignore;
 pub mod index;
 pub mod index_handler;
+pub mod merge;
 pub mod model;
 pub mod puller;
 pub mod scanner;
