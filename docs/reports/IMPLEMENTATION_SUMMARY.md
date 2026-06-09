@@ -286,7 +286,7 @@ cmd/
 - ✅ 推送（Push）方向：被动响应块请求（上传）已实现；ManagerBlockSource 轮询所有已连接设备
 - ✅ 配置持久化：JSON 配置文件 + CLI override 机制
 - ✅ REST API：兼容 Go 布局的基础接口已运行
-- ⚠️ Web GUI 托管：内置 HTTP 服务器就绪，静态资源托管待实现
+- ❌ Web GUI 托管：已永久放弃，TUI + 系统托盘作为唯一主界面
 
 ### Phase 2 — 网络可达性体验优化（核心完成）
 - ✅ Local Discovery：UDP 广播骨架 + daemon_runner auto-dial

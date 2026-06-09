@@ -1,0 +1,30 @@
+[package]
+name = "syncthing-tray"
+version = "3.0.0"
+edition = "2021"
+
+[[bin]]
+name = "syncthing-tray"
+path = "src/main.rs"
+
+[dependencies]
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "process", "time"] }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true, features = ["env-filter"] }
+serde = { workspace = true }
+serde_json = { workspace = true }
+anyhow = { workspace = true }
+
+# HTTP client for REST API
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+
+[dependencies.windows]
+version = "0.58"
+features = [
+    "Win32_Foundation",
+    "Win32_Graphics_Gdi",
+    "Win32_UI_Shell",
+    "Win32_UI_WindowsAndMessaging",
+    "Win32_System_Threading",
+    "Win32_System_LibraryLoader",
+]

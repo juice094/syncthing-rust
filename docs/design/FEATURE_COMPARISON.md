@@ -19,7 +19,7 @@ tags: [design, comparison, go]
 | **核心同步能力** | 成熟生产级 | 骨架+逻辑层完成，网络对接进行中 | 中等 |
 | **网络传输** | TCP+TLS / QUIC(relay) / NAT 穿透 | TCP+TLS 刚修复，iroh QUIC 可选 | 小~中等 |
 | **协议完整性** | 完整 BEP v1.0 | Hello + Request/Response/Index 已定义，其余待验证 | 中等 |
-| **配置与 UI** | Web UI + REST API + 完整配置系统 | CLI 仅 `run`/`generate-cert`/`show-id`，无 Web UI | 大 |
+| **配置与 UI** | Web UI + REST API + 完整配置系统 | TUI + 系统托盘 + REST API + CLI (`run`/`tui`/`init`/`status`/`devices`/`folders`/`logs`)；Web GUI 永久放弃 | 小 |
 | **监控与可观测性** | 完整事件系统、审计日志 | 基础事件发布、tracing 日志 | 中等 |
 
 ---
@@ -96,11 +96,11 @@ tags: [design, comparison, go]
 
 | 功能 | Go Syncthing | Rust (`cmd/syncthing`) | 状态 |
 |------|--------------|------------------------|------|
-| Web GUI | ✅ | ❌ | 未开始 |
-| REST API | ✅ | ❌ | 未开始 |
-| 事件 API (/events) | ✅ | ❌ | 未开始 |
+| Web GUI | ✅ | ❌ | 永久放弃（TUI + Tray 替代） |
+| REST API | ✅ | ✅ | `/rest/system/*`, `/rest/config/*`, `/rest/db/browse`, `/rest/db/file`, `/rest/events/poll` |
+| 事件 API (/events) | ✅ | ✅ | WebSocket + REST 长轮询（60s） |
 | CLI daemon (`run`) | ✅ | ✅ | 能启动 SyncService + ConnectionManager + BlockSource |
-| CLI cert 管理 | ✅ | ✅ | `generate-cert` / `show-id` |
+| CLI cert 管理 | ✅ | ✅ | 已迁移至 `syncthing-cli` (`generate-cert` / `show-id`) |
 
 ---
 
@@ -109,7 +109,7 @@ tags: [design, comparison, go]
 1. **Push 方向**: 只能拉取，不能主动推送本地变更给远程节点。
 2. **持久化配置**: 没有加载 `config.xml` / `config.toml`，每次启动都是默认空配置。
 3. **完整数据库**: 缺少 LevelDB 等价物，大规模文件夹会性能不足。
-4. **Web UI / REST API**: 完全没有，无法远程管理。
+4. **Web GUI / REST API**: Web GUI 已永久放弃；REST API 已完整实现，CLI 与 TUI 均通过 REST API 管理 daemon。
 5. **真实互通验证**: TCP/TLS/BEP 修复后，尚未与 Go Syncthing 真实节点握手。
 6. **ignore 规则集成**: `.stignore` 解析在另一代码库完成，未迁移到本工作区。
 
