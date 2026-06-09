@@ -7,6 +7,7 @@ use ratatui::{
 };
 
 use crate::tui::app::App;
+use crate::tui::widgets::progress;
 
 pub fn draw(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
     let mut constraints = vec![
@@ -79,14 +80,39 @@ pub fn draw(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
 
     let mut chunk_idx = 1;
 
-    // 活跃同步状态区域
+    // 活跃同步状态区域（文本 + LineGauge 进度条）
     if !active_folders.is_empty() || !app.sync_progress.is_empty() {
         let theme = &app.theme;
-        let mut status_lines = vec![Line::from(Span::styled(
-            "Active sync tasks:",
-            theme.style_header,
-        ))];
-        for (folder, status) in &active_folders {
+        let sync_area = chunks[chunk_idx];
+
+        // 内部垂直布局：标题 + 每文件夹一行
+        let row_count = active_folders.len().max(1) + 1; // +1 for header
+        let inner_constraints: Vec<Constraint> = std::iter::once(Constraint::Length(1))
+            .chain(std::iter::repeat_n(Constraint::Length(1), row_count - 1))
+            .collect();
+        let inner = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints(inner_constraints)
+            .margin(1) // 1-cell margin inside the block border
+            .split(sync_area);
+
+        // 渲染边框
+        let block = Block::default().borders(Borders::ALL).title("Sync Status");
+        f.render_widget(block, sync_area);
+
+        // 标题行
+        f.render_widget(
+            Paragraph::new(Text::from(vec![Line::from(Span::styled(
+                "Active sync tasks:",
+                theme.style_header,
+            ))])),
+            inner[0],
+        );
+
+        // 每文件夹一行：标签文本 + LineGauge
+        for (idx, (folder, status)) in active_folders.iter().enumerate() {
+            let row = inner.get(idx + 1).copied().unwrap_or(sync_area);
+
             let label = match status {
                 syncthing_core::types::FolderStatus::Scanning => "Scanning",
                 syncthing_core::types::FolderStatus::Pulling => "Pulling",
@@ -103,21 +129,27 @@ pub fn draw(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
                 | syncthing_core::types::FolderStatus::SyncWaiting => Color::Cyan,
                 _ => Color::Gray,
             };
-            let progress = app
+            let progress_ratio = app
                 .sync_progress
                 .get(folder.as_str())
                 .cloned()
-                .unwrap_or(0.0);
-            status_lines.push(Line::from(vec![
-                Span::raw(format!("  {}: ", folder)),
+                .unwrap_or(0.0)
+                .clamp(0.0, 1.0);
+
+            // 水平分割：左侧标签（20宽），右侧进度条
+            let cols = Layout::default()
+                .direction(Direction::Horizontal)
+                .constraints([Constraint::Length(20), Constraint::Min(10)])
+                .split(row);
+
+            let label_text = Text::from(vec![Line::from(vec![
+                Span::raw(format!("{} ", folder)),
                 Span::styled(label, ratatui::style::Style::default().fg(color)),
-                Span::raw(format!(" {:.0}%", progress * 100.0)),
-            ]));
+            ])]);
+            f.render_widget(Paragraph::new(label_text), cols[0]);
+
+            progress::draw_line_gauge(f, cols[1], theme, progress_ratio);
         }
-        let status_para = Paragraph::new(Text::from(status_lines))
-            .block(Block::default().borders(Borders::ALL).title("Sync Status"))
-            .wrap(Wrap { trim: true });
-        f.render_widget(status_para, chunks[chunk_idx]);
         chunk_idx += 1;
     }
 

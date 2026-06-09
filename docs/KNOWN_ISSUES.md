@@ -8,14 +8,14 @@ tags: [issues, bugs, tracker, syncthing-rust]
 # Known Issues
 
 > **维护原则**：发现的缺陷必须显式登记，避免误判项目成熟度。  
-> **最后更新**：2026-06-04（v0.2.10 — 生产部署，382 tests / 0 failures，§15 新增）
+> **最后更新**：2026-06-09（v3.0.0 — global_announce_enabled 配置修复，§17 新增）
 
 本文档列举当前已知未修复的功能性 / 行为性问题。  
 **这些问题决定了项目目前的"事实可用性"边界**。
 
 ---
 
-## ⚠️ 项目阶段定位（2026-06-03 v0.2.10-rc3）
+## ⚠️ 项目阶段定位（2026-06-09 v3.0.0-rc1）
 
 | 维度 | 状态 |
 |------|------|
@@ -546,6 +546,33 @@ v0.3.0 路线图详见 [`NEXT_STEPS_2026-05-15.md`](./plans/NEXT_STEPS_2026-05-1
 5. **静态端口 NAT**：OPNsense/pfSense 等企业级路由器需配置 Static Port NAT 以保持 UDP 打洞稳定。
 
 **追踪**：2026-06-03 E2E 测试中发现，`daemon.2026-06-03-12.log`。
+
+---
+
+## §17. Global Discovery 配置 `global_announce_enabled` 未生效（P1，**已修复 ✅** 2026-06-09）
+
+**症状**：
+- `config.json` 中设置 `options.global_announce_enabled: false`
+- 启动后日志仍每 5 分钟出现 `WARN Global discovery announce failed: ... discovery.syncthing.net`，说明仍在尝试连接官方发现服务器
+- 设备信息在不知情的情况下被 announce 到第三方服务器
+
+**根因**：
+`cmd/syncthing/src/tui/discovery_tasks.rs:33` 的 `init_and_spawn_global_discovery()` 函数**完全未检查** `config.options.global_announce_enabled` 配置值。无论配置是 `true` 还是 `false`，都会无条件：
+1. 初始化 `GlobalDiscovery` 客户端（从 cert.pem/key.pem 构建 mTLS 身份）
+2. 启动 announce 后台循环（30 分钟间隔向 discovery.syncthing.net 注册地址）
+3. 启动 query 后台循环（5 分钟间隔查询对侧设备地址）
+
+**修复**：
+- `discovery_tasks.rs`：`init_and_spawn_global_discovery()` 函数签名新增 `global_announce_enabled: bool` 参数
+- 函数入口添加早期返回：`if !global_announce_enabled { info!("Global discovery disabled by config, skipping"); return (None, None); }`
+- `daemon_runner.rs:310` 调用方传入 `config.options.global_announce_enabled`
+
+**验证**：
+- `cargo check --bin syncthing` 通过
+- `cargo test --workspace`：309 passed / 0 failed / 4 ignored
+- 设置 `global_announce_enabled: false` 后启动，日志中无 `GlobalDiscovery` / `discovery.syncthing.net` 相关输出
+
+**影响**：隐私合规缺陷。在政企/内网环境中，静默连接外部发现服务器可能违反安全策略。
 
 ---
 

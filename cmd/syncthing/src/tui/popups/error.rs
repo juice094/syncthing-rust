@@ -6,10 +6,10 @@ use ratatui::{
 };
 
 use crate::tui::theme::Theme;
-use crate::tui::widgets::centered_rect;
+use crate::tui::widgets::centered_popup;
 
 pub fn draw(f: &mut Frame, msg: &str, theme: &Theme) {
-    let area = centered_rect(50, 20, f.area());
+    let area = centered_popup(50, 12, f.area());
 
     // Dim the background
     let dim = ratatui::widgets::Block::default().style(Style::default().bg(Color::Rgb(20, 20, 25)));
@@ -17,15 +17,20 @@ pub fn draw(f: &mut Frame, msg: &str, theme: &Theme) {
 
     f.render_widget(Clear, area);
 
-    let text = Text::from(vec![
+    let mut lines: Vec<Line> = vec![
         Line::from(Span::styled("⚠ Error", theme.style_error)),
         Line::raw(""),
-        Line::raw(msg),
-        Line::raw(""),
-        Line::from(Span::styled("Press Esc to close", theme.style_idle)),
-    ]);
+    ];
+    for line in msg.lines() {
+        lines.push(Line::raw(line));
+    }
+    lines.push(Line::raw(""));
+    lines.push(Line::from(Span::styled(
+        "Press Esc to close",
+        theme.style_idle,
+    )));
 
-    let para = Paragraph::new(text)
+    let para = Paragraph::new(Text::from(lines))
         .block(
             Block::default()
                 .borders(Borders::ALL)

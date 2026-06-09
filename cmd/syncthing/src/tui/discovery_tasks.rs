@@ -39,10 +39,16 @@ pub async fn init_and_spawn_global_discovery(
     sync_service: Arc<SyncService>,
     local_device_id: DeviceId,
     mut shutdown_rx: tokio::sync::watch::Receiver<bool>,
+    global_announce_enabled: bool,
 ) -> (
     Option<Arc<syncthing_net::GlobalDiscovery>>,
     Option<GlobalDiscoveryShutdown>,
 ) {
+    if !global_announce_enabled {
+        info!("Global discovery disabled by config, skipping");
+        return (None, None);
+    }
+
     let global_discovery =
         match syncthing_net::GlobalDiscovery::from_cert_files(device_id, cert_path, key_path, None)
             .await

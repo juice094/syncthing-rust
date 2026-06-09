@@ -252,7 +252,7 @@
 
 - ❄️ BEP 扩展 `Verify` 消息族、跨实例共识、信誉系统、加密信道重建 —— 投入产出比过低，待多实例生产验证后解冻
 - ❄️ QUIC Transport、MagicSocket 抽象 —— 等 TCP+Relay 路径完全稳定后评估
-- ❄️ WebUI / GUI —— TUI 已覆盖 90% 核心操作，若未来确有需求基于 REST API 独立开发
+- ❄️ WebUI / GUI —— **永久放弃**。TUI + 系统托盘作为唯一主界面（2026-06-09 决策）。REST API 保留供脚本/集成使用
 
 ## 跨项目接口
 

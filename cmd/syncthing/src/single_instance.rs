@@ -32,6 +32,14 @@ pub fn acquire(config_dir: &Path) -> Result<(), String> {
         }
     }
 
+    std::fs::create_dir_all(config_dir).map_err(|e| {
+        format!(
+            "Failed to create config dir '{}': {}",
+            config_dir.display(),
+            e
+        )
+    })?;
+
     std::fs::write(&pid_file, format!("{}\n", std::process::id()))
         .map_err(|e| format!("Failed to write pid file '{}': {}", pid_file.display(), e))?;
 

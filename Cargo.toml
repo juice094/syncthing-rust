@@ -15,6 +15,7 @@ members = [
     "cmd/syncthing-mcp-bridge",
     "cmd/syncthing-bench",
     "cmd/syncthing-cli",
+    "cmd/syncthing-tray",
 ]
 
 [workspace.dependencies]

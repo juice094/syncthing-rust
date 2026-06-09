@@ -31,9 +31,9 @@ struct Cli {
     #[arg(short, long, global = true, default_value = "info")]
     log_level: String,
 
-    /// 子命令
+    /// 子命令（不提供时自动启动 daemon + TUI）
     #[command(subcommand)]
-    command: Commands,
+    command: Option<Commands>,
 }
 
 #[derive(Subcommand, Debug)]
@@ -62,6 +62,58 @@ enum Commands {
 
     /// 交互式初始化向导（生成 config.json）
     Init,
+
+    /// 查询 daemon 运行状态
+    Status {
+        /// 以 JSON 格式输出
+        #[arg(long)]
+        json: bool,
+    },
+
+    /// 设备管理
+    Devices {
+        #[command(subcommand)]
+        action: DeviceAction,
+    },
+
+    /// 文件夹管理
+    Folders {
+        #[command(subcommand)]
+        action: FolderAction,
+    },
+
+    /// 查看日志
+    Logs {
+        /// 显示最后 N 行
+        #[arg(long, default_value = "50")]
+        tail: usize,
+    },
+
+    /// 注册开机自启动（Windows: 注册表 Run 键）
+    InstallAutostart,
+
+    /// 取消开机自启动
+    UninstallAutostart,
+
+    /// 自动模式：启动 daemon + TUI（无子命令时的默认行为）
+    #[command(hide = true)]
+    Auto,
+}
+
+#[derive(Subcommand, Debug)]
+enum DeviceAction {
+    /// 列出已配置的设备
+    List,
+}
+
+#[derive(Subcommand, Debug)]
+enum FolderAction {
+    /// 列出已配置的文件夹
+    List {
+        /// 包含状态信息
+        #[arg(long)]
+        status: bool,
+    },
 }
 
 /// 配置文件名
@@ -84,6 +136,9 @@ fn save_config(path: &PathBuf, config: &Config) -> anyhow::Result<()> {
     Ok(())
 }
 
+mod autostart;
+mod cli_query;
+mod cli_status;
 mod config_validation;
 mod init_wizard;
 mod logging_buffer;
@@ -148,16 +203,34 @@ async fn main() -> Result<()> {
         .config_dir
         .unwrap_or_else(syncthing_core::paths::default_config_dir);
 
-    // C-UX-5: 单实例锁
-    single_instance::acquire(&config_dir).map_err(|e| anyhow::anyhow!(e))?;
-    let _instance_guard = SingleInstanceGuard(config_dir.clone());
+    // C-UX-5: 单实例锁 — 查询命令不创建锁，只通过 REST API 通信
+    let needs_lock = match &cli.command {
+        None => true, // auto mode = daemon + TUI
+        Some(cmd) => !matches!(
+            cmd,
+            Commands::Status { .. }
+                | Commands::Devices { .. }
+                | Commands::Folders { .. }
+                | Commands::Logs { .. }
+                | Commands::InstallAutostart
+                | Commands::UninstallAutostart
+        ),
+    };
+    if needs_lock {
+        single_instance::acquire(&config_dir).map_err(|e| anyhow::anyhow!(e))?;
+    }
+    let _instance_guard = if needs_lock {
+        Some(SingleInstanceGuard(config_dir.clone()))
+    } else {
+        None
+    };
 
     let log_level = cli
         .log_level
         .parse::<Level>()
         .context("invalid log level")?;
 
-    match cli.command {
+    match cli.command.unwrap_or(Commands::Auto) {
         Commands::Run {
             listen,
             device_name,
@@ -215,6 +288,45 @@ async fn main() -> Result<()> {
                         let _ = shutdown_tx.send(true);
                     });
 
+                    // B1: Windows ConsoleCtrlEvent (点击控制台X / 系统关机)
+                    #[cfg(windows)]
+                    {
+                        let shutdown_tx = startup.shutdown_tx.clone();
+                        std::thread::spawn(move || {
+                            use std::sync::atomic::{AtomicBool, Ordering};
+                            static CTRL_EVENT: AtomicBool = AtomicBool::new(false);
+
+                            unsafe extern "system" fn handler(
+                                ctrl_type: u32,
+                            ) -> windows::Win32::Foundation::BOOL {
+                                match ctrl_type {
+                                    2 | 5 | 6 => {
+                                        // CTRL_CLOSE_EVENT | CTRL_SHUTDOWN_EVENT | CTRL_LOGOFF_EVENT
+                                        CTRL_EVENT.store(true, Ordering::SeqCst);
+                                        windows::Win32::Foundation::BOOL(1)
+                                    }
+                                    _ => windows::Win32::Foundation::BOOL(0),
+                                }
+                            }
+
+                            unsafe {
+                                let _ = windows::Win32::System::Console::SetConsoleCtrlHandler(
+                                    Some(handler),
+                                    windows::Win32::Foundation::BOOL(1), // TRUE = add handler
+                                );
+                            }
+
+                            loop {
+                                std::thread::sleep(std::time::Duration::from_millis(500));
+                                if CTRL_EVENT.swap(false, Ordering::SeqCst) {
+                                    info!("Received ConsoleCtrlEvent, initiating graceful shutdown...");
+                                    let _ = shutdown_tx.send(true);
+                                    break;
+                                }
+                            }
+                        });
+                    }
+
                     let daemon_result = startup.future.await;
                     let _ = api_handle.await;
                     daemon_result?;
@@ -245,6 +357,139 @@ async fn main() -> Result<()> {
         }
         Commands::Init => {
             init_wizard::run_wizard(&config_dir)?;
+        }
+        Commands::Status { json } => {
+            let config_path = config_dir.join(CONFIG_FILE_NAME);
+            if !config_path.exists() {
+                eprintln!(
+                    "Config file not found: {}\n修复: 先运行 `syncthing init` 生成配置",
+                    config_path.display()
+                );
+                std::process::exit(1);
+            }
+            if let Err(e) = cli_status::run(&config_path, json).await {
+                eprintln!(
+                    "Failed to query status: {}\n修复: 确认 daemon 已运行 (syncthing run)",
+                    e
+                );
+                std::process::exit(1);
+            }
+        }
+        Commands::Devices { action } => {
+            let config_path = config_dir.join(CONFIG_FILE_NAME);
+            if !config_path.exists() {
+                eprintln!(
+                    "Config file not found: {}\n修复: syncthing init",
+                    config_path.display()
+                );
+                std::process::exit(1);
+            }
+            match action {
+                DeviceAction::List => {
+                    if let Err(e) = cli_query::devices_list(&config_path).await {
+                        eprintln!("Failed to list devices: {}\n修复: 确认 daemon 已运行", e);
+                        std::process::exit(1);
+                    }
+                }
+            }
+        }
+        Commands::Folders { action } => {
+            let config_path = config_dir.join(CONFIG_FILE_NAME);
+            if !config_path.exists() {
+                eprintln!(
+                    "Config file not found: {}\n修复: syncthing init",
+                    config_path.display()
+                );
+                std::process::exit(1);
+            }
+            match action {
+                FolderAction::List { status } => {
+                    if let Err(e) = cli_query::folders_list(&config_path, status).await {
+                        eprintln!("Failed to list folders: {}\n修复: 确认 daemon 已运行", e);
+                        std::process::exit(1);
+                    }
+                }
+            }
+        }
+        Commands::Logs { tail } => {
+            if let Err(e) = cli_query::logs_tail(&config_dir, tail) {
+                eprintln!("Failed to read logs: {}", e);
+                std::process::exit(1);
+            }
+        }
+        Commands::InstallAutostart => {
+            #[cfg(windows)]
+            {
+                if let Err(e) = autostart::install(&config_dir) {
+                    eprintln!("Failed to install autostart: {}", e);
+                    std::process::exit(1);
+                }
+                println!("Autostart installed. syncthing-rust will start on login.");
+            }
+            #[cfg(not(windows))]
+            {
+                eprintln!("Autostart is only supported on Windows.");
+                std::process::exit(1);
+            }
+        }
+        Commands::UninstallAutostart => {
+            #[cfg(windows)]
+            {
+                if let Err(e) = autostart::uninstall() {
+                    eprintln!("Failed to uninstall autostart: {}", e);
+                    std::process::exit(1);
+                }
+                println!("Autostart removed.");
+            }
+            #[cfg(not(windows))]
+            {
+                eprintln!("Autostart is only supported on Windows.");
+                std::process::exit(1);
+            }
+        }
+        Commands::Auto => {
+            // Auto mode: daemon in background + tray icon. Then exit.
+            // TUI is accessible via tray right-click → "Open TUI".
+            use std::process::Stdio;
+            use tokio::process::Command;
+
+            std::fs::create_dir_all(&config_dir)
+                .with_context(|| format!("create config dir {}", config_dir.display()))?;
+
+            drop(_instance_guard);
+            single_instance::release(&config_dir);
+
+            let exe = std::env::current_exe().context("get current exe path")?;
+            let exe_dir = exe.parent().map(|p| p.to_path_buf()).unwrap_or_default();
+            let config_dir_str = config_dir.to_string_lossy().to_string();
+
+            let daemon_alive = reqwest::get("http://127.0.0.1:8385/rest/health")
+                .await
+                .map(|r| r.status().is_success())
+                .unwrap_or(false);
+
+            if !daemon_alive {
+                Command::new(&exe)
+                    .arg("run")
+                    .arg("--config-dir")
+                    .arg(&config_dir_str)
+                    .stdout(Stdio::null())
+                    .stderr(Stdio::null())
+                    .spawn()
+                    .context("spawn daemon")?;
+            }
+
+            let tray_exe = exe_dir.join("syncthing-tray.exe");
+            if tray_exe.exists() {
+                Command::new(&tray_exe)
+                    .stdout(Stdio::null())
+                    .stderr(Stdio::null())
+                    .spawn()
+                    .context("spawn tray")?;
+            }
+
+            println!("syncthing-rust started. Check system tray icon.");
+            println!("TUI: syncthing tui   |   Status: syncthing status");
         }
     }
 
