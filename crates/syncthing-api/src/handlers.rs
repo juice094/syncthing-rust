@@ -80,7 +80,7 @@ pub async fn websocket_handler(
 }
 
 /// Handle WebSocket connection
-async fn handle_websocket(socket: WebSocket, state: ApiState, query: EventsQuery) {
+pub(crate) async fn handle_websocket(socket: WebSocket, state: ApiState, query: EventsQuery) {
     let connection_id = format!("ws_{}", generate_connection_id());
     info!(
         "WebSocket connection established: {} (events: {:?}, since: {:?}, limit: {:?})",
@@ -218,10 +218,11 @@ struct ClientMessage {
 }
 
 /// Global event ID counter
-static EVENT_ID_COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+pub(crate) static EVENT_ID_COUNTER: std::sync::atomic::AtomicU64 =
+    std::sync::atomic::AtomicU64::new(1);
 
-/// Convert internal Event to EventMessage for WebSocket
-fn convert_event_to_message(event: Event) -> EventMessage {
+/// Convert internal Event to EventMessage for WebSocket / REST poll.
+pub(crate) fn convert_event_to_message(event: Event) -> EventMessage {
     let event_type = match &event {
         Event::FolderSummary { .. } => "FolderSummary",
         Event::ItemFinished { .. } => "ItemFinished",
@@ -254,6 +255,63 @@ fn convert_event_to_message(event: Event) -> EventMessage {
             .as_millis() as u64,
         data,
     }
+}
+
+/// Handle REST long-polling for events.
+///
+/// Compatible with Go syncthing `GET /rest/events?since=N&limit=M&events=T1,T2`.
+/// Waits up to 60 seconds for new events if buffer has none matching.
+pub async fn events_poll_handler(
+    Query(query): Query<EventsQuery>,
+    State(state): State<ApiState>,
+) -> axum::Json<Vec<EventMessage>> {
+    let since = query.since.unwrap_or(0);
+    let limit = query.limit.unwrap_or(1).clamp(1, 1000);
+    let filter: Option<Vec<String>> = query
+        .events
+        .as_ref()
+        .map(|e| e.split(',').map(|s| s.trim().to_string()).collect());
+
+    let buffer = state.event_bus.event_buffer();
+
+    // 1. Try to satisfy from buffer first
+    let mut collected = buffer.since(since);
+    if let Some(ref f) = filter {
+        collected.retain(|m| f.contains(&m.event_type));
+    }
+
+    if !collected.is_empty() {
+        collected.truncate(limit);
+        return axum::Json(collected);
+    }
+
+    // 2. Buffer empty for this since — subscribe and wait (long-poll)
+    let mut rx = state.event_bus.subscribe();
+    let timeout = tokio::time::Duration::from_secs(60);
+    let start = std::time::Instant::now();
+
+    while collected.len() < limit && start.elapsed() < timeout {
+        let remaining = timeout - start.elapsed();
+        match tokio::time::timeout(remaining.min(std::time::Duration::from_secs(1)), rx.recv())
+            .await
+        {
+            Ok(Ok(event)) => {
+                let msg = convert_event_to_message(event);
+                if msg.id <= since {
+                    continue;
+                }
+                if filter.as_ref().is_none_or(|f| f.contains(&msg.event_type)) {
+                    collected.push(msg);
+                }
+            }
+            _ => {
+                // Timeout or channel closed / lagged — return what we have
+                break;
+            }
+        }
+    }
+
+    axum::Json(collected)
 }
 
 /// Error response for API errors

@@ -41,7 +41,9 @@ mod system;
 mod system_ops;
 
 use config::{get_config, update_config};
-use db::{db_override, db_revert, db_scan_post, trigger_folder_scan, trigger_scan};
+use db::{
+    browse, db_override, db_revert, db_scan_post, file_info, trigger_folder_scan, trigger_scan,
+};
 use device::{add_device, get_device, list_devices, remove_device, update_device};
 use folder::{
     create_folder, delete_folder, get_folder, get_folder_status, list_folders, update_folder,
@@ -231,10 +233,14 @@ impl RestApi {
             .route("/rest/db/scan", post(db_scan_post))
             .route("/rest/db/override", post(db_override))
             .route("/rest/db/revert", post(db_revert))
+            .route("/rest/db/browse", get(browse))
+            .route("/rest/db/file", get(file_info))
             // Health check
             .route("/rest/health", get(health_check))
             // WebSocket events
             .route("/rest/events", get(handlers::websocket_handler))
+            // REST long-poll events
+            .route("/rest/events/poll", get(handlers::events_poll_handler))
             // Middleware
             .layer(auth_layer)
             .layer(CorsLayer::permissive())

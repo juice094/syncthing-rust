@@ -316,6 +316,7 @@ pub async fn start_daemon(
         Arc::clone(&sync_service),
         device_id,
         shutdown_rx.clone(),
+        config.options.global_announce_enabled,
     )
     .await;
 

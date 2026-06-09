@@ -10,7 +10,7 @@
 //! Syncthing events. Events can be sent to WebSocket clients or used
 //! internally within the application.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
 
 use tokio::sync::{broadcast, mpsc, watch, RwLock};
@@ -19,8 +19,74 @@ use tracing::{debug, trace, warn};
 use syncthing_core::types::Event;
 use syncthing_core::{Result, SyncthingError};
 
+use crate::handlers::EventMessage;
+
 /// Default channel capacity for event broadcasting
 const DEFAULT_CHANNEL_CAPACITY: usize = 1000;
+/// Default ring buffer capacity for REST poll events
+const DEFAULT_EVENT_BUFFER_CAPACITY: usize = 1000;
+
+/// Ring buffer for historical events (supports REST poll `since` parameter).
+///
+/// Uses `std::sync::Mutex` so `push` is synchronous (called from `EventBus::publish`).
+#[derive(Debug, Clone)]
+pub struct EventBuffer {
+    inner: Arc<std::sync::Mutex<VecDeque<EventMessage>>>,
+    capacity: usize,
+}
+
+impl EventBuffer {
+    /// Create a new event buffer with default capacity.
+    pub fn new() -> Self {
+        Self::with_capacity(DEFAULT_EVENT_BUFFER_CAPACITY)
+    }
+
+    /// Create with custom capacity.
+    pub fn with_capacity(capacity: usize) -> Self {
+        Self {
+            inner: Arc::new(std::sync::Mutex::new(VecDeque::with_capacity(capacity))),
+            capacity,
+        }
+    }
+
+    /// Push an event into the buffer, evicting the oldest if at capacity.
+    /// Synchronous: called from `EventBus::publish` which is non-async.
+    pub fn push(&self, msg: EventMessage) {
+        let mut buf = self.inner.lock().unwrap();
+        if buf.len() >= self.capacity {
+            buf.pop_front();
+        }
+        buf.push_back(msg);
+    }
+
+    /// Return all events with id > since_id.
+    pub fn since(&self, since_id: u64) -> Vec<EventMessage> {
+        let buf = self.inner.lock().unwrap();
+        buf.iter().filter(|m| m.id > since_id).cloned().collect()
+    }
+
+    /// Get the latest event id (0 if empty).
+    pub fn latest_id(&self) -> u64 {
+        let buf = self.inner.lock().unwrap();
+        buf.back().map(|m| m.id).unwrap_or(0)
+    }
+
+    /// Current count of buffered events.
+    pub fn len(&self) -> usize {
+        self.inner.lock().unwrap().len()
+    }
+
+    /// Whether the buffer is empty.
+    pub fn is_empty(&self) -> bool {
+        self.inner.lock().unwrap().is_empty()
+    }
+}
+
+impl Default for EventBuffer {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 /// Event bus for publishing and subscribing to events
 ///
@@ -57,6 +123,8 @@ pub struct EventBus {
     sender: broadcast::Sender<Event>,
     /// Active WebSocket connections
     connections: Arc<RwLock<HashMap<String, mpsc::Sender<Event>>>>,
+    /// Historical event buffer for REST poll support
+    event_buffer: EventBuffer,
 }
 
 impl EventBus {
@@ -66,6 +134,7 @@ impl EventBus {
         Self {
             sender,
             connections: Arc::new(RwLock::new(HashMap::new())),
+            event_buffer: EventBuffer::new(),
         }
     }
 
@@ -78,7 +147,13 @@ impl EventBus {
         Self {
             sender,
             connections: Arc::new(RwLock::new(HashMap::new())),
+            event_buffer: EventBuffer::with_capacity(capacity),
         }
+    }
+
+    /// Access the historical event buffer.
+    pub fn event_buffer(&self) -> &EventBuffer {
+        &self.event_buffer
     }
 
     /// Subscribe to events
@@ -95,6 +170,10 @@ impl EventBus {
     /// * `event` - The event to publish
     pub fn publish(&self, event: Event) {
         trace!("Publishing event: {:?}", event);
+
+        // Convert to message and store in buffer (for REST poll)
+        let msg = crate::handlers::convert_event_to_message(event.clone());
+        self.event_buffer.push(msg);
 
         // Send to broadcast channel
         if let Err(e) = self.sender.send(event.clone()) {

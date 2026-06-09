@@ -75,7 +75,8 @@ pub fn merge_text(local: &str, remote: &str, _item_name: &str) -> MergeResult {
                     // 同一行的修改 → 冲突标记
                     merged.push_str(&format!(
                         "<<<<<<< local\n{}=======\n{}>>>>>>> remote\n",
-                        ops[i].1, ops[i + 1].1
+                        ops[i].1,
+                        ops[i + 1].1
                     ));
                     has_conflicts = true;
                     conflict_count += 1;
