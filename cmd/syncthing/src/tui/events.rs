@@ -97,6 +97,36 @@ fn handle_key(app: &mut App, key: KeyEvent) -> bool {
             }
             _ => {}
         },
+        KeyCode::Char('e') if app.tab == Tab::Folders => {
+            if let Some(folder) = app.config.folders.get(app.folder_selected) {
+                let stignore = std::path::Path::new(&folder.path).join(".stignore");
+                // 确保文件存在
+                if !stignore.exists() {
+                    let _ = std::fs::write(&stignore, "# .stignore — syncthing-rust\n");
+                }
+                let path_str = stignore.to_string_lossy().to_string();
+                // 打开系统编辑器
+                #[cfg(windows)]
+                {
+                    let _ = std::process::Command::new("notepad.exe")
+                        .arg(&path_str)
+                        .spawn();
+                }
+                #[cfg(not(windows))]
+                {
+                    let editor = std::env::var("EDITOR").unwrap_or_else(|_| "nano".to_string());
+                    let _ = std::process::Command::new(editor).arg(&path_str).spawn();
+                }
+                // 编辑完后触发扫描
+                if let Some(ref service) = app.sync_service {
+                    let service = Arc::clone(service);
+                    let fid = folder.id.clone();
+                    tokio::spawn(async move {
+                        let _ = service.scan_folder(&fid).await;
+                    });
+                }
+            }
+        }
         _ => {}
     }
 
@@ -117,10 +147,10 @@ fn try_paste_into(fields: &mut [String], focus: usize) {
 fn handle_add_device_key(app: &mut App, key: KeyEvent) -> bool {
     match key.code {
         KeyCode::Esc => app.popup = Popup::None,
-        KeyCode::Tab => {
+        KeyCode::Tab | KeyCode::Down => {
             app.device_form.focus = (app.device_form.focus + 1) % app.device_form.fields.len();
         }
-        KeyCode::BackTab => {
+        KeyCode::BackTab | KeyCode::Up => {
             if app.device_form.focus == 0 {
                 app.device_form.focus = app.device_form.fields.len() - 1;
             } else {
@@ -187,20 +217,10 @@ fn handle_add_device_key(app: &mut App, key: KeyEvent) -> bool {
 }
 
 fn handle_add_folder_key(app: &mut App, key: KeyEvent) -> bool {
+    let max_focus = app.folder_form.fields.len();
+    let device_list_focus = max_focus;
     match key.code {
         KeyCode::Esc => app.popup = Popup::None,
-        KeyCode::Tab => {
-            app.folder_form.focus =
-                (app.folder_form.focus + 1) % (app.folder_form.fields.len() + 1);
-        }
-        KeyCode::BackTab => {
-            let len = app.folder_form.fields.len() + 1;
-            if app.folder_form.focus == 0 {
-                app.folder_form.focus = len - 1;
-            } else {
-                app.folder_form.focus -= 1;
-            }
-        }
         KeyCode::Char('v') | KeyCode::Char('V')
             if key.modifiers.contains(KeyModifiers::CONTROL) =>
         {
@@ -236,19 +256,35 @@ fn handle_add_folder_key(app: &mut App, key: KeyEvent) -> bool {
             app.popup = Popup::None;
             save_and_log(app);
         }
-        KeyCode::Down
-            if app.folder_form.focus == app.folder_form.fields.len()
-                && app.folder_device_selected + 1 < app.config.devices.len() =>
-        {
-            app.folder_device_selected += 1;
+        KeyCode::Down => {
+            if app.folder_form.focus == device_list_focus
+                && app.folder_device_selected + 1 < app.config.devices.len()
+            {
+                app.folder_device_selected += 1;
+            } else {
+                app.folder_form.focus = (app.folder_form.focus + 1) % (max_focus + 1);
+            }
         }
-        KeyCode::Up
-            if app.folder_form.focus == app.folder_form.fields.len()
-                && app.folder_device_selected > 0 =>
-        {
-            app.folder_device_selected -= 1;
+        KeyCode::Up => {
+            if app.folder_form.focus == device_list_focus && app.folder_device_selected > 0 {
+                app.folder_device_selected -= 1;
+            } else if app.folder_form.focus == 0 {
+                app.folder_form.focus = max_focus;
+            } else {
+                app.folder_form.focus -= 1;
+            }
         }
-        KeyCode::Char(' ') if app.folder_form.focus == app.folder_form.fields.len() => {
+        KeyCode::Tab => {
+            app.folder_form.focus = (app.folder_form.focus + 1) % (max_focus + 1);
+        }
+        KeyCode::BackTab => {
+            if app.folder_form.focus == 0 {
+                app.folder_form.focus = max_focus;
+            } else {
+                app.folder_form.focus -= 1;
+            }
+        }
+        KeyCode::Char(' ') if app.folder_form.focus == device_list_focus => {
             if let Some(selected) = app
                 .folder_device_selection
                 .get_mut(app.folder_device_selected)
