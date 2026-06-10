@@ -79,8 +79,23 @@ pub async fn run_tui(
     let mut terminal = Terminal::new(backend)?;
     terminal.clear()?;
 
-    let mut app = App::new(config_dir, listen, device_name, config);
+    let mut app = App::new(config_dir.clone(), listen, device_name, config);
     app.push_log("TUI started. Press F5 to run daemon.".to_string());
+
+    // P1: TUI 启动时预加载历史日志（最近 50 行）
+    let logs_dir = config_dir.join("logs");
+    if logs_dir.is_dir() {
+        if let Some(latest) = find_latest_log_file(&logs_dir) {
+            match tail_lines(&latest, 50) {
+                Ok(lines) => {
+                    for line in lines {
+                        app.push_log(line);
+                    }
+                }
+                Err(e) => app.push_log(format!("Failed to load log file: {}", e)),
+            }
+        }
+    }
 
     let res = run_app(&mut terminal, &mut app, memory_buffer).await;
 
@@ -114,6 +129,7 @@ async fn run_app<B: Backend>(
     > = None;
     let mut daemon_handle: Option<syncthing_net::ConnectionManagerHandle> = None;
     let mut event_tx: Option<tokio::sync::mpsc::Sender<TuiEvent>> = None;
+    let mut daemon_shutdown_tx: Option<tokio::sync::watch::Sender<bool>> = None;
 
     loop {
         terminal
@@ -135,7 +151,14 @@ async fn run_app<B: Backend>(
                     if key.code == crossterm::event::KeyCode::F(5)
                         && key.kind == crossterm::event::KeyEventKind::Press =>
                 {
-                    toggle_daemon(app, &mut daemon_future, &mut daemon_handle, &mut event_tx).await;
+                    toggle_daemon(
+                        app,
+                        &mut daemon_future,
+                        &mut daemon_handle,
+                        &mut event_tx,
+                        &mut daemon_shutdown_tx,
+                    )
+                    .await;
                     false
                 }
                 _ => events::handle_event(app, event),
@@ -145,7 +168,13 @@ async fn run_app<B: Backend>(
         };
 
         if should_exit {
-            // 停止 daemon：变量被 drop，连接自动关闭
+            // 优雅关闭 daemon（如果正在运行）
+            if let Some(tx) = daemon_shutdown_tx.take() {
+                let _ = tx.send(true);
+                app.push_log("Daemon shutdown signal sent.".to_string());
+                // 让出一次时间片让 daemon 处理 shutdown 信号，避免阻塞 TUI 退出
+                tokio::task::yield_now().await;
+            }
             app.daemon_running = false;
             app.daemon_status = "Stopped".to_string();
             app.event_rx = None;
@@ -175,6 +204,24 @@ async fn run_app<B: Backend>(
         }
 
         if last_tick.elapsed() >= tick_rate {
+            // P2: daemon 崩溃检测 —— 如果 daemon_running 但 handle 已失效，标记为 Crashed
+            if app.daemon_running {
+                let alive = daemon_handle
+                    .as_ref()
+                    .map(|h| h.local_addr().is_some())
+                    .unwrap_or(false);
+                if !alive {
+                    app.daemon_running = false;
+                    app.daemon_status = "Crashed".to_string();
+                    app.push_log("Daemon crashed or exited unexpectedly.".to_string());
+                    let _ = daemon_future.take();
+                    let _ = daemon_handle.take();
+                    let _ = event_tx.take();
+                    app.sync_service = None;
+                    app.event_rx = None;
+                }
+            }
+
             // 轮询 daemon 状态（fallback，事件桥未覆盖时）
             if let Some(ref handle) = daemon_handle {
                 let live = handle.connected_devices();
@@ -190,11 +237,11 @@ async fn run_app<B: Backend>(
                     );
                 }
             }
-            // 从内存日志缓冲区拉取新日志
-            for line in memory_buffer.take_lines(100) {
+            // 从内存日志缓冲区拉取新日志（按当前过滤级别）
+            for entry in memory_buffer.take_lines_filtered(100, &app.log_filter_level) {
                 // 避免重复追加已经存在的日志行（简单去重：检查最后一条）
-                if app.log_lines.back().map(|s| s.as_str()) != Some(line.as_str()) {
-                    app.push_log(line);
+                if app.log_lines.back().map(|s| s.as_str()) != Some(entry.msg.as_str()) {
+                    app.push_log(entry.msg);
                 }
             }
             last_tick = tokio::time::Instant::now();
@@ -211,8 +258,14 @@ async fn toggle_daemon(
     >,
     daemon_handle: &mut Option<syncthing_net::ConnectionManagerHandle>,
     event_tx: &mut Option<tokio::sync::mpsc::Sender<TuiEvent>>,
+    daemon_shutdown_tx: &mut Option<tokio::sync::watch::Sender<bool>>,
 ) {
-    if daemon_future.is_some() {
+    // 使用 daemon_shutdown_tx 判断 daemon 是否运行（启动时设置，停止时 take）
+    if daemon_shutdown_tx.is_some() {
+        // 发送优雅关闭信号，然后清理本地状态
+        if let Some(tx) = daemon_shutdown_tx.take() {
+            let _ = tx.send(true);
+        }
         *daemon_future = None;
         *daemon_handle = None;
         *event_tx = None;
@@ -228,6 +281,7 @@ async fn toggle_daemon(
 
         match daemon_runner::start_daemon(config_dir, listen, device_name).await {
             Ok(startup) => {
+                *daemon_shutdown_tx = Some(startup.shutdown_tx.clone());
                 *daemon_handle = Some(startup.connection_handle.clone());
                 app.sync_service = Some(startup.sync_service.clone());
 
@@ -289,4 +343,28 @@ async fn toggle_daemon(
             }
         }
     }
+}
+
+/// 在 logs 目录中找到最新的日志文件（按修改时间）
+fn find_latest_log_file(logs_dir: &std::path::Path) -> Option<std::path::PathBuf> {
+    let mut entries: Vec<_> = std::fs::read_dir(logs_dir)
+        .ok()?
+        .filter_map(|e| e.ok())
+        .filter(|e| {
+            e.path()
+                .extension()
+                .map(|ext| ext == "log")
+                .unwrap_or(false)
+        })
+        .collect();
+    entries.sort_by_key(|e| std::cmp::Reverse(e.metadata().ok().and_then(|m| m.modified().ok())));
+    entries.into_iter().next().map(|e| e.path())
+}
+
+/// 读取文件最后 n 行
+fn tail_lines(path: &std::path::Path, n: usize) -> anyhow::Result<Vec<String>> {
+    let content = std::fs::read_to_string(path)?;
+    let lines: Vec<String> = content.lines().map(|s| s.to_string()).collect();
+    let skip = lines.len().saturating_sub(n);
+    Ok(lines.into_iter().skip(skip).collect())
 }

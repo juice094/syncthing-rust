@@ -49,7 +49,7 @@ pub fn draw(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
         .block(
             Block::default()
                 .borders(Borders::ALL)
-                .title("Devices (a: add, d: delete)"),
+                .title("Devices (Ins/a: add, Enter/e: edit, Del/d: delete)"),
         )
         .highlight_style(theme.style_header.add_modifier(Modifier::REVERSED))
         .highlight_spacing(HighlightSpacing::Always)

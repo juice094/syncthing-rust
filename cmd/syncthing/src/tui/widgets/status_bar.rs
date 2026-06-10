@@ -25,6 +25,11 @@ pub fn draw(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
         Span::styled("q", theme.style_header),
         Span::styled(" Quit  ", theme.style_idle),
         Span::styled(format!("| {}", app.daemon_status), daemon_style),
+        Span::styled("  l", theme.style_header),
+        Span::styled(
+            format!(" {} ", app.log_filter_level.as_str().to_ascii_uppercase()),
+            theme.style_idle,
+        ),
     ])]);
 
     let para = Paragraph::new(text).alignment(Alignment::Center);

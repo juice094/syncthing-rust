@@ -1,6 +1,19 @@
 /// 配置验证 — C-UX-4
 /// 启动前快速失败，避免配置错误导致运行时静默异常
 pub fn validate_config(config: &syncthing_core::types::Config) -> anyhow::Result<()> {
+    validate_config_internal(config, true)
+}
+
+/// TUI 模式下的轻量验证 — 不检查 folder path 存在性。
+/// TUI 是配置编辑器，用户可能正在创建尚未存在的文件夹。
+pub fn validate_config_non_blocking(config: &syncthing_core::types::Config) -> anyhow::Result<()> {
+    validate_config_internal(config, false)
+}
+
+fn validate_config_internal(
+    config: &syncthing_core::types::Config,
+    check_folder_paths: bool,
+) -> anyhow::Result<()> {
     use std::collections::HashSet;
     use std::net::SocketAddr;
     use std::str::FromStr;
@@ -82,20 +95,22 @@ pub fn validate_config(config: &syncthing_core::types::Config) -> anyhow::Result
         if folder.id.is_empty() {
             anyhow::bail!("Folder ID cannot be empty\n修复: 为文件夹指定唯一标识符");
         }
-        let path = std::path::Path::new(&folder.path);
-        if !path.exists() {
-            anyhow::bail!(
-                "Folder path does not exist: {}\n\
-                 修复: 创建该目录或修改 config.json 中的 path 字段",
-                folder.path
-            );
-        }
-        if !path.is_dir() {
-            anyhow::bail!(
-                "Folder path is not a directory: {}\n\
-                 修复: 将 path 指向一个目录而非文件",
-                folder.path
-            );
+        if check_folder_paths {
+            let path = std::path::Path::new(&folder.path);
+            if !path.exists() {
+                anyhow::bail!(
+                    "Folder path does not exist: {}\n\
+                     修复: 创建该目录或修改 config.json 中的 path 字段",
+                    folder.path
+                );
+            }
+            if !path.is_dir() {
+                anyhow::bail!(
+                    "Folder path is not a directory: {}\n\
+                     修复: 将 path 指向一个目录而非文件",
+                    folder.path
+                );
+            }
         }
     }
 

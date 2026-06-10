@@ -3,10 +3,17 @@ use std::collections::VecDeque;
 use std::sync::Arc;
 use tracing_subscriber::Layer;
 
-/// 内存日志 Ring Buffer
+/// 带级别的日志条目
+#[derive(Clone)]
+pub struct LogEntry {
+    pub msg: String,
+    pub level: tracing::Level,
+}
+
+/// 内存日志 Ring Buffer（带级别）
 #[derive(Clone)]
 pub struct MemoryBuffer {
-    inner: Arc<Mutex<VecDeque<String>>>,
+    inner: Arc<Mutex<VecDeque<LogEntry>>>,
     capacity: usize,
 }
 
@@ -18,21 +25,30 @@ impl MemoryBuffer {
         }
     }
 
-    pub fn take_lines(&self, n: usize) -> Vec<String> {
-        let guard = self.inner.lock();
-        guard.iter().rev().take(n).cloned().rev().collect()
-    }
-
-    pub fn push(&self, msg: String) {
+    pub fn push(&self, entry: LogEntry) {
         let mut guard = self.inner.lock();
         if guard.len() >= self.capacity {
             guard.pop_front();
         }
-        guard.push_back(msg);
+        guard.push_back(entry);
+    }
+
+    /// 返回全部条目（不过滤）
+    #[allow(dead_code)]
+    pub fn take_lines(&self, n: usize) -> Vec<LogEntry> {
+        let guard = self.inner.lock();
+        guard.iter().rev().take(n).cloned().rev().collect()
+    }
+
+    /// 按最低级别过滤后返回（最新 N 条）
+    pub fn take_lines_filtered(&self, n: usize, min_level: &tracing::Level) -> Vec<LogEntry> {
+        let guard = self.inner.lock();
+        let filtered: Vec<_> = guard.iter().filter(|e| e.level >= *min_level).collect();
+        filtered.into_iter().rev().take(n).cloned().rev().collect()
     }
 }
 
-/// tracing Layer 实现
+/// tracing Layer 实现 —— 写入时带上 level
 pub struct MemoryLayer {
     buffer: MemoryBuffer,
 }
@@ -64,7 +80,10 @@ where
                 .unwrap_or_else(|| meta.target()),
             visitor.0
         );
-        self.buffer.push(msg);
+        self.buffer.push(LogEntry {
+            msg,
+            level: *meta.level(),
+        });
     }
 }
 
