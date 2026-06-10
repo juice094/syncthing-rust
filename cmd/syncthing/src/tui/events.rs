@@ -382,14 +382,12 @@ fn handle_edit_device_key(app: &mut App, key: KeyEvent) -> bool {
             }
         }
         KeyCode::Char('v') | KeyCode::Char('V')
-            if key.modifiers.contains(KeyModifiers::CONTROL)
-                && app.device_form.focus != 0 =>
+            if key.modifiers.contains(KeyModifiers::CONTROL) && app.device_form.focus != 0 =>
         {
             try_paste_into(&mut app.device_form.fields, app.device_form.focus);
         }
         KeyCode::Insert
-            if key.modifiers.contains(KeyModifiers::SHIFT)
-                && app.device_form.focus != 0 =>
+            if key.modifiers.contains(KeyModifiers::SHIFT) && app.device_form.focus != 0 =>
         {
             try_paste_into(&mut app.device_form.fields, app.device_form.focus);
         }
@@ -435,14 +433,12 @@ fn handle_edit_folder_key(app: &mut App, key: KeyEvent) -> bool {
     match key.code {
         KeyCode::Esc => app.popup = Popup::None,
         KeyCode::Char('v') | KeyCode::Char('V')
-            if key.modifiers.contains(KeyModifiers::CONTROL)
-                && app.folder_form.focus != 0 =>
+            if key.modifiers.contains(KeyModifiers::CONTROL) && app.folder_form.focus != 0 =>
         {
             try_paste_into(&mut app.folder_form.fields, app.folder_form.focus);
         }
         KeyCode::Insert
-            if key.modifiers.contains(KeyModifiers::SHIFT)
-                && app.folder_form.focus != 0 =>
+            if key.modifiers.contains(KeyModifiers::SHIFT) && app.folder_form.focus != 0 =>
         {
             try_paste_into(&mut app.folder_form.fields, app.folder_form.focus);
         }

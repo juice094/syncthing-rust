@@ -18,7 +18,7 @@ use windows::Win32::UI::WindowsAndMessaging::{
     DestroyIcon, DestroyMenu, DispatchMessageW, GetCursorPos, GetMessageW, LoadIconW, PostMessageW,
     PostQuitMessage, RegisterClassW, RegisterWindowMessageW, SetForegroundWindow, TrackPopupMenu,
     HICON, HMENU, IDI_APPLICATION, IDI_ERROR, IDI_INFORMATION, IDI_WARNING, LR_DEFAULTCOLOR,
-    MF_STRING, TPM_BOTTOMALIGN, TPM_LEFTALIGN, WM_COMMAND, WM_DESTROY, WM_LBUTTONDOWN, WM_NULL,
+    MF_STRING, TPM_BOTTOMALIGN, TPM_LEFTALIGN, WM_COMMAND, WM_DESTROY, WM_LBUTTONUP, WM_NULL,
     WM_RBUTTONUP, WNDCLASSW, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_OVERLAPPED,
 };
 
@@ -82,11 +82,28 @@ pub fn spawn() -> Receiver<TrayEvent> {
     let (tx, rx) = channel::<TrayEvent>();
     std::thread::spawn(move || unsafe {
         if let Err(e) = tray_thread(tx) {
-            // 无法输出到控制台，静默失败
-            let _ = e;
+            tracing::error!("Tray thread error: {}", e);
         }
     });
     rx
+}
+
+/// 主动清理托盘图标（供 Exit 前调用）
+pub fn cleanup() {
+    if let Some(s) = STATE.get() {
+        unsafe {
+            let nid = NOTIFYICONDATAW {
+                cbSize: std::mem::size_of::<NOTIFYICONDATAW>() as u32,
+                hWnd: HWND(s.hwnd as *mut _),
+                uID: TRAY_ICON_ID,
+                ..Default::default()
+            };
+            let _ = Shell_NotifyIconW(NIM_DELETE, &nid);
+            if let Some(ptr) = s.custom_hicon {
+                let _ = DestroyIcon(HICON(ptr as *mut _));
+            }
+        }
+    }
 }
 
 /// 返回托盘窗口句柄（供 update_icon / update_tooltip 使用）
@@ -176,6 +193,7 @@ unsafe fn tray_thread(tx: Sender<TrayEvent>) -> anyhow::Result<()> {
     nid.szTip[..tl].copy_from_slice(&tw[..tl]);
 
     if !Shell_NotifyIconW(NIM_ADD, &nid).as_bool() {
+        tracing::error!("Shell_NotifyIconW(NIM_ADD) failed — tray icon may not be visible");
         anyhow::bail!("NIM_ADD failed");
     }
 
@@ -241,7 +259,7 @@ unsafe extern "system" fn window_proc(
         WM_TRAYICON => {
             match lparam.0 as u32 {
                 WM_RBUTTONUP => show_context_menu(hwnd),
-                WM_LBUTTONDOWN => {
+                WM_LBUTTONUP => {
                     if let Some(s) = STATE.get() {
                         let _ = s.event_tx.send(TrayEvent::OpenTui);
                     }
@@ -288,6 +306,10 @@ unsafe extern "system" fn window_proc(
     }
 }
 
+/// 上一次图标状态缓存，避免无意义刷新
+static LAST_ICON: std::sync::Mutex<Option<IconType>> = std::sync::Mutex::new(None);
+static LAST_TOOLTIP: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
+
 // ==================== update helpers ====================
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -312,6 +334,13 @@ impl IconType {
 pub unsafe fn update_icon(_hwnd: HWND, icon_type: IconType) {
     let Some(state) = STATE.get() else { return };
 
+    // 防抖：状态未变时跳过
+    if let Ok(guard) = LAST_ICON.lock() {
+        if guard.as_ref() == Some(&icon_type) {
+            return;
+        }
+    }
+
     // Default/Idle 使用 build.rs 生成的自定义图标；Error/Syncing 使用系统图标（颜色区分）
     let hicon = match icon_type {
         IconType::Default | IconType::Idle => state
@@ -333,10 +362,22 @@ pub unsafe fn update_icon(_hwnd: HWND, icon_type: IconType) {
         ..Default::default()
     };
     let _ = Shell_NotifyIconW(NIM_MODIFY, &nid);
+
+    if let Ok(mut guard) = LAST_ICON.lock() {
+        *guard = Some(icon_type);
+    }
 }
 
 pub unsafe fn update_tooltip(_hwnd: HWND, text: &str) {
     let Some(state) = STATE.get() else { return };
+
+    // 防抖：tooltip 未变时跳过
+    if let Ok(guard) = LAST_TOOLTIP.lock() {
+        if guard.as_deref() == Some(text) {
+            return;
+        }
+    }
+
     let mut nid = NOTIFYICONDATAW {
         cbSize: std::mem::size_of::<NOTIFYICONDATAW>() as u32,
         hWnd: HWND(state.hwnd as *mut _),
@@ -348,6 +389,10 @@ pub unsafe fn update_tooltip(_hwnd: HWND, text: &str) {
     let len = wide.len().min(nid.szTip.len() - 1);
     nid.szTip[..len].copy_from_slice(&wide[..len]);
     let _ = Shell_NotifyIconW(NIM_MODIFY, &nid);
+
+    if let Ok(mut guard) = LAST_TOOLTIP.lock() {
+        *guard = Some(text.to_string());
+    }
 }
 
 /// Show a Windows tray balloon notification.
