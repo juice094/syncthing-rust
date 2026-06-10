@@ -62,6 +62,10 @@ struct Args {
     /// Alert output path. Appends one line per threshold breach.
     #[arg(long, default_value = "alerts.log")]
     alerts: PathBuf,
+    /// Log silence threshold: if a log file has not grown in this many seconds,
+    /// emit an alert (indicates daemon may be hung).
+    #[arg(long, default_value = "120")]
+    log_silent_secs: u64,
 }
 
 /// Parsed representation of a process identifier.
@@ -112,6 +116,14 @@ struct ProcSample {
     rss_mb: u64,
     cpu_percent: f32,
     found: bool,
+}
+
+/// Last-known mtime per log file, for silence detection.
+#[derive(Debug)]
+struct LogMtimeTracker {
+    path: PathBuf,
+    last_mtime: std::time::SystemTime,
+    last_size: u64,
 }
 
 /// One row of the output timeseries.
@@ -295,6 +307,20 @@ async fn main() -> anyhow::Result<()> {
     let header = build_csv_header(proc_ids.len(), args.logs.len(), args.sync_dirs.len());
     append_text(&args.output, header).await?;
 
+    // Initialize log mtime trackers for silence detection
+    let mut log_trackers: Vec<LogMtimeTracker> = Vec::with_capacity(args.logs.len());
+    for path in &args.logs {
+        let (mtime, size) = tokio::fs::metadata(path)
+            .await
+            .map(|m| (m.modified().unwrap_or(SystemTime::UNIX_EPOCH), m.len()))
+            .unwrap_or((SystemTime::UNIX_EPOCH, 0));
+        log_trackers.push(LogMtimeTracker {
+            path: path.clone(),
+            last_mtime: mtime,
+            last_size: size,
+        });
+    }
+
     let start = Instant::now();
     let mut ticker = tokio::time::interval(interval);
 
@@ -337,9 +363,20 @@ async fn main() -> anyhow::Result<()> {
             }
         }
 
-        // Alerts
+        // ── Alerts ──
+        // 1. Process crash / disappearance
         for (idx, p) in sample.procs.iter().enumerate() {
-            if p.found && p.rss_mb > args.rss_alert_mb {
+            if !p.found {
+                let msg = format!(
+                    "[ALERT] {} proc{} PROCESS NOT FOUND (crashed or exited)\n",
+                    fmt_iso8601(sample.ts),
+                    idx,
+                );
+                warn!("{}", msg.trim());
+                if let Err(e) = append_text(&args.alerts, msg.clone()).await {
+                    warn!("Failed to write alert: {}", e);
+                }
+            } else if p.rss_mb > args.rss_alert_mb {
                 let msg = format!(
                     "[ALERT] {} proc{} RSS {}MiB > threshold {}MiB\n",
                     fmt_iso8601(sample.ts),
@@ -352,6 +389,8 @@ async fn main() -> anyhow::Result<()> {
                 }
             }
         }
+
+        // 2. Log size threshold
         for (idx, size_mb) in sample.log_sizes_mb.iter().enumerate() {
             if *size_mb > args.log_alert_mb {
                 let msg = format!(
@@ -363,6 +402,40 @@ async fn main() -> anyhow::Result<()> {
                 );
                 if let Err(e) = append_text(&args.alerts, msg).await {
                     warn!("Failed to write alert: {}", e);
+                }
+            }
+        }
+
+        // 3. Log silence detection: if mtime hasn't changed AND size hasn't grown
+        //    for log_silent_secs, the daemon may be hung.
+        for (idx, tracker) in log_trackers.iter_mut().enumerate() {
+            let current = tokio::fs::metadata(&tracker.path)
+                .await
+                .map(|m| (m.modified().unwrap_or(SystemTime::UNIX_EPOCH), m.len()))
+                .unwrap_or((SystemTime::UNIX_EPOCH, 0));
+            let (mtime, size) = current;
+            if size > tracker.last_size || mtime > tracker.last_mtime {
+                tracker.last_mtime = mtime;
+                tracker.last_size = size;
+            } else {
+                let silent_secs = mtime
+                    .duration_since(tracker.last_mtime)
+                    .unwrap_or(Duration::ZERO)
+                    .as_secs();
+                if silent_secs >= args.log_silent_secs {
+                    let msg = format!(
+                        "[ALERT] {} log{} SILENT for {}s (no growth since {})\n",
+                        fmt_iso8601(sample.ts),
+                        idx,
+                        silent_secs,
+                        fmt_iso8601(tracker.last_mtime),
+                    );
+                    warn!("{}", msg.trim());
+                    if let Err(e) = append_text(&args.alerts, msg.clone()).await {
+                        warn!("Failed to write alert: {}", e);
+                    }
+                    // Reset tracker to avoid repeated alerts every tick
+                    tracker.last_mtime = SystemTime::now();
                 }
             }
         }

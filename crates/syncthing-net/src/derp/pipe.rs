@@ -23,7 +23,7 @@ use syncthing_core::{PathQuality, ReliablePipe, TransportType};
 use super::protocol::Frame;
 
 /// 内部发送任务：从 channel 接收已编码的帧数据，写入 TCP stream
-async fn send_task(mut write_half: OwnedWriteHalf, mut rx: mpsc::UnboundedReceiver<Vec<u8>>) {
+async fn send_task(mut write_half: OwnedWriteHalf, mut rx: mpsc::Receiver<Vec<u8>>) {
     while let Some(data) = rx.recv().await {
         trace!("DERP send_task writing {} bytes", data.len());
         if let Err(e) = tokio::io::AsyncWriteExt::write_all(&mut write_half, &data).await {
@@ -38,7 +38,7 @@ async fn send_task(mut write_half: OwnedWriteHalf, mut rx: mpsc::UnboundedReceiv
 }
 
 /// 内部接收任务：从 TCP stream 读取帧，将 RecvPacket 的 payload 传给读端
-async fn recv_task(mut read_half: OwnedReadHalf, read_tx: mpsc::UnboundedSender<Bytes>) {
+async fn recv_task(mut read_half: OwnedReadHalf, read_tx: mpsc::Sender<Bytes>) {
     let mut len_buf = [0u8; 4];
     loop {
         match tokio::io::AsyncReadExt::read_exact(&mut read_half, &mut len_buf).await {
@@ -57,7 +57,7 @@ async fn recv_task(mut read_half: OwnedReadHalf, read_tx: mpsc::UnboundedSender<
                             Ok(Some((frame, _))) => match frame {
                                 Frame::RecvPacket { payload, .. } => {
                                     trace!("DERP recv_task: forwarding {} bytes", payload.len());
-                                    if read_tx.send(payload.into()).is_err() {
+                                    if read_tx.try_send(payload.into()).is_err() {
                                         debug!("DERP recv_task: read_tx closed");
                                         break;
                                     }
@@ -115,9 +115,9 @@ pub struct DerpPipe {
     /// 发送任务句柄
     send_handle: Option<tokio::task::JoinHandle<()>>,
     /// 写入帧数据的 channel（shutdown 时替换为 closed channel）
-    write_tx: mpsc::UnboundedSender<Vec<u8>>,
+    write_tx: mpsc::Sender<Vec<u8>>,
     /// 从 recv_task 接收数据的 channel
-    read_rx: mpsc::UnboundedReceiver<Bytes>,
+    read_rx: mpsc::Receiver<Bytes>,
     /// 当前读取缓冲区（从 read_rx 收到的 Bytes 的剩余部分）
     read_buffer: Bytes,
     /// 本地地址
@@ -138,8 +138,8 @@ impl DerpPipe {
         let peer_addr = stream.peer_addr().ok();
         let (read_half, write_half) = stream.into_split();
 
-        let (read_tx, read_rx) = mpsc::unbounded_channel::<Bytes>();
-        let (write_tx, write_rx) = mpsc::unbounded_channel::<Vec<u8>>();
+        let (read_tx, read_rx) = mpsc::channel::<Bytes>(1024);
+        let (write_tx, write_rx) = mpsc::channel::<Vec<u8>>(1024);
 
         let _recv_handle = tokio::spawn(recv_task(read_half, read_tx));
         let send_handle = tokio::spawn(send_task(write_half, write_rx));
@@ -219,7 +219,7 @@ impl AsyncWrite for DerpPipe {
         };
 
         let encoded = frame.encode();
-        match this.write_tx.send(encoded) {
+        match this.write_tx.try_send(encoded) {
             Ok(()) => Poll::Ready(Ok(buf.len())),
             Err(_) => Poll::Ready(Err(io::Error::new(
                 io::ErrorKind::BrokenPipe,
@@ -236,7 +236,7 @@ impl AsyncWrite for DerpPipe {
     fn poll_shutdown(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<io::Result<()>> {
         let this = self.get_mut();
         // 关闭 write_tx，这会触发 send_task 退出
-        let (closed_tx, _) = mpsc::unbounded_channel::<Vec<u8>>();
+        let (closed_tx, _) = mpsc::channel::<Vec<u8>>(1);
         let _ = std::mem::replace(&mut this.write_tx, closed_tx);
         Poll::Ready(Ok(()))
     }
@@ -269,7 +269,7 @@ impl ReliablePipe for DerpPipe {
 impl Drop for DerpPipe {
     fn drop(&mut self) {
         // 关闭 channel，让后台任务退出
-        let (closed_tx, _) = mpsc::unbounded_channel::<Vec<u8>>();
+        let (closed_tx, _) = mpsc::channel::<Vec<u8>>(1);
         let _ = std::mem::replace(&mut self.write_tx, closed_tx);
         // abort send_task
         if let Some(handle) = self.send_handle.take() {
