@@ -11,7 +11,7 @@ const REG_VALUE_NAME: &str = "syncthing-rust";
 pub fn install(config_dir: &Path) -> anyhow::Result<()> {
     let exe = std::env::current_exe().map_err(|e| anyhow::anyhow!("get current exe: {}", e))?;
     let cmd = format!(
-        "\"{}\" run --config-dir \"{}\"",
+        "\"{}\" --config-dir \"{}\"",
         exe.display(),
         config_dir.display()
     );
