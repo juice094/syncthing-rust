@@ -1,6 +1,10 @@
 //! Syncthing Rust 实现 - 主入口
 //!
 //! 提供命令行界面和守护进程功能
+//!
+//! Windows 桌面模式（feature = "tray"）：无参数启动 = daemon + 系统托盘图标
+
+#![cfg_attr(all(windows, feature = "tray"), windows_subsystem = "windows")]
 
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
@@ -143,6 +147,10 @@ mod config_validation;
 mod init_wizard;
 mod logging_buffer;
 mod single_instance;
+#[cfg(all(windows, feature = "tray"))]
+mod tray;
+#[cfg(all(windows, feature = "tray"))]
+mod tray_api;
 mod tui;
 use syncthing::api_server;
 
@@ -463,48 +471,87 @@ async fn main() -> Result<()> {
             }
         }
         Commands::Auto => {
-            // Auto mode: daemon in background + tray icon. Then exit.
-            // TUI is accessible via tray right-click → "Open TUI".
-            use std::process::Stdio;
-            use tokio::process::Command;
-
+            // Auto mode: daemon + in-process tray icon (Windows only).
+            // On Linux/macOS this is equivalent to `syncthing run`.
             std::fs::create_dir_all(&config_dir)
                 .with_context(|| format!("create config dir {}", config_dir.display()))?;
 
-            drop(_instance_guard);
-            single_instance::release(&config_dir);
+            // Tray mode: file-only logging (no console)
+            #[cfg(all(windows, feature = "tray"))]
+            init_tray_logging(&config_dir);
 
-            let exe = std::env::current_exe().context("get current exe path")?;
-            let exe_dir = exe.parent().map(|p| p.to_path_buf()).unwrap_or_default();
-            let config_dir_str = config_dir.to_string_lossy().to_string();
+            let (listen, device_name) = resolve_daemon_config(
+                &config_dir,
+                CLI_DEFAULT_LISTEN.to_string(),
+                syncthing_core::constants::DEFAULT_DEVICE_NAME.to_string(),
+                false,
+            )?;
 
-            let daemon_alive = reqwest::get("http://127.0.0.1:8385/rest/health")
-                .await
-                .map(|r| r.status().is_success())
-                .unwrap_or(false);
+            match tui::daemon_runner::start_daemon(config_dir.clone(), listen, device_name).await {
+                Ok(startup) => {
+                    let (api_handle, _api_addr) = match api_server::start_api_server(
+                        &config_dir,
+                        startup.sync_service.clone(),
+                        startup.device_id,
+                        Some(startup.connection_handle.clone()),
+                    )
+                    .await
+                    {
+                        Ok(h) => h,
+                        Err(e) => {
+                            warn!("Failed to start REST API server: {}", e);
+                            (tokio::spawn(async {}), SocketAddr::from(([0, 0, 0, 0], 0)))
+                        }
+                    };
 
-            if !daemon_alive {
-                Command::new(&exe)
-                    .arg("run")
-                    .arg("--config-dir")
-                    .arg(&config_dir_str)
-                    .stdout(Stdio::null())
-                    .stderr(Stdio::null())
-                    .spawn()
-                    .context("spawn daemon")?;
+                    let shutdown_tx = startup.shutdown_tx.clone();
+
+                    #[cfg(all(windows, feature = "tray"))]
+                    {
+                        // Spawn tray thread + status polling task
+                        let event_rx = tray::spawn();
+                        let client = tray_api::DaemonClient::new("http://127.0.0.1:8385");
+
+                        tokio::spawn(tray_status_loop(client));
+
+                        // Main thread: process tray events
+                        for event in event_rx {
+                            tracing::debug!("Tray event: {:?}", event);
+                            match event {
+                                tray::TrayEvent::OpenWebUi => open_web_ui(),
+                                tray::TrayEvent::OpenTui => spawn_tui_from_tray(&config_dir),
+                                tray::TrayEvent::ToggleDaemon => {
+                                    let _ = shutdown_tx.send(true);
+                                }
+                                tray::TrayEvent::Exit => {
+                                    tracing::info!("Exit requested, cleaning up...");
+                                    let _ = shutdown_tx.send(true);
+                                    tray::cleanup();
+                                    break;
+                                }
+                            }
+                        }
+                    }
+
+                    #[cfg(not(all(windows, feature = "tray")))]
+                    {
+                        // Non-Windows or headless: just wait for Ctrl+C
+                        tokio::spawn(async move {
+                            tokio::signal::ctrl_c().await.ok();
+                            info!("Received SIGINT, initiating graceful shutdown...");
+                            let _ = shutdown_tx.send(true);
+                        });
+                    }
+
+                    let daemon_result = startup.future.await;
+                    let _ = api_handle.await;
+                    daemon_result?;
+                }
+                Err(e) => {
+                    tracing::error!("Failed to start daemon: {}", e);
+                    std::process::exit(1);
+                }
             }
-
-            let tray_exe = exe_dir.join("syncthing-tray.exe");
-            if tray_exe.exists() {
-                Command::new(&tray_exe)
-                    .stdout(Stdio::null())
-                    .stderr(Stdio::null())
-                    .spawn()
-                    .context("spawn tray")?;
-            }
-
-            println!("syncthing-rust started. Check system tray icon.");
-            println!("TUI: syncthing tui   |   Status: syncthing status");
         }
     }
 
@@ -686,6 +733,145 @@ async fn cmd_tui(
         memory_buffer,
     )
     .await
+}
+
+// ==================== tray helpers (Windows + feature = "tray") ====================
+
+#[cfg(all(windows, feature = "tray"))]
+fn init_tray_logging(config_dir: &Path) {
+    let logs_dir = config_dir.join("logs");
+    if let Err(e) = std::fs::create_dir_all(&logs_dir) {
+        eprintln!("Cannot create logs dir: {}", e);
+        return;
+    }
+
+    let file_appender = tracing_appender::rolling::Builder::new()
+        .rotation(tracing_appender::rolling::Rotation::DAILY)
+        .max_log_files(7)
+        .filename_prefix("tray")
+        .filename_suffix("log")
+        .build(&logs_dir)
+        .unwrap_or_else(|e| {
+            eprintln!("Failed to create tray log appender: {}. Using temp dir.", e);
+            tracing_appender::rolling::daily(std::env::temp_dir(), "syncthing-tray-fallback")
+        });
+
+    let (non_blocking, _guard) = tracing_appender::non_blocking(file_appender);
+    std::mem::forget(_guard);
+
+    let subscriber = tracing_subscriber::registry().with(
+        tracing_subscriber::fmt::layer()
+            .with_writer(non_blocking)
+            .with_filter(tracing_subscriber::filter::LevelFilter::INFO),
+    );
+    if let Err(e) = tracing::subscriber::set_global_default(subscriber) {
+        eprintln!("Failed to set tray logger: {}", e);
+    }
+}
+
+#[cfg(all(windows, feature = "tray"))]
+async fn tray_status_loop(mut client: tray_api::DaemonClient) {
+    let mut interval = tokio::time::interval(tokio::time::Duration::from_secs(5));
+    let mut last_online = false;
+    let mut last_connected: usize = 0;
+    let mut last_syncing = false;
+
+    loop {
+        interval.tick().await;
+        let online = client.ping().await;
+        client.set_online(online);
+        if online {
+            let _ = client.refresh_status().await;
+        }
+        let s = client.status();
+        let icon = client.icon_type();
+        let tip = format!(
+            "syncthing-rust\n{} connected\n{} folder{}",
+            if s.online {
+                format!(
+                    "{} device{}",
+                    s.connected_devices,
+                    if s.connected_devices == 1 { "" } else { "s" }
+                )
+            } else {
+                "offline".to_string()
+            },
+            s.folder_count,
+            if s.folder_count == 1 { "" } else { "s" }
+        );
+
+        unsafe {
+            let hwnd = tray::tray_hwnd();
+            if s.online && !last_online {
+                tray::show_notification(
+                    hwnd,
+                    "Syncthing",
+                    "Daemon is online",
+                    tray::BalloonIcon::Info,
+                );
+            } else if !s.online && last_online {
+                tray::show_notification(
+                    hwnd,
+                    "Syncthing",
+                    "Daemon went offline",
+                    tray::BalloonIcon::Error,
+                );
+            } else if s.online && s.connected_devices != last_connected {
+                let msg = if s.connected_devices > last_connected {
+                    format!("Device connected ({} total)", s.connected_devices)
+                } else {
+                    format!("Device disconnected ({} total)", s.connected_devices)
+                };
+                tray::show_notification(hwnd, "Syncthing", &msg, tray::BalloonIcon::Info);
+            }
+
+            if s.syncing && !last_syncing {
+                tray::show_notification(hwnd, "Syncthing", "Sync started", tray::BalloonIcon::Info);
+            }
+
+            tray::update_tooltip(hwnd, &tip);
+            tray::update_icon(hwnd, icon);
+        }
+
+        last_online = s.online;
+        last_connected = s.connected_devices;
+        last_syncing = s.syncing;
+    }
+}
+
+#[cfg(all(windows, feature = "tray"))]
+fn spawn_tui_from_tray(config_dir: &Path) {
+    let exe = std::env::current_exe().unwrap_or_default();
+    let cd = config_dir.to_string_lossy().to_string();
+    std::thread::spawn(move || {
+        match std::process::Command::new("cmd.exe")
+            .arg("/c")
+            .arg("start")
+            .arg("")
+            .arg(&exe)
+            .arg("tui")
+            .arg("--config-dir")
+            .arg(&cd)
+            .spawn()
+        {
+            Ok(child) => tracing::info!("TUI spawned via cmd /c start: pid={:?}", child.id()),
+            Err(e) => tracing::error!("Failed to spawn TUI: {}", e),
+        }
+    });
+}
+
+#[cfg(all(windows, feature = "tray"))]
+fn open_web_ui() {
+    unsafe {
+        let _ = windows::Win32::UI::Shell::ShellExecuteW(
+            None,
+            windows::core::w!("open"),
+            windows::core::w!("http://127.0.0.1:8385"),
+            None,
+            None,
+            windows::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL,
+        );
+    }
 }
 
 #[cfg(test)]
