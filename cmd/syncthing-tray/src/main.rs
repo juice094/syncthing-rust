@@ -1,6 +1,8 @@
 #![windows_subsystem = "windows"]
 
 use std::process::Stdio;
+use tracing_subscriber::layer::SubscriberExt;
+use tracing_subscriber::Layer;
 
 mod api;
 mod tray;
@@ -9,6 +11,11 @@ use api::DaemonClient;
 use tray::TrayEvent;
 
 fn main() {
+    // 初始化文件日志（托盘无控制台，日志是唯一排障手段）
+    init_tray_logging();
+
+    tracing::info!("syncthing-tray starting...");
+
     // 1. 启动托盘线程（窗口 + 消息循环在独立线程）
     let event_rx = tray::spawn();
 
@@ -20,15 +27,51 @@ fn main() {
 
     // 3. 主线程：处理托盘事件
     for event in event_rx {
+        tracing::debug!("Tray event: {:?}", event);
         match event {
             TrayEvent::OpenWebUi => open_web_ui(),
             TrayEvent::OpenTui => spawn_tui(),
             TrayEvent::ToggleDaemon => toggle_daemon(),
             TrayEvent::Exit => {
+                tracing::info!("Exit requested, cleaning up...");
                 stop_daemon();
+                tray::cleanup();
                 std::process::exit(0);
             }
         }
+    }
+}
+
+/// 初始化托盘日志：写入 %LOCALAPPDATA%\syncthing-rust\logs\tray.log
+fn init_tray_logging() {
+    let logs_dir = config_dir().join("logs");
+    if let Err(e) = std::fs::create_dir_all(&logs_dir) {
+        eprintln!("Cannot create logs dir: {}", e);
+        return;
+    }
+
+    let file_appender = tracing_appender::rolling::Builder::new()
+        .rotation(tracing_appender::rolling::Rotation::DAILY)
+        .max_log_files(7)
+        .filename_prefix("tray")
+        .filename_suffix("log")
+        .build(&logs_dir)
+        .unwrap_or_else(|e| {
+            eprintln!("Failed to create tray log appender: {}. Using temp dir.", e);
+            tracing_appender::rolling::daily(std::env::temp_dir(), "syncthing-tray-fallback")
+        });
+
+    let (non_blocking, _guard) = tracing_appender::non_blocking(file_appender);
+    // 将 _guard 泄漏到静态生命周期，避免日志刷新器被 drop
+    std::mem::forget(_guard);
+
+    let subscriber = tracing_subscriber::registry().with(
+        tracing_subscriber::fmt::layer()
+            .with_writer(non_blocking)
+            .with_filter(tracing_subscriber::filter::LevelFilter::INFO),
+    );
+    if let Err(e) = tracing::subscriber::set_global_default(subscriber) {
+        eprintln!("Failed to set tray logger: {}", e);
     }
 }
 
@@ -36,10 +79,10 @@ fn main() {
 
 static DAEMON_LOCK: std::sync::Mutex<Option<tokio::process::Child>> = std::sync::Mutex::new(None);
 
-fn config_dir() -> String {
+fn config_dir() -> std::path::PathBuf {
     std::env::var("LOCALAPPDATA")
-        .map(|p| format!("{}\\syncthing-rust", p))
-        .unwrap_or_else(|_| ".".to_string())
+        .map(|p| std::path::PathBuf::from(format!("{}\\syncthing-rust", p)))
+        .unwrap_or_else(|_| std::path::PathBuf::from("."))
 }
 
 fn syncthing_exe() -> std::path::PathBuf {
@@ -155,7 +198,10 @@ fn spawn_tui() {
     let cd = config_dir();
     std::thread::spawn(move || {
         if !exe.exists() {
-            tracing::error!("syncthing.exe not found at {}", exe.display());
+            tracing::error!(
+                "syncthing.exe not found at {}. Ensure syncthing.exe is in the same directory as syncthing-tray.exe.",
+                exe.display()
+            );
             return;
         }
         // 使用 cmd.exe /c start 启动 TUI，确保新控制台窗口正确分配 std handles。
@@ -181,11 +227,15 @@ fn spawn_tui() {
 fn toggle_daemon() {
     let mut lock = DAEMON_LOCK.lock().unwrap();
     if let Some(mut child) = lock.take() {
-        // Stop
+        // Stop: 使用 tokio runtime 阻塞 kill（托盘后台线程有独立 runtime）
         std::thread::spawn(move || {
             let rt = tokio::runtime::Runtime::new().unwrap();
             rt.block_on(async {
-                let _ = child.kill().await;
+                if let Err(e) = child.kill().await {
+                    tracing::warn!("Failed to kill daemon: {}", e);
+                } else {
+                    tracing::info!("Daemon stopped by toggle");
+                }
             });
         });
     } else {
@@ -196,7 +246,7 @@ fn toggle_daemon() {
             std::thread::spawn(move || {
                 let rt = tokio::runtime::Runtime::new().unwrap();
                 rt.block_on(async {
-                    if let Ok(child) = tokio::process::Command::new(&exe)
+                    match tokio::process::Command::new(&exe)
                         .arg("run")
                         .arg("--config-dir")
                         .arg(&cd)
@@ -204,20 +254,34 @@ fn toggle_daemon() {
                         .stderr(Stdio::null())
                         .spawn()
                     {
-                        *DAEMON_LOCK.lock().unwrap() = Some(child);
+                        Ok(child) => {
+                            tracing::info!("Daemon started by toggle: pid={:?}", child.id());
+                            *DAEMON_LOCK.lock().unwrap() = Some(child);
+                        }
+                        Err(e) => {
+                            tracing::error!("Failed to start daemon: {}", e);
+                        }
                     }
                 });
             });
+        } else {
+            tracing::error!(
+                "syncthing.exe not found at {}. Ensure syncthing.exe is in the same directory.",
+                exe.display()
+            );
         }
     }
 }
 
 fn stop_daemon() {
     if let Some(mut child) = DAEMON_LOCK.lock().unwrap().take() {
-        let rt = tokio::runtime::Runtime::new().unwrap();
-        rt.block_on(async {
-            let _ = child.kill().await;
-        });
+        if let Ok(rt) = tokio::runtime::Runtime::new() {
+            rt.block_on(async {
+                if let Err(e) = child.kill().await {
+                    tracing::warn!("Failed to kill daemon on exit: {}", e);
+                }
+            });
+        }
     }
 }
 
