@@ -851,13 +851,22 @@ async fn tray_status_loop(mut client: tray_api::DaemonClient) {
 /// TUI 需要控制台才能渲染；此函数在 `tui` 命令入口处调用。
 #[cfg(windows)]
 fn ensure_console() {
+    use windows::Win32::System::Console::{AllocConsole, AttachConsole, GetConsoleWindow};
+    use windows::Win32::UI::WindowsAndMessaging::{SetForegroundWindow, ShowWindow, SW_SHOWNORMAL};
+
     unsafe {
         // 先尝试附加到父进程控制台（如果从终端手动启动）
-        if windows::Win32::System::Console::AttachConsole(u32::MAX).is_ok() {
+        if AttachConsole(u32::MAX).is_ok() {
             return;
         }
         // 父进程无控制台 → 分配新窗口（托盘/桌面快捷方式场景）
-        let _ = windows::Win32::System::Console::AllocConsole();
+        if AllocConsole().is_ok() {
+            let hwnd = GetConsoleWindow();
+            if !hwnd.is_invalid() {
+                let _ = ShowWindow(hwnd, SW_SHOWNORMAL);
+                let _ = SetForegroundWindow(hwnd);
+            }
+        }
     }
 }
 
@@ -866,17 +875,17 @@ fn spawn_tui_from_tray(config_dir: &Path) {
     let exe = std::env::current_exe().unwrap_or_default();
     let cd = config_dir.to_string_lossy().to_string();
     std::thread::spawn(move || {
-        match std::process::Command::new("cmd.exe")
+        // 使用 cmd /c（不用 start）让 cmd.exe 提供持久控制台，
+        // 直到 TUI 退出后才关闭。
+        let status = std::process::Command::new("cmd.exe")
             .arg("/c")
-            .arg("start")
-            .arg("")
             .arg(&exe)
             .arg("tui")
             .arg("--config-dir")
             .arg(&cd)
-            .spawn()
-        {
-            Ok(child) => tracing::info!("TUI spawned via cmd /c start: pid={:?}", child.id()),
+            .status();
+        match status {
+            Ok(s) => tracing::info!("TUI exited with status: {:?}", s.code()),
             Err(e) => tracing::error!("Failed to spawn TUI: {}", e),
         }
     });
