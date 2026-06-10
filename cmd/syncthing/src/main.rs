@@ -156,10 +156,12 @@ impl Drop for SingleInstanceGuard {
 }
 
 /// Resolve listen/device_name from config file, overridden by CLI args.
+/// `skip_path_check`: TUI 模式下跳过 folder path 存在性检查（用户可能正在创建文件夹）。
 fn resolve_daemon_config(
     config_dir: &Path,
     cli_listen: String,
     cli_device_name: String,
+    skip_path_check: bool,
 ) -> Result<(String, String)> {
     let config_path = config_dir.join(CONFIG_FILE_NAME);
     let config = if config_path.exists() {
@@ -172,7 +174,17 @@ fn resolve_daemon_config(
     };
 
     // C-UX-4: 配置验证 — 启动前快速失败
-    config_validation::validate_config(&config)?;
+    // TUI 模式下降级为警告：TUI 是配置编辑器，用户需要在界面内修复错误配置
+    if skip_path_check {
+        if let Err(e) = config_validation::validate_config_non_blocking(&config) {
+            eprintln!(
+                "[Config Warning] {}\n提示: 进入 TUI 后可修改配置修复此问题",
+                e
+            );
+        }
+    } else {
+        config_validation::validate_config(&config)?;
+    }
 
     // CLI overrides config (runtime-only, do NOT persist to disk)
     let listen = if cli_listen != CLI_DEFAULT_LISTEN {
@@ -203,12 +215,13 @@ async fn main() -> Result<()> {
         .config_dir
         .unwrap_or_else(syncthing_core::paths::default_config_dir);
 
-    // C-UX-5: 单实例锁 — 查询命令不创建锁，只通过 REST API 通信
+    // C-UX-5: 单实例锁 — daemon 独占；TUI/查询命令不创建锁
     let needs_lock = match &cli.command {
         None => true, // auto mode = daemon + TUI
         Some(cmd) => !matches!(
             cmd,
-            Commands::Status { .. }
+            Commands::Tui { .. }
+                | Commands::Status { .. }
                 | Commands::Devices { .. }
                 | Commands::Folders { .. }
                 | Commands::Logs { .. }
@@ -263,7 +276,8 @@ async fn main() -> Result<()> {
             );
             tracing::subscriber::set_global_default(subscriber)
                 .map_err(|e| anyhow::anyhow!("Failed to set subscriber: {}", e))?;
-            let (listen, device_name) = resolve_daemon_config(&config_dir, listen, device_name)?;
+            let (listen, device_name) =
+                resolve_daemon_config(&config_dir, listen, device_name, false)?;
             match tui::daemon_runner::start_daemon(config_dir.clone(), listen, device_name).await {
                 Ok(startup) => {
                     // 启动 REST API 服务器
@@ -352,7 +366,8 @@ async fn main() -> Result<()> {
                     ))
                     .with(memory_layer);
             tracing::subscriber::set_global_default(subscriber)?;
-            let (listen, device_name) = resolve_daemon_config(&config_dir, listen, device_name)?;
+            let (listen, device_name) =
+                resolve_daemon_config(&config_dir, listen, device_name, true)?;
             cmd_tui(&config_dir, &listen, &device_name, memory_buffer).await?;
         }
         Commands::Init => {
@@ -798,6 +813,7 @@ mod tests {
             &tmp_dir,
             "0.0.0.0:9999".to_string(),
             "custom-name".to_string(),
+            false,
         )
         .expect("failed to resolve config");
         assert_eq!(listen, "0.0.0.0:9999");
@@ -835,6 +851,7 @@ mod tests {
             &tmp_dir,
             syncthing_core::constants::DEFAULT_LISTEN_ADDR.to_string(),
             syncthing_core::constants::DEFAULT_DEVICE_NAME.to_string(),
+            false,
         )
         .expect("failed to resolve config");
         // Because CLI arg equals default, it falls back to config value (the old 22000)

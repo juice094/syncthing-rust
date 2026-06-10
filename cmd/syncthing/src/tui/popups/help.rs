@@ -24,6 +24,7 @@ pub fn draw(f: &mut Frame, theme: &Theme) {
             vec![
                 ("F5", "Start / Stop daemon"),
                 ("Tab / ← →", "Switch tab"),
+                ("l", "Toggle log filter (Error→Warn→Info→Debug→Trace)"),
                 ("q", "Quit TUI"),
                 ("?", "Show this help"),
             ],
@@ -37,11 +38,20 @@ pub fn draw(f: &mut Frame, theme: &Theme) {
         ),
         (
             "Devices Tab",
-            vec![("a", "Add new device"), ("d", "Delete selected device")],
+            vec![
+                ("Ins / a", "Add new device"),
+                ("Enter / e", "Edit selected device"),
+                ("Del / d", "Delete selected device"),
+            ],
         ),
         (
             "Folders Tab",
-            vec![("a", "Add new folder"), ("d", "Delete selected folder")],
+            vec![
+                ("Ins / a", "Add new folder"),
+                ("Enter / e", "Edit selected folder"),
+                ("i", "Edit .stignore"),
+                ("Del / d", "Delete selected folder"),
+            ],
         ),
         (
             "Forms (Add Device / Folder)",

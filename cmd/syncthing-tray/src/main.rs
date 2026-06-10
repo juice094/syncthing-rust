@@ -151,16 +151,30 @@ async fn daemon_loop() {
 }
 
 fn spawn_tui() {
-    use std::os::windows::process::CommandExt;
     let exe = syncthing_exe();
     let cd = config_dir();
     std::thread::spawn(move || {
-        let _ = std::process::Command::new(&exe)
+        if !exe.exists() {
+            tracing::error!("syncthing.exe not found at {}", exe.display());
+            return;
+        }
+        // 使用 cmd.exe /c start 启动 TUI，确保新控制台窗口正确分配 std handles。
+        // 直接 CreateProcess + CREATE_NEW_CONSOLE 会导致子进程继承父进程
+        // （windows_subsystem，无控制台）的 INVALID_HANDLE_VALUE stdout，
+        // crossterm::enable_raw_mode 因此失败。
+        match std::process::Command::new("cmd.exe")
+            .arg("/c")
+            .arg("start")
+            .arg("")
+            .arg(&exe)
             .arg("tui")
             .arg("--config-dir")
             .arg(&cd)
-            .creation_flags(0x00000010) // CREATE_NEW_CONSOLE
-            .spawn();
+            .spawn()
+        {
+            Ok(child) => tracing::info!("TUI spawned via cmd /c start: pid={}", child.id()),
+            Err(e) => tracing::error!("Failed to spawn TUI: {}", e),
+        }
     });
 }
 

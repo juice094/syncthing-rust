@@ -47,8 +47,9 @@ fn generate_icon() -> Vec<u8> {
 
             // Main body: rounded rect
             let in_body = cx.abs() < 14 && (-12..10).contains(&cy);
-            let in_top_round =
-                cx.abs() < 14 && (-14..=-12).contains(&cy) && (cx * cx + (cy + 12) * (cy + 12)) < 20;
+            let in_top_round = cx.abs() < 14
+                && (-14..=-12).contains(&cy)
+                && (cx * cx + (cy + 12) * (cy + 12)) < 20;
             let in_bottom_round =
                 cx.abs() < 14 && (10..=12).contains(&cy) && (cx * cx + (cy - 10) * (cy - 10)) < 20;
 

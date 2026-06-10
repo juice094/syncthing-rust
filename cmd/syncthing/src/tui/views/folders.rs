@@ -72,7 +72,7 @@ pub fn draw(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
     .block(
         Block::default()
             .borders(Borders::ALL)
-            .title("Folders (a: add, d: delete)"),
+            .title("Folders (Ins/a: add, Enter/e: edit, i: ignore, Del/d: delete)"),
     )
     .row_highlight_style(theme.style_header.add_modifier(Modifier::REVERSED));
 

@@ -51,6 +51,8 @@ pub enum Popup {
     None,
     AddDevice,
     AddFolder,
+    EditDevice,
+    EditFolder,
     Help,
     Error(String),
 }
@@ -98,6 +100,9 @@ pub struct App {
     /// 事件接收器（由 daemon 启动时设置）
     pub event_rx: Option<tokio::sync::mpsc::Receiver<crate::tui::TuiEvent>>,
 
+    /// 日志过滤级别（TUI 快捷键 l 切换）
+    pub log_filter_level: tracing::Level,
+
     // 表单
     pub device_form: FormState,
     pub folder_form: FormState,
@@ -130,6 +135,7 @@ impl App {
             folder_states: HashMap::new(),
             sync_progress: HashMap::new(),
             event_rx: None,
+            log_filter_level: tracing::Level::INFO,
         }
     }
 
