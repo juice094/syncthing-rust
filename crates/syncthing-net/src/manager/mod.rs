@@ -48,7 +48,7 @@ pub struct ConnectionManager {
     pub(crate) config: ConnectionManagerConfig,
     /// 本地设备身份（抽象层，解耦具体密码学方案）
     /// 保留 Arc 引用以维持 trait object 生命周期；local_device_id 已缓存
-    // TODO(v0.3.0): 当 ConnectionManager 需要动态身份切换时激活
+    // TODO: dynamic identity switching (currently single identity per process)
     #[allow(dead_code)]
     pub(crate) identity: Arc<dyn Identity>,
     /// 本地设备ID（从 identity 缓存，避免虚函数调用）
@@ -399,6 +399,7 @@ impl ConnectionManager {
     }
 
     /// 检查是否应该重连
+    #[allow(clippy::unused_self)]
     pub(crate) fn should_reconnect(&self, _device_id: &DeviceId, reason: &str) -> bool {
         // 检查断开原因是否值得重试
         !reason.contains("manual disconnect")

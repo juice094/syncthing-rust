@@ -172,7 +172,7 @@ impl EventBus {
         trace!("Publishing event: {:?}", event);
 
         // Convert to message and store in buffer (for REST poll)
-        let msg = crate::handlers::convert_event_to_message(event.clone());
+        let msg = crate::handlers::convert_event_to_message(&event);
         self.event_buffer.push(msg);
 
         // Send to broadcast channel

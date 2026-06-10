@@ -32,7 +32,7 @@ pub struct StaggeredVersioner {
 }
 
 impl StaggeredVersioner {
-    pub fn new(folder_path: PathBuf, max_age_days: Option<u32>) -> Self {
+    pub fn new(folder_path: &Path, max_age_days: Option<u32>) -> Self {
         let max_age_secs = max_age_days
             .map(|d| d as i64 * 86400)
             .unwrap_or(DEFAULT_MAX_AGE_SECS);
@@ -331,7 +331,7 @@ mod tests {
     async fn test_staggered_versioner_archive_and_clean() {
         let dir = tempfile::tempdir().unwrap();
         let folder = dir.path().to_path_buf();
-        let v = StaggeredVersioner::new(folder.clone(), None);
+        let v = StaggeredVersioner::new(&folder, None);
 
         let test_file = folder.join("data.txt");
         tokio::fs::write(&test_file, b"v1").await.unwrap();
@@ -363,7 +363,7 @@ mod tests {
     #[tokio::test]
     async fn test_staggered_noop_missing_file() {
         let dir = tempfile::tempdir().unwrap();
-        let v = StaggeredVersioner::new(dir.path().to_path_buf(), None);
+        let v = StaggeredVersioner::new(dir.path(), None);
         assert!(v.archive(Path::new("/no/such/file")).await.is_ok());
     }
 }

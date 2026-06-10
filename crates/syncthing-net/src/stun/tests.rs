@@ -63,8 +63,8 @@ fn test_is_public_address() {
 
 #[test]
 fn test_stun_request_building() {
-    let client = StunClient::new();
-    let request = client.build_binding_request().unwrap();
+    let _client = StunClient::new();
+    let request = StunClient::build_binding_request().unwrap();
 
     assert!(is_stun_packet(&request));
     assert_eq!(&request[0..2], &BINDING_REQUEST);

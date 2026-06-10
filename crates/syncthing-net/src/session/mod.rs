@@ -124,7 +124,7 @@ pub trait BepSessionHandler: Send + Sync {
 /// BEP protocol session for a single connection.
 pub struct BepSession {
     /// 远程设备身份（抽象层）
-    // TODO(v0.3.0): 当 BepSession 需要身份校验或证书轮换时激活
+    // TODO: identity verification / certificate rotation
     #[allow(dead_code)]
     pub(super) identity: Arc<dyn Identity>,
     /// 远程设备ID（从 identity 缓存）

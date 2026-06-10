@@ -54,15 +54,12 @@ pub fn create_versioner(cfg: &VersioningConfig, folder_path: &Path) -> Option<Bo
                 .get("keep")
                 .and_then(|v| v.parse::<usize>().ok())
                 .unwrap_or(5);
-            Some(Box::new(simple::SimpleVersioner::new(
-                folder_path.to_path_buf(),
-                keep,
-            )))
+            Some(Box::new(simple::SimpleVersioner::new(folder_path, keep)))
         }
         VersioningConfig::Staggered { params } => {
             let max_age = params.get("maxAge").and_then(|v| v.parse::<u32>().ok());
             Some(Box::new(staggered::StaggeredVersioner::new(
-                folder_path.to_path_buf(),
+                folder_path,
                 max_age,
             )))
         }

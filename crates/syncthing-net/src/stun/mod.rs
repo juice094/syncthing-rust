@@ -457,7 +457,7 @@ impl StunClient {
 
     /// 构建 STUN 绑定请求消息（保留用于测试兼容）
     #[allow(dead_code)]
-    fn build_binding_request(&self) -> Result<Vec<u8>> {
+    fn build_binding_request() -> Result<Vec<u8>> {
         Ok(build_binding_request(new_tx_id()))
     }
 

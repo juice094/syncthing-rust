@@ -146,13 +146,13 @@ impl App {
         self.log_lines.push_back(msg);
     }
 
-    // TODO(v0.3.0): TUI device detail panel
+    // TODO: TUI device detail panel
     #[allow(dead_code)]
     pub fn selected_device(&self) -> Option<&Device> {
         self.config.devices.get(self.device_selected)
     }
 
-    // TODO(v0.3.0): TUI folder detail panel
+    // TODO: TUI folder detail panel
     #[allow(dead_code)]
     pub fn selected_folder(&self) -> Option<&Folder> {
         self.config.folders.get(self.folder_selected)

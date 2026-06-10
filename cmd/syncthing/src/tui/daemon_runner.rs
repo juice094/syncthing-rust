@@ -36,11 +36,11 @@ pub struct DaemonStartup {
     pub future: std::pin::Pin<Box<dyn std::future::Future<Output = Result<()>> + Send>>,
     pub connection_handle: ConnectionManagerHandle,
     pub sync_service: Arc<SyncService>,
-    // TODO(v0.3.0): 用于优雅关闭时取消所有会话任务
+    // TODO: wire session_handles into graceful shutdown
     #[allow(dead_code)]
     pub session_handles: Arc<DashMap<DeviceId, JoinHandle<()>>>,
     pub device_id: DeviceId,
-    // TODO(v0.3.0): 用于优雅关闭全局发现服务
+    // TODO: wire global_discovery_shutdown into graceful shutdown
     #[allow(dead_code)]
     pub global_discovery_shutdown: Option<GlobalDiscoveryShutdown>,
     /// Daemon 优雅关闭信号发送端
@@ -444,15 +444,15 @@ pub async fn start_daemon(
             .collect()
     };
     spawn_relay_listeners(
-        relay_pool_urls,
-        config_relay_urls,
-        Arc::clone(&tls_config_arc),
+        &relay_pool_urls,
+        &config_relay_urls,
+        &tls_config_arc,
         device_id,
-        config.device_name.clone(),
-        handle.clone(),
-        Arc::clone(&public_addrs),
-        global_discovery.clone(),
-        shutdown_rx.clone(),
+        &config.device_name,
+        &handle,
+        &public_addrs,
+        &global_discovery,
+        &shutdown_rx,
     );
 
     let connection_handle = handle.clone();

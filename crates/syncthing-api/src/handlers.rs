@@ -112,7 +112,7 @@ pub(crate) async fn handle_websocket(socket: WebSocket, state: ApiState, query: 
         let connection_id = connection_id.clone();
         tokio::spawn(async move {
             while let Some(event) = event_rx.recv().await {
-                let event_msg = convert_event_to_message(event);
+                let event_msg = convert_event_to_message(&event);
 
                 // Apply event type filter if specified
                 if let Some(ref filter) = event_filter {
@@ -222,7 +222,7 @@ pub(crate) static EVENT_ID_COUNTER: std::sync::atomic::AtomicU64 =
     std::sync::atomic::AtomicU64::new(1);
 
 /// Convert internal Event to EventMessage for WebSocket / REST poll.
-pub(crate) fn convert_event_to_message(event: Event) -> EventMessage {
+pub(crate) fn convert_event_to_message(event: &Event) -> EventMessage {
     let event_type = match &event {
         Event::FolderSummary { .. } => "FolderSummary",
         Event::ItemFinished { .. } => "ItemFinished",
@@ -232,7 +232,7 @@ pub(crate) fn convert_event_to_message(event: Event) -> EventMessage {
         Event::RemoteIndexUpdated { .. } => "RemoteIndexUpdated",
     };
 
-    let data = match serde_json::to_value(&event) {
+    let data = match serde_json::to_value(event) {
         Ok(mut value) => {
             // Remove the type field since we send it separately
             if let Some(obj) = value.as_object_mut() {
@@ -296,7 +296,7 @@ pub async fn events_poll_handler(
             .await
         {
             Ok(Ok(event)) => {
-                let msg = convert_event_to_message(event);
+                let msg = convert_event_to_message(&event);
                 if msg.id <= since {
                     continue;
                 }
@@ -498,7 +498,7 @@ mod tests {
             },
         };
 
-        let msg = convert_event_to_message(event);
+        let msg = convert_event_to_message(&event);
         assert_eq!(msg.event_type, "FolderSummary");
         assert!(msg.data.get("folder").is_some());
     }

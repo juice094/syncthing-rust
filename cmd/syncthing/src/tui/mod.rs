@@ -26,7 +26,7 @@ pub enum TuiEvent {
     DeviceDisconnected {
         device_id: syncthing_core::DeviceId,
     },
-    // TODO(v0.3.0): TUI real-time sync progress bar
+    // TODO: TUI real-time sync progress bar
     #[allow(dead_code)]
     SyncProgress {
         folder: String,
@@ -142,7 +142,7 @@ async fn run_app<B: Backend>(
 
         let should_exit = if crossterm::event::poll(timeout)? {
             let event = crossterm::event::read()?;
-            match event {
+            match &event {
                 crossterm::event::Event::Resize(_, _) => {
                     // 窗口大小变化时立即重绘
                     false
@@ -161,7 +161,7 @@ async fn run_app<B: Backend>(
                     .await;
                     false
                 }
-                _ => events::handle_event(app, event),
+                _ => events::handle_event(app, &event),
             }
         } else {
             false

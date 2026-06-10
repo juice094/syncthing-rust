@@ -62,12 +62,12 @@ impl From<syncthing_core::types::FileInfo> for WireFileInfo {
             modified_ns: f.modified_ns,
             modified_by: f.modified_by.unwrap_or(0),
             block_size: f.block_size,
-            platform: None, // TODO: platform data conversion
+            platform: None, // TODO: BEP protocol extension — platform data
             blocks: f.blocks.into_iter().map(Into::into).collect(),
             symlink_target: f.symlink_target.unwrap_or_default().into_bytes(),
             blocks_hash: f.blocks_hash.unwrap_or_default(),
-            encrypted: Vec::new(),            // TODO: encrypted data
-            previous_blocks_hash: Vec::new(), // TODO: previous blocks hash
+            encrypted: Vec::new(), // TODO: BEP protocol extension — encrypted data
+            previous_blocks_hash: Vec::new(), // TODO: BEP protocol extension — previous blocks hash
         }
     }
 }

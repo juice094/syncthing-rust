@@ -100,11 +100,8 @@ impl TestNode {
         // on_connected/on_disconnected callbacks fire for every peer connection.
         // This drives BepSession::run() per peer, enabling ClusterConfig /
         // Index / Block transfer (i.e. real end-to-end sync).
-        let pending_responses = install_bep_bridge(
-            &manager,
-            Arc::clone(&sync_service),
-            connection_handle.clone(),
-        );
+        let pending_responses =
+            install_bep_bridge(&manager, &sync_service, connection_handle.clone());
 
         // Provide a block source so the puller can fetch remote blocks via BEP.
         let block_source = Arc::new(TestBlockSource {
