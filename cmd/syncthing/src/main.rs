@@ -851,7 +851,10 @@ async fn tray_status_loop(mut client: tray_api::DaemonClient) {
 /// TUI 需要控制台才能渲染；此函数在 `tui` 命令入口处调用。
 #[cfg(windows)]
 fn ensure_console() {
-    use windows::Win32::System::Console::{AllocConsole, AttachConsole, GetConsoleWindow};
+    use windows::Win32::System::Console::{
+        AllocConsole, AttachConsole, GetConsoleWindow, GetStdHandle, SetConsoleScreenBufferSize,
+        SetConsoleWindowInfo, COORD, SMALL_RECT, STD_OUTPUT_HANDLE,
+    };
     use windows::Win32::UI::WindowsAndMessaging::{SetForegroundWindow, ShowWindow, SW_SHOWNORMAL};
 
     unsafe {
@@ -861,6 +864,19 @@ fn ensure_console() {
         }
         // 父进程无控制台 → 分配新窗口（托盘/桌面快捷方式场景）
         if AllocConsole().is_ok() {
+            // 调整控制台缓冲区与窗口，避免 TUI 底部被截断
+            if let Ok(handle) = GetStdHandle(STD_OUTPUT_HANDLE) {
+                let buf = COORD { X: 120, Y: 40 };
+                let _ = SetConsoleScreenBufferSize(handle, buf);
+                let rect = SMALL_RECT {
+                    Left: 0,
+                    Top: 0,
+                    Right: 119,
+                    Bottom: 39,
+                };
+                let _ = SetConsoleWindowInfo(handle, true, &rect);
+            }
+
             let hwnd = GetConsoleWindow();
             if !hwnd.is_invalid() {
                 let _ = ShowWindow(hwnd, SW_SHOWNORMAL);
@@ -870,21 +886,48 @@ fn ensure_console() {
     }
 }
 
+/// 多终端启动 TUI：按优先级尝试 Windows Terminal → PowerShell → CMD。
+/// 直接调用（不用 `start`）确保 shell 等待 syncthing.exe 退出，
+/// syncthing.exe 通过 `AttachConsole` 附加到 shell 控制台。
 #[cfg(all(windows, feature = "tray"))]
 fn spawn_tui_from_tray(config_dir: &Path) {
     let exe = std::env::current_exe().unwrap_or_default();
     let cd = config_dir.to_string_lossy().to_string();
+    let exe_q = format!("\"{}\"", exe.display());
+    let cd_q = format!("\"{}\"", cd);
+
     std::thread::spawn(move || {
-        // 使用 cmd /c（不用 start）让 cmd.exe 提供持久控制台，
-        // 直到 TUI 退出后才关闭。
-        let status = std::process::Command::new("cmd.exe")
+        // 优先级 1: Windows Terminal（新标签页，最佳体验）
+        let wt = std::process::Command::new("wt.exe")
+            .arg("new-tab")
+            .arg("powershell")
+            .arg("-Command")
+            .arg(format!("& {} tui --config-dir {}", exe_q, cd_q))
+            .spawn();
+        if wt.is_ok() {
+            tracing::info!("TUI spawned via Windows Terminal");
+            return;
+        }
+
+        // 优先级 2: PowerShell（直接启动，PowerShell 等待子进程）
+        let ps = std::process::Command::new("powershell.exe")
+            .arg("-Command")
+            .arg(format!("& {} tui --config-dir {}", exe_q, cd_q))
+            .spawn();
+        if ps.is_ok() {
+            tracing::info!("TUI spawned via PowerShell");
+            return;
+        }
+
+        // 优先级 3: CMD 回退
+        let cmd = std::process::Command::new("cmd.exe")
             .arg("/c")
             .arg(&exe)
             .arg("tui")
             .arg("--config-dir")
             .arg(&cd)
             .status();
-        match status {
+        match cmd {
             Ok(s) => tracing::info!("TUI exited with status: {:?}", s.code()),
             Err(e) => tracing::error!("Failed to spawn TUI: {}", e),
         }
