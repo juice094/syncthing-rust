@@ -21,7 +21,7 @@ pub struct SimpleVersioner {
 }
 
 impl SimpleVersioner {
-    pub fn new(folder_path: PathBuf, keep: usize) -> Self {
+    pub fn new(folder_path: &Path, keep: usize) -> Self {
         Self {
             versions_dir: folder_path.join(STVERSIONS_DIR),
             keep,
@@ -203,7 +203,7 @@ mod tests {
     async fn test_simple_versioner_archive_and_prune() {
         let dir = tempfile::tempdir().unwrap();
         let folder = dir.path().to_path_buf();
-        let v = SimpleVersioner::new(folder.clone(), 3);
+        let v = SimpleVersioner::new(&folder, 3);
 
         let test_file = folder.join("test.txt");
         tokio::fs::write(&test_file, b"v1").await.unwrap();
@@ -231,7 +231,7 @@ mod tests {
     #[tokio::test]
     async fn test_simple_versioner_noop_on_missing_file() {
         let dir = tempfile::tempdir().unwrap();
-        let v = SimpleVersioner::new(dir.path().to_path_buf(), 5);
+        let v = SimpleVersioner::new(dir.path(), 5);
         let result = v.archive(Path::new("/nonexistent/file.txt")).await;
         assert!(result.is_ok(), "Archive missing file should be noop");
     }
@@ -239,7 +239,7 @@ mod tests {
     #[tokio::test]
     async fn test_simple_versioner_get_empty() {
         let dir = tempfile::tempdir().unwrap();
-        let v = SimpleVersioner::new(dir.path().to_path_buf(), 5);
+        let v = SimpleVersioner::new(dir.path(), 5);
         let versions = v
             .get_versions(Path::new("never_archived.txt"))
             .await

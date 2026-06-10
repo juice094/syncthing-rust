@@ -304,8 +304,8 @@ impl McpServer {
         };
 
         match response {
-            Ok(text) => Ok(tool_result(text)),
-            Err(e) => Ok(tool_error(e)),
+            Ok(text) => Ok(tool_result(&text)),
+            Err(e) => Ok(tool_error(&e)),
         }
     }
 
@@ -426,14 +426,14 @@ fn arg_opt_array_str(args: &Value, key: &str) -> Option<Vec<String>> {
 
 // ─── MCP Result Builders ──────────────────────────────────────────────────
 
-fn tool_result(text: String) -> Value {
+fn tool_result(text: &str) -> Value {
     serde_json::json!({
         "content": [{"type": "text", "text": text}],
         "isError": false
     })
 }
 
-fn tool_error(msg: String) -> Value {
+fn tool_error(msg: &str) -> Value {
     serde_json::json!({
         "content": [{"type": "text", "text": msg}],
         "isError": true

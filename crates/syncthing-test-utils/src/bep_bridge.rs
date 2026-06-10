@@ -273,14 +273,14 @@ impl BlockSource for TestBlockSource {
 /// registered before any connection arrives.
 pub fn install_bep_bridge(
     manager: &ConnectionManager,
-    sync_service: Arc<SyncService>,
+    sync_service: &Arc<SyncService>,
     handle: ConnectionManagerHandle,
 ) -> PendingResponses {
     let pending_responses: PendingResponses = Arc::new(DashMap::new());
     let session_handles: Arc<DashMap<DeviceId, JoinHandle<()>>> = Arc::new(DashMap::new());
 
     // on_connected: spawn BepSession::run()
-    let sync_service_c = Arc::clone(&sync_service);
+    let sync_service_c = Arc::clone(sync_service);
     let handle_c = handle.clone();
     let pending_c = Arc::clone(&pending_responses);
     let sessions_c = Arc::clone(&session_handles);
@@ -324,7 +324,7 @@ pub fn install_bep_bridge(
     });
 
     // on_disconnected
-    let sync_service_d = Arc::clone(&sync_service);
+    let sync_service_d = Arc::clone(sync_service);
     let sessions_d = Arc::clone(&session_handles);
     manager.on_disconnected(move |device_id, reason| {
         info!(
@@ -347,8 +347,8 @@ pub fn install_bep_bridge(
     // Spawn background task: forward LocalIndexUpdated events -> BEP IndexUpdate
     // messages to all connected peers. Without this, scan_folder() changes never
     // leave the local node.
-    let sync_service_e = Arc::clone(&sync_service);
-    let handle_e = handle.clone();
+    let sync_service_e = Arc::clone(sync_service);
+    let handle_e = handle;
     tokio::spawn(async move {
         let mut subscriber = sync_service_e.events().subscribe();
         loop {

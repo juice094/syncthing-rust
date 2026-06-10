@@ -34,7 +34,7 @@ pub const PROTOCOL_HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(30);
 /// TCP 监听器
 pub struct SyncthingTcpListener {
     /// 绑定地址
-    // TODO(v0.3.0): 当需要查询实际监听地址时激活
+    // TODO: expose actual bound SocketAddr (currently only stores configured addr)
     #[allow(dead_code)]
     bind_addr: SocketAddr,
     /// 底层TCP监听器
@@ -411,7 +411,7 @@ pub struct TcpTransport {
     /// 拨号器
     dialer: TcpDialer,
     /// 绑定地址
-    // TODO(v0.3.0): 当需要查询实际监听地址时激活
+    // TODO: expose actual bound SocketAddr (currently only stores configured addr)
     #[allow(dead_code)]
     bind_addr: SocketAddr,
 }

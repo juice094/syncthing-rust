@@ -203,7 +203,7 @@ fn resolve_daemon_config(
     let device_name = if cli_device_name != "syncthing-rust" {
         cli_device_name
     } else {
-        config.device_name.clone()
+        config.device_name
     };
 
     Ok((listen, device_name))

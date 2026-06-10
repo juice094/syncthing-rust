@@ -139,7 +139,7 @@ impl BepRawConnection {
     }
 
     /// 创建新的Hello消息
-    fn create_hello(&self, device_name: &str, client_name: &str, client_version: &str) -> Hello {
+    fn create_hello(device_name: &str, client_name: &str, client_version: &str) -> Hello {
         Hello {
             device_name: device_name.to_string(),
             client_name: client_name.to_string(),
@@ -163,7 +163,7 @@ impl BepRawConnection {
     ) -> Result<Hello> {
         self.set_state(ConnectionState::TlsHandshakeComplete);
 
-        let our_hello = self.create_hello(device_name, client_name, client_version);
+        let our_hello = Self::create_hello(device_name, client_name, client_version);
 
         info!(
             "Sending Hello: device={} client={}/{}",
@@ -204,7 +204,7 @@ impl BepRawConnection {
     ) -> Result<Hello> {
         self.set_state(ConnectionState::TlsHandshakeComplete);
 
-        let our_hello = self.create_hello(device_name, client_name, client_version);
+        let our_hello = Self::create_hello(device_name, client_name, client_version);
 
         let mut stream = self.stream.lock().await;
         let remote_hello = exchange_hello_server(&mut *stream, &our_hello).await?;

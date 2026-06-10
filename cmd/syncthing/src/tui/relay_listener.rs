@@ -10,27 +10,27 @@ use tracing::{info, warn};
 
 #[allow(clippy::too_many_arguments)]
 pub fn spawn_relay_listeners(
-    relay_pool_urls: Vec<String>,
-    config_relay_urls: Vec<String>,
-    tls_config_arc: Arc<syncthing_net::SyncthingTlsConfig>,
+    relay_pool_urls: &[String],
+    config_relay_urls: &[String],
+    tls_config_arc: &Arc<syncthing_net::SyncthingTlsConfig>,
     device_id: DeviceId,
-    device_name: String,
-    handle: syncthing_net::ConnectionManagerHandle,
-    public_addrs: Arc<Mutex<Vec<String>>>,
-    global_discovery: Option<Arc<syncthing_net::GlobalDiscovery>>,
-    shutdown_rx: tokio::sync::watch::Receiver<bool>,
+    device_name: &str,
+    handle: &syncthing_net::ConnectionManagerHandle,
+    public_addrs: &Arc<Mutex<Vec<String>>>,
+    global_discovery: &Option<Arc<syncthing_net::GlobalDiscovery>>,
+    shutdown_rx: &tokio::sync::watch::Receiver<bool>,
 ) {
     let mut relay_listen_urls: std::collections::HashSet<String> =
-        config_relay_urls.into_iter().collect();
+        config_relay_urls.iter().cloned().collect();
     for url in relay_pool_urls {
-        relay_listen_urls.insert(url);
+        relay_listen_urls.insert(url.clone());
     }
     let relay_listen_urls: Vec<String> = relay_listen_urls.into_iter().collect();
     for relay_url in relay_listen_urls {
         let relay_handle = handle.clone();
-        let relay_tls = Arc::clone(&tls_config_arc);
-        let relay_device_name = device_name.clone();
-        let relay_public_addrs = Arc::clone(&public_addrs);
+        let relay_tls = Arc::clone(tls_config_arc);
+        let relay_device_name = device_name.to_string();
+        let relay_public_addrs = Arc::clone(public_addrs);
         let relay_global_discovery = global_discovery.clone();
         let mut relay_shutdown = shutdown_rx.clone();
         tokio::spawn(async move {

@@ -43,8 +43,6 @@ dev/third_party/iroh/
 test_gray_folder/
 
 # Stress test artifacts (current + historical names)
-stress-test-*.csv
-stress-test-data/
 stress-test-data-*/
 stress-*.log
 *.pid
@@ -77,4 +75,9 @@ stress-*.err
 releases/**/*.exe
 releases/**/syncthing-*
 releases/**/stress_test-*
-dist/
+
+# Obsidian vault (local notes)
+.obsidian/
+
+# Runtime data directory (local state, not source)
+data/

@@ -144,7 +144,7 @@ impl Scanner {
                 for file_info in files {
                     match self.db.get_file(&folder.id, &file_info.name).await? {
                         Some(existing) => {
-                            if self.has_file_changed(&existing, &file_info) {
+                            if Self::has_file_changed(&existing, &file_info) {
                                 debug!(file = %file_info.name, "File was modified");
                                 modified_count += 1;
                                 let mut new_info = file_info;
@@ -481,7 +481,7 @@ impl Scanner {
     }
 
     /// 检查文件是否变更
-    fn has_file_changed(&self, old: &FileInfo, new: &FileInfo) -> bool {
+    fn has_file_changed(old: &FileInfo, new: &FileInfo) -> bool {
         // 检查大小
         if old.size != new.size {
             return true;
@@ -715,7 +715,7 @@ mod tests {
             no_permissions: None,
         };
 
-        let input = vec![old_file.clone(), unchanged.clone(), new_file.clone()];
+        let input = vec![old_file, unchanged, new_file];
         let result = Scanner::detect_and_reorder_renames(input);
 
         // 新文件应排在最前面
@@ -771,7 +771,7 @@ mod tests {
             no_permissions: None,
         };
 
-        let input = vec![old_file.clone(), new_file.clone()];
+        let input = vec![old_file, new_file];
         let result = Scanner::detect_and_reorder_renames(input);
 
         // 顺序不变

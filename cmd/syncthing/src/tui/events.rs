@@ -9,9 +9,9 @@ use syncthing_core::DeviceId;
 use crate::save_config;
 use crate::tui::app::{App, FormState, Popup, Tab};
 
-pub fn handle_event(app: &mut App, event: Event) -> bool {
+pub fn handle_event(app: &mut App, event: &Event) -> bool {
     match event {
-        Event::Key(key) if key.kind == KeyEventKind::Press => handle_key(app, key),
+        Event::Key(key) if key.kind == KeyEventKind::Press => handle_key(app, *key),
         _ => false,
     }
 }
