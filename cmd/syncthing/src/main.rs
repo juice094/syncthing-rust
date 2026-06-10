@@ -363,6 +363,9 @@ async fn main() -> Result<()> {
             listen,
             device_name,
         } => {
+            #[cfg(windows)]
+            ensure_console();
+
             let memory_buffer = logging_buffer::MemoryBuffer::new(100);
             let memory_layer = logging_buffer::MemoryLayer::new(memory_buffer.clone());
             // TUI 模式下丢弃 stdout 输出，避免日志穿透到 TUI 外侧
@@ -506,6 +509,10 @@ async fn main() -> Result<()> {
 
                     let shutdown_tx = startup.shutdown_tx.clone();
 
+                    // 启动 daemon 主循环（session cleanup + 健康检查），
+                    // 必须与托盘事件循环并发运行，否则托盘阻塞期间 daemon 会僵死。
+                    let daemon_handle = tokio::spawn(startup.future);
+
                     #[cfg(all(windows, feature = "tray"))]
                     {
                         // Spawn tray thread + status polling task
@@ -536,16 +543,17 @@ async fn main() -> Result<()> {
                     #[cfg(not(all(windows, feature = "tray")))]
                     {
                         // Non-Windows or headless: just wait for Ctrl+C
+                        let shutdown_tx_c = shutdown_tx.clone();
                         tokio::spawn(async move {
                             tokio::signal::ctrl_c().await.ok();
                             info!("Received SIGINT, initiating graceful shutdown...");
-                            let _ = shutdown_tx.send(true);
+                            let _ = shutdown_tx_c.send(true);
                         });
                     }
 
-                    let daemon_result = startup.future.await;
+                    let daemon_result = daemon_handle.await;
                     let _ = api_handle.await;
-                    daemon_result?;
+                    daemon_result??;
                 }
                 Err(e) => {
                     tracing::error!("Failed to start daemon: {}", e);
@@ -836,6 +844,20 @@ async fn tray_status_loop(mut client: tray_api::DaemonClient) {
         last_online = s.online;
         last_connected = s.connected_devices;
         last_syncing = s.syncing;
+    }
+}
+
+/// Windows: 为 `windows_subsystem` 二进制分配控制台窗口。
+/// TUI 需要控制台才能渲染；此函数在 `tui` 命令入口处调用。
+#[cfg(windows)]
+fn ensure_console() {
+    unsafe {
+        // 先尝试附加到父进程控制台（如果从终端手动启动）
+        if windows::Win32::System::Console::AttachConsole(u32::MAX).is_ok() {
+            return;
+        }
+        // 父进程无控制台 → 分配新窗口（托盘/桌面快捷方式场景）
+        let _ = windows::Win32::System::Console::AllocConsole();
     }
 }
 
