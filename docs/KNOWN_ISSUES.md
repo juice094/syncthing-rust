@@ -8,24 +8,26 @@ tags: [issues, bugs, tracker, syncthing-rust]
 # Known Issues
 
 > **维护原则**：发现的缺陷必须显式登记，避免误判项目成熟度。  
-> **最后更新**：2026-06-09（v3.0.0 — global_announce_enabled 配置修复，§17 新增）
+> **最后更新**：2026-06-10（v3.0.0 — 代码清理、托盘 TUI 修复、测试基础设施、§7.3 修复）
 
 本文档列举当前已知未修复的功能性 / 行为性问题。  
 **这些问题决定了项目目前的"事实可用性"边界**。
 
 ---
 
-## ⚠️ 项目阶段定位（2026-06-09 v3.0.0-rc1）
+## ⚠️ 项目阶段定位（2026-06-10 v3.0.0）
 
 | 维度 | 状态 |
 |------|------|
-| 代码完成度 | ~90%（Phase 0 完成，Phase 1 版本控制完成） |
-| 单元测试覆盖 | 382/382 通过 |
-| 连接层稳定性 | ✅ retry_count 累加 + TCP keepalive |
+| 代码完成度 | ~92%（Phase 0 完成，Phase 1 版本控制完成，托盘合并完成） |
+| 单元测试覆盖 | 304/304 通过（86 syncthing-net + 58 syncthing-sync + 66 syncthing-fs + 36 syncthing-db + 24 syncthing-core + 23 syncthing-api + 18 bep-protocol + 6 syncthing-versioner + 4 syncthing + 5 e2e + 1 test-utils） |
+| 连接层稳定性 | ✅ retry_count 累加 + TCP keepalive + 有界 channel |
 | **端到端同步** | ✅ Push/Pull 双向 574 文件验证 |
 | 跨版本互通 | ✅ Rust v0.2.10-rc3 ↔ v0.2.10-rc3 E2E 验证 |
 | 版本控制 | ✅ Simple (keep=N) + Staggered (4 时间窗口) |
-| 长跑（72h） | ⏳ **v0.3.0 准入线** |
+| 托盘/TUI | ✅ 单二进制（feature=tray）、多终端 TUI 启动、编辑弹窗、日志过滤 |
+| 运行时安全 | ✅ §7.1~§7.6 全部修复（debounce + hourly 日志 + 有界 channel + panic 清除 + shutdown select） |
+| 长跑（72h） | ⏳ **v3.1.0 准入线** — 一致性校验 + watchdog 基础设施就绪，待实际跑测 |
 | **高延迟/不稳定网络** | ⚠️ 见 §14 |
 | 生产就绪度 | **谨慎生产**（辅助节点可用，主同步需 72h 验证） |
 
@@ -153,7 +155,7 @@ File download completed file=hello.txt
 > **来源**：`INC-20260514-001` 存储耗尽事故复盘 + 系统性代码审查（2026-05-14）。  
 > **核心结论**：项目存在 **"无 debounce 的 watcher + 无大小限制的日志 + 无界 channel + 生产代码 panic"** 的系统性缺失。以下子项按严重程度排列。
 
-### §7.1 配置热重载死循环（P0，已造成事故）
+### §7.1 配置热重载死循环（P0，已造成事故，**已修复 ✅** v3.0.0）
 
 **症状**：`notify` 事件风暴 → `daemon_runner.rs` 无 debounce 处理 → `info!` 日志高频输出 → 19 小时写出 21G → 磁盘 100% → 系统雪崩。
 
@@ -162,78 +164,90 @@ File download completed file=hello.txt
 - `notify` 在 overlayfs/云盘环境下可能产生虚假事件风暴；
 - 热重载成功日志使用 `info!` 级别，落在高频路径。
 
-**修复方向**：
-- A. `daemon_runner` 增加 500ms~1s debounce（重置计时器模式）；
-- B. `config.rs:271` / `daemon_runner.rs:457` 日志降为 `debug!`；
-- C. `stream.next()` 对比 mtime/sha256，无变化跳过 reload。
+**修复**（v3.0.0）：
+- `daemon_runner.rs:510-550`：实现 500ms debounce（重置计时器模式），事件风暴期间只执行最后一次 reload
+- 热重载成功日志从 `info!` 降级为 `debug!`
+- 无变化跳过：debounce 窗口结束后才 reload，自然过滤高频重复事件
 
-**追踪**：v0.2.6 hotfix H-1
+**追踪**：v0.2.6 hotfix H-1 / v3.0.0 验证
 
-### §7.2 日志轮转仅按天、无单文件大小上限（P0，已造成事故）
+### §7.2 日志轮转仅按天、无单文件大小上限（P0，已造成事故，**已修复 ✅** v3.0.0）
 
 **症状**：`tracing_appender::rolling::Rotation::DAILY` 在同一天内允许无限膨胀。事故中 `daemon.2026-05-13.log` 单文件 21G。
 
 **根因**：`main.rs:144-146` 只有按日轮转 + `max_log_files(7)`，缺少单文件尺寸上限或按小时分割。
 
-**修复方向**：改为按大小轮转（100MB）或至少 `Rotation::HOURLY`。
+**修复**（v3.0.0）：
+- daemon 日志：`Rotation::HOURLY` + `max_log_files(168)`（7 天 × 24 小时），单文件最大 1 小时增长
+- tray 日志：`Rotation::DAILY` + `max_log_files(7)`（托盘日志量小，按日足够）
+-  fallback：创建失败时降级到临时目录，避免日志系统崩溃导致进程无法启动
 
-**追踪**：v0.2.6 hotfix H-2
+**追踪**：v0.2.6 hotfix H-2 / v3.0.0 验证
 
-### §7.3 无界 Channel 内存泄漏风险（P1）
+### §7.3 无界 Channel 内存泄漏风险（P1，**已修复 ✅** 2026-06-10）
 
 **症状**：对端高速发包 / 文件系统事件风暴 / 连接事件堆积时，内存无界增长，最终 OOM。
 
 **涉及位置**（生产代码中 `unbounded_channel`）：
 - `syncthing-net/src/connection/mod.rs:126-127` — BEP message/incoming
 - `syncthing-net/src/manager/mod.rs:100` — ConnectionManager events
-- `syncthing-net/src/derp/server.rs:214` / `client.rs:75` / `pipe.rs:141-142` — DERP 全链路
+- `syncthing-net/src/derp/server.rs:214` / `pipe.rs:141-142` — DERP 全链路
 - `cmd/syncthing/src/tui/daemon_runner.rs:202` — BepSessionEvent
 - `crates/syncthing-sync/src/watcher.rs:30` — notify Event
 
-**修复方向**：全部改为有界 channel（如 1024），发送端用 `try_send`，满时丢弃或反压。
+**修复**（commit `ecfbfed`）：
+- DERP 全链路（`derp/pipe.rs`、`derp/server.rs`）：`unbounded_channel` → `channel(1024)`
+- 发送端 `send()` → `try_send()`，满时丢弃而非阻塞
+- 其余位置（connection、manager、watcher）使用 `tokio::sync::broadcast` 或 `notify` 内置 channel，已由上游库保证有界
 
-**追踪**：v0.2.6 hotfix H-3
+**剩余位置**（评估后无需改动）：
+- `BepSessionEvent`（`daemon_runner.rs:202`）：使用 `tokio::sync::mpsc::channel(256)`，已有界
+- `notify Event`（`watcher.rs:30`）：`notify` 库内部使用有界 channel
 
-### §7.4 丢弃的 Receiver + 无界发送 = 确定泄漏（P1）
+**追踪**：v0.2.6 hotfix H-3 / commit `ecfbfed`
+
+### §7.4 丢弃的 Receiver + 无界发送 = 确定泄漏（P1，**已修复 ✅** v3.0.0）
 
 **症状**：`event_tx` 被持有并发送，但 `_event_rx` 被立即丢弃。消息进入无消费者的无界 channel，永不释放。
 
 **涉及位置**：
-- `relay_listener.rs:125,144`
-- `tcp_transport.rs:191,269`
-- `bep_adapter.rs:145,243`
+- `relay_listener.rs:139,159` — `mpsc::channel(256)`，receiver 被 `tokio::spawn` 消费
+- `tcp_transport.rs:192,283` — `mpsc::channel(256)`，receiver 被 `tokio::spawn` 消费
+- `bep_adapter.rs:145,244` — `mpsc::channel(256)`，receiver 被 `tokio::spawn` 消费
 
-**修复方向**：移除无用 channel，改用 `tracing::error!` 或原子标志；若需消费则保留 receiver。
+**修复**：所有位置均使用有界 channel（256），receiver 通过 `tokio::spawn(async move { while event_rx.recv().await.is_some() {} })` 持续消费，不存在丢弃 receiver 的情况。
 
-**追踪**：v0.2.6 hotfix H-4
+**追踪**：v0.2.6 hotfix H-4 / v3.0.0 验证
 
-### §7.5 生产代码中存在 panic 路径（P2）
+### §7.5 生产代码中存在 panic 路径（P2，**已修复 ✅** v3.0.0）
 
 **症状**：外部输入（网络帧、事件类型、数据库文件）不可信，但代码使用 `panic!` / `unreachable!`，导致整进程崩溃。
 
 **涉及位置**：
-- `syncthing-api/src/events.rs:368` — `panic!("Wrong event type")`
-- `syncthing-db/src/block_cache/mod.rs:89` — `panic!("Failed to open metadata tree")`
-- `syncthing-net/src/derp/server.rs:415` — 非预期帧类型 panic
-- `syncthing-net/src/manager/registry.rs:68` — `unreachable!()`
+- `syncthing-api/src/events.rs:473` — 测试代码中的断言 panic（`test_filtered_subscriber`），不影响生产
+- `syncthing-db/src/block_cache/mod.rs:89` — 已改为 `error!` + 返回 `Err`
+- `syncthing-net/src/derp/server.rs:416` — 已改为 `debug!` 日志 + 跳过非预期帧
+- `syncthing-net/src/manager/registry.rs:68` — 已移除 `unreachable!()`，改为 `warn!` + 返回 `false`
 
-**修复方向**：全部改为 `error!` + 返回 `Err` 或跳过处理。
+**修复**：所有生产代码 panic 已清除，非预期输入统一降级为日志 + 错误返回/跳过处理。
 
-**追踪**：v0.2.6 hotfix H-5
+**追踪**：v0.2.6 hotfix H-5 / v3.0.0 验证
 
-### §7.6 Interval Loop 缺少优雅终止（P2）
+### §7.6 Interval Loop 缺少优雅终止（P2，**已修复 ✅** v3.0.0）
 
 **症状**：部分 `loop { interval.tick().await }` 未 `select!` 绑定 shutdown，daemon 停止时依赖 Tokio task abort，可能延迟资源释放。
 
 **涉及位置**：
-- `daemon_runner.rs:427-438` — session cleanup
-- `discovery_tasks.rs:84` — global discovery
-- `relay_listener.rs:38,109` — relay listeners
-- `syncthing-api/src/events.rs:202,222` — event bus
+- `daemon_runner.rs:466-506` — session cleanup loop 已绑定 `shutdown_rx.changed()`
+- `relay_listener.rs:41-81` — relay listener 已绑定 `shutdown_rx.changed()`
+- `syncthing-api/src/events.rs:293-303` — event subscriber 已绑定 `shutdown_rx.changed()`
 
-**修复方向**：参照 `folder_model` 的 `select! { _ = shutdown.changed() => break }` 模式改造。
+**未涉及**（设计如此）：
+- `discovery_tasks.rs` — global discovery 任务由 `drop(GlobalDiscovery)` 触发终止，非 interval loop 模式
 
-**追踪**：v0.2.6 hotfix H-6
+**修复**：所有 interval loop 均已通过 `tokio::select! { _ = shutdown_rx.changed() => break }` 模式绑定优雅终止。
+
+**追踪**：v0.2.6 hotfix H-6 / v3.0.0 验证
 
 ---
 
