@@ -52,7 +52,7 @@ struct ClientHandle {
     addr: SocketAddr,
     last_activity: Arc<RwLock<Instant>>,
     /// 发送通道（服务器 → 客户端写任务）
-    tx: tokio::sync::mpsc::UnboundedSender<Frame>,
+    tx: tokio::sync::mpsc::Sender<Frame>,
 }
 
 /// DERP 中继服务器
@@ -125,7 +125,7 @@ impl DerpServer {
                     if let Some((_, client)) = clients.remove(&device_id) {
                         warn!("DERP client {} timed out, disconnecting", device_id);
                         addr_index.remove(&client.addr);
-                        let _ = client.tx.send(Frame::ClosePeer { target: device_id });
+                        let _ = client.tx.try_send(Frame::ClosePeer { target: device_id });
                     }
                 }
             }
@@ -211,7 +211,7 @@ impl DerpServer {
             .map_err(|e| SyncthingError::connection(format!("ServerInfo send failed: {}", e)))?;
 
         // 创建客户端通道
-        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<Frame>();
+        let (tx, mut rx) = tokio::sync::mpsc::channel::<Frame>(1024);
         let last_activity = Arc::new(RwLock::new(Instant::now()));
 
         let client = ClientHandle {
@@ -272,7 +272,7 @@ impl DerpServer {
                                 from: device_id,
                                 payload,
                             };
-                            if target_client.tx.send(recv).is_err() {
+                            if target_client.tx.try_send(recv).is_err() {
                                 warn!("DERP failed to forward packet to {}", target);
                             } else {
                                 debug!("DERP forwarded packet from {} to {}", device_id, target);

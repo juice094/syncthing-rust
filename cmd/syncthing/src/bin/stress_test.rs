@@ -11,6 +11,7 @@ use std::time::{Duration, Instant, SystemTime};
 
 use chrono::{DateTime, Utc};
 use clap::Parser;
+use sha2::{Digest, Sha256};
 use sysinfo::{ProcessRefreshKind, RefreshKind, System};
 use tokio::io::AsyncWriteExt;
 use tokio::time::{interval, interval_at};
@@ -382,6 +383,45 @@ async fn main() -> anyhow::Result<()> {
             if let Err(e) = syncthing_net::metrics::global().flush_to_csv(&metrics_report) {
                 warn!("Failed to flush metrics CSV: {}", e);
             }
+
+            // Consistency check: every 5 ticks (~5 min) compare file hashes
+            if elapsed.is_multiple_of(tick_secs * 5) {
+                match compute_dir_hashes(&monitor_fa).await {
+                    Ok(hashes_a) => match compute_dir_hashes(&monitor_fb).await {
+                        Ok(hashes_b) => {
+                            let (ok, mismatches) = compare_hashes("A", &hashes_a, "B", &hashes_b);
+                            if ok {
+                                info!(
+                                    "consistency_check ok: {} files match between A and B",
+                                    hashes_a.len()
+                                );
+                            } else {
+                                let mismatch_count = mismatches.len();
+                                warn!("consistency_check FAILED: {} mismatches", mismatch_count);
+                                for m in &mismatches[..mismatch_count.min(5)] {
+                                    warn!("  {}", m);
+                                }
+                                monitor_errors.fetch_add(mismatch_count as u64, Ordering::Relaxed);
+                                let log_line = format!(
+                                    "{},{},consistency_mismatch,{},{},{}\n",
+                                    ts,
+                                    elapsed,
+                                    mismatch_count,
+                                    hashes_a.len(),
+                                    hashes_b.len()
+                                );
+                                let _ = append_to_file(
+                                    &monitor_report.with_extension("consistency.csv"),
+                                    log_line,
+                                )
+                                .await;
+                            }
+                        }
+                        Err(e) => warn!("consistency_check: failed to hash B: {}", e),
+                    },
+                    Err(e) => warn!("consistency_check: failed to hash A: {}", e),
+                }
+            }
         }
     });
 
@@ -477,18 +517,47 @@ async fn main() -> anyhow::Result<()> {
     fault_task.abort();
     heartbeat_handle.abort();
 
-    // Final sync check
-    let final_a = count_files(&folder_path_a).await;
-    let final_b = count_files(&folder_path_b).await;
+    // Final sync check: content hash consistency (not just file count)
+    let final_a_count = count_files(&folder_path_a).await;
+    let final_b_count = count_files(&folder_path_b).await;
     let total_errors = error_count.load(Ordering::Relaxed);
-    info!(
-        "Final state: files_a={}, files_b={}, errors={}",
-        final_a, final_b, total_errors
-    );
+
+    let (consistent, mismatches) = match compute_dir_hashes(&folder_path_a).await {
+        Ok(hashes_a) => match compute_dir_hashes(&folder_path_b).await {
+            Ok(hashes_b) => {
+                let (ok, mm) = compare_hashes("A", &hashes_a, "B", &hashes_b);
+                info!(
+                    "Final consistency: {} files in A, {} files in B, consistent={}",
+                    hashes_a.len(),
+                    hashes_b.len(),
+                    ok
+                );
+                (ok, mm)
+            }
+            Err(e) => {
+                warn!("Final consistency check failed for B: {}", e);
+                (false, vec![format!("hash_B_error: {}", e)])
+            }
+        },
+        Err(e) => {
+            warn!("Final consistency check failed for A: {}", e);
+            (false, vec![format!("hash_A_error: {}", e)])
+        }
+    };
+
+    if !consistent {
+        warn!(
+            "FINAL CONSISTENCY CHECK FAILED — {} mismatches:",
+            mismatches.len()
+        );
+        for m in &mismatches {
+            warn!("  {}", m);
+        }
+    }
 
     info!(
-        "File counts: node_a={}, node_b={} (note: TestNode does not run full sync daemon)",
-        final_a, final_b
+        "Final state: files_a={}, files_b={}, errors={}, consistent={}",
+        final_a_count, final_b_count, total_errors, consistent
     );
 
     node_a.shutdown().await;
@@ -516,6 +585,101 @@ async fn count_files(path: &PathBuf) -> usize {
         }
     }
     count
+}
+
+/// 递归扫描目录，返回 (相对路径 → SHA-256 十六进制) 的映射。
+/// 目录条目被跳过，仅计算普通文件。
+async fn compute_dir_hashes(
+    root: &std::path::Path,
+) -> anyhow::Result<std::collections::HashMap<String, String>> {
+    let mut result = std::collections::HashMap::new();
+    let mut stack = vec![root.to_path_buf()];
+
+    while let Some(dir) = stack.pop() {
+        let mut entries = match tokio::fs::read_dir(&dir).await {
+            Ok(e) => e,
+            Err(e) => {
+                warn!("read_dir failed on {}: {}", dir.display(), e);
+                continue;
+            }
+        };
+
+        while let Ok(Some(entry)) = entries.next_entry().await {
+            let path = entry.path();
+            let ft = match entry.file_type().await {
+                Ok(t) => t,
+                Err(_) => continue,
+            };
+            if ft.is_dir() {
+                stack.push(path);
+            } else if ft.is_file() {
+                let rel = path
+                    .strip_prefix(root)
+                    .unwrap_or(&path)
+                    .to_string_lossy()
+                    .replace('\\', "/");
+                let hash = match sha256_file(&path).await {
+                    Ok(h) => h,
+                    Err(e) => {
+                        warn!("sha256 failed on {}: {}", path.display(), e);
+                        continue;
+                    }
+                };
+                result.insert(rel, hash);
+            }
+        }
+    }
+    Ok(result)
+}
+
+/// 计算单个文件的 SHA-256，在 spawn_blocking 中执行。
+async fn sha256_file(path: &std::path::Path) -> anyhow::Result<String> {
+    let path = path.to_path_buf();
+    let bytes = tokio::fs::read(&path).await?;
+    let hash = tokio::task::spawn_blocking(move || {
+        let mut hasher = Sha256::new();
+        hasher.update(&bytes);
+        hex::encode(hasher.finalize())
+    })
+    .await?;
+    Ok(hash)
+}
+
+/// 比对两个目录的哈希映射，返回不一致信息。
+fn compare_hashes(
+    a_name: &str,
+    a: &std::collections::HashMap<String, String>,
+    b_name: &str,
+    b: &std::collections::HashMap<String, String>,
+) -> (bool, Vec<String>) {
+    let mut mismatches = Vec::new();
+    // A 中有但 B 中缺失或内容不同
+    for (rel, hash_a) in a {
+        match b.get(rel) {
+            Some(hash_b) if hash_a == hash_b => {}
+            Some(hash_b) => {
+                mismatches.push(format!(
+                    "content_mismatch: {} ({}={} {}={})",
+                    rel,
+                    a_name,
+                    &hash_a[..8],
+                    b_name,
+                    &hash_b[..8]
+                ));
+            }
+            None => {
+                mismatches.push(format!("missing_in_{}: {}", b_name, rel));
+            }
+        }
+    }
+    // B 中有但 A 中缺失
+    for rel in b.keys() {
+        if !a.contains_key(rel) {
+            mismatches.push(format!("missing_in_{}: {}", a_name, rel));
+        }
+    }
+    let ok = mismatches.is_empty();
+    (ok, mismatches)
 }
 
 async fn append_to_file(path: &PathBuf, line: String) -> anyhow::Result<()> {
