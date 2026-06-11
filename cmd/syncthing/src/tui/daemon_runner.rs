@@ -9,6 +9,8 @@ use dashmap::DashMap;
 use tokio::task::JoinHandle;
 use tracing::{debug, info, warn};
 
+use crate::tui::constants;
+
 use syncthing_core::types::Config;
 use syncthing_core::DeviceId;
 use syncthing_net::{
@@ -230,7 +232,8 @@ pub async fn start_daemon(
                 old_handle.abort();
             }
             let handle2 = tokio::spawn(async move {
-                let (event_tx, event_rx) = tokio::sync::mpsc::channel::<BepSessionEvent>(256);
+                let (event_tx, event_rx) =
+                    tokio::sync::mpsc::channel::<BepSessionEvent>(constants::EVENT_CHANNEL_CAP);
                 let event_device_id = device_id;
                 let shared_folders_map = Arc::clone(&shared_folders_map);
                 spawn_session_event_logger(event_device_id, event_rx, shared_folders_map);
@@ -357,7 +360,10 @@ pub async fn start_daemon(
                 let tcp_healthy = syncthing_net::relay::filter_healthy_relays(urls, 3).await;
                 info!("{} relay(s) passed TCP health check", tcp_healthy.len());
                 // Stage 2: deep TLS + JoinRelay on top 10, stop at 10 to increase overlap probability
-                let to_check = tcp_healthy.into_iter().take(10).collect();
+                let to_check = tcp_healthy
+                    .into_iter()
+                    .take(constants::RELAY_HEALTH_CHECK_CAP)
+                    .collect();
                 let healthy = syncthing_net::relay::filter_healthy_relays_tls(
                     to_check,
                     3,
@@ -507,7 +513,7 @@ pub async fn start_daemon(
     );
 
     // 配置热同步：监听 config.json 变更并通知 sync_service
-    // H-1: 500ms debounce（重置计时器模式）+ 日志降级为 debug
+    // H-1: debounce（重置计时器模式）+ 日志降级为 debug
     let config_path_for_watch = config_path.clone();
     let sync_service_for_watch = Arc::clone(&sync_service);
     tokio::spawn(async move {
@@ -517,12 +523,14 @@ pub async fn start_daemon(
                 loop {
                     // 等待第一个事件
                     if let Ok(()) = stream.next().await {
-                        let mut deadline = tokio::time::Instant::now() + Duration::from_millis(500);
+                        let mut deadline = tokio::time::Instant::now()
+                            + Duration::from_millis(constants::CONFIG_WATCH_DEBOUNCE_MS);
                         // debounce 窗口：期间新事件重置计时器
                         loop {
                             tokio::select! {
                                 Ok(()) = stream.next() => {
-                                    deadline = tokio::time::Instant::now() + Duration::from_millis(500);
+                                    deadline = tokio::time::Instant::now()
+                                        + Duration::from_millis(constants::CONFIG_WATCH_DEBOUNCE_MS);
                                 }
                                 _ = tokio::time::sleep_until(deadline) => {
                                     break;

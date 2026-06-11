@@ -1,8 +1,10 @@
 pub mod app;
 pub mod bep_handler;
+pub mod constants;
 pub mod daemon_runner;
 pub mod discovery_tasks;
 pub mod events;
+pub mod forms;
 pub mod index_dispatcher;
 pub mod nat_tasks;
 pub mod popups;
@@ -82,11 +84,11 @@ pub async fn run_tui(
     let mut app = App::new(config_dir.clone(), listen, device_name, config);
     app.push_log("TUI started. Press F5 to run daemon.".to_string());
 
-    // P1: TUI 启动时预加载历史日志（最近 50 行）
+    // P1: TUI 启动时预加载历史日志
     let logs_dir = config_dir.join("logs");
     if logs_dir.is_dir() {
         if let Some(latest) = find_latest_log_file(&logs_dir) {
-            match tail_lines(&latest, 50) {
+            match tail_lines(&latest, constants::LOG_TAIL_LINES) {
                 Ok(lines) => {
                     for line in lines {
                         app.push_log(line);
@@ -122,7 +124,7 @@ async fn run_app<B: Backend>(
     memory_buffer: MemoryBuffer,
 ) -> io::Result<()> {
     let mut last_tick = tokio::time::Instant::now();
-    let tick_rate = Duration::from_millis(250);
+    let tick_rate = constants::TICK_RATE;
 
     let mut daemon_future: Option<
         std::pin::Pin<Box<dyn std::future::Future<Output = anyhow::Result<()>> + Send>>,
@@ -286,7 +288,7 @@ async fn toggle_daemon(
                 app.sync_service = Some(startup.sync_service.clone());
 
                 // 启动事件桥
-                let (tx, rx) = tokio::sync::mpsc::channel::<TuiEvent>(256);
+                let (tx, rx) = tokio::sync::mpsc::channel::<TuiEvent>(constants::EVENT_CHANNEL_CAP);
                 *event_tx = Some(tx.clone());
                 app.event_rx = Some(rx);
 

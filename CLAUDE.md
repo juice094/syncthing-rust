@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Identity
 
-`syncthing-rust` is a Rust reimplementation of the Syncthing BEP protocol for P2P file sync — zero runtime deps, single static binary, wire-compatible with Go Syncthing. Currently **v3.0.0** (production-grade), deployed on ROG-X (Windows 11) ↔ Gray-Cloud (Ubuntu 24.04) via Tailscale.
+`syncthing-rust` is a Rust reimplementation of the Syncthing BEP protocol for P2P file sync — zero runtime deps, single static binary, wire-compatible with Go Syncthing. Currently **v3.0.2** (production-grade), deployed on ROG-X (Windows 11) ↔ Gray-Cloud (Ubuntu 24.04) via Tailscale.
 
 ## Build & Test
 
@@ -18,15 +18,17 @@ cargo audit
 # Build release (Windows desktop — includes tray)
 cargo build --release --bin syncthing --features tray
 
-# Build release (headless / server / embedded — no tray)
+# Build release (headless / server — no tray)
 cargo build --release --bin syncthing --no-default-features
 
-# Build auxiliary binaries
-cargo build --release --bin syncthing-tray     # Thin wrapper (Windows only)
-cargo build --release --bin syncthing-monitor  # Resource/health monitor
-cargo build --release --bin syncthing-cli      # generate-cert, show-id, metrics-flush
-cargo build --release --bin syncthing-bench    # Benchmarks
-cargo build --release --bin syncthing-mcp-bridge  # MCP stdio ↔ REST API
+# Build aux binaries
+cargo build --release --bin syncthing-tray       # Thin wrapper (Windows only, backward compat)
+cargo build --release --bin syncthing-monitor    # Process/resource monitor (from cmd/syncthing)
+cargo build --release --bin stress_test          # 72h dual-node endurance stress test
+cargo build --release --bin gen_test_config      # Generate test configs for dual-node test
+cargo build --release -p syncthing-cli           # generate-cert, show-id, metrics-flush
+cargo build --release -p syncthing-bench         # Criterion benchmarks
+cargo build --release -p syncthing-mcp-bridge    # MCP stdio ↔ REST API bridge
 
 # Run a single test
 cargo test -p syncthing-net --lib -- session::tests::test_session_ping_pong
@@ -42,17 +44,14 @@ cargo build --release --bin syncthing --no-default-features --target x86_64-unkn
 | `tray` | ✅ | Windows system tray integration (`#![windows_subsystem = "windows"]`, Win32 `Shell_NotifyIconW`) |
 | `websocket` | ❌ | Enables WebSocket transport in `syncthing-net` |
 
-Headless builds exclude all Windows UI code:
-```bash
-cargo build --release --no-default-features  # Pure daemon, ~13MB
-```
+Headless builds exclude all Windows UI code. `-p syncthing-cli` / `-p syncthing-bench` / `-p syncthing-mcp-bridge` are separate workspace members unaffected by syncthing's features.
 
 ## Architecture: Crate DAG
 
 ```
-cmd/syncthing              # CLI (clap) + TUI (ratatui) + daemon lifecycle + tray
+cmd/syncthing              # CLI (clap) + TUI (ratatui) + daemon lifecycle + tray + aux bins
   ├─ syncthing-api         # REST + WebSocket (axum), EventBus, handlers
-  ├─ syncthing-net         # ConnectionManager, ParallelDialer, discovery, relay
+  ├─ syncthing-net         # ConnectionManager, ParallelDialer, discovery, relay (DERP)
   ├─ syncthing-sync        # Scanner, Puller, IndexHandler, folder_model, watcher
   ├─ syncthing-core        # Types (DeviceId, FileInfo, Vector), traits — no internal deps
   ├─ syncthing-fs          # Filesystem ops, .stignore matcher, scanner/hash
@@ -65,6 +64,11 @@ cmd/syncthing-cli            # generate-cert, show-id, metrics-flush
 cmd/syncthing-bench          # Criterion benchmarks
 cmd/syncthing-mcp-bridge     # MCP stdio ↔ REST API bridge
 ```
+
+Binaries inside `cmd/syncthing/src/bin/`:
+- `stress_test.rs` — 72h dual-node endurance test with SHA-256 content hash consistency checks
+- `monitor.rs` — cross-platform process monitor (RSS, CPU, log growth, silence detection)
+- `gen_test_config.rs` — generates test configs for dual-node stress testing
 
 **Coupling rules:**
 - `syncthing-core` — no internal crate deps (pure traits + types)
@@ -85,16 +89,16 @@ Entry point: `cmd/syncthing/src/main.rs`:
 ## CLI Commands
 
 ```
-syncthing                        # No args: daemon + tray (Windows) or daemon only (Linux)
-syncthing run                    # Daemon only (foreground, no tray)
-syncthing tui                    # TUI client (connects to existing daemon)
-syncthing init                   # Interactive config wizard
-syncthing status [--json]        # Query daemon status via REST API
-syncthing devices list           # List configured devices with online status
+syncthing                      # No args: daemon + tray (Windows) or daemon only (Linux)
+syncthing run                  # Daemon only (foreground, no tray)
+syncthing tui                  # TUI client (connects to existing daemon)
+syncthing init                 # Interactive config wizard
+syncthing status [--json]      # Query daemon status via REST API
+syncthing devices list         # List configured devices with online status
 syncthing folders list [--status]  # List folders with sync state
-syncthing logs --tail N          # Tail log file (last N lines)
-syncthing install-autostart      # Windows: register HKCU Run key
-syncthing uninstall-autostart    # Windows: remove HKCU Run key
+syncthing logs --tail N        # Tail log file (last N lines)
+syncthing install-autostart    # Windows: register HKCU Run key
+syncthing uninstall-autostart  # Windows: remove HKCU Run key
 ```
 
 ## Windows Desktop Mode
@@ -118,6 +122,8 @@ Tray sources in `cmd/syncthing/src/`:
 - `tray_api.rs` — `DaemonClient` REST client for status polling
 - `build.rs` — generates 32×32 hard-drive ICO in `OUT_DIR`
 
+TUI launch from tray uses multi-terminal fallback: Windows Terminal (`wt.exe`) → PowerShell → CMD, with `AllocConsole()` + `SetConsoleScreenBufferSize` (120×40) for console window sizing.
+
 ## TUI Key Bindings
 
 | Key | Context | Action |
@@ -138,7 +144,7 @@ Popups (Add/Edit forms): `Tab`/`↑↓` navigate fields, `Space` toggles device 
 ## Config
 
 Defaults: BEP `0.0.0.0:22001`, REST API `0.0.0.0:8385`.
-Config: `$LOCALAPPDATA/syncthing-rust/config.json` (Windows), `~/.config/syncthing-rust/config.json` (Linux).
+Config: `%LOCALAPPDATA%/syncthing-rust/config.json` (Windows), `~/.config/syncthing-rust/config.json` (Linux).
 Key options: `global_announce_enabled`, `relays_enabled`, `transports: ["tcp"]`.
 `GET /rest/health` is the ping endpoint — `/rest/system/ping` does not exist.
 
@@ -156,9 +162,9 @@ Notable endpoints:
 - `GET /rest/events` — WebSocket upgrade
 - `POST /rest/system/shutdown` — graceful shutdown
 
-## Known Test Flake
+## Test Status
 
-`test_session_block_request_response` — Ping vs Response message race. Not a regression. `test_two_node_single_file_sync` — ClusterConfig race under parallel test load (T3.1b health check mitigates in production, verified against Go syncthing v2.1.0).
+347 tests (workspace total, including unit + integration + doc-tests), 1 flaky (`test_session_block_request_response` — Ping/Response race), 1 ignored (`test_two_node_single_file_sync` — ClusterConfig race under parallel load).
 
 ## Facts Register
 

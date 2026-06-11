@@ -8,6 +8,8 @@ use syncthing_net::tls::{accept_tls_stream, connect_tls_stream};
 use tokio::sync::Mutex;
 use tracing::{info, warn};
 
+use crate::tui::constants;
+
 #[allow(clippy::too_many_arguments)]
 pub fn spawn_relay_listeners(
     relay_pool_urls: &[String],
@@ -35,8 +37,8 @@ pub fn spawn_relay_listeners(
         let mut relay_shutdown = shutdown_rx.clone();
         tokio::spawn(async move {
             let mut backoff = Duration::from_secs(1);
-            const MAX_BACKOFF: Duration = Duration::from_secs(300);
-            const RESET_THRESHOLD: Duration = Duration::from_secs(60);
+            let max_backoff = Duration::from_secs(constants::RELAY_MAX_BACKOFF_SECS);
+            let reset_threshold = Duration::from_secs(constants::RELAY_BACKOFF_RESET_SECS);
             loop {
                 if *relay_shutdown.borrow() {
                     info!("Relay listener for {} shutting down", relay_url);
@@ -73,10 +75,10 @@ pub fn spawn_relay_listeners(
                     _ = tokio::time::sleep(backoff) => {}
                 }
                 // Exponential backoff; reset if the listener ran successfully for a while
-                if start.elapsed() > RESET_THRESHOLD {
+                if start.elapsed() > reset_threshold {
                     backoff = Duration::from_secs(1);
                 } else {
-                    backoff = (backoff * 2).min(MAX_BACKOFF);
+                    backoff = (backoff * 2).min(max_backoff);
                 }
             }
         });

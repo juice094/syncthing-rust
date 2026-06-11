@@ -1,6 +1,5 @@
 use ratatui::{
     layout::{Constraint, Direction, Layout},
-    style::Color,
     text::{Line, Span, Text},
     widgets::{Block, Borders, Paragraph, Wrap},
     Frame,
@@ -123,11 +122,11 @@ pub fn draw(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
             };
             let color = match status {
                 syncthing_core::types::FolderStatus::Scanning
-                | syncthing_core::types::FolderStatus::ScanWaiting => Color::Yellow,
+                | syncthing_core::types::FolderStatus::ScanWaiting => theme.warning,
                 syncthing_core::types::FolderStatus::Pulling
                 | syncthing_core::types::FolderStatus::Pushing
-                | syncthing_core::types::FolderStatus::SyncWaiting => Color::Cyan,
-                _ => Color::Gray,
+                | syncthing_core::types::FolderStatus::SyncWaiting => theme.info,
+                _ => theme.muted,
             };
             let progress_ratio = app
                 .sync_progress

@@ -5,11 +5,12 @@ use ratatui::{
     Frame,
 };
 
+use crate::tui::constants;
 use crate::tui::theme::Theme;
 use crate::tui::widgets::centered_popup;
 
 pub fn draw(f: &mut Frame, theme: &Theme) {
-    let area = centered_popup(70, 22, f.area());
+    let area = centered_popup(constants::HELP_POPUP_W, constants::HELP_POPUP_H, f.area());
 
     // Dim background
     let dim = ratatui::widgets::Block::default()

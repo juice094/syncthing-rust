@@ -6,36 +6,11 @@ use anyhow::Context;
 use serde::Deserialize;
 use serde_json::Value;
 
-fn load_config(path: &Path) -> anyhow::Result<syncthing_core::types::Config> {
-    let content = std::fs::read_to_string(path)
-        .with_context(|| format!("failed to read config from {:?}", path))?;
-    let config: syncthing_core::types::Config = serde_json::from_str(&content)
-        .with_context(|| format!("failed to parse config from {:?}", path))?;
-    Ok(config)
-}
+use crate::api_client::ApiClient;
 
-fn client() -> anyhow::Result<reqwest::Client> {
-    reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(5))
-        .build()
-        .context("build HTTP client")
-}
-
-/// GET helper
-async fn get(
-    client: &reqwest::Client,
-    api_addr: &str,
-    api_key: &str,
-    path: &str,
-) -> anyhow::Result<reqwest::Response> {
-    let url = format!("{}{}", api_addr, path);
-    let resp = client
-        .get(&url)
-        .header("X-API-Key", api_key)
-        .send()
-        .await
-        .with_context(|| format!("GET {}", url))?;
-    Ok(resp)
+fn build_client(config_path: &Path) -> anyhow::Result<ApiClient> {
+    let config = crate::load_config(config_path)?;
+    Ok(ApiClient::new(&config))
 }
 
 // ============================================================
@@ -53,24 +28,10 @@ struct DeviceResponse {
 }
 
 pub async fn devices_list(config_path: &Path) -> anyhow::Result<()> {
-    let config = load_config(config_path)?;
-    let api_addr = format!("http://{}", api_bind_to_localhost(&config.gui.address));
-    let api_key = config.gui.api_key;
+    let client = build_client(config_path)?;
 
-    let client = client()?;
-
-    let devices: Vec<DeviceResponse> = get(&client, &api_addr, &api_key, "/rest/config/devices")
-        .await?
-        .json()
-        .await
-        .context("parse devices")?;
-
-    // Fetch connections to determine online status
-    let connections: Value = get(&client, &api_addr, &api_key, "/rest/system/connections")
-        .await?
-        .json()
-        .await
-        .context("parse connections")?;
+    let devices: Vec<DeviceResponse> = client.get("/rest/config/devices").await?;
+    let connections: Value = client.get("/rest/system/connections").await?;
 
     let connected_ids: std::collections::HashSet<String> = connections
         .get("connections")
@@ -127,17 +88,9 @@ struct FolderStatusResponse {
 }
 
 pub async fn folders_list(config_path: &Path, with_status: bool) -> anyhow::Result<()> {
-    let config = load_config(config_path)?;
-    let api_addr = format!("http://{}", api_bind_to_localhost(&config.gui.address));
-    let api_key = config.gui.api_key;
+    let client = build_client(config_path)?;
 
-    let client = client()?;
-
-    let folders: Vec<FolderResponse> = get(&client, &api_addr, &api_key, "/rest/config/folders")
-        .await?
-        .json()
-        .await
-        .context("parse folders")?;
+    let folders: Vec<FolderResponse> = client.get("/rest/config/folders").await?;
 
     if with_status {
         println!(
@@ -146,22 +99,16 @@ pub async fn folders_list(config_path: &Path, with_status: bool) -> anyhow::Resu
         );
         println!("{}", "-".repeat(80));
         for f in &folders {
-            let status: FolderStatusResponse = get(
-                &client,
-                &api_addr,
-                &api_key,
-                &format!("/rest/folder/{}/status", f.id),
-            )
-            .await?
-            .json()
-            .await
-            .unwrap_or(FolderStatusResponse {
-                files: 0,
-                bytes: 0,
-                need_files: 0,
-                need_bytes: 0,
-                pull_errors: 0,
-            });
+            let status: FolderStatusResponse = client
+                .get(&format!("/rest/folder/{}/status", f.id))
+                .await
+                .unwrap_or(FolderStatusResponse {
+                    files: 0,
+                    bytes: 0,
+                    need_files: 0,
+                    need_bytes: 0,
+                    pull_errors: 0,
+                });
             let state = if status.pull_errors > 0 {
                 "error"
             } else if status.need_bytes > 0 {
@@ -214,7 +161,6 @@ pub fn logs_tail(config_dir: &Path, tail: usize) -> anyhow::Result<()> {
         );
     }
 
-    // Find the most recently modified log file
     let mut entries: Vec<_> = std::fs::read_dir(&logs_dir)
         .with_context(|| format!("read logs dir {}", logs_dir.display()))?
         .filter_map(|e| e.ok())
@@ -248,9 +194,4 @@ pub fn logs_tail(config_dir: &Path, tail: usize) -> anyhow::Result<()> {
     }
 
     Ok(())
-}
-
-fn api_bind_to_localhost(addr: &str) -> String {
-    let port = addr.rsplit(':').next().unwrap_or("8385");
-    format!("127.0.0.1:{}", port)
 }
