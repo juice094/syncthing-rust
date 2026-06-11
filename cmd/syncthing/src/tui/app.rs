@@ -5,6 +5,8 @@ use std::sync::Arc;
 use syncthing_core::types::{Config, Device, Folder, FolderStatus};
 use syncthing_core::DeviceId;
 
+use crate::tui::constants;
+use crate::tui::forms::FormState;
 use crate::tui::theme::Theme;
 
 /// 当前激活的 Tab
@@ -57,19 +59,6 @@ pub enum Popup {
     Error(String),
 }
 
-/// 输入表单状态
-#[derive(Debug, Clone, Default)]
-pub struct FormState {
-    pub fields: Vec<String>,
-    pub focus: usize,
-}
-
-impl FormState {
-    pub fn new(fields: Vec<String>) -> Self {
-        Self { fields, focus: 0 }
-    }
-}
-
 /// 全局 App 状态
 pub struct App {
     pub config_dir: PathBuf,
@@ -103,11 +92,10 @@ pub struct App {
     /// 日志过滤级别（TUI 快捷键 l 切换）
     pub log_filter_level: tracing::Level,
 
-    // 表单
-    pub device_form: FormState,
-    pub folder_form: FormState,
-    pub folder_device_selection: Vec<bool>, // 对应 config.devices 的多选
-    pub folder_device_selected: usize,      // 当前高亮的设备列表项
+    // 统一表单状态（有弹窗时 Some，无弹窗时 None）
+    pub form: Option<FormState>,
+    pub folder_device_selection: Vec<bool>,
+    pub folder_device_selected: usize,
 }
 
 impl App {
@@ -122,13 +110,12 @@ impl App {
             popup: Popup::None,
             device_selected: 0,
             folder_selected: 0,
-            log_lines: VecDeque::with_capacity(100),
+            log_lines: VecDeque::with_capacity(constants::LOG_BUFFER_CAP),
             daemon_running: false,
             daemon_status: "Stopped".to_string(),
             connected_devices: Vec::new(),
             theme: Theme::default(),
-            device_form: FormState::new(vec![String::new(), String::new(), String::new()]),
-            folder_form: FormState::new(vec![String::new(), String::new()]),
+            form: None,
             folder_device_selection: vec![false; device_count],
             folder_device_selected: 0,
             sync_service: None,
@@ -140,19 +127,17 @@ impl App {
     }
 
     pub fn push_log(&mut self, msg: String) {
-        if self.log_lines.len() >= 100 {
+        if self.log_lines.len() >= constants::LOG_BUFFER_CAP {
             self.log_lines.pop_front();
         }
         self.log_lines.push_back(msg);
     }
 
-    // TODO: TUI device detail panel
     #[allow(dead_code)]
     pub fn selected_device(&self) -> Option<&Device> {
         self.config.devices.get(self.device_selected)
     }
 
-    // TODO: TUI folder detail panel
     #[allow(dead_code)]
     pub fn selected_folder(&self) -> Option<&Folder> {
         self.config.folders.get(self.folder_selected)

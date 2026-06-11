@@ -6,6 +6,8 @@ use std::time::Duration;
 use tokio::sync::Mutex;
 use tracing::{debug, info, warn};
 
+use crate::tui::constants;
+
 use syncthing_core::DeviceId;
 use syncthing_net::ConnectionManagerHandle;
 use syncthing_sync::{SyncManager, SyncService};
@@ -88,7 +90,9 @@ pub async fn init_and_spawn_global_discovery(
             .map(|d| d.id)
             .collect();
         tokio::spawn(async move {
-            let mut interval = tokio::time::interval(Duration::from_secs(300));
+            let mut interval = tokio::time::interval(Duration::from_secs(
+                constants::GLOBAL_DISCOVERY_INTERVAL_SECS,
+            ));
             loop {
                 tokio::select! {
                     _ = shutdown_rx.changed() => {

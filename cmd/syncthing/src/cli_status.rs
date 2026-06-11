@@ -5,6 +5,8 @@ use std::path::Path;
 use anyhow::Context;
 use serde::Deserialize;
 
+use crate::api_client::ApiClient;
+
 /// System status response (subset of /rest/system/status)
 #[derive(Debug, Deserialize)]
 struct SystemStatus {
@@ -21,19 +23,11 @@ struct Connections {
 
 /// Query daemon status via REST API and print formatted output.
 pub async fn run(config_path: &Path, json_output: bool) -> anyhow::Result<()> {
-    let config = load_config(config_path)?;
-
-    let api_addr = format!("http://{}", api_bind_to_localhost(&config.gui.address));
-    let api_key = config.gui.api_key;
-
-    let client = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(5))
-        .build()
-        .context("build HTTP client")?;
+    let config = crate::load_config(config_path)?;
+    let client = ApiClient::new(&config);
 
     // Check if daemon is running via /rest/health
-    let ping_url = format!("{}/rest/health", api_addr);
-    match client.get(&ping_url).send().await {
+    match client.get_raw("/rest/health").await {
         Ok(resp) if resp.status().is_success() => {}
         _ => {
             if json_output {
@@ -52,41 +46,18 @@ pub async fn run(config_path: &Path, json_output: bool) -> anyhow::Result<()> {
         }
     }
 
-    // Fetch system status
-    let status_url = format!("{}/rest/system/status", api_addr);
     let system_status: SystemStatus = client
-        .get(&status_url)
-        .header("X-API-Key", &api_key)
-        .send()
+        .get("/rest/system/status")
         .await
-        .context("GET /rest/system/status")?
-        .json()
-        .await
-        .context("parse system status")?;
-
-    // Fetch connections
-    let conn_url = format!("{}/rest/system/connections", api_addr);
+        .context("GET /rest/system/status")?;
     let connections: Connections = client
-        .get(&conn_url)
-        .header("X-API-Key", &api_key)
-        .send()
+        .get("/rest/system/connections")
         .await
-        .context("GET /rest/system/connections")?
-        .json()
-        .await
-        .context("parse connections")?;
-
-    // Fetch folder count
-    let folders_url = format!("{}/rest/config/folders", api_addr);
+        .context("GET /rest/system/connections")?;
     let folders: Vec<serde_json::Value> = client
-        .get(&folders_url)
-        .header("X-API-Key", &api_key)
-        .send()
+        .get("/rest/config/folders")
         .await
-        .context("GET /rest/config/folders")?
-        .json()
-        .await
-        .context("parse folders")?;
+        .context("GET /rest/config/folders")?;
 
     let connected = connections.connections.len();
     let total_devices = config.devices.len();
@@ -117,18 +88,4 @@ pub async fn run(config_path: &Path, json_output: bool) -> anyhow::Result<()> {
     }
 
     Ok(())
-}
-
-fn load_config(path: &Path) -> anyhow::Result<syncthing_core::types::Config> {
-    let content = std::fs::read_to_string(path)
-        .with_context(|| format!("failed to read config from {:?}", path))?;
-    let config: syncthing_core::types::Config = serde_json::from_str(&content)
-        .with_context(|| format!("failed to parse config from {:?}", path))?;
-    Ok(config)
-}
-
-/// Extract port from bind address and replace host with localhost.
-fn api_bind_to_localhost(addr: &str) -> String {
-    let port = addr.rsplit(':').next().unwrap_or("8385");
-    format!("127.0.0.1:{}", port)
 }

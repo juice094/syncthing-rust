@@ -124,7 +124,7 @@ enum FolderAction {
 const CONFIG_FILE_NAME: &str = "config.json";
 
 /// 从配置文件加载配置
-fn load_config(path: &PathBuf) -> anyhow::Result<Config> {
+fn load_config(path: &Path) -> anyhow::Result<Config> {
     let content = std::fs::read_to_string(path)
         .with_context(|| format!("failed to read config from {:?}", path))?;
     let config: Config = serde_json::from_str(&content)
@@ -140,6 +140,7 @@ fn save_config(path: &PathBuf, config: &Config) -> anyhow::Result<()> {
     Ok(())
 }
 
+mod api_client;
 mod autostart;
 mod cli_query;
 mod cli_status;
@@ -161,6 +162,23 @@ impl Drop for SingleInstanceGuard {
     fn drop(&mut self) {
         single_instance::release(&self.0);
     }
+}
+
+const TUI_PID_FILE_NAME: &str = "syncthing-tui.pid";
+
+fn tui_pid_path(config_dir: &Path) -> PathBuf {
+    config_dir.join(TUI_PID_FILE_NAME)
+}
+
+fn write_tui_pid(config_dir: &Path) {
+    let path = tui_pid_path(config_dir);
+    if let Err(e) = std::fs::write(&path, format!("{}\n", std::process::id())) {
+        tracing::warn!("Failed to write TUI PID file {}: {}", path.display(), e);
+    }
+}
+
+fn cleanup_tui_pid(config_dir: &Path) {
+    let _ = std::fs::remove_file(tui_pid_path(config_dir));
 }
 
 /// Resolve listen/device_name from config file, overridden by CLI args.
@@ -366,6 +384,9 @@ async fn main() -> Result<()> {
             #[cfg(windows)]
             ensure_console();
 
+            // 写入 TUI PID 文件，供托盘检测已存在实例
+            write_tui_pid(&config_dir);
+
             let memory_buffer = logging_buffer::MemoryBuffer::new(100);
             let memory_layer = logging_buffer::MemoryLayer::new(memory_buffer.clone());
             // TUI 模式下丢弃 stdout 输出，避免日志穿透到 TUI 外侧
@@ -380,6 +401,7 @@ async fn main() -> Result<()> {
             let (listen, device_name) =
                 resolve_daemon_config(&config_dir, listen, device_name, true)?;
             cmd_tui(&config_dir, &listen, &device_name, memory_buffer).await?;
+            cleanup_tui_pid(&config_dir);
         }
         Commands::Init => {
             init_wizard::run_wizard(&config_dir)?;
@@ -515,11 +537,19 @@ async fn main() -> Result<()> {
 
                     #[cfg(all(windows, feature = "tray"))]
                     {
-                        // Spawn tray thread + status polling task
-                        let event_rx = tray::spawn();
-                        let client = tray_api::DaemonClient::new("http://127.0.0.1:8385");
+                        // 从配置读取 GUI 地址，提取端口构造 loopback URL
+                        let config =
+                            load_config(&config_dir.join(CONFIG_FILE_NAME)).unwrap_or_default();
+                        let api_port = config.gui.address.rsplit(':').next().unwrap_or("8385");
+                        let api_url = format!("http://127.0.0.1:{}", api_port);
 
-                        tokio::spawn(tray_status_loop(client));
+                        let (event_rx, tray_handle) = tray::spawn();
+                        let client = tray_api::DaemonClient::new(&api_url);
+
+                        let status_shutdown = shutdown_tx.subscribe();
+                        tokio::spawn(async move {
+                            tray_status_loop(client, status_shutdown).await;
+                        });
 
                         // Main thread: process tray events
                         for event in event_rx {
@@ -534,6 +564,8 @@ async fn main() -> Result<()> {
                                     tracing::info!("Exit requested, cleaning up...");
                                     let _ = shutdown_tx.send(true);
                                     tray::cleanup();
+                                    // 等待 tray 线程退出（WM_CLOSE → WM_DESTROY → PostQuitMessage → GetMessageW=0）
+                                    let _ = tray_handle.join();
                                     break;
                                 }
                             }
@@ -765,6 +797,10 @@ fn init_tray_logging(config_dir: &Path) {
         });
 
     let (non_blocking, _guard) = tracing_appender::non_blocking(file_appender);
+    // SAFETY: std::mem::forget 防止 _guard 的 Drop 阻塞进程退出。
+    // tracing_appender::non_blocking 的 guard 在 drop 时会 flush 缓冲区，
+    // 但在托盘场景中进程退出由 Win32 消息驱动，drop 时机不可控。
+    // forget 允许 OS 直接回收内存和线程，丢失少量日志是可接受的。
     std::mem::forget(_guard);
 
     let subscriber = tracing_subscriber::registry().with(
@@ -778,14 +814,25 @@ fn init_tray_logging(config_dir: &Path) {
 }
 
 #[cfg(all(windows, feature = "tray"))]
-async fn tray_status_loop(mut client: tray_api::DaemonClient) {
+async fn tray_status_loop(
+    mut client: tray_api::DaemonClient,
+    mut shutdown_rx: tokio::sync::watch::Receiver<bool>,
+) {
     let mut interval = tokio::time::interval(tokio::time::Duration::from_secs(5));
     let mut last_online = false;
     let mut last_connected: usize = 0;
     let mut last_syncing = false;
 
     loop {
-        interval.tick().await;
+        tokio::select! {
+            _ = interval.tick() => {}
+            _ = shutdown_rx.changed() => {
+                if *shutdown_rx.borrow() {
+                    tracing::debug!("Tray status loop: daemon shut down, exiting");
+                    return;
+                }
+            }
+        }
         let online = client.ping().await;
         client.set_online(online);
         if online {
@@ -808,35 +855,50 @@ async fn tray_status_loop(mut client: tray_api::DaemonClient) {
             if s.folder_count == 1 { "" } else { "s" }
         );
 
-        unsafe {
-            let hwnd = tray::tray_hwnd();
-            if s.online && !last_online {
+        // SAFETY: 每个 tray API 调用都是独立线程安全的（Shell_NotifyIconW 通过 PostMessage 与 Shell 通信）。
+        // hwnd 从 STATE OnceLock 读取，初始化后不变。
+        let hwnd = tray::tray_hwnd();
+        if s.online && !last_online {
+            // SAFETY: show_notification 仅调用 Shell_NotifyIconW，线程安全。
+            unsafe {
                 tray::show_notification(
                     hwnd,
                     "Syncthing",
                     "Daemon is online",
                     tray::BalloonIcon::Info,
                 );
-            } else if !s.online && last_online {
+            }
+        } else if !s.online && last_online {
+            // SAFETY: 同上。
+            unsafe {
                 tray::show_notification(
                     hwnd,
                     "Syncthing",
                     "Daemon went offline",
                     tray::BalloonIcon::Error,
                 );
-            } else if s.online && s.connected_devices != last_connected {
-                let msg = if s.connected_devices > last_connected {
-                    format!("Device connected ({} total)", s.connected_devices)
-                } else {
-                    format!("Device disconnected ({} total)", s.connected_devices)
-                };
+            }
+        } else if s.online && s.connected_devices != last_connected {
+            let msg = if s.connected_devices > last_connected {
+                format!("Device connected ({} total)", s.connected_devices)
+            } else {
+                format!("Device disconnected ({} total)", s.connected_devices)
+            };
+            // SAFETY: 同上。
+            unsafe {
                 tray::show_notification(hwnd, "Syncthing", &msg, tray::BalloonIcon::Info);
             }
+        }
 
-            if s.syncing && !last_syncing {
+        if s.syncing && !last_syncing {
+            // SAFETY: 同上。
+            unsafe {
                 tray::show_notification(hwnd, "Syncthing", "Sync started", tray::BalloonIcon::Info);
             }
+        }
 
+        // SAFETY: update_tooltip/update_icon 均通过 Shell_NotifyIconW 实现，线程安全。
+        unsafe {
             tray::update_tooltip(hwnd, &tip);
             tray::update_icon(hwnd, icon);
         }
@@ -857,12 +919,12 @@ fn ensure_console() {
     };
     use windows::Win32::UI::WindowsAndMessaging::{SetForegroundWindow, ShowWindow, SW_SHOWNORMAL};
 
+    // SAFETY: Win32 Console API 是进程级操作。AttachConsole 尝试连接到父进程控制台，
+    // 若失败则 AllocConsole 分配新控制台。这些 API 在进程生命周期内仅需调用一次。
     unsafe {
-        // 先尝试附加到父进程控制台（如果从终端手动启动）
         if AttachConsole(u32::MAX).is_ok() {
             return;
         }
-        // 父进程无控制台 → 分配新窗口（托盘/桌面快捷方式场景）
         if AllocConsole().is_ok() {
             // 调整控制台缓冲区与窗口，避免 TUI 底部被截断
             if let Ok(handle) = GetStdHandle(STD_OUTPUT_HANDLE) {
@@ -886,12 +948,31 @@ fn ensure_console() {
     }
 }
 
-/// 多终端启动 TUI：按优先级尝试 Windows Terminal → PowerShell → CMD。
-/// 直接调用（不用 `start`）确保 shell 等待 syncthing.exe 退出，
-/// syncthing.exe 通过 `AttachConsole` 附加到 shell 控制台。
+/// 多终端启动 TUI：按优先级尝试 Windows Terminal → pwsh → PowerShell → CMD。
+/// 启动前检查已有 TUI 实例（通过 PID 文件），若已存在则聚焦窗口而非重复创建。
 #[cfg(all(windows, feature = "tray"))]
 fn spawn_tui_from_tray(config_dir: &Path) {
-    let exe = std::env::current_exe().unwrap_or_default();
+    // 检查是否已有 TUI 实例在运行
+    if let Some(pid) = read_tui_pid(config_dir) {
+        if is_process_alive(pid) {
+            tracing::info!(
+                "TUI already running (PID {}), focusing existing window",
+                pid
+            );
+            focus_window_by_pid(pid);
+            return;
+        }
+        // PID 文件残留，清理后继续
+        let _ = std::fs::remove_file(tui_pid_path(config_dir));
+    }
+
+    let exe = std::env::current_exe().unwrap_or_else(|e| {
+        tracing::warn!(
+            "Failed to get current exe path: {}. Using 'syncthing.exe'.",
+            e
+        );
+        std::path::PathBuf::from("syncthing.exe")
+    });
     let cd = config_dir.to_string_lossy().to_string();
     let exe_q = format!("\"{}\"", exe.display());
     let cd_q = format!("\"{}\"", cd);
@@ -909,9 +990,25 @@ fn spawn_tui_from_tray(config_dir: &Path) {
             return;
         }
 
-        // 优先级 2: PowerShell（直接启动，PowerShell 等待子进程）
+        // 优先级 2: pwsh.exe (PowerShell 7)
+        let pwsh = std::process::Command::new("pwsh.exe")
+            .args(["-NoLogo", "-NoProfile", "-Command"])
+            .arg(format!("& {} tui --config-dir {}", exe_q, cd_q))
+            .spawn();
+        if pwsh.is_ok() {
+            tracing::info!("TUI spawned via pwsh");
+            return;
+        }
+
+        // 优先级 3: powershell.exe (Windows 内置 PowerShell 5.1)
         let ps = std::process::Command::new("powershell.exe")
-            .arg("-Command")
+            .args([
+                "-NoLogo",
+                "-NoProfile",
+                "-ExecutionPolicy",
+                "Bypass",
+                "-Command",
+            ])
             .arg(format!("& {} tui --config-dir {}", exe_q, cd_q))
             .spawn();
         if ps.is_ok() {
@@ -919,13 +1016,10 @@ fn spawn_tui_from_tray(config_dir: &Path) {
             return;
         }
 
-        // 优先级 3: CMD 回退
+        // 优先级 4: CMD 最后回退（使用引号包裹路径，防止空格路径断裂）
         let cmd = std::process::Command::new("cmd.exe")
             .arg("/c")
-            .arg(&exe)
-            .arg("tui")
-            .arg("--config-dir")
-            .arg(&cd)
+            .arg(format!("{} tui --config-dir {}", exe_q, cd_q))
             .status();
         match cmd {
             Ok(s) => tracing::info!("TUI exited with status: {:?}", s.code()),
@@ -935,9 +1029,89 @@ fn spawn_tui_from_tray(config_dir: &Path) {
 }
 
 #[cfg(all(windows, feature = "tray"))]
-fn open_web_ui() {
+fn read_tui_pid(config_dir: &Path) -> Option<u32> {
+    let path = tui_pid_path(config_dir);
+    std::fs::read_to_string(&path)
+        .ok()?
+        .trim()
+        .parse::<u32>()
+        .ok()
+}
+
+#[cfg(all(windows, feature = "tray"))]
+fn is_process_alive(pid: u32) -> bool {
+    use windows::Win32::System::Threading::{
+        GetExitCodeProcess, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION,
+    };
+    // STILL_ACTIVE = STATUS_PENDING = 259
+    const STILL_ACTIVE: u32 = 259;
+    // SAFETY: OpenProcess with PROCESS_QUERY_LIMITED_INFORMATION is read-only and safe for any PID.
+    // GetExitCodeProcess is read-only. CloseHandle must be called to avoid handle leak.
     unsafe {
-        let _ = windows::Win32::UI::Shell::ShellExecuteW(
+        let handle = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid).unwrap_or_default();
+        if handle.is_invalid() {
+            return false;
+        }
+        let mut exit_code = 0u32;
+        let ok = GetExitCodeProcess(handle, &mut exit_code).is_ok();
+        // SAFETY: handle 由 OpenProcess 返回，必须通过 CloseHandle 释放。
+        let _ = windows::Win32::Foundation::CloseHandle(handle);
+        ok && exit_code == STILL_ACTIVE
+    }
+}
+
+#[cfg(all(windows, feature = "tray"))]
+fn focus_window_by_pid(target_pid: u32) {
+    use windows::Win32::Foundation::{BOOL, HWND, LPARAM};
+    use windows::Win32::UI::WindowsAndMessaging::{
+        EnumWindows, GetWindowThreadProcessId, IsWindowVisible, SetForegroundWindow, ShowWindow,
+        SW_SHOWNORMAL,
+    };
+
+    struct Ctx {
+        target_pid: u32,
+        found: HWND,
+    }
+
+    // SAFETY: enum_proc 作为 EnumWindows 回调，由系统以正确的 hwnd/lparam 调用。
+    // lparam 指向调用栈上的 Ctx 结构体，EnumWindows 是同步 API，生命周期有效。
+    unsafe extern "system" fn enum_proc(hwnd: HWND, lparam: LPARAM) -> BOOL {
+        let ctx = &mut *(lparam.0 as *mut Ctx);
+        let mut pid = 0u32;
+        GetWindowThreadProcessId(hwnd, Some(&mut pid));
+        if pid == ctx.target_pid && IsWindowVisible(hwnd).as_bool() {
+            ctx.found = hwnd;
+            return BOOL::from(false);
+        }
+        BOOL::from(true)
+    }
+
+    let mut ctx = Ctx {
+        target_pid,
+        found: HWND::default(),
+    };
+    // SAFETY: EnumWindows 是同步回调 API。ctx 在调用栈上，回调期间有效。
+    // LPARAM 传递 &mut ctx 指针。
+    unsafe {
+        let _ = EnumWindows(Some(enum_proc), LPARAM(&mut ctx as *mut _ as isize));
+    }
+    if !ctx.found.is_invalid() {
+        // SAFETY: ctx.found 来自 EnumWindows 回调中的 IsWindowVisible 检查，
+        // 确认窗口句柄有效且可见。ShowWindow/SW_SHOWNORMAL 恢复最小化窗口，
+        // SetForegroundWindow 将窗口带到前台。这些都是线程安全的。
+        unsafe {
+            let _ = ShowWindow(ctx.found, SW_SHOWNORMAL);
+            let _ = SetForegroundWindow(ctx.found);
+        }
+    }
+}
+
+#[cfg(all(windows, feature = "tray"))]
+fn open_web_ui() {
+    // SAFETY: ShellExecuteW 以 "open" 动词启动默认浏览器访问 loopback URL (127.0.0.1:8385)。
+    // 所有参数均为安全字符串（无用户输入），不涉及任意命令执行。
+    unsafe {
+        let result = windows::Win32::UI::Shell::ShellExecuteW(
             None,
             windows::core::w!("open"),
             windows::core::w!("http://127.0.0.1:8385"),
@@ -945,6 +1119,9 @@ fn open_web_ui() {
             None,
             windows::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL,
         );
+        if result.0 as isize <= 32 {
+            tracing::warn!("ShellExecuteW returned error code {:?}", result.0);
+        }
     }
 }
 

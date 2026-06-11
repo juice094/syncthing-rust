@@ -47,6 +47,8 @@ use windows::Win32::System::Registry::{
 fn open_run_key(_writable: bool) -> anyhow::Result<HKEY> {
     let mut hkey = HKEY(std::ptr::null_mut());
     let path = w!("Software\\Microsoft\\Windows\\CurrentVersion\\Run");
+    // SAFETY: HKEY_CURRENT_USER 是预定义的根键句柄，path 是常量字符串。
+    // RegCreateKeyW 在 HKCU 下创建/打开 Run 子键，不会越权访问。
     unsafe {
         let result = RegCreateKeyW(HKEY_CURRENT_USER, path, &mut hkey);
         if result.0 != 0 {
@@ -61,6 +63,8 @@ fn set_reg_value(hkey: HKEY, name: &str, value: &str) -> anyhow::Result<()> {
     let name_wide: Vec<u16> = name.encode_utf16().chain(std::iter::once(0)).collect();
     let value_wide: Vec<u16> = value.encode_utf16().chain(std::iter::once(0)).collect();
     let byte_len = (value_wide.len() * std::mem::size_of::<u16>()) as u32;
+    // SAFETY: name_wide/value_wide 是栈上 Vec 的指针，在函数作用域内有效。
+    // from_raw 不获取所有权，slice::from_raw_parts 仅在 RegSetValueExW 调用期间读取。
     unsafe {
         RegSetValueExW(
             hkey,
@@ -81,6 +85,7 @@ fn set_reg_value(hkey: HKEY, name: &str, value: &str) -> anyhow::Result<()> {
 #[cfg(windows)]
 fn delete_reg_value(hkey: HKEY, name: &str) -> anyhow::Result<()> {
     let name_wide: Vec<u16> = name.encode_utf16().chain(std::iter::once(0)).collect();
+    // SAFETY: name_wide 是栈上 Vec，在函数作用域内有效。from_raw 不获取所有权。
     unsafe {
         let result = RegDeleteValueW(hkey, windows::core::PCWSTR::from_raw(name_wide.as_ptr()));
         if result.0 != 0 {
@@ -98,6 +103,8 @@ fn delete_reg_value(hkey: HKEY, name: &str) -> anyhow::Result<()> {
 
 #[cfg(windows)]
 fn close_key(hkey: HKEY) {
+    // SAFETY: hkey 由 RegCreateKeyW/RegOpenKeyW 返回，必须通过 RegCloseKey 释放。
+    // 关闭预定义根键（如 HKCU）是无操作的。
     unsafe {
         let _ = RegCloseKey(hkey);
     }

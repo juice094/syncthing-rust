@@ -5,6 +5,7 @@ use ratatui::{
 };
 
 use crate::tui::app::{App, Popup, Tab};
+use crate::tui::forms::render;
 
 pub fn draw(f: &mut Frame, app: &mut App) {
     let area = f.area();
@@ -31,11 +32,24 @@ pub fn draw(f: &mut Frame, app: &mut App) {
     crate::tui::widgets::status_bar::draw(f, app, chunks[2]);
 
     let theme = &app.theme;
-    match app.popup {
-        Popup::AddDevice => crate::tui::popups::add_device::draw(f, app, theme),
-        Popup::AddFolder => crate::tui::popups::add_folder::draw(f, app, theme),
-        Popup::EditDevice => crate::tui::popups::edit_device::draw(f, app, theme),
-        Popup::EditFolder => crate::tui::popups::edit_folder::draw(f, app, theme),
+    match &app.popup {
+        Popup::AddDevice | Popup::EditDevice => {
+            if let Some(ref form) = app.form {
+                render::draw_device_form(f, form, theme);
+            }
+        }
+        Popup::AddFolder | Popup::EditFolder => {
+            if let Some(ref form) = app.form {
+                render::draw_folder_form(
+                    f,
+                    form,
+                    theme,
+                    &app.config.devices,
+                    &app.folder_device_selection,
+                    app.folder_device_selected,
+                );
+            }
+        }
         Popup::Help => crate::tui::popups::help::draw(f, theme),
         Popup::Error(ref msg) => crate::tui::popups::error::draw(f, msg, theme),
         Popup::None => {}
