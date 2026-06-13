@@ -57,7 +57,7 @@ dashmap = "5.5"
 parking_lot = "0.12"
 notify = "8"
 tempfile = "3"
-socket2 = "0.5"
+socket2 = "0.6"
 walkdir = "2"
 
 # 可选传输层
