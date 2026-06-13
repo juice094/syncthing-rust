@@ -15,7 +15,7 @@ pub fn draw(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
         theme.style_offline
     };
 
-    let f5_hint = if app.external_daemon {
+    let f5_hint = if app.external_daemon && app.tray_client.is_none() {
         " External  "
     } else {
         " Run/Stop  "

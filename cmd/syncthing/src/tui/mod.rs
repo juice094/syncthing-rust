@@ -60,6 +60,7 @@ pub async fn run_tui(
     listen: String,
     device_name: String,
     memory_buffer: MemoryBuffer,
+    tray_pipe: Option<String>,
 ) -> anyhow::Result<()> {
     // 加载配置
     let config = crate::load_config(&config_dir.join(crate::CONFIG_FILE_NAME)).unwrap_or_default();
@@ -82,13 +83,54 @@ pub async fn run_tui(
     terminal.clear()?;
 
     let mut app = App::new(config_dir.clone(), listen, device_name, config);
+    app.tray_pipe = tray_pipe;
 
     // 启动时检测是否已有外部 daemon（如 Auto 模式托盘启动的实例）
     if detect_external_daemon(&app.config, &config_dir).await {
         app.daemon_running = true;
         app.external_daemon = true;
-        app.daemon_status = "Running (external)".to_string();
-        app.push_log("External daemon detected. F5 toggle disabled.".to_string());
+
+        // 若由托盘打开，尝试连接托盘 IPC，使 F5 能跨进程控制 daemon
+        if let Some(pipe_name) = app.tray_pipe.clone() {
+            match tokio::time::timeout(
+                std::time::Duration::from_secs(3),
+                crate::tray_ipc::TrayIpcClient::connect(&pipe_name),
+            )
+            .await
+            {
+                Ok(Ok(mut client)) => {
+                    // 发送 Ping 探测确认托盘存活
+                    match tokio::time::timeout(
+                        std::time::Duration::from_secs(2),
+                        client.send(crate::tray_ipc::TrayIpcRequest::Ping),
+                    )
+                    .await
+                    {
+                        Ok(Ok(resp)) if resp.ok => {
+                            app.tray_client = Some(client);
+                            app.daemon_status = "Running (tray-managed)".to_string();
+                            app.push_log(
+                                "Tray-managed daemon detected. F5 controls daemon via tray."
+                                    .to_string(),
+                            );
+                        }
+                        _ => {
+                            app.daemon_status = "Running (external)".to_string();
+                            app.push_log(
+                                "External daemon detected. F5 toggle disabled.".to_string(),
+                            );
+                        }
+                    }
+                }
+                _ => {
+                    app.daemon_status = "Running (external)".to_string();
+                    app.push_log("External daemon detected. F5 toggle disabled.".to_string());
+                }
+            }
+        } else {
+            app.daemon_status = "Running (external)".to_string();
+            app.push_log("External daemon detected. F5 toggle disabled.".to_string());
+        }
     } else {
         app.push_log("TUI started. Press F5 to run daemon.".to_string());
     }
@@ -125,6 +167,23 @@ pub async fn run_tui(
     }
 
     Ok(())
+}
+
+/// 静默检查本地 REST API 是否可达。
+async fn daemon_health_check(config: &syncthing_core::types::Config) -> bool {
+    let api_port = config.gui.address.rsplit(':').next().unwrap_or("8385");
+    let client = match reqwest::Client::builder()
+        .timeout(Duration::from_secs(2))
+        .build()
+    {
+        Ok(c) => c,
+        Err(_) => return false,
+    };
+    let url = format!("http://127.0.0.1:{}/rest/health", api_port);
+    match client.get(&url).send().await {
+        Ok(resp) => resp.status().is_success(),
+        Err(_) => false,
+    }
 }
 
 /// 检测是否已有外部 daemon 在运行。
@@ -188,6 +247,7 @@ async fn run_app<B: Backend>(
 ) -> io::Result<()> {
     let mut last_tick = tokio::time::Instant::now();
     let tick_rate = constants::TICK_RATE;
+    let mut health_check_tick: u8 = 0;
 
     // daemon_join_handle: 后台 daemon 主循环的 JoinHandle，用于崩溃检测与优雅关闭等待
     let mut daemon_join_handle: Option<tokio::task::JoinHandle<()>> = None;
@@ -334,6 +394,23 @@ async fn run_app<B: Backend>(
                     app.push_log(entry.msg);
                 }
             }
+
+            // 托盘托管模式：每 ~2 秒轮询一次 REST API，同步 daemon 实际状态
+            if app.tray_client.is_some() {
+                health_check_tick = health_check_tick.wrapping_add(1);
+                if health_check_tick.is_multiple_of(8) {
+                    let alive = daemon_health_check(&app.config).await;
+                    if alive != app.daemon_running {
+                        app.daemon_running = alive;
+                        app.daemon_status = if alive {
+                            "Running (tray-managed)".to_string()
+                        } else {
+                            "Stopped (tray-managed)".to_string()
+                        };
+                    }
+                }
+            }
+
             last_tick = tokio::time::Instant::now();
         }
     }
@@ -348,6 +425,40 @@ async fn toggle_daemon(
     event_tx: &mut Option<tokio::sync::mpsc::Sender<TuiEvent>>,
     daemon_shutdown_tx: &mut Option<tokio::sync::watch::Sender<bool>>,
 ) {
+    // 托盘托管模式：通过 IPC 命令让托盘进程启停 daemon
+    if app.external_daemon && app.tray_client.is_some() {
+        let req = if app.daemon_running {
+            crate::tray_ipc::TrayIpcRequest::StopDaemon
+        } else {
+            crate::tray_ipc::TrayIpcRequest::StartDaemon
+        };
+        if let Some(client) = app.tray_client.as_mut() {
+            match client.send(req).await {
+                Ok(resp) if resp.ok => {
+                    app.daemon_status = if app.daemon_running {
+                        "Stopping...".to_string()
+                    } else {
+                        "Starting...".to_string()
+                    };
+                    app.push_log(format!(
+                        "Daemon {} command sent to tray.",
+                        if app.daemon_running { "stop" } else { "start" }
+                    ));
+                }
+                Ok(resp) => {
+                    app.push_log(format!(
+                        "Tray daemon command failed: {}",
+                        resp.error.unwrap_or_default()
+                    ));
+                }
+                Err(e) => {
+                    app.push_log(format!("Failed to send command to tray: {}", e));
+                }
+            }
+        }
+        return;
+    }
+
     // 外部 daemon 由托盘/Auto 模式管理，TUI 不能启动或停止它
     if app.external_daemon {
         app.push_log("Daemon is managed externally. Use the tray menu to stop it.".to_string());
