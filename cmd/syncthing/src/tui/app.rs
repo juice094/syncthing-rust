@@ -5,6 +5,7 @@ use std::sync::Arc;
 use syncthing_core::types::{Config, Device, Folder, FolderStatus};
 use syncthing_core::DeviceId;
 
+use crate::tray_ipc::TrayIpcClient;
 use crate::tui::constants;
 use crate::tui::forms::FormState;
 use crate::tui::theme::Theme;
@@ -77,6 +78,10 @@ pub struct App {
     /// 标记当前 daemon 是否由外部进程（如 Auto 模式的托盘）启动。
     /// 若为 true，TUI 不应尝试启动/停止它，避免重复实例。
     pub external_daemon: bool,
+    /// 托盘 IPC 管道名。由托盘打开 TUI 时传入，用于 F5 跨进程控制托盘 daemon。
+    pub tray_pipe: Option<String>,
+    /// 托盘 IPC 客户端。连接成功后 TUI 可通过它发送 StartDaemon / StopDaemon。
+    pub tray_client: Option<TrayIpcClient>,
     pub connected_devices: Vec<DeviceId>,
     pub theme: Theme,
 
@@ -117,6 +122,8 @@ impl App {
             daemon_running: false,
             daemon_status: "Stopped".to_string(),
             external_daemon: false,
+            tray_pipe: None,
+            tray_client: None,
             connected_devices: Vec::new(),
             theme: Theme::default(),
             form: None,
