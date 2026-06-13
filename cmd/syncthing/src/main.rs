@@ -1193,6 +1193,10 @@ fn ensure_console() {
 /// 优先尝试 Windows Terminal / PowerShell 7 / Windows PowerShell 打开 TUI，
 /// 使用终端原生窗口；均失败时回退到直接 CreateProcess + ensure_console()。
 ///
+/// 对 wt.exe / pwsh.exe 使用 ShellExecuteW 启动，以正确处理 WindowsApps
+///（Microsoft Store）安装产生的 AppExecutionAlias，避免 Rust 的 CreateProcess
+/// 找不到可执行文件而直接回退到独立控制台窗口。
+///
 /// 启动前检查已有 TUI 实例（通过 PID 文件），若已存在则聚焦窗口而非重复创建。
 #[cfg(all(windows, feature = "tray"))]
 fn spawn_tui_from_tray(config_dir: &Path, tray_pipe_name: &str) {
@@ -1230,42 +1234,31 @@ fn spawn_tui_from_tray(config_dir: &Path, tray_pipe_name: &str) {
         );
 
         // 1. 优先 Windows Terminal
-        if let Ok(status) = std::process::Command::new("wt.exe")
-            .arg("new-tab")
-            .arg("--title")
-            .arg("syncthing-rust TUI")
-            .arg("--")
-            .arg("pwsh.exe")
-            .arg("-NoExit")
-            .arg("-Command")
-            .arg(&ps_cmd)
-            .status()
-        {
-            tracing::info!("TUI launched via Windows Terminal: {:?}", status.code());
+        if shell_execute(
+            "wt.exe",
+            &format!(
+                "new-tab --title \"syncthing-rust TUI\" -- pwsh.exe -NoExit -Command \"{}\"",
+                ps_cmd
+            ),
+        ) {
+            tracing::info!("TUI launched via Windows Terminal");
             return;
         }
         tracing::debug!("wt.exe not available, trying PowerShell 7");
 
         // 2. PowerShell 7
-        if let Ok(status) = std::process::Command::new("pwsh.exe")
-            .arg("-NoExit")
-            .arg("-Command")
-            .arg(&ps_cmd)
-            .status()
-        {
-            tracing::info!("TUI launched via PowerShell 7: {:?}", status.code());
+        if shell_execute("pwsh.exe", &format!("-NoExit -Command \"{}\"", ps_cmd)) {
+            tracing::info!("TUI launched via PowerShell 7");
             return;
         }
         tracing::debug!("pwsh.exe not available, trying Windows PowerShell");
 
         // 3. Windows PowerShell
-        if let Ok(status) = std::process::Command::new("powershell.exe")
-            .arg("-NoExit")
-            .arg("-Command")
-            .arg(&ps_cmd)
-            .status()
-        {
-            tracing::info!("TUI launched via Windows PowerShell: {:?}", status.code());
+        if shell_execute(
+            "powershell.exe",
+            &format!("-NoExit -Command \"{}\"", ps_cmd),
+        ) {
+            tracing::info!("TUI launched via Windows PowerShell");
             return;
         }
         tracing::debug!("powershell.exe not available, falling back to direct spawn");
@@ -1283,6 +1276,37 @@ fn spawn_tui_from_tray(config_dir: &Path, tray_pipe_name: &str) {
             Err(e) => tracing::error!("Failed to spawn TUI: {}", e),
         }
     });
+}
+
+/// 使用 ShellExecuteW 启动外部程序，正确处理 WindowsApps AppExecutionAlias。
+///
+/// 返回 true 表示 ShellExecuteW 调用成功（程序已被提交启动）。
+/// 返回 false 表示目标未找到或无法启动。
+#[cfg(all(windows, feature = "tray"))]
+fn shell_execute(file: &str, parameters: &str) -> bool {
+    use windows::core::PCWSTR;
+    use windows::Win32::UI::Shell::ShellExecuteW;
+    use windows::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL;
+
+    let op: Vec<u16> = "open".encode_utf16().chain(Some(0)).collect();
+    let file: Vec<u16> = file.encode_utf16().chain(Some(0)).collect();
+    let params: Vec<u16> = parameters.encode_utf16().chain(Some(0)).collect();
+
+    // SAFETY: ShellExecuteW 接收以 null 结尾的 UTF-16 字符串指针。字符串在调用期间保持存活，
+    // 调用后立即返回，不会跨 await 持引用。
+    let result = unsafe {
+        ShellExecuteW(
+            None,
+            PCWSTR(op.as_ptr()),
+            PCWSTR(file.as_ptr()),
+            PCWSTR(params.as_ptr()),
+            None,
+            SW_SHOWNORMAL,
+        )
+    };
+
+    // ShellExecuteW 返回值 > 32 表示成功；<= 32 为错误码。
+    result.0 as isize > 32
 }
 
 /// 将字符串中的单引号替换为两个单引号，供 PowerShell 单引号字符串使用。
