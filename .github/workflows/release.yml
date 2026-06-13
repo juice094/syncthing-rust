@@ -45,7 +45,7 @@ jobs:
           ls -lh dist/syncthing-x86_64-linux
 
       - name: Upload to Release
-        uses: softprops/action-gh-release@v1
+        uses: softprops/action-gh-release@v3
         with:
           tag_name: ${{ github.ref_name }}
           name: "Release ${{ github.ref_name }}"
@@ -85,7 +85,7 @@ jobs:
           Get-Item dist/syncthing-x86_64-windows.exe | Select-Object Name, @{N='SizeMB';E={[math]::Round($_.Length/1MB,2)}}
 
       - name: Upload to Release
-        uses: softprops/action-gh-release@v1
+        uses: softprops/action-gh-release@v3
         with:
           tag_name: ${{ github.ref_name }}
           name: "Release ${{ github.ref_name }}"
