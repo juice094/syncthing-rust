@@ -1,6 +1,7 @@
 use bep_protocol::messages::{Hello, Index, WireBlockInfo, WireFileInfo, WireVector};
-use criterion::{black_box, criterion_group, criterion_main, Criterion};
+use criterion::{criterion_group, criterion_main, Criterion};
 use prost::Message;
+use std::hint::black_box;
 
 fn bench_hello_encode_decode(c: &mut Criterion) {
     let hello = Hello::new("rust-node", "syncthing", "v0.2.6");

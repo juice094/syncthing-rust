@@ -21,8 +21,9 @@ use windows::Win32::UI::WindowsAndMessaging::{
     LoadIconW, PostMessageW, PostQuitMessage, RegisterClassW, RegisterWindowMessageW,
     SetForegroundWindow, TrackPopupMenu, HICON, HMENU, IDI_APPLICATION, IDI_ERROR, IDI_INFORMATION,
     IDI_WARNING, LR_DEFAULTCOLOR, MENU_ITEM_FLAGS, MF_GRAYED, MF_STRING, SM_CXSMICON,
-    TPM_BOTTOMALIGN, TPM_LEFTALIGN, WM_APP, WM_CLOSE, WM_COMMAND, WM_DESTROY, WM_LBUTTONUP,
-    WM_NULL, WM_RBUTTONUP, WNDCLASSW, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_OVERLAPPED,
+    TPM_BOTTOMALIGN, TPM_LEFTALIGN, WM_APP, WM_CLOSE, WM_COMMAND, WM_DESTROY, WM_LBUTTONDBLCLK,
+    WM_LBUTTONUP, WM_NULL, WM_RBUTTONUP, WNDCLASSW, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW,
+    WS_OVERLAPPED,
 };
 
 /// 防止 DestroyIcon double-free：cleanup() 先释放后置 true，WM_DESTROY 检查此标志。
@@ -437,7 +438,10 @@ unsafe extern "system" fn window_proc(
         WM_TRAYICON => {
             match lparam.0 as u32 {
                 WM_RBUTTONUP => show_context_menu(hwnd),
-                WM_LBUTTONUP => {
+                // 单击托盘图标不执行操作；双击打开 TUI。避免双击时被识别为两次单击
+                // 而产生重复 TUI 实例。
+                WM_LBUTTONUP => {}
+                WM_LBUTTONDBLCLK => {
                     if let Some(s) = STATE.get() {
                         let _ = s.event_tx.send(TrayEvent::OpenTui);
                     }
