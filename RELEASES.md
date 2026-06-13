@@ -1,5 +1,73 @@
 # Releases
 
+## v3.0.3 — TUI Stability & Modern Tray Icons (2026-06-13)
+
+### Headline
+TUI daemon lifecycle hardened, Windows raw mode fixed, modern Phosphor-style tray icon set.
+
+### What's New
+- **TUI F5 daemon toggle lifecycle fix**: non-blocking stop with `JoinHandle` management; restart blocked until previous daemon fully exits.
+- **Windows raw mode fix**: TUI body wrapped in `tokio::task::LocalSet` so crossterm thread-local console mode stays on the same OS thread.
+- **Folder form keyboard navigation**: Tab/Down from the last field enters the "Share with" device list; BackTab/Up wraps from the first field.
+- **Modern tray icon set**: Phosphor `git-merge` based status icons + 16×16 menu item icons.
+
+### Stats
+- **Tests**: 364 passed / 4 ignored / 0 failed
+- **Clippy**: 0 warnings
+- **CI**: 19/19 jobs passing
+
+## v3.0.2 — Text Three-Way Merge (2026-06-07)
+
+### Headline
+Text files can now be auto-merged; overlapping edits produce git-style conflict markers instead of silent conflict copies.
+
+### What's New
+- **Three-way text merge**: base/local/remote merge using `similar::TextDiff`; non-overlapping changes auto-merged.
+- **Conflict markers**: overlapping line modifications produce git-style `<<<<<<< / ======= / >>>>>>>` markers.
+- **Binary fallback**: binary files fall back to RenameBoth (`.sync-conflict-*`).
+
+### Stats
+- **Tests**: 364 passed / 4 ignored / 0 failed
+- **Clippy**: 0 warnings
+
+## v3.0.1 — Stale-Index Cascade Deletion Fix (2026-06-07)
+
+### Headline
+Root cause of §15 stale-index mass-deletion fixed.
+
+### What's Fixed
+- `index_handler::process_files` no longer writes remote deletion markers for files that have no local DB record, preventing cascade deletion after a peer format/reinstall.
+
+### Stats
+- **Tests**: 364 passed / 4 ignored / 0 failed
+- **Clippy**: 0 warnings
+
+## v3.0.0 — Production-Grade P2P File Sync (2026-06-07)
+
+### Headline
+BEP Relay v1 activated, sequence race fixed, CI fully green; project transitions from alpha to production-ready.
+
+### What's New
+- **Sequence race fix**: per-folder `Mutex` around `FileSystemDatabase::increment_sequence` read-modify-write.
+- **Relay v1 activation**: relay pool URLs persisted before dial decision; 10 relay candidates race against direct TCP.
+- **Production deployment**: ROG-X (Windows 11) ↔ Gray-Cloud (Ubuntu 24.04) bidirectional sync over Tailscale.
+- **WSL cross-compile + systemd service**: cloud-deploy.sh one-command Linux deployment.
+- **git bundle disaster recovery**: SOP for peer format/reset scenarios.
+- **Simple + Staggered versioning**: `.stversions/` archive with configurable retention.
+
+### Quality
+- **CI**: 19/19 jobs passing (clippy, test, deny, fmt, doc, e2e, bench-smoke, release-check, file-size).
+- **Tests**: 341 passed / 4 ignored / 0 failed at release; current workspace 364 passed / 4 ignored / 0 failed.
+- **Clippy**: 0 warnings.
+
+### Known Limitations
+- §1 ClusterConfig first-handshake timeout mitigated by auto-reconnect.
+- §14 High-latency/unstable network block transfer failures.
+- §15 Stale DB index after peer format — recovery SOP exists, automatic detection pending.
+- 72h stress test pending (v3.1.0 readiness gate).
+
+---
+
 ## v0.2.10-rc3 — Phase 0 Complete + Production Readiness (2026-06-03)
 
 ### Protocol

@@ -153,18 +153,27 @@ pub(crate) async fn system_config_post(
     update_config(State(state), Json(request)).await
 }
 
-pub(crate) async fn system_restart() -> impl IntoResponse {
-    tokio::spawn(async {
+pub(crate) async fn system_restart(State(state): State<ApiState>) -> impl IntoResponse {
+    tokio::spawn(async move {
         tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-        std::process::exit(3);
+        if let Some(tx) = state.shutdown_tx {
+            let _ = tx.send(true);
+        } else {
+            // 没有 shutdown channel 时回退到强制退出（理论上只在测试或嵌入场景出现）
+            std::process::exit(3);
+        }
     });
     Json(serde_json::json!({ "ok": "restarting" }))
 }
 
-pub(crate) async fn system_shutdown() -> impl IntoResponse {
-    tokio::spawn(async {
+pub(crate) async fn system_shutdown(State(state): State<ApiState>) -> impl IntoResponse {
+    tokio::spawn(async move {
         tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-        std::process::exit(0);
+        if let Some(tx) = state.shutdown_tx {
+            let _ = tx.send(true);
+        } else {
+            std::process::exit(0);
+        }
     });
     Json(serde_json::json!({ "ok": "shutting down" }))
 }

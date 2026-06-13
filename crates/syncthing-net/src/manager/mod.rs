@@ -93,12 +93,10 @@ pub struct ConnectionManager {
 
 impl ConnectionManager {
     /// 获取已初始化的 self_weak。
-    /// INVARIANT: `self_weak` 在 `Arc::new_cyclic` 中设置，永远不会为 `None`。
-    pub(crate) fn self_weak(&self) -> Weak<ConnectionManager> {
-        self.self_weak
-            .read()
-            .clone()
-            .expect("INVARIANT: self_weak set in Arc::new_cyclic during ConnectionManager::new")
+    pub(crate) fn self_weak(&self) -> syncthing_core::Result<Weak<ConnectionManager>> {
+        self.self_weak.read().clone().ok_or_else(|| {
+            syncthing_core::SyncthingError::internal("ConnectionManager self_weak not initialized")
+        })
     }
 
     /// 创建新的连接管理器
@@ -181,14 +179,13 @@ impl ConnectionManager {
             self.parallel_dialer.set_connector(connector);
         }
         *self.transport_registry.write() = Some(registry);
-        info!(
-            "Transport registry set with schemes: {:?}",
-            self.transport_registry
-                .read()
-                .as_ref()
-                .expect("INVARIANT: registry just written above")
-                .schemes()
-        );
+        let schemes = self
+            .transport_registry
+            .read()
+            .as_ref()
+            .map(|r| r.schemes())
+            .unwrap_or_default();
+        info!("Transport registry set with schemes: {:?}", schemes);
     }
 
     /// 启动连接管理器
@@ -349,7 +346,13 @@ impl ConnectionManager {
 
     /// 启动网络监控任务
     pub fn start_netmon(&self, mut rx: mpsc::Receiver<NetChangeEvent>) {
-        let weak = self.self_weak();
+        let weak = match self.self_weak() {
+            Ok(w) => w,
+            Err(e) => {
+                warn!("Failed to get self_weak, aborting netmon task: {}", e);
+                return;
+            }
+        };
         let handle = tokio::spawn(async move {
             while let Some(event) = rx.recv().await {
                 if let Some(manager) = weak.upgrade() {
@@ -449,7 +452,13 @@ impl ConnectionManager {
         );
 
         // 延迟后重连
-        let weak = self.self_weak();
+        let weak = match self.self_weak() {
+            Ok(w) => w,
+            Err(e) => {
+                warn!("Failed to get self_weak, aborting reconnect: {}", e);
+                return;
+            }
+        };
         tokio::spawn(async move {
             sleep(backoff).await;
 

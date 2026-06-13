@@ -11,14 +11,12 @@
 
 use async_trait::async_trait;
 use std::path::{Path, PathBuf};
-use std::time::{Duration, SystemTime};
+use std::time::SystemTime;
 use tokio::fs;
 use tracing::debug;
 
 use crate::{CleanContext, FileVersion, Versioner};
-use syncthing_core::SyncthingError;
 
-const STVERSIONS_DIR: &str = ".stversions";
 const DEFAULT_MAX_AGE_SECS: i64 = 365 * 24 * 60 * 60; // 1 year
 
 struct Interval {
@@ -38,7 +36,7 @@ impl StaggeredVersioner {
             .unwrap_or(DEFAULT_MAX_AGE_SECS);
 
         Self {
-            versions_dir: folder_path.join(STVERSIONS_DIR),
+            versions_dir: folder_path.join(crate::util::STVERSIONS_DIR),
             intervals: [
                 Interval {
                     step_secs: 30,
@@ -59,26 +57,6 @@ impl StaggeredVersioner {
             ],
         }
     }
-
-    fn version_path(&self, file_path: &Path, timestamp: &str) -> PathBuf {
-        let name = file_path
-            .file_name()
-            .and_then(|n| n.to_str())
-            .unwrap_or("unknown");
-        self.versions_dir.join(format!("{}~{}", name, timestamp))
-    }
-
-    /// Extract version timestamp from filename (format: `name~YYYYMMDD-HHMMSS`)
-    fn extract_timestamp(filename: &str) -> Option<SystemTime> {
-        let tag = filename.rsplit('~').next()?;
-        let parsed = chrono::NaiveDateTime::parse_from_str(tag, "%Y%m%d-%H%M%S").ok()?;
-        let dt = parsed.and_utc();
-        Some(
-            std::time::UNIX_EPOCH
-                + Duration::from_secs(dt.timestamp() as u64)
-                + Duration::from_nanos(dt.timestamp_subsec_nanos() as u64),
-        )
-    }
 }
 
 #[async_trait]
@@ -88,52 +66,14 @@ impl Versioner for StaggeredVersioner {
             return Ok(());
         }
 
-        fs::create_dir_all(&self.versions_dir)
-            .await
-            .map_err(SyncthingError::Io)?;
-
-        let timestamp = chrono::Utc::now().format("%Y%m%d-%H%M%S").to_string();
-        let dest = self.version_path(file_path, &timestamp);
-
-        fs::copy(file_path, &dest).await.map_err(|e| {
-            SyncthingError::io(format!(
-                "archive {} -> {}: {}",
-                file_path.display(),
-                dest.display(),
-                e
-            ))
-        })?;
+        let dest = crate::util::archive_file(&self.versions_dir, file_path).await?;
         debug!(src = %file_path.display(), dest = %dest.display(), "Archived (staggered)");
         Ok(())
     }
 
     async fn get_versions(&self, file_path: &Path) -> syncthing_core::Result<Vec<FileVersion>> {
-        let name = file_path
-            .file_name()
-            .and_then(|n| n.to_str())
-            .unwrap_or("unknown");
-        let prefix = format!("{}~", name);
-
-        let mut versions = Vec::new();
-        let mut entries = match fs::read_dir(&self.versions_dir).await {
-            Ok(e) => e,
-            Err(_) => return Ok(versions),
-        };
-
-        while let Ok(Some(entry)) = entries.next_entry().await {
-            let fname = entry.file_name();
-            let fname = fname.to_string_lossy();
-            if !fname.starts_with(&prefix) {
-                continue;
-            }
-            if let Ok(meta) = entry.metadata().await {
-                versions.push(FileVersion {
-                    version_time: meta.modified().unwrap_or(SystemTime::UNIX_EPOCH),
-                    mod_time: meta.modified().unwrap_or(SystemTime::UNIX_EPOCH),
-                    size: meta.len(),
-                });
-            }
-        }
+        let mut versions = crate::util::list_versions_for(&self.versions_dir, file_path).await?;
+        // Staggered expects oldest-first for its window algorithm
         versions.sort_by_key(|a| a.version_time);
         Ok(versions)
     }
@@ -143,42 +83,7 @@ impl Versioner for StaggeredVersioner {
         file_path: &Path,
         version_time: SystemTime,
     ) -> syncthing_core::Result<()> {
-        let name = file_path
-            .file_name()
-            .and_then(|n| n.to_str())
-            .unwrap_or("unknown");
-        let prefix = format!("{}~", name);
-
-        let mut entries = match fs::read_dir(&self.versions_dir).await {
-            Ok(e) => e,
-            Err(_) => return Err(SyncthingError::internal("versions dir not found")),
-        };
-
-        while let Ok(Some(entry)) = entries.next_entry().await {
-            let fname = entry.file_name();
-            let fname = fname.to_string_lossy();
-            if !fname.starts_with(&prefix) {
-                continue;
-            }
-            let meta = entry.metadata().await.map_err(SyncthingError::Io)?;
-            let mtime = meta.modified().unwrap_or(SystemTime::UNIX_EPOCH);
-            let diff = mtime.duration_since(version_time).unwrap_or_default();
-            if diff.as_secs() < 2 {
-                fs::copy(entry.path(), file_path).await.map_err(|e| {
-                    SyncthingError::io(format!(
-                        "restore {} -> {}: {}",
-                        entry.path().display(),
-                        file_path.display(),
-                        e
-                    ))
-                })?;
-                return Ok(());
-            }
-        }
-        Err(SyncthingError::internal(format!(
-            "version not found for {}",
-            file_path.display()
-        )))
+        crate::util::restore_by_timestamp(&self.versions_dir, file_path, version_time).await
     }
 
     async fn clean(&self, _ctx: &CleanContext) -> syncthing_core::Result<()> {
@@ -198,20 +103,15 @@ impl Versioner for StaggeredVersioner {
             let fname = entry.file_name();
             let fname = fname.to_string_lossy();
 
-            // Group by original filename prefix (before ~)
-            if let Some(tag_pos) = fname.rfind('~') {
-                let base = &fname[..tag_pos];
-                let _ = base; // Used below for grouping
-            }
-
             // Remove files beyond maxAge
             let meta = match entry.metadata().await {
                 Ok(m) => m,
                 Err(_) => continue,
             };
             let mtime = meta.modified().unwrap_or(SystemTime::UNIX_EPOCH);
+            let version_ts = crate::util::extract_timestamp(&fname).unwrap_or(mtime);
             let age = now_secs
-                - mtime
+                - version_ts
                     .duration_since(SystemTime::UNIX_EPOCH)
                     .unwrap_or_default()
                     .as_secs() as i64;
@@ -250,7 +150,7 @@ impl StaggeredVersioner {
             let fname = entry.file_name().to_string_lossy().to_string();
             if let Some(tag_pos) = fname.rfind('~') {
                 let base = fname[..tag_pos].to_string();
-                if let Some(ts) = Self::extract_timestamp(&fname) {
+                if let Some(ts) = crate::util::extract_timestamp(&fname) {
                     let age = now_secs
                         - ts.duration_since(SystemTime::UNIX_EPOCH)
                             .unwrap_or_default()
@@ -354,7 +254,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_staggered_extract_timestamp() {
-        let ts = StaggeredVersioner::extract_timestamp("data.txt~20260603-120000").unwrap();
+        let ts = crate::util::extract_timestamp("data.txt~20260603-120000").unwrap();
         let secs = ts.duration_since(SystemTime::UNIX_EPOCH).unwrap().as_secs();
         // 2026-06-03 12:00:00 UTC
         assert!(secs > 1_700_000_000, "Timestamp should be in 2026+");

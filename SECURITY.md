@@ -9,8 +9,8 @@
 | Version | Supported | Notes |
 |---------|-----------|-------|
 | `main`  | ✅ | Active development. Receives all fixes. |
-| v0.2.8 Alpha | ✅ | Current Alpha. Security fixes backported on request. |
-| < v0.2.0 | ❌ | Pre-release; no support. |
+| v3.0.3 | ✅ | Current production release. Receives security fixes. |
+| < v3.0.0 | ❌ | Pre-release / alpha; no support. |
 
 ---
 
@@ -76,7 +76,7 @@ These parameters affect attack surface; review when changing:
 | `connection_timeout` | 120 s | direct 60 s / relay 180 s (planned) | TUNING_PLAN T-D4 |
 | `heartbeat_interval` | 30 s | OK (chosen for relay NAT, commit `2950f1f`) | `daemon_runner.rs:117` |
 | `max_connections` | 1000 | OK for single-node | `daemon_runner.rs:119` |
-| Loopback API auth bypass | enabled | TBD (debug aid; document risk) | `README.md` |
+| Loopback API auth bypass | enabled by default | Acceptable for single-user desktop; expose only with reverse proxy + TLS | `AGENTS.md` §8.4 |
 
 ---
 
@@ -103,8 +103,8 @@ If you run `syncthing-rust` in untrusted environments:
 - [ ] Bind REST API to loopback only (`gui.address = "127.0.0.1:8385"`) unless reverse-proxied with TLS.
 - [ ] Rotate API key periodically; treat `config.json` as a secret.
 - [ ] Restrict folder paths to dedicated directories — no system roots.
-- [ ] Monitor `RSS` growth; current `FileSystemDatabase` has unbounded in-memory cache (TUNING_PLAN T-C3 fixes this).
-- [ ] Enable log rotation manually until TUNING_PLAN T-F3 ships (`daemon.log` is currently unbounded).
+- [ ] Monitor `RSS` growth; current `FileSystemDatabase` uses an in-memory cache (see TUNING_PLAN T-C3 for tightening plan).
+- [ ] Log rotation is enabled by default (hourly, 7-day retention); verify `log_dir` is on a partition with adequate space.
 - [ ] Review `MAX_BEP_MESSAGE_SIZE` for your peer-trust profile; 128 MiB default is generous.
 
 ---

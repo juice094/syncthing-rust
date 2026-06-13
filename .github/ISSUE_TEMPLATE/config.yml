@@ -1,5 +1,11 @@
-blank_issues_enabled: true
+blank_issues_enabled: false
 contact_links:
   - name: Ask a Question
     url: https://github.com/juice094/syncthing-rust/discussions
-    about: Please use Discussions for general questions, architecture debates, or usage help.
+    about: Please use GitHub Discussions for questions, usage help, or general chat.
+  - name: Security Vulnerability
+    url: https://github.com/juice094/syncthing-rust/blob/main/SECURITY.md
+    about: Do not open public issues for security-sensitive matters. See SECURITY.md for reporting instructions.
+  - name: Commercial Support
+    url: https://github.com/juice094/syncthing-rust/blob/main/SUPPORT.md
+    about: For production deployments, priority bug fixes, or integration consulting, see SUPPORT.md.

@@ -76,6 +76,8 @@ pub struct ApiState {
     pub connection_manager: Option<Arc<dyn ConnectionManager>>,
     /// Optional local database for folder statistics
     pub db: Option<Arc<dyn FolderDatabase>>,
+    /// Daemon 优雅关闭信号发送端
+    pub shutdown_tx: Option<tokio::sync::watch::Sender<bool>>,
 }
 
 impl ApiState {
@@ -94,7 +96,14 @@ impl ApiState {
             start_time: std::time::Instant::now(),
             connection_manager: None,
             db: None,
+            shutdown_tx: None,
         }
+    }
+
+    /// 设置 daemon 关闭信号发送端
+    pub fn with_shutdown_tx(mut self, tx: tokio::sync::watch::Sender<bool>) -> Self {
+        self.shutdown_tx = Some(tx);
+        self
     }
 }
 

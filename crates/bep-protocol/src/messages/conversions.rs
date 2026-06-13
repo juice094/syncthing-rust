@@ -108,6 +108,7 @@ impl From<WireFileInfo> for syncthing_core::types::FileInfo {
                 Some(f.blocks_hash)
             },
             no_permissions: if f.no_permissions { Some(true) } else { None },
+            base_version: None,
         }
     }
 }

@@ -9,10 +9,6 @@ Cargo.lock
 *.swp
 *.swo
 
-# OS
-.DS_Store
-Thumbs.db
-
 # Protobuf compiler (optional vendored)
 /protoc/
 /protoc.zip
@@ -21,7 +17,6 @@ Thumbs.db
 stress-test-data/
 stress-test-*.csv
 stress-test-*.log
-*.log
 test_output.*
 
 # Runtime test data

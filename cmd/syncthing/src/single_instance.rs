@@ -50,3 +50,22 @@ pub fn acquire(config_dir: &Path) -> Result<(), String> {
 pub fn release(config_dir: &Path) {
     let _ = std::fs::remove_file(config_dir.join(PID_FILE_NAME));
 }
+
+/// 检查 pid 文件是否指向一个仍在运行的 syncthing-rust 实例。
+///
+/// 返回 Some(pid) 表示有另一个实例在运行；返回 None 表示无实例或 pid 文件已过期。
+pub fn running_instance_pid(config_dir: &Path) -> Option<u32> {
+    let pid_file = config_dir.join(PID_FILE_NAME);
+    if !pid_file.exists() {
+        return None;
+    }
+    let pid_str = std::fs::read_to_string(&pid_file).unwrap_or_default();
+    let pid = pid_str.trim().parse::<u32>().ok()?;
+    if pid == std::process::id() {
+        return None;
+    }
+    let s = System::new_with_specifics(
+        RefreshKind::new().with_processes(ProcessRefreshKind::everything()),
+    );
+    s.process(sysinfo::Pid::from(pid as usize)).map(|_| pid)
+}

@@ -23,31 +23,28 @@ impl ConnectionManager {
             self.device_relay_urls.insert(device_id, relay_urls.clone());
         }
 
-        // 检查是否已连接
-        if self.is_connected(&device_id) {
-            debug!("Device {} is already connected", device_id);
-            return Ok(());
-        }
+        // 在单个 write 临界区内原子完成：
+        // 1. 检查是否已连接
+        // 2. 检查是否已在连接中
+        // 3. 继承重试次数
+        // 4. 插入 pending 表
+        // 防止并发网络事件（netmon 重连 + 定时重试）导致同一设备并行拨号风暴。
+        let cancel_rx = {
+            let mut pending = self.pending_connections.write().await;
 
-        // 检查是否已在连接中
-        {
-            let pending = self.pending_connections.read().await;
+            if self.is_connected(&device_id) {
+                debug!("Device {} is already connected", device_id);
+                return Ok(());
+            }
+
             if pending.contains_key(&device_id) {
                 debug!("Connection to {} is already pending", device_id);
                 return Ok(());
             }
-        }
 
-        // 继承已有重试次数（如果存在）
-        let retry_count = {
-            let pending = self.pending_connections.read().await;
-            pending.get(&device_id).map(|p| p.retry_count).unwrap_or(0)
-        };
+            let retry_count = pending.get(&device_id).map(|p| p.retry_count).unwrap_or(0);
 
-        // 添加到待连接列表
-        let (cancel_tx, cancel_rx) = oneshot::channel();
-        {
-            let mut pending = self.pending_connections.write().await;
+            let (cancel_tx, cancel_rx) = oneshot::channel();
             pending.insert(
                 device_id,
                 super::PendingConnection {
@@ -59,9 +56,10 @@ impl ConnectionManager {
                     _cancel_tx: Some(cancel_tx),
                 },
             );
-        }
+            cancel_rx
+        };
 
-        // 启动连接任务
+        // 启动连接任务（必须在释放 pending write lock 之后，避免任务执行时死锁）
         self.spawn_connect_task(device_id, addresses, relay_urls, cancel_rx);
 
         Ok(())
@@ -78,7 +76,13 @@ impl ConnectionManager {
         let parallel_dialer = Arc::clone(&self.parallel_dialer);
         let tls_config = Arc::clone(&self.tls_config);
         let local_device_id = self.local_device_id;
-        let self_weak = self.self_weak();
+        let self_weak = match self.self_weak() {
+            Ok(w) => w,
+            Err(e) => {
+                warn!("Failed to get self_weak, aborting connect task: {}", e);
+                return;
+            }
+        };
 
         tokio::spawn(async move {
             tokio::select! {

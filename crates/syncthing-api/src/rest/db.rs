@@ -305,6 +305,7 @@ fn build_tree(
                             modified_by: None,
                             blocks_hash: None,
                             no_permissions: None,
+                            base_version: None,
                         },
                         Vec::new(),
                     )

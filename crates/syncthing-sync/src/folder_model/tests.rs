@@ -66,6 +66,7 @@ async fn test_pull_notify_wakeup() {
         modified_by: None,
         blocks_hash: None,
         no_permissions: None,
+        base_version: None,
     };
 
     // 模拟远程索引已更新到 DB

@@ -63,6 +63,19 @@ impl ConflictResolver {
         } else {
             ConflictResolution::RenameBoth
         };
+
+        if resolution == ConflictResolution::Merge {
+            // 文本合并推迟到 Puller：先接受 remote 版本，让 Puller 在下载完成后
+            // 使用 base_version 做真正的三路合并。
+            self.db.update_file(folder, remote.clone()).await?;
+            self.events.publish(SyncEvent::ConflictResolved {
+                folder: folder.to_string(),
+                item: local.name.clone(),
+                resolution,
+            });
+            return Ok(ConflictResolution::UseRemote);
+        }
+
         self.apply_resolution(folder, local, remote, folder_path, resolution)
             .await?;
 
@@ -353,6 +366,7 @@ mod tests {
             modified_by: None,
             blocks_hash: None,
             no_permissions: None,
+            base_version: None,
         }
     }
 

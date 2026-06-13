@@ -36,7 +36,9 @@ pub async fn start_api_server(
     sync_service: Arc<syncthing_sync::SyncService>,
     my_id: DeviceId,
     connection_handle: Option<syncthing_net::manager::ConnectionManagerHandle>,
+    shutdown_tx: tokio::sync::watch::Sender<bool>,
 ) -> Result<(tokio::task::JoinHandle<()>, SocketAddr)> {
+    let mut shutdown_rx = shutdown_tx.subscribe();
     let config_path = config_dir.join("config.json");
     let config_store = Arc::new(syncthing_api::config::JsonConfigStore::new(&config_path));
 
@@ -60,7 +62,8 @@ pub async fn start_api_server(
         config_store,
         syncthing_api::events::EventBus::new(),
         Some(sync_service.clone() as Arc<dyn syncthing_core::traits::SyncModel>),
-    );
+    )
+    .with_shutdown_tx(shutdown_tx);
     state.my_id = Some(my_id);
     state.api_key = Some(api_key.to_string());
     state.connection_manager = connection_handle
@@ -103,7 +106,13 @@ pub async fn start_api_server(
 
     let handle = tokio::spawn(async move {
         let svc = router.into_make_service_with_connect_info::<SocketAddr>();
-        if let Err(e) = axum::serve(listener, svc).await {
+        if let Err(e) = axum::serve(listener, svc)
+            .with_graceful_shutdown(async move {
+                let _ = shutdown_rx.changed().await;
+                info!("REST API server received shutdown signal");
+            })
+            .await
+        {
             warn!("REST API server error: {}", e);
         }
     });

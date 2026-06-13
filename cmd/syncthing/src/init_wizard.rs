@@ -7,20 +7,20 @@ use std::path::PathBuf;
 use std::str::FromStr;
 use syncthing_core::types::{AddressType, Config, Device, Folder, FolderType};
 
-fn prompt(message: &str, default: Option<&str>) -> String {
+fn prompt(message: &str, default: Option<&str>) -> io::Result<String> {
     print!("{}", message);
     if let Some(d) = default {
         print!(" [{}]", d);
     }
     print!(": ");
-    io::stdout().flush().unwrap();
+    io::stdout().flush()?;
     let mut input = String::new();
-    io::stdin().read_line(&mut input).unwrap();
+    io::stdin().read_line(&mut input)?;
     let trimmed = input.trim();
     if trimmed.is_empty() {
-        default.unwrap_or("").to_string()
+        Ok(default.unwrap_or("").to_string())
     } else {
-        trimmed.to_string()
+        Ok(trimmed.to_string())
     }
 }
 
@@ -31,11 +31,11 @@ pub fn run_wizard(config_dir: &PathBuf) -> anyhow::Result<()> {
     println!();
 
     // 1. 设备名称
-    let device_name = prompt("1. 本设备名称", Some("syncthing-rust"));
+    let device_name = prompt("1. 本设备名称", Some("syncthing-rust"))?;
 
     // 2. 同步文件夹路径
     let folder_path = loop {
-        let path = prompt("2. 同步文件夹路径（绝对路径）", None);
+        let path = prompt("2. 同步文件夹路径（绝对路径）", None)?;
         if path.is_empty() {
             println!("   错误：路径不能为空\n");
             continue;
@@ -56,7 +56,7 @@ pub fn run_wizard(config_dir: &PathBuf) -> anyhow::Result<()> {
 
     // 3. 对侧设备 ID
     let peer_id = loop {
-        let id = prompt("3. 对侧设备 ID（如 XXXXXXX-XXXXXXX-...）", None);
+        let id = prompt("3. 对侧设备 ID（如 XXXXXXX-XXXXXXX-...）", None)?;
         if id.is_empty() {
             println!("   错误：设备 ID 不能为空\n");
             continue;
@@ -73,7 +73,7 @@ pub fn run_wizard(config_dir: &PathBuf) -> anyhow::Result<()> {
         let addr = prompt(
             "4. 对侧地址（如 192.168.1.100:22001 或 tailscale IP）",
             None,
-        );
+        )?;
         if addr.is_empty() {
             println!("   错误：地址不能为空\n");
             continue;
@@ -102,12 +102,12 @@ pub fn run_wizard(config_dir: &PathBuf) -> anyhow::Result<()> {
             folder_type: FolderType::SendReceive,
             paused: false,
             rescan_interval_secs: 10,
-            devices: vec![syncthing_core::DeviceId::from_str(&peer_id).unwrap()],
+            devices: vec![syncthing_core::DeviceId::from_str(&peer_id)?],
             ignore_patterns: vec![],
             versioning: None,
         }],
         devices: vec![Device {
-            id: syncthing_core::DeviceId::from_str(&peer_id).unwrap(),
+            id: syncthing_core::DeviceId::from_str(&peer_id)?,
             name: Some("peer".to_string()),
             addresses: vec![AddressType::Tcp(peer_addr)],
             paused: false,
@@ -116,7 +116,7 @@ pub fn run_wizard(config_dir: &PathBuf) -> anyhow::Result<()> {
         local_device_id: Some(local_device_id),
         gui: syncthing_core::types::GuiConfig {
             enabled: true,
-            address: "0.0.0.0:8385".to_string(),
+            address: syncthing_core::constants::DEFAULT_GUI_ADDR.to_string(),
             api_key: random_api_key(),
         },
         options: syncthing_core::types::Options {

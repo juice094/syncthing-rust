@@ -74,6 +74,9 @@ pub struct App {
 
     pub daemon_running: bool,
     pub daemon_status: String,
+    /// 标记当前 daemon 是否由外部进程（如 Auto 模式的托盘）启动。
+    /// 若为 true，TUI 不应尝试启动/停止它，避免重复实例。
+    pub external_daemon: bool,
     pub connected_devices: Vec<DeviceId>,
     pub theme: Theme,
 
@@ -113,6 +116,7 @@ impl App {
             log_lines: VecDeque::with_capacity(constants::LOG_BUFFER_CAP),
             daemon_running: false,
             daemon_status: "Stopped".to_string(),
+            external_daemon: false,
             connected_devices: Vec::new(),
             theme: Theme::default(),
             form: None,

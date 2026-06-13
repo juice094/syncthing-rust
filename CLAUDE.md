@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Identity
 
-`syncthing-rust` is a Rust reimplementation of the Syncthing BEP protocol for P2P file sync — zero runtime deps, single static binary, wire-compatible with Go Syncthing. Currently **v3.0.2** (production-grade), deployed on ROG-X (Windows 11) ↔ Gray-Cloud (Ubuntu 24.04) via Tailscale.
+`syncthing-rust` is a Rust reimplementation of the Syncthing BEP protocol for P2P file sync — zero runtime deps, single static binary, wire-compatible with Go Syncthing. Currently **v3.0.3** (production-grade), deployed on ROG-X (Windows 11) ↔ Gray-Cloud (Ubuntu 24.04) via Tailscale.
 
 ## Build & Test
 
@@ -143,7 +143,7 @@ Popups (Add/Edit forms): `Tab`/`↑↓` navigate fields, `Space` toggles device 
 
 ## Config
 
-Defaults: BEP `0.0.0.0:22001`, REST API `0.0.0.0:8385`.
+Defaults: BEP `0.0.0.0:22001`, REST API `127.0.0.1:8385`.
 Config: `%LOCALAPPDATA%/syncthing-rust/config.json` (Windows), `~/.config/syncthing-rust/config.json` (Linux).
 Key options: `global_announce_enabled`, `relays_enabled`, `transports: ["tcp"]`.
 `GET /rest/health` is the ping endpoint — `/rest/system/ping` does not exist.
@@ -164,7 +164,7 @@ Notable endpoints:
 
 ## Test Status
 
-347 tests (workspace total, including unit + integration + doc-tests), 1 flaky (`test_session_block_request_response` — Ping/Response race), 1 ignored (`test_two_node_single_file_sync` — ClusterConfig race under parallel load).
+364 passed / 4 ignored / 0 failed (workspace total, including unit + integration + doc-tests). Ignored: `test_two_node_single_file_sync` (ClusterConfig race under parallel test load) and two external-network STUN doc-tests.
 
 ## Facts Register
 

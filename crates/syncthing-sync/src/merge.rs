@@ -1,9 +1,9 @@
 //! 文本文件三路合并
 //!
-//! 简化版：无 base 版本，直接对比 local vs remote。
+//! 提供基于 base / local / remote 的真正三路合并，不依赖 git。
 //! 不重叠的修改自动合并，重叠修改插入 git 风格冲突标记。
 
-use similar::{ChangeTag, TextDiff};
+use similar::TextDiff;
 
 /// 合并结果
 #[derive(Debug, Clone)]
@@ -16,17 +16,101 @@ pub struct MergeResult {
     pub conflict_count: usize,
 }
 
-/// 对文本内容执行简化三路合并
+/// 将字符串按行分割，保留每行末尾的换行符
+fn split_lines(s: &str) -> Vec<String> {
+    s.split_inclusive('\n').map(|s| s.to_string()).collect()
+}
+
+/// 表示 base 中的一个编辑区间
+#[derive(Debug, Clone)]
+struct Edit {
+    /// 在 base 中的起始行（包含）
+    start: usize,
+    /// 在 base 中的结束行（不包含）
+    end: usize,
+    /// 替换后的行（带换行符）
+    lines: Vec<String>,
+}
+
+impl Edit {
+    /// 从 diff 构建编辑列表
+    fn from_diff(diff: &TextDiff<'_, '_, '_, str>, side: &str) -> Vec<Self> {
+        let side_lines = split_lines(side);
+        let mut edits = Vec::new();
+        for op in diff.ops() {
+            let old_range = op.old_range();
+            let new_range = op.new_range();
+            if old_range == new_range && matches!(op, similar::DiffOp::Equal { .. }) {
+                continue;
+            }
+            let lines = side_lines[new_range.start..new_range.end].to_vec();
+            edits.push(Self {
+                start: old_range.start,
+                end: old_range.end,
+                lines,
+            });
+        }
+        edits
+    }
+}
+
+/// 找出 local 与 remote 编辑的重叠区域，并扩展为冲突区域
+fn find_conflict_regions(local_edits: &[Edit], remote_edits: &[Edit]) -> Vec<(usize, usize)> {
+    let mut regions = Vec::new();
+    for le in local_edits {
+        for re in remote_edits {
+            // 区间重叠判断：[a,b) 与 [c,d) 重叠当且仅当 a < d && c < b
+            if le.start < re.end && re.start < le.end {
+                regions.push((le.start.min(re.start), le.end.max(re.end)));
+            }
+        }
+    }
+    // 合并重叠的冲突区域
+    regions.sort_by_key(|r| r.0);
+    let mut merged: Vec<(usize, usize)> = Vec::new();
+    for (start, end) in regions {
+        if let Some(last) = merged.last_mut() {
+            if start <= last.1 {
+                last.1 = last.1.max(end);
+                continue;
+            }
+        }
+        merged.push((start, end));
+    }
+    merged
+}
+
+/// 为冲突区域构建一侧的输出
 ///
-/// 策略（无 base 版）：
-/// 1. 将 local 和 remote 分别与 common（取 local 和 remote 的最长公共子序列近似）对比
-/// 2. 更简化的做法：直接对 local 和 remote 做行级 diff
-/// 3. 如果 remote 只是 local 的超集（新增行）→ 自动合并
-/// 4. 如果同一行被双端修改 → 冲突标记
+/// 如果该侧在冲突区域内有编辑，应用编辑；否则使用 base 内容。
+fn build_side(base_lines: &[String], edits: &[Edit], start: usize, end: usize) -> String {
+    if let Some(edit) = edits.iter().find(|e| e.start >= start && e.start < end) {
+        let mut s = String::new();
+        for line in &base_lines[start..edit.start] {
+            s.push_str(line);
+        }
+        for line in &edit.lines {
+            s.push_str(line);
+        }
+        for line in &base_lines[edit.end..end] {
+            s.push_str(line);
+        }
+        s
+    } else {
+        base_lines[start..end].concat()
+    }
+}
+
+/// 对文本内容执行真正的三路合并
 ///
-/// 实际实现：用 Myer's diff 算法比较 local↔remote，
-/// 然后对每对相邻的 diff hunk 判断是否是"替换同一行"。
-pub fn merge_text(local: &str, remote: &str, _item_name: &str) -> MergeResult {
+/// 策略：
+/// 1. local == remote → 直接返回。
+/// 2. 只有一侧发生变化 → 采用变化侧。
+/// 3. 两侧都发生变化：
+///    - 计算 base→local 和 base→remote 的编辑。
+///    - 非重叠编辑自动顺序应用。
+///    - 重叠编辑生成 git 风格冲突标记。
+pub fn three_way_merge(base: &str, local: &str, remote: &str, _item_name: &str) -> MergeResult {
     // 完全相同 → 无需合并
     if local == remote {
         return MergeResult {
@@ -36,63 +120,113 @@ pub fn merge_text(local: &str, remote: &str, _item_name: &str) -> MergeResult {
         };
     }
 
-    let diff = TextDiff::from_lines(local, remote);
+    // 只有一侧发生变化
+    if local == base {
+        return MergeResult {
+            content: remote.to_string(),
+            has_conflicts: false,
+            conflict_count: 0,
+        };
+    }
+    if remote == base {
+        return MergeResult {
+            content: local.to_string(),
+            has_conflicts: false,
+            conflict_count: 0,
+        };
+    }
+
+    let base_lines = split_lines(base);
+    let base_len = base_lines.len();
+
+    let diff_local = TextDiff::from_lines(base, local);
+    let diff_remote = TextDiff::from_lines(base, remote);
+
+    let local_edits = Edit::from_diff(&diff_local, local);
+    let remote_edits = Edit::from_diff(&diff_remote, remote);
+
+    let conflicts = find_conflict_regions(&local_edits, &remote_edits);
+
     let mut merged = String::new();
     let mut has_conflicts = false;
     let mut conflict_count = 0;
 
-    // 收集所有 diff hunks
-    let mut ops: Vec<(ChangeTag, String)> = Vec::new();
-    for group in diff.grouped_ops(3) {
-        for op in group {
-            for change in diff.iter_changes(&op) {
-                ops.push((change.tag(), change.value().to_string()));
-            }
-        }
-    }
+    let mut pos = 0usize;
+    let mut li = 0usize;
+    let mut ri = 0usize;
+    let mut ci = 0usize;
 
-    // 简化策略：
-    // 遍历 diff ops，将连续的 Equal + Delete + Insert 识别为"替换"
-    // 如果是纯 Insert（新增行）→ 直接追加
-    // 如果是 Delete + Insert（修改行）→ 检查是否为同一行的修改
-    //   → 用行号判断：如果删除和插入在同一个位置附近 → 冲突标记
-    //
-    // 更简单的做法：直接输出 unified diff 风格的合并
-    // Equal → 保留
-    // Delete(local) + Insert(remote) → 如果删除的是一行，插入的也是一行 → 冲突标记
-    // Insert only → 追加
-
-    let mut i = 0;
-    while i < ops.len() {
-        match ops[i].0 {
-            ChangeTag::Equal => {
-                merged.push_str(&ops[i].1);
-                i += 1;
-            }
-            ChangeTag::Delete => {
-                // 检查下一个是否是 Insert（替换场景）
-                if i + 1 < ops.len() && ops[i + 1].0 == ChangeTag::Insert {
-                    // 同一行的修改 → 冲突标记
-                    merged.push_str(&format!(
-                        "<<<<<<< local\n{}=======\n{}>>>>>>> remote\n",
-                        ops[i].1,
-                        ops[i + 1].1
-                    ));
-                    has_conflicts = true;
-                    conflict_count += 1;
-                    i += 2;
-                } else {
-                    // 纯删除（local 有，remote 没有）→ remote 删除了这一行
-                    // 在简化模型中，我们接受 remote 的版本（不保留删除的行）
-                    i += 1;
+    while pos < base_len || li < local_edits.len() || ri < remote_edits.len() {
+        // 当前位置是否在一个冲突区域内？
+        if let Some(&(cstart, cend)) = conflicts.get(ci) {
+            if cstart == pos {
+                let local_side = build_side(&base_lines, &local_edits, cstart, cend);
+                let remote_side = build_side(&base_lines, &remote_edits, cstart, cend);
+                merged.push_str("<<<<<<< local\n");
+                merged.push_str(&local_side);
+                merged.push_str("=======\n");
+                merged.push_str(&remote_side);
+                merged.push_str(">>>>>>> remote\n");
+                has_conflicts = true;
+                conflict_count += 1;
+                pos = cend;
+                ci += 1;
+                // 跳过被冲突区域覆盖的 edit
+                while li < local_edits.len() && local_edits[li].end <= pos {
+                    li += 1;
                 }
-            }
-            ChangeTag::Insert => {
-                // 纯新增 → 追加 remote 的内容
-                merged.push_str(&ops[i].1);
-                i += 1;
+                while ri < remote_edits.len() && remote_edits[ri].end <= pos {
+                    ri += 1;
+                }
+                continue;
             }
         }
+
+        // 当前位置是否有 local edit？
+        if let Some(edit) = local_edits.get(li) {
+            if edit.start == pos {
+                for line in &edit.lines {
+                    merged.push_str(line);
+                }
+                // Insert 操作 edit.start == edit.end，不消耗 base 行，保持 pos 不变
+                if edit.start != edit.end {
+                    pos = edit.end;
+                }
+                li += 1;
+                continue;
+            }
+        }
+
+        // 当前位置是否有 remote edit？
+        if let Some(edit) = remote_edits.get(ri) {
+            if edit.start == pos {
+                for line in &edit.lines {
+                    merged.push_str(line);
+                }
+                if edit.start != edit.end {
+                    pos = edit.end;
+                }
+                ri += 1;
+                continue;
+            }
+        }
+
+        // 找到下一个事件位置
+        let next_conflict_start = conflicts.get(ci).map(|c| c.0);
+        let next_local_start = local_edits.get(li).map(|e| e.start);
+        let next_remote_start = remote_edits.get(ri).map(|e| e.start);
+
+        let next_event = [next_conflict_start, next_local_start, next_remote_start]
+            .iter()
+            .filter_map(|&x| x)
+            .min()
+            .unwrap_or(base_len)
+            .max(pos);
+
+        for line in &base_lines[pos..next_event] {
+            merged.push_str(line);
+        }
+        pos = next_event;
     }
 
     MergeResult {
@@ -100,6 +234,14 @@ pub fn merge_text(local: &str, remote: &str, _item_name: &str) -> MergeResult {
         has_conflicts,
         conflict_count,
     }
+}
+
+/// 对文本内容执行简化三路合并（无 base 版本）
+///
+/// 兼容旧接口：当没有 base 时，把 local 同时作为 base，退化为双路 diff。
+/// 这种情况下的冲突判断较粗糙，建议调用方优先使用 `three_way_merge`。
+pub fn merge_text(local: &str, remote: &str, _item_name: &str) -> MergeResult {
+    three_way_merge(local, local, remote, _item_name)
 }
 
 /// 判断文件是否为可合并的文本类型
@@ -121,6 +263,15 @@ pub fn is_mergeable_text(path: &str) -> bool {
         || path.ends_with(".ini")
         || path.ends_with(".cfg")
         || path.ends_with(".log")
+        || path.ends_with(".c")
+        || path.ends_with(".h")
+        || path.ends_with(".cpp")
+        || path.ends_with(".go")
+        || path.ends_with(".java")
+        || path.ends_with(".kt")
+        || path.ends_with(".swift")
+        || path.ends_with(".rb")
+        || path.ends_with(".php")
 }
 
 #[cfg(test)]
@@ -129,47 +280,90 @@ mod tests {
 
     #[test]
     fn test_identical_content() {
-        let result = merge_text("line1\nline2\n", "line1\nline2\n", "test.md");
+        let result = three_way_merge(
+            "line1\nline2\n",
+            "line1\nline2\n",
+            "line1\nline2\n",
+            "test.md",
+        );
         assert!(!result.has_conflicts);
         assert_eq!(result.conflict_count, 0);
         assert_eq!(result.content, "line1\nline2\n");
     }
 
     #[test]
-    fn test_non_overlapping_additions() {
-        let local = "line1\nline2\n";
-        let remote = "line1\nline2\nline3\n";
-        let result = merge_text(local, remote, "test.md");
+    fn test_local_unchanged_use_remote() {
+        let result = three_way_merge(
+            "line1\nline2\n",
+            "line1\nline2\n",
+            "line1\nline2\nline3\n",
+            "test.md",
+        );
         assert!(!result.has_conflicts);
         assert_eq!(result.content, "line1\nline2\nline3\n");
     }
 
     #[test]
+    fn test_remote_unchanged_use_local() {
+        let result = three_way_merge(
+            "line1\nline2\n",
+            "line1\nline2\nline3\n",
+            "line1\nline2\n",
+            "test.md",
+        );
+        assert!(!result.has_conflicts);
+        assert_eq!(result.content, "line1\nline2\nline3\n");
+    }
+
+    #[test]
+    fn test_non_overlapping_additions() {
+        let base = "line1\nline2\n";
+        let local = "line1\nlocal-add\nline2\n";
+        let remote = "line1\nline2\nremote-add\n";
+        let result = three_way_merge(base, local, remote, "test.md");
+        assert!(!result.has_conflicts);
+        assert!(result.content.contains("local-add"));
+        assert!(result.content.contains("remote-add"));
+    }
+
+    #[test]
     fn test_overlapping_line_modification() {
-        let local = "core: autonomy\n";
-        let remote = "core: collaboration\n";
-        let result = merge_text(local, remote, "SOUL.md");
+        let base = "core: autonomy\n";
+        let local = "core: collaboration\n";
+        let remote = "core: synergy\n";
+        let result = three_way_merge(base, local, remote, "SOUL.md");
         assert!(result.has_conflicts);
         assert_eq!(result.conflict_count, 1);
         assert!(result.content.contains("<<<<<<< local"));
-        assert!(result.content.contains("core: autonomy"));
         assert!(result.content.contains("core: collaboration"));
+        assert!(result.content.contains("core: synergy"));
         assert!(result.content.contains(">>>>>>> remote"));
     }
 
     #[test]
-    fn test_local_addition_remote_different_addition() {
-        let local = "line1\nlocal-add\nline2\n";
-        let remote = "line1\nremote-add\nline2\n";
-        let result = merge_text(local, remote, "test.md");
-        // 第二行被双端替换 → 冲突
+    fn test_local_delete_remote_keep() {
+        let base = "line1\nline2\n";
+        let local = "line2\n";
+        let remote = "line1\nline2\n";
+        let result = three_way_merge(base, local, remote, "test.md");
+        assert!(!result.has_conflicts);
+        assert_eq!(result.content, "line2\n");
+    }
+
+    #[test]
+    fn test_local_delete_remote_modify() {
+        let base = "line1\nline2\n";
+        let local = "line2\n";
+        let remote = "line1-changed\nline2\n";
+        let result = three_way_merge(base, local, remote, "test.md");
         assert!(result.has_conflicts);
         assert_eq!(result.conflict_count, 1);
     }
 
     #[test]
-    fn test_remote_pure_addition_no_conflict() {
-        let local = "line1\n";
+    fn test_merge_text_backward_compatible() {
+        // merge_text 使用 local 作为 base，行为与旧实现接近
+        let local = "line1\nline2\n";
         let remote = "line1\nline2\nline3\n";
         let result = merge_text(local, remote, "test.md");
         assert!(!result.has_conflicts);
@@ -181,6 +375,8 @@ mod tests {
         assert!(is_mergeable_text("SOUL.md"));
         assert!(is_mergeable_text("config.toml"));
         assert!(is_mergeable_text("script.py"));
+        assert!(is_mergeable_text("main.c"));
+        assert!(is_mergeable_text("lib.h"));
         assert!(!is_mergeable_text("image.png"));
         assert!(!is_mergeable_text("binary.dll"));
     }

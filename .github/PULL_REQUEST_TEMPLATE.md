@@ -26,20 +26,27 @@
 - [ ] `syncthing-sync`
 - [ ] `syncthing-api`
 - [ ] `syncthing-core`
-- [ ] `cmd/syncthing`
-- [ ] `cmd/syncthing-bench`
+- [ ] `syncthing-fs`
+- [ ] `syncthing-db`
+- [ ] `syncthing-versioner`
 - [ ] `syncthing-test-utils`
+- [ ] `cmd/syncthing`
+- [ ] `cmd/syncthing-cli`
+- [ ] `cmd/syncthing-bench`
+- [ ] `cmd/syncthing-mcp-bridge`
+- [ ] `cmd/syncthing-tray`
 - [ ] Other: ___
 
 ## Checklist
 
 <!-- All items must pass before merge. -->
 
-- [ ] `cargo test --workspace` passes locally (309 tests)
-- [ ] `cargo clippy --workspace --all-targets` reports **0 warnings**
-- [ ] `cargo fmt --check` passes (or I ran `cargo fmt`)
+- [ ] `cargo test --workspace` passes locally (364 passed / 4 ignored / 0 failed)
+- [ ] `cargo clippy --workspace --all-targets -- -D warnings -W clippy::await_holding_lock` reports **0 warnings**
+- [ ] `cargo fmt --all -- --check` passes (or I ran `cargo fmt --all`)
+- [ ] `cargo doc --no-deps --workspace` passes
 - [ ] I have updated relevant documentation (`README.md`, `docs/`, `CHANGELOG.md` if applicable)
-- [ ] My changes are covered by existing tests or I have added new tests
+- [ ] My changes are covered by existing tests or I have added new tests / E2E coverage
 - [ ] If this PR modifies public API or protocol behavior, I have updated the design docs or ADRs
 
 ## Testing Notes

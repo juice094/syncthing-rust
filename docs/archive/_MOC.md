@@ -39,8 +39,6 @@ tags: [moc, archive, history]
 - [[archive/2026-04-04-bep-handshake/VERIFICATION_STANDARD]]
 - [[archive/2026-04-04-bep-handshake/verification-checklist]]
 - [[archive/ENGINEERING_ANALYSIS_2026-04-09]] (2026-04-09)
-- [[archive/GITHUB_OPTIMIZATION]]
-- [[archive/README_DESKTOP_2026-04-04]] (2026-04-04)
 - [[archive/STAGE_REPORT_SYNCTHING_2026-04-10]] (2026-04-10)
 - [[archive/TESTING_GUIDE_FOR_GRAY_v0.1.0]]
 - [[archive/TODAY_WORK_REPORT_2026-04-09]] (2026-04-09)
@@ -62,10 +60,6 @@ tags: [moc, archive, history]
 - [[archive/plans/PHASE4_PLAN]]
 - [[archive/plans/WAVE3_PLAN]]
 - [[archive/plans/improvement-plan]]
-- [[archive/tasks/Agent-A-task-ARCHIVED]]
-- [[archive/tasks/Agent-B-task-ARCHIVED]]
-- [[archive/tasks/Agent-D-task-ARCHIVED]]
-- [[archive/tasks/Agent-E-task-ARCHIVED]]
 - [[archive/verification-reports/FINAL_VERIFICATION_REPORT_20250403]] (2025-04-03)
 - [[archive/verification-reports/IROH_MIGRATION_REPORT]]
 - [[archive/verification-reports/MASTER_FINAL_REPORT_20250403]] (2025-04-03)

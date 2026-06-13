@@ -6,8 +6,8 @@
 
 | Metric | Status |
 |:---|:---|
-| Version | v0.2.10-rc3 |
-| Tests | 382 passed / 0 failed |
+| Version | v3.0.3 |
+| Tests | 364 passed / 4 ignored / 0 failed |
 | Clippy | 0 warnings |
 | License | MIT (dual: commercial available) |
 | Rust | 1.85+ |
@@ -59,8 +59,9 @@ cargo run -p syncthing-cli -- status
 
 Before submitting a PR:
 
-- [ ] `cargo test --all` — all green
-- [ ] `cargo check --all` — zero warnings
+- [ ] `cargo test --workspace` — 364 passed / 4 ignored / 0 failed
+- [ ] `cargo clippy --workspace --all-targets -- -D warnings -W clippy::await_holding_lock` — 0 warnings
+- [ ] `cargo fmt --check` — pass (or run `cargo fmt --all`)
 - [ ] New public API has doc comment
 - [ ] New error paths are logged (not silent)
 - [ ] No production `unwrap()` (test code only)
@@ -104,14 +105,15 @@ when the target is opened by editors/AV/desktop search.
 
 | Crate | Purpose | Must Not |
 |:---|:---|:---|
-| `syncthing-core` | Traits + types only | No concrete impls |
+| `syncthing-core` | Traits + types + constants | No internal crate deps / no concrete impls |
 | `bep-protocol` | Wire format (prost) | No I/O |
-| `syncthing-net` | Transport, sessions, discovery | No sync logic |
-| `syncthing-sync` | Scanner, puller, folder model | No wire format |
-| `syncthing-fs` | Filesystem abstraction | No sync logic |
-| `syncthing-db` | Storage backend | No sync logic |
-| `syncthing-api` | REST + WebSocket | No sync logic |
-| `syncthing-versioner` | File versioning | No FS I/O |
+| `syncthing-net` | Transport, sessions, discovery, NAT traversal | No sync logic |
+| `syncthing-sync` | Scanner, puller, folder model, conflict resolution | No wire format |
+| `syncthing-fs` | Filesystem abstraction, ignore patterns, watcher | No sync state machine logic |
+| `syncthing-db` | Metadata + block storage backend | Expose sled-specific APIs |
+| `syncthing-api` | REST API + event bus + config store | Hold concrete `ConnectionManagerHandle` / `LocalDatabase` |
+| `syncthing-versioner` | File versioning strategies | FS I/O |
+| `syncthing-test-utils` | Test harnesses (`MemoryPipe`, `TestNode`) | Used only in tests / dev tools |
 
 ---
 
@@ -137,11 +139,13 @@ Read [`AGENTS.md`](AGENTS.md) before modifying core logic.
 
 ## Frozen Items
 
-The following are **stage-frozen** (high cost / low value at v0.2.x). Do not implement without prior discussion:
+The following are **stage-frozen** per [AGENTS.md](AGENTS.md). Do not implement without an ADR and prior discussion:
 
-- Consensus algorithms
+- Consensus algorithms / distributed verification extensions
 - Reputation systems
 - Custom cryptography beyond rustls TLS 1.3
+- QUIC / MagicSocket transport
+- Web GUI (permanent freeze: TUI + tray + REST API only)
 
 ---
 

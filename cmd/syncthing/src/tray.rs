@@ -9,6 +9,7 @@ use std::sync::OnceLock;
 
 use windows::core::{w, PCWSTR};
 use windows::Win32::Foundation::{HINSTANCE, HWND, LPARAM, LRESULT, WPARAM};
+
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::UI::Shell::{
     Shell_NotifyIconW, NIF_ICON, NIF_MESSAGE, NIF_TIP, NIM_ADD, NIM_DELETE, NIM_MODIFY,
@@ -16,27 +17,39 @@ use windows::Win32::UI::Shell::{
 };
 use windows::Win32::UI::WindowsAndMessaging::{
     AppendMenuW, CreateIconFromResourceEx, CreatePopupMenu, CreateWindowExW, DefWindowProcW,
-    DestroyIcon, DestroyMenu, DispatchMessageW, GetCursorPos, GetMessageW, LoadIconW, PostMessageW,
-    PostQuitMessage, RegisterClassW, RegisterWindowMessageW, SetForegroundWindow, TrackPopupMenu,
-    HICON, HMENU, IDI_APPLICATION, IDI_ERROR, IDI_INFORMATION, IDI_WARNING, LR_DEFAULTCOLOR,
-    MF_STRING, TPM_BOTTOMALIGN, TPM_LEFTALIGN, WM_APP, WM_CLOSE, WM_COMMAND, WM_DESTROY,
-    WM_LBUTTONUP, WM_NULL, WM_RBUTTONUP, WNDCLASSW, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW,
-    WS_OVERLAPPED,
+    DestroyIcon, DestroyMenu, DispatchMessageW, GetCursorPos, GetMessageW, GetSystemMetrics,
+    LoadIconW, PostMessageW, PostQuitMessage, RegisterClassW, RegisterWindowMessageW,
+    SetForegroundWindow, TrackPopupMenu, HICON, HMENU, IDI_APPLICATION, IDI_ERROR, IDI_INFORMATION,
+    IDI_WARNING, LR_DEFAULTCOLOR, MENU_ITEM_FLAGS, MF_GRAYED, MF_STRING, SM_CXSMICON,
+    TPM_BOTTOMALIGN, TPM_LEFTALIGN, WM_APP, WM_CLOSE, WM_COMMAND, WM_DESTROY, WM_LBUTTONUP,
+    WM_NULL, WM_RBUTTONUP, WNDCLASSW, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_OVERLAPPED,
 };
 
 /// 防止 DestroyIcon double-free：cleanup() 先释放后置 true，WM_DESTROY 检查此标志。
 static CLEANED_UP: AtomicBool = AtomicBool::new(false);
 
+/// 当前 daemon 运行状态，供菜单渲染时读取。
+/// 由主线程在 daemon 启动/停止时更新。
+static DAEMON_RUNNING: AtomicBool = AtomicBool::new(false);
+
+/// 设置 daemon 运行状态（主线程调用）。
+pub fn set_daemon_running(running: bool) {
+    DAEMON_RUNNING.store(running, Ordering::Release);
+}
+
+/// 读取 daemon 是否正在运行（托盘线程调用）。
+pub fn daemon_running() -> bool {
+    DAEMON_RUNNING.load(Ordering::Acquire)
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TrayEvent {
-    OpenWebUi,
     OpenTui,
     ToggleDaemon,
     Exit,
 }
 
 const WM_TRAYICON: u32 = WM_APP + 1;
-const ID_OPEN_WEBUI: u32 = 1001;
 const ID_OPEN_TUI: u32 = 1004;
 const ID_TOGGLE_DAEMON: u32 = 1002;
 const ID_EXIT: u32 = 1003;
@@ -70,6 +83,37 @@ impl BalloonIcon {
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_balloon_icon_to_niif() {
+        assert_eq!(BalloonIcon::None.to_niif(), NIIF_NONE);
+        assert_eq!(BalloonIcon::Info.to_niif(), NIIF_INFO);
+        assert_eq!(BalloonIcon::Warning.to_niif(), NIIF_WARNING);
+        assert_eq!(BalloonIcon::Error.to_niif(), NIIF_ERROR);
+    }
+
+    #[test]
+    fn test_icon_type_system_mapping() {
+        // 系统图标选择仅用于 Error/Syncing；Default/Idle 优先使用自定义图标。
+        assert!(IconType::Default.to_system_icon() == IDI_APPLICATION);
+        assert!(IconType::Idle.to_system_icon() == IDI_INFORMATION);
+        assert!(IconType::Syncing.to_system_icon() == IDI_WARNING);
+        assert!(IconType::Error.to_system_icon() == IDI_ERROR);
+    }
+
+    #[test]
+    fn test_tray_event_variants() {
+        // 事件枚举在 Windows 消息循环和主线程之间传递，需保证 Copy + Eq。
+        let e1 = TrayEvent::OpenTui;
+        let e2 = TrayEvent::OpenTui;
+        assert_eq!(e1, e2);
+        assert_ne!(e1, TrayEvent::Exit);
+    }
+}
+
 /// 线程安全的状态存储（替代 static mut）
 static STATE: OnceLock<TrayState> = OnceLock::new();
 
@@ -79,8 +123,23 @@ struct TrayState {
     /// Kept for TaskbarCreated message comparison; static analysis cannot see the use.
     #[allow(dead_code)]
     taskbar_created_msg: u32,
-    /// Custom HICON stored as usize because raw pointers are neither Send nor Sync.
-    custom_hicon: Option<usize>,
+    /// 当前显示图标的 HICON（任意状态），以 usize 存储是因为原始指针非 Send/Sync。
+    current_hicon: Option<usize>,
+}
+
+/// Windows 错误消息框（用于无控制台场景）。
+unsafe fn show_error_message(title: &str, message: &str) {
+    use std::iter::once;
+    use windows::Win32::UI::WindowsAndMessaging::{MessageBoxW, MB_ICONERROR, MB_OK};
+
+    let title_wide: Vec<u16> = title.encode_utf16().chain(once(0)).collect();
+    let msg_wide: Vec<u16> = message.encode_utf16().chain(once(0)).collect();
+    let _ = MessageBoxW(
+        None,
+        PCWSTR(msg_wide.as_ptr()),
+        PCWSTR(title_wide.as_ptr()),
+        MB_OK | MB_ICONERROR,
+    );
 }
 
 /// 在独立 Win32 线程上启动托盘图标和消息循环。
@@ -118,8 +177,8 @@ pub fn cleanup() {
                 ..Default::default()
             };
             let _ = Shell_NotifyIconW(NIM_DELETE, &nid);
-            // SAFETY: custom_hicon 由 CreateIconFromResourceEx 创建，必须通过 DestroyIcon 释放。
-            if let Some(ptr) = s.custom_hicon {
+            // SAFETY: current_hicon 由 CreateIconFromResourceEx 创建，必须通过 DestroyIcon 释放。
+            if let Some(ptr) = s.current_hicon {
                 let _ = DestroyIcon(HICON(ptr as *mut _));
             }
             // 设置标志防止 WM_DESTROY 再次释放 icon
@@ -135,37 +194,97 @@ pub fn tray_hwnd() -> HWND {
     HWND(STATE.get().map(|s| s.hwnd).unwrap_or(0) as *mut _)
 }
 
-// 由 build.rs 生成的 ICO 数据（32x32 32bpp ARGB 硬盘图标）
-static ICON_BYTES: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/tray-icon.ico"));
+// 由 build.rs 生成的多尺寸 ICO 数据（16/24/32/48/256）
+static ICON_BYTES_DEFAULT: &[u8] =
+    include_bytes!(concat!(env!("OUT_DIR"), "/tray-icon-default.ico"));
+static ICON_BYTES_IDLE: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/tray-icon-idle.ico"));
+static ICON_BYTES_SYNCING: &[u8] =
+    include_bytes!(concat!(env!("OUT_DIR"), "/tray-icon-syncing.ico"));
+static ICON_BYTES_ERROR: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/tray-icon-error.ico"));
 
-/// 从 build.rs 生成的 ICO 加载自定义图标。
-/// 跳过 6 字节 ICONDIR + 16 字节 ICONDIRENTRY，指向 BITMAPINFOHEADER。
-///
-/// SAFETY: `ICON_BYTES` 由 build.rs 生成，保证格式为合法的 ICO 文件。
-/// 偏移量从 ICONDIRENTRY 固定位置读取（bytes 12-15 = little-endian u32 offset）。
-/// 若偏移量越界，`image_data.get(image_offset..)?` 返回 None，安全退出。
-unsafe fn load_custom_icon() -> Option<HICON> {
-    const ICONDIR_SIZE: usize = 6;
-    const ENTRY_SIZE: usize = 16;
-    if ICON_BYTES.len() < ICONDIR_SIZE + ENTRY_SIZE {
+fn icon_bytes(icon_type: IconType) -> &'static [u8] {
+    match icon_type {
+        IconType::Default => ICON_BYTES_DEFAULT,
+        IconType::Idle => ICON_BYTES_IDLE,
+        IconType::Syncing => ICON_BYTES_SYNCING,
+        IconType::Error => ICON_BYTES_ERROR,
+    }
+}
+
+struct IcoEntry {
+    width: u32,
+    height: u32,
+    size: u32,
+    offset: u32,
+}
+
+fn parse_ico(data: &[u8]) -> Option<Vec<IcoEntry>> {
+    if data.len() < 6 {
         return None;
     }
-    let offset_bytes = [
-        ICON_BYTES[ICONDIR_SIZE + 12],
-        ICON_BYTES[ICONDIR_SIZE + 13],
-        ICON_BYTES[ICONDIR_SIZE + 14],
-        ICON_BYTES[ICONDIR_SIZE + 15],
-    ];
-    let image_offset = u32::from_le_bytes(offset_bytes) as usize;
-    let image_data = ICON_BYTES.get(image_offset..)?;
-    // SAFETY: image_data 来自 build.rs 生成的有效 ICO 图像数据，
-    // CreateIconFromResourceEx 对无效输入返回 Err。
+    let count = u16::from_le_bytes([data[4], data[5]]) as usize;
+    if data.len() < 6 + count * 16 {
+        return None;
+    }
+    let mut entries = Vec::with_capacity(count);
+    for i in 0..count {
+        let base = 6 + i * 16;
+        let width = if data[base] == 0 {
+            256
+        } else {
+            data[base] as u32
+        };
+        let height = if data[base + 1] == 0 {
+            256
+        } else {
+            data[base + 1] as u32
+        };
+        let size = u32::from_le_bytes([
+            data[base + 8],
+            data[base + 9],
+            data[base + 10],
+            data[base + 11],
+        ]);
+        let offset = u32::from_le_bytes([
+            data[base + 12],
+            data[base + 13],
+            data[base + 14],
+            data[base + 15],
+        ]);
+        entries.push(IcoEntry {
+            width,
+            height,
+            size,
+            offset,
+        });
+    }
+    Some(entries)
+}
+
+/// 从 ICO 数据中选择最接近系统小图标尺寸的 entry。
+fn select_best_ico_entry(entries: &[IcoEntry]) -> Option<&IcoEntry> {
+    let desired = unsafe { GetSystemMetrics(SM_CXSMICON) as u32 };
+    entries
+        .iter()
+        .min_by_key(|e| e.width.abs_diff(desired) + e.height.abs_diff(desired))
+}
+
+/// 从 build.rs 生成的多尺寸 ICO 加载指定状态图标。
+///
+/// SAFETY: ICO 数据由 build.rs 生成，格式合法。CreateIconFromResourceEx 对无效输入返回 Err。
+unsafe fn load_state_icon(icon_type: IconType) -> Option<HICON> {
+    let data = icon_bytes(icon_type);
+    let entries = parse_ico(data)?;
+    let entry = select_best_ico_entry(&entries)?;
+    let start = entry.offset as usize;
+    let end = start + entry.size as usize;
+    let image_data = data.get(start..end)?;
     CreateIconFromResourceEx(
         image_data,
         windows::Win32::Foundation::BOOL(1),
         0x0003_0000,
-        32,
-        32,
+        entry.width as i32,
+        entry.height as i32,
         LR_DEFAULTCOLOR,
     )
     .ok()
@@ -208,8 +327,8 @@ unsafe fn tray_thread(tx: Sender<TrayEvent>) -> anyhow::Result<()> {
         None,
     )?;
 
-    // 优先使用 build.rs 生成的自定义图标；失败时回退到系统图标
-    let custom_hicon = load_custom_icon();
+    // 优先使用 build.rs 生成的状态图标；失败时回退到系统图标
+    let custom_hicon = load_state_icon(IconType::Default);
     let hicon = custom_hicon
         .map(|h| HICON(h.0))
         .unwrap_or_else(|| LoadIconW(None, IDI_APPLICATION).unwrap_or_default());
@@ -229,6 +348,10 @@ unsafe fn tray_thread(tx: Sender<TrayEvent>) -> anyhow::Result<()> {
 
     if !Shell_NotifyIconW(NIM_ADD, &nid).as_bool() {
         tracing::error!("Shell_NotifyIconW(NIM_ADD) failed — tray icon may not be visible");
+        show_error_message(
+            "Syncthing Tray Error",
+            "Failed to register tray icon.\nThe daemon is still running, but no icon is visible in the system tray.",
+        );
         anyhow::bail!("NIM_ADD failed");
     }
 
@@ -237,7 +360,7 @@ unsafe fn tray_thread(tx: Sender<TrayEvent>) -> anyhow::Result<()> {
         event_tx: tx,
         hwnd: hwnd.0 as isize,
         taskbar_created_msg,
-        custom_hicon: custom_hicon.map(|h| h.0 as usize),
+        current_hicon: custom_hicon.map(|h| h.0 as usize),
     });
 
     // 消息循环
@@ -262,15 +385,25 @@ unsafe fn show_context_menu(hwnd: HWND) {
     if hmenu.0.is_null() {
         return;
     }
-    let _ = AppendMenuW(hmenu, MF_STRING, ID_OPEN_WEBUI as usize, w!("Open Web UI"));
+
+    // 操作项（无图标、无标题，保持菜单极简）
+    // daemon 运行时显示 "Stop Daemon"，停止后显示灰色的 "Start Daemon"（暂不支持托盘内启动）。
+    let running = daemon_running();
+    let toggle_text = if running {
+        w!("Stop Daemon")
+    } else {
+        w!("Start Daemon")
+    };
+
     let _ = AppendMenuW(hmenu, MF_STRING, ID_OPEN_TUI as usize, w!("Open TUI"));
-    let _ = AppendMenuW(
-        hmenu,
-        MF_STRING,
-        ID_TOGGLE_DAEMON as usize,
-        w!("Start / Stop Daemon"),
-    );
+    let toggle_flags = if running {
+        MF_STRING
+    } else {
+        MENU_ITEM_FLAGS(MF_STRING.0 | MF_GRAYED.0)
+    };
+    let _ = AppendMenuW(hmenu, toggle_flags, ID_TOGGLE_DAEMON as usize, toggle_text);
     let _ = AppendMenuW(hmenu, MF_STRING, ID_EXIT as usize, w!("Exit"));
+
     // SAFETY: SetForegroundWindow 需要 hwnd 为当前进程拥有的窗口句柄。
     // hwnd 由 tray_thread 创建，属于当前进程。
     let _ = SetForegroundWindow(hwnd);
@@ -317,7 +450,6 @@ unsafe extern "system" fn window_proc(
             let id = wparam.0 as u32;
             if let Some(s) = STATE.get() {
                 let event = match id {
-                    ID_OPEN_WEBUI => Some(TrayEvent::OpenWebUi),
                     ID_OPEN_TUI => Some(TrayEvent::OpenTui),
                     ID_TOGGLE_DAEMON => Some(TrayEvent::ToggleDaemon),
                     ID_EXIT => Some(TrayEvent::Exit),
@@ -339,9 +471,9 @@ unsafe extern "system" fn window_proc(
                     ..Default::default()
                 };
                 let _ = Shell_NotifyIconW(NIM_DELETE, &nid);
-                // SAFETY: custom_hicon 仅在 cleanup() 未调用时释放。
+                // SAFETY: current_hicon 仅在 cleanup() 未调用时释放。
                 if let Some(s) = STATE.get() {
-                    if let Some(ptr) = s.custom_hicon {
+                    if let Some(ptr) = s.current_hicon {
                         let _ = DestroyIcon(HICON(ptr as *mut _));
                     }
                 }
@@ -382,7 +514,7 @@ impl IconType {
 ///
 /// SAFETY: 可从任意线程调用。Shell_NotifyIconW 是线程安全的，
 /// 内部通过 PostMessage 而非 SendMessage 与 Shell 通信。
-/// HICON 句柄由 LoadIconW（系统图标，无需释放）或 STATE.custom_hicon（自定义图标，托管于 OnceLock）提供。
+/// 旧 HICON 会在这里被 DestroyIcon 释放。
 pub unsafe fn update_icon(_hwnd: HWND, icon_type: IconType) {
     let Some(state) = STATE.get() else { return };
 
@@ -393,16 +525,18 @@ pub unsafe fn update_icon(_hwnd: HWND, icon_type: IconType) {
         }
     }
 
-    // Default/Idle 使用 build.rs 生成的自定义图标；Error/Syncing 使用系统图标（颜色区分）
-    let hicon = match icon_type {
-        IconType::Default | IconType::Idle => state
-            .custom_hicon
-            .map(|p| HICON(p as *mut _))
-            .unwrap_or_else(|| LoadIconW(None, IDI_APPLICATION).unwrap_or_default()),
-        IconType::Syncing | IconType::Error => match LoadIconW(None, icon_type.to_system_icon()) {
-            Ok(h) => h,
-            Err(_) => return,
-        },
+    let new_hicon = match load_state_icon(icon_type) {
+        Some(h) => h,
+        None => {
+            tracing::warn!(
+                "Failed to load state icon {:?}, falling back to system icon",
+                icon_type
+            );
+            match LoadIconW(None, icon_type.to_system_icon()) {
+                Ok(h) => h,
+                Err(_) => return,
+            }
+        }
     };
 
     let nid = NOTIFYICONDATAW {
@@ -410,11 +544,21 @@ pub unsafe fn update_icon(_hwnd: HWND, icon_type: IconType) {
         hWnd: HWND(state.hwnd as *mut _),
         uID: TRAY_ICON_ID,
         uFlags: NIF_ICON,
-        hIcon: hicon,
+        hIcon: new_hicon,
         ..Default::default()
     };
     // SAFETY: NIM_MODIFY 是线程安全的 Win32 API 调用。
     let _ = Shell_NotifyIconW(NIM_MODIFY, &nid);
+
+    // 释放旧图标并缓存新图标句柄
+    if let Some(old) = STATE.get().and_then(|s| s.current_hicon) {
+        let _ = DestroyIcon(HICON(old as *mut _));
+    }
+    let _ = STATE.get().map(|s| {
+        // SAFETY: TrayState 存于 OnceLock，此处仅修改 current_hicon 字段。
+        let ptr = s as *const TrayState as *mut TrayState;
+        (*ptr).current_hicon = Some(new_hicon.0 as usize);
+    });
 
     if let Ok(mut guard) = LAST_ICON.lock() {
         *guard = Some(icon_type);

@@ -13,10 +13,14 @@ pub struct DaemonStatus {
     pub errors: Vec<String>,
 }
 
+/// 默认 REST 请求超时（秒）
+const REQUEST_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
+
 /// 轻量级 REST 客户端
 pub struct DaemonClient {
     base_url: String,
     status: DaemonStatus,
+    http: reqwest::Client,
 }
 
 #[derive(Debug, Deserialize)]
@@ -42,15 +46,25 @@ struct FolderStatusItem {
 
 impl DaemonClient {
     pub fn new(base_url: &str) -> Self {
+        let http = reqwest::Client::builder()
+            .timeout(REQUEST_TIMEOUT)
+            .build()
+            .unwrap_or_default();
         Self {
             base_url: base_url.trim_end_matches('/').to_string(),
             status: DaemonStatus::default(),
+            http,
         }
     }
 
     /// Ping daemon 检查是否存活
     pub async fn ping(&self) -> bool {
-        match reqwest::get(format!("{}/rest/health", self.base_url)).await {
+        match self
+            .http
+            .get(format!("{}/rest/health", self.base_url))
+            .send()
+            .await
+        {
             Ok(resp) => resp.status().is_success(),
             Err(_) => false,
         }
@@ -67,10 +81,22 @@ impl DaemonClient {
             return Ok(());
         }
 
-        // 并行获取 connections 和 folders 列表
-        let conn_fut = reqwest::get(format!("{}/rest/system/connections", self.base_url));
-        let folders_fut = reqwest::get(format!("{}/rest/config/folders", self.base_url));
-        let (conn_resp, folders_resp) = tokio::join!(conn_fut, folders_fut);
+        // 并行获取 connections、folders 和 devices 列表
+        let conn_fut = self
+            .http
+            .get(format!("{}/rest/system/connections", self.base_url))
+            .send();
+        let folders_fut = self
+            .http
+            .get(format!("{}/rest/config/folders", self.base_url))
+            .send();
+        let devices_fut = self
+            .http
+            .get(format!("{}/rest/config/devices", self.base_url))
+            .send();
+
+        let (conn_resp, folders_resp, devices_resp) =
+            tokio::join!(conn_fut, folders_fut, devices_fut);
 
         // 连接统计
         match conn_resp {
@@ -84,23 +110,26 @@ impl DaemonClient {
             }
         }
 
+        // 设备总数（与在线数独立）
+        if let Ok(resp) = devices_resp {
+            if let Ok(arr) = resp.json::<Vec<serde_json::Value>>().await {
+                self.status.total_devices = arr.len();
+            }
+        }
+
         // 文件夹列表 + 逐文件夹状态检查
         if let Ok(resp) = folders_resp {
             if let Ok(arr) = resp.json::<Vec<serde_json::Value>>().await {
                 self.status.folder_count = arr.len();
-                self.status.total_devices = self.status.connected_devices; // best-effort
 
                 // 检查每个文件夹的同步状态
                 let mut syncing = false;
                 let mut errors = Vec::new();
                 for folder in &arr {
                     if let Some(folder_id) = folder.get("id").and_then(|v| v.as_str()) {
-                        if let Ok(resp) = reqwest::get(format!(
-                            "{}/rest/folder/{}/status",
-                            self.base_url, folder_id
-                        ))
-                        .await
-                        {
+                        let status_url =
+                            format!("{}/rest/folder/{}/status", self.base_url, folder_id);
+                        if let Ok(resp) = self.http.get(&status_url).send().await {
                             if let Ok(s) = resp.json::<FolderStatusItem>().await {
                                 if s.pull_errors > 0 {
                                     errors.push(format!(
@@ -138,5 +167,63 @@ impl DaemonClient {
         } else {
             crate::tray::IconType::Default
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_icon_type_default() {
+        let client = DaemonClient::new("http://127.0.0.1:8385");
+        assert_eq!(client.icon_type(), crate::tray::IconType::Error);
+    }
+
+    #[test]
+    fn test_icon_type_online_idle() {
+        let mut client = DaemonClient::new("http://127.0.0.1:8385");
+        client.set_online(true);
+        client.status.connected_devices = 1;
+        client.status.total_devices = 2;
+        assert_eq!(client.icon_type(), crate::tray::IconType::Idle);
+    }
+
+    #[test]
+    fn test_icon_type_online_syncing() {
+        let mut client = DaemonClient::new("http://127.0.0.1:8385");
+        client.set_online(true);
+        client.status.syncing = true;
+        client.status.connected_devices = 1;
+        assert_eq!(client.icon_type(), crate::tray::IconType::Syncing);
+    }
+
+    #[test]
+    fn test_icon_type_online_no_devices() {
+        let mut client = DaemonClient::new("http://127.0.0.1:8385");
+        client.set_online(true);
+        client.status.connected_devices = 0;
+        client.status.total_devices = 3;
+        assert_eq!(client.icon_type(), crate::tray::IconType::Default);
+    }
+
+    #[test]
+    fn test_status_default() {
+        let client = DaemonClient::new("http://127.0.0.1:8385");
+        let status = client.status();
+        assert!(!status.online);
+        assert_eq!(status.connected_devices, 0);
+        assert_eq!(status.total_devices, 0);
+        assert_eq!(status.folder_count, 0);
+        assert!(!status.syncing);
+        assert!(status.errors.is_empty());
+    }
+
+    #[test]
+    fn test_base_url_trailing_slash_removed() {
+        let client = DaemonClient::new("http://127.0.0.1:8385/");
+        // base_url 是私有的，无法直接断言；但后续 ping 会拼成 /rest/health
+        // 这里仅验证构造不 panic。
+        let _ = client;
     }
 }

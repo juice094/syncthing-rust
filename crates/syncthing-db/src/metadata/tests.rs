@@ -20,6 +20,7 @@ fn create_test_file_info(name: &str, size: u64) -> FileInfo {
         modified_by: None,
         blocks_hash: None,
         no_permissions: None,
+        base_version: None,
     }
 }
 

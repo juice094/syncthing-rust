@@ -1,9 +1,3 @@
-//! Module: syncthing-api
-//! Worker: Agent-F
-//! Status: UNVERIFIED
-//!
-//! ⚠️ 此代码由Agent生成，未经主控验证
-
 //! Syncthing API Library
 //!
 //! This crate provides REST API and WebSocket event functionality for Syncthing.
@@ -36,7 +30,7 @@
 //!
 //!     // Create and start API server
 //!     let mut api = RestApi::new(state);
-//!     api.bind("127.0.0.1:8384".parse()?).await?;
+//!     api.bind(syncthing_core::constants::DEFAULT_API_ADDR.parse()?).await?;
 //!     api.run().await?;
 //!
 //!     Ok(())
@@ -60,9 +54,6 @@ use syncthing_core::Result;
 
 /// Library version
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
-
-/// Default API listen address
-pub const DEFAULT_API_ADDRESS: &str = "127.0.0.1:8384";
 
 /// Initialize the API module
 ///

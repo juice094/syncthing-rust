@@ -1,0 +1,18 @@
+# Code owners for syncthing-rust
+# See https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/about-code-owners
+
+# Global fallback — single maintainer project
+* @juice094
+
+# Core protocol and security-sensitive areas require maintainer review
+/crates/syncthing-core/ @juice094
+/crates/bep-protocol/ @juice094
+/crates/syncthing-net/ @juice094
+/crates/syncthing-sync/ @juice094
+/crates/syncthing-db/ @juice094
+/crates/syncthing-api/ @juice094
+
+# CI/CD and release workflows
+/.github/workflows/ @juice094
+/deny.toml @juice094
+/cargo-deny.toml @juice094

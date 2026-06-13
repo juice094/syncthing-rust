@@ -7,8 +7,9 @@
 零运行时依赖 · 与 Go 版 Syncthing 线路兼容 · 单静态二进制（~13 MB）
 
 [![Rust](https://img.shields.io/badge/rust-1.85%2B-orange?logo=rust)](https://www.rust-lang.org)
-[![Tests](https://img.shields.io/badge/tests-382%20passed-brightgreen)](https://github.com/juice094/syncthing-rust/actions)
-[![Version](https://img.shields.io/badge/version-v0.2.10--rc3-blue)](https://github.com/juice094/syncthing-rust/releases)
+[![CI](https://github.com/juice094/syncthing-rust/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/juice094/syncthing-rust/actions/workflows/ci.yml)
+[![Tests](https://img.shields.io/badge/tests-364%20passed-brightgreen)](https://github.com/juice094/syncthing-rust/actions)
+[![Version](https://img.shields.io/badge/version-v3.0.3-blue)](https://github.com/juice094/syncthing-rust/releases)
 [![License](https://img.shields.io/badge/license-MIT%20%2B%20Commercial-blue)](./LICENSE)
 
 </div>
@@ -19,9 +20,9 @@
 
 [Syncthing](https://syncthing.net/) BEP 协议的 Rust 实现 — 零运行时依赖，单静态二进制，与官方 Go 守护进程线路兼容。
 
-**当前阶段**：Alpha。核心协议完成，端到端同步验证通过，生产硬化进行中。
+**当前阶段**：Production。核心协议、端到端同步、Windows 系统托盘与 TUI 均已稳定运行。
 
-> [最新发布：v0.2.10-rc3](https://github.com/juice094/syncthing-rust/releases/tag/v0.2.10-rc3) — Phase 0 完成 + 生产就绪修复 + 版本控制
+> [最新发布：v3.0.3](https://github.com/juice094/syncthing-rust/releases/tag/v3.0.3) — TUI 稳定性修复 + 现代托盘图标
 
 ---
 
@@ -76,9 +77,9 @@ syncthing-rust/
 | 限制 | 影响 | 缓解 |
 |:---|:---|:---|
 | 高延迟/不稳定网络 | 大文件批量传输可能因防火墙断开 | 自动重连 + keepalive；网络优化见 [KNOWN_ISSUES §14](docs/KNOWN_ISSUES.md) |
-| 无 Symlink 同步 | 符号链接静默跳过 | v0.3.0 规划 |
-| 无 Web GUI | 仅 TUI | — |
-| 无 QUIC transport | 仅 TCP | 规划中 |
+| 无 Symlink 同步 | 符号链接静默跳过 | 未来版本规划 |
+| 无 Web GUI | TUI + 系统托盘 + REST API 为主界面（见 [AGENTS.md](AGENTS.md) 冻结声明） | — |
+| 无 QUIC transport | 当前仅 TCP + Relay v1（见 [AGENTS.md](AGENTS.md) 冻结声明） | 未来评估 |
 
 ---
 
@@ -99,9 +100,21 @@ cargo run --release -- run --config-dir ~/.syncthing
 详见 [CONTRIBUTING.md](CONTRIBUTING.md)。
 
 ```bash
-cargo test --all              # 382 个测试
-cargo check --all             # 0 警告
+cargo test --workspace        # 364 passed / 4 ignored / 0 failed
+cargo clippy --workspace --all-targets -- -D warnings -W clippy::await_holding_lock  # 0 警告
 ```
+
+---
+
+## 💬 社区与支持
+
+| 场景 | 入口 |
+|:---|:---|
+| Bug 报告 | [GitHub Issues](https://github.com/juice094/syncthing-rust/issues/new?template=bug_report.md) |
+| 功能建议 | [GitHub Issues](https://github.com/juice094/syncthing-rust/issues/new?template=feature_request.md) |
+| 使用问题 / 讨论 | [GitHub Discussions](https://github.com/juice094/syncthing-rust/discussions) |
+| 安全漏洞 | 见 [SECURITY.md](SECURITY.md)（请勿公开 issue） |
+| 商业支持 | 见 [SUPPORT.md](SUPPORT.md) / [LICENSE-COMMERCIAL.md](LICENSE-COMMERCIAL.md) |
 
 ---
 
@@ -113,6 +126,6 @@ cargo check --all             # 0 警告
 
 <div align="center">
 
-**[⭐ Star](https://github.com/juice094/syncthing-rust) · [🐛 Issues](https://github.com/juice094/syncthing-rust/issues) · [🤝 Contribute](CONTRIBUTING.md)**
+**[⭐ Star](https://github.com/juice094/syncthing-rust) · [🐛 Issues](https://github.com/juice094/syncthing-rust/issues) · [💬 Discussions](https://github.com/juice094/syncthing-rust/discussions) · [🤝 Contribute](CONTRIBUTING.md)**
 
 </div>

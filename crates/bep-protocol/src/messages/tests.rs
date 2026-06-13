@@ -141,6 +141,7 @@ fn test_file_info_conversion() {
         modified_by: None,
         blocks_hash: None,
         no_permissions: None,
+        base_version: None,
     };
 
     let wire: WireFileInfo = original.clone().into();

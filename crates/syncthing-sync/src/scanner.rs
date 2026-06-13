@@ -10,12 +10,12 @@ use crate::puller::temp_path_for;
 use sha2::{Digest, Sha256};
 use std::path::Path;
 use std::sync::Arc;
-use syncthing_core::types::{BlockInfo, FileInfo, FileType, Folder, Vector};
+use syncthing_core::types::{BlockInfo, FileInfo, FileInfoBase, FileType, Folder, Vector};
 use tokio::fs;
 use tracing::{debug, error, info, trace};
 
 /// 块大小（128KB，与 Syncthing 默认一致）
-const DEFAULT_BLOCK_SIZE: i32 = 128 * 1024;
+const DEFAULT_BLOCK_SIZE: i32 = syncthing_core::constants::DEFAULT_BLOCK_SIZE;
 
 /// Scanner 默认排除的文件/目录名（与 Go Syncthing 对齐）
 /// 这些条目在 .stignore 加载前生效，防止元数据被索引和同步。
@@ -151,6 +151,8 @@ impl Scanner {
                                 new_info.sequence = self.db.increment_sequence(&folder.id).await?;
                                 new_info.version = existing.version.clone();
                                 new_info.version.increment(1);
+                                // 保留上一次全局一致的 base 版本
+                                new_info.base_version = existing.base_version.clone();
                                 changed_files.push(new_info);
                             }
                         }
@@ -344,6 +346,13 @@ impl Scanner {
                     modified_by: None,
                     blocks_hash: None,
                     no_permissions: None,
+                    base_version: Some(FileInfoBase {
+                        size: 0,
+                        modified_s: modified_secs,
+                        modified_ns: modified_nanos,
+                        blocks_hash: None,
+                        content_hash: None,
+                    }),
                 });
             } else if metadata.is_file() {
                 // 计算文件哈希和块信息
@@ -384,6 +393,13 @@ impl Scanner {
                     modified_by: None,
                     blocks_hash: None,
                     no_permissions: None,
+                    base_version: Some(FileInfoBase {
+                        size: 0,
+                        modified_s: modified_secs,
+                        modified_ns: 0,
+                        blocks_hash: None,
+                        content_hash: None,
+                    }),
                 });
             }
         }
@@ -414,8 +430,9 @@ impl Scanner {
 
         let permissions = 0o644;
 
-        // 计算块信息
+        // 计算块信息，同时计算整体内容哈希
         let mut blocks = Vec::new();
+        let mut content_hasher = Sha256::new();
         if size > 0 {
             let block_size = DEFAULT_BLOCK_SIZE;
             let num_blocks = ((size + block_size as i64 - 1) / block_size as i64) as usize;
@@ -446,6 +463,7 @@ impl Scanner {
                 let mut hasher = Sha256::new();
                 hasher.update(&buffer[..bytes_read]);
                 let hash = hasher.finalize().to_vec();
+                content_hasher.update(&buffer[..bytes_read]);
 
                 blocks.push(BlockInfo {
                     size: bytes_read as i32,
@@ -461,6 +479,7 @@ impl Scanner {
             }
         }
 
+        let content_hash = content_hasher.finalize().to_vec();
         Ok(FileInfo {
             name: relative_path.to_string(),
             file_type: FileType::File,
@@ -477,6 +496,13 @@ impl Scanner {
             modified_by: None,
             blocks_hash: None,
             no_permissions: None,
+            base_version: Some(FileInfoBase {
+                size,
+                modified_s: modified_secs,
+                modified_ns: modified_nanos,
+                blocks_hash: None,
+                content_hash: Some(content_hash),
+            }),
         })
     }
 
@@ -669,6 +695,7 @@ mod tests {
             modified_by: None,
             blocks_hash: None,
             no_permissions: None,
+            base_version: None,
         };
 
         let new_file = FileInfo {
@@ -691,6 +718,7 @@ mod tests {
             modified_by: None,
             blocks_hash: None,
             no_permissions: None,
+            base_version: None,
         };
 
         let unchanged = FileInfo {
@@ -713,6 +741,7 @@ mod tests {
             modified_by: None,
             blocks_hash: None,
             no_permissions: None,
+            base_version: None,
         };
 
         let input = vec![old_file, unchanged, new_file];
@@ -747,6 +776,7 @@ mod tests {
             modified_by: None,
             blocks_hash: None,
             no_permissions: None,
+            base_version: None,
         };
 
         let new_file = FileInfo {
@@ -769,6 +799,7 @@ mod tests {
             modified_by: None,
             blocks_hash: None,
             no_permissions: None,
+            base_version: None,
         };
 
         let input = vec![old_file, new_file];
