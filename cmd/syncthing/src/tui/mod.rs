@@ -37,7 +37,7 @@ pub enum TuiEvent {
 }
 
 use std::io;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use crossterm::{
@@ -82,7 +82,16 @@ pub async fn run_tui(
     terminal.clear()?;
 
     let mut app = App::new(config_dir.clone(), listen, device_name, config);
-    app.push_log("TUI started. Press F5 to run daemon.".to_string());
+
+    // 启动时检测是否已有外部 daemon（如 Auto 模式托盘启动的实例）
+    if detect_external_daemon(&app.config, &config_dir).await {
+        app.daemon_running = true;
+        app.external_daemon = true;
+        app.daemon_status = "Running (external)".to_string();
+        app.push_log("External daemon detected. F5 toggle disabled.".to_string());
+    } else {
+        app.push_log("TUI started. Press F5 to run daemon.".to_string());
+    }
 
     // P1: TUI 启动时预加载历史日志
     let logs_dir = config_dir.join("logs");
@@ -118,6 +127,60 @@ pub async fn run_tui(
     Ok(())
 }
 
+/// 检测是否已有外部 daemon 在运行。
+///
+/// 检查顺序：
+/// 1. `config_dir/syncthing.pid` 是否存在且指向运行中的 syncthing-rust 进程
+/// 2. ping 本地 REST API `/rest/health`（处理无 pid 文件但端口仍被占用的情况）
+///
+/// 若检测到外部 daemon，TUI 不应再启动内部实例，防止端口冲突和单实例锁问题。
+async fn detect_external_daemon(config: &syncthing_core::types::Config, config_dir: &Path) -> bool {
+    // 1. PID 文件证据链
+    if let Some(pid) = crate::single_instance::running_instance_pid(config_dir) {
+        tracing::info!(
+            "External daemon detected via pid file: syncthing-rust is running (PID {})",
+            pid
+        );
+        return true;
+    }
+
+    // 2. 端口/HTTP 证据链（兜底，清理过时的 pid 文件后仍有服务在监听时生效）
+    let api_port = config.gui.address.rsplit(':').next().unwrap_or("8385");
+    let url = format!("http://127.0.0.1:{}/rest/health", api_port);
+
+    let client = match reqwest::Client::builder()
+        .timeout(Duration::from_secs(2))
+        .build()
+    {
+        Ok(c) => c,
+        Err(_) => return false,
+    };
+
+    match client.get(&url).send().await {
+        Ok(resp) => {
+            let external = resp.status().is_success();
+            if external {
+                tracing::info!(
+                    "External daemon detected via HTTP ping on port {} (/{})",
+                    api_port,
+                    url
+                );
+            } else {
+                tracing::debug!(
+                    "Port {} responded with status {}, no external daemon",
+                    api_port,
+                    resp.status()
+                );
+            }
+            external
+        }
+        Err(e) => {
+            tracing::debug!("No external daemon detected on port {}: {}", api_port, e);
+            false
+        }
+    }
+}
+
 async fn run_app<B: Backend>(
     terminal: &mut Terminal<B>,
     app: &mut App,
@@ -126,9 +189,8 @@ async fn run_app<B: Backend>(
     let mut last_tick = tokio::time::Instant::now();
     let tick_rate = constants::TICK_RATE;
 
-    let mut daemon_future: Option<
-        std::pin::Pin<Box<dyn std::future::Future<Output = anyhow::Result<()>> + Send>>,
-    > = None;
+    // daemon_join_handle: 后台 daemon 主循环的 JoinHandle，用于崩溃检测与优雅关闭等待
+    let mut daemon_join_handle: Option<tokio::task::JoinHandle<()>> = None;
     let mut daemon_handle: Option<syncthing_net::ConnectionManagerHandle> = None;
     let mut event_tx: Option<tokio::sync::mpsc::Sender<TuiEvent>> = None;
     let mut daemon_shutdown_tx: Option<tokio::sync::watch::Sender<bool>> = None;
@@ -155,7 +217,7 @@ async fn run_app<B: Backend>(
                 {
                     toggle_daemon(
                         app,
-                        &mut daemon_future,
+                        &mut daemon_join_handle,
                         &mut daemon_handle,
                         &mut event_tx,
                         &mut daemon_shutdown_tx,
@@ -170,15 +232,21 @@ async fn run_app<B: Backend>(
         };
 
         if should_exit {
-            // 优雅关闭 daemon（如果正在运行）
-            if let Some(tx) = daemon_shutdown_tx.take() {
-                let _ = tx.send(true);
-                app.push_log("Daemon shutdown signal sent.".to_string());
-                // 让出一次时间片让 daemon 处理 shutdown 信号，避免阻塞 TUI 退出
-                tokio::task::yield_now().await;
+            // 优雅关闭 daemon（如果正在运行且由本 TUI 管理）
+            if !app.external_daemon {
+                if let Some(tx) = daemon_shutdown_tx.take() {
+                    let _ = tx.send(true);
+                    app.push_log("Daemon shutdown signal sent.".to_string());
+                    // 让出一次时间片让 daemon 处理 shutdown 信号，避免阻塞 TUI 退出
+                    tokio::task::yield_now().await;
+                }
+                // 等待 daemon 主循环在 2 秒内完成优雅关闭
+                if let Some(handle) = daemon_join_handle.take() {
+                    let _ = tokio::time::timeout(Duration::from_secs(2), handle).await;
+                }
+                app.daemon_running = false;
+                app.daemon_status = "Stopped".to_string();
             }
-            app.daemon_running = false;
-            app.daemon_status = "Stopped".to_string();
             app.event_rx = None;
             break;
         }
@@ -206,22 +274,42 @@ async fn run_app<B: Backend>(
         }
 
         if last_tick.elapsed() >= tick_rate {
-            // P2: daemon 崩溃检测 —— 如果 daemon_running 但 handle 已失效，标记为 Crashed
-            if app.daemon_running {
+            // P2: daemon 崩溃检测 —— 如果 daemon_running 但 handle 已失效或主循环已结束，标记为 Crashed
+            // 外部 daemon 跳过此检测，因为它不由本 TUI 进程管理
+            if app.daemon_running && !app.external_daemon {
                 let alive = daemon_handle
                     .as_ref()
                     .map(|h| h.local_addr().is_some())
                     .unwrap_or(false);
-                if !alive {
+                let finished = daemon_join_handle
+                    .as_ref()
+                    .map(|h| h.is_finished())
+                    .unwrap_or(true);
+                if !alive || finished {
                     app.daemon_running = false;
                     app.daemon_status = "Crashed".to_string();
                     app.push_log("Daemon crashed or exited unexpectedly.".to_string());
-                    let _ = daemon_future.take();
+                    let _ = daemon_join_handle.take();
                     let _ = daemon_handle.take();
                     let _ = event_tx.take();
+                    let _ = daemon_shutdown_tx.take();
                     app.sync_service = None;
                     app.event_rx = None;
                 }
+            }
+
+            // 检测正在停止的 daemon 是否已完全退出，更新 UI 为 Stopped
+            if !app.daemon_running
+                && !app.external_daemon
+                && app.daemon_status == "Stopping..."
+                && daemon_join_handle
+                    .as_ref()
+                    .map(|h| h.is_finished())
+                    .unwrap_or(true)
+            {
+                app.daemon_status = "Stopped".to_string();
+                app.push_log("Daemon stopped.".to_string());
+                let _ = daemon_join_handle.take();
             }
 
             // 轮询 daemon 状态（fallback，事件桥未覆盖时）
@@ -255,28 +343,47 @@ async fn run_app<B: Backend>(
 
 async fn toggle_daemon(
     app: &mut App,
-    daemon_future: &mut Option<
-        std::pin::Pin<Box<dyn std::future::Future<Output = anyhow::Result<()>> + Send>>,
-    >,
+    daemon_join_handle: &mut Option<tokio::task::JoinHandle<()>>,
     daemon_handle: &mut Option<syncthing_net::ConnectionManagerHandle>,
     event_tx: &mut Option<tokio::sync::mpsc::Sender<TuiEvent>>,
     daemon_shutdown_tx: &mut Option<tokio::sync::watch::Sender<bool>>,
 ) {
+    // 外部 daemon 由托盘/Auto 模式管理，TUI 不能启动或停止它
+    if app.external_daemon {
+        app.push_log("Daemon is managed externally. Use the tray menu to stop it.".to_string());
+        return;
+    }
+
     // 使用 daemon_shutdown_tx 判断 daemon 是否运行（启动时设置，停止时 take）
     if daemon_shutdown_tx.is_some() {
-        // 发送优雅关闭信号，然后清理本地状态
+        // 发送优雅关闭信号；不在这里同步等待，避免阻塞 TUI 事件循环
         if let Some(tx) = daemon_shutdown_tx.take() {
             let _ = tx.send(true);
+            app.push_log("Daemon shutdown signal sent.".to_string());
         }
-        *daemon_future = None;
         *daemon_handle = None;
         *event_tx = None;
         app.sync_service = None;
         app.event_rx = None;
         app.daemon_running = false;
-        app.daemon_status = "Stopped".to_string();
-        app.push_log("Daemon stopped.".to_string());
+        app.daemon_status = "Stopping...".to_string();
+        app.push_log("Daemon stopping...".to_string());
     } else {
+        // 若上次停止的 daemon 仍在后台收尾，禁止立即重启，避免端口冲突
+        if daemon_join_handle
+            .as_ref()
+            .map(|h| !h.is_finished())
+            .unwrap_or(false)
+        {
+            app.popup = app::Popup::Error(
+                "Daemon is still shutting down. Please wait a moment.".to_string(),
+            );
+            app.push_log(
+                "Daemon start blocked: previous daemon is still shutting down.".to_string(),
+            );
+            return;
+        }
+
         let config_dir = app.config_dir.clone();
         let listen = app.listen.clone();
         let device_name = app.device_name.clone();
@@ -330,11 +437,12 @@ async fn toggle_daemon(
                 });
 
                 let fut = startup.future;
-                tokio::spawn(async move {
+                let join_handle = tokio::spawn(async move {
                     if let Err(e) = fut.await {
                         warn!("Daemon exited with error: {}", e);
                     }
                 });
+                *daemon_join_handle = Some(join_handle);
                 app.daemon_running = true;
                 app.daemon_status = "Running".to_string();
                 app.push_log("Daemon started.".to_string());
@@ -369,4 +477,70 @@ fn tail_lines(path: &std::path::Path, n: usize) -> anyhow::Result<Vec<String>> {
     let lines: Vec<String> = content.lines().map(|s| s.to_string()).collect();
     let skip = lines.len().saturating_sub(n);
     Ok(lines.into_iter().skip(skip).collect())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use syncthing_core::types::Config;
+
+    /// 启动一个最小 HTTP server，在 /rest/health 返回 200 OK。
+    /// 仅用于测试 detect_external_daemon。
+    async fn spawn_health_server(port: u16) -> tokio::task::JoinHandle<()> {
+        let listener = tokio::net::TcpListener::bind(("127.0.0.1", port))
+            .await
+            .expect("bind test health server");
+        tokio::spawn(async move {
+            let (mut socket, _) = listener.accept().await.expect("accept health request");
+            let mut buf = [0u8; 1024];
+            // 读取请求头（不解析，简单丢弃）
+            let _ = tokio::io::AsyncReadExt::read(&mut socket, &mut buf).await;
+            let response = "HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nok";
+            let _ = tokio::io::AsyncWriteExt::write_all(&mut socket, response.as_bytes()).await;
+        })
+    }
+
+    #[tokio::test]
+    async fn test_detect_external_daemon_online() {
+        let port = 18385u16;
+        let handle = spawn_health_server(port).await;
+
+        let mut config = Config::new();
+        config.gui.address = format!("127.0.0.1:{}", port);
+
+        let config_dir = std::env::temp_dir().join(format!(
+            "syncthing-test-external-online-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&config_dir);
+        std::fs::create_dir_all(&config_dir).unwrap();
+
+        assert!(
+            detect_external_daemon(&config, &config_dir).await,
+            "应检测到在线的外部 daemon"
+        );
+
+        let _ = std::fs::remove_dir_all(&config_dir);
+        handle.abort();
+    }
+
+    #[tokio::test]
+    async fn test_detect_external_daemon_offline() {
+        let mut config = Config::new();
+        config.gui.address = "127.0.0.1:18386".to_string();
+
+        let config_dir = std::env::temp_dir().join(format!(
+            "syncthing-test-external-offline-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&config_dir);
+        std::fs::create_dir_all(&config_dir).unwrap();
+
+        assert!(
+            !detect_external_daemon(&config, &config_dir).await,
+            "未运行的 daemon 应返回 false"
+        );
+
+        let _ = std::fs::remove_dir_all(&config_dir);
+    }
 }

@@ -33,14 +33,14 @@ impl MemoryConfigStore {
     fn default_config() -> Config {
         Config {
             version: 1,
-            listen_addr: "0.0.0.0:22000".to_string(),
-            device_name: "syncthing-rust".to_string(),
+            listen_addr: syncthing_core::constants::DEFAULT_LISTEN_ADDR.to_string(),
+            device_name: syncthing_core::constants::DEFAULT_DEVICE_NAME.to_string(),
             folders: Vec::new(),
             devices: Vec::new(),
             local_device_id: None,
             gui: syncthing_core::types::GuiConfig {
                 enabled: true,
-                address: "127.0.0.1:8384".to_string(),
+                address: syncthing_core::constants::DEFAULT_GUI_ADDR.to_string(),
                 api_key: String::new(),
             },
             options: syncthing_core::types::Options {
@@ -322,7 +322,10 @@ mod tests {
         let config = MemoryConfigStore::default_config();
         assert_eq!(config.version, 1);
         assert!(config.gui.enabled);
-        assert_eq!(config.gui.address, "127.0.0.1:8384");
+        assert_eq!(
+            config.gui.address,
+            syncthing_core::constants::DEFAULT_GUI_ADDR
+        );
     }
 
     #[tokio::test]

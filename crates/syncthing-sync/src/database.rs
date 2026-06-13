@@ -49,6 +49,9 @@ pub trait LocalDatabase: Send + Sync {
     /// 增加序列号
     async fn increment_sequence(&self, folder: &str) -> Result<u64>;
 
+    /// 重置序列号为 0（重大变更/重建索引时使用）
+    async fn reset_sequence(&self, folder: &str) -> Result<()>;
+
     /// 获取文件夹索引元数据
     async fn get_folder_index_meta(&self, folder: &str) -> Result<Option<(IndexID, u64)>>;
 
@@ -158,6 +161,11 @@ impl LocalDatabase for MemoryDatabase {
         let mut seq = self.sequences.entry(folder.to_string()).or_insert(0);
         *seq += 1;
         Ok(*seq)
+    }
+
+    async fn reset_sequence(&self, folder: &str) -> Result<()> {
+        self.sequences.insert(folder.to_string(), 0);
+        Ok(())
     }
 
     async fn get_folder_index_meta(&self, folder: &str) -> Result<Option<(IndexID, u64)>> {
@@ -414,6 +422,14 @@ impl LocalDatabase for FileSystemDatabase {
         Ok(seq)
     }
 
+    async fn reset_sequence(&self, folder: &str) -> Result<()> {
+        let seq_lock = self.get_seq_lock(folder);
+        let _lock = seq_lock.lock().await;
+        let path = self.base_path.join(format!("seq_{}", folder));
+        tokio::fs::write(&path, "0").await?;
+        Ok(())
+    }
+
     async fn get_folder_index_meta(&self, folder: &str) -> Result<Option<(IndexID, u64)>> {
         let path = self.base_path.join(format!("index_meta_{}.json", folder));
         if !path.exists() {
@@ -465,6 +481,7 @@ mod tests {
             modified_by: None,
             blocks_hash: None,
             no_permissions: None,
+            base_version: None,
         };
 
         db.update_file("test-folder", file.clone()).await.unwrap();

@@ -462,7 +462,10 @@ pub async fn start_daemon(
     );
 
     let connection_handle = handle.clone();
+    let connection_handle_for_shutdown = handle.clone();
+    let sync_service_for_shutdown = Arc::clone(&sync_service);
     let session_handles_clone = Arc::clone(&session_handles);
+    let session_handles_for_shutdown = Arc::clone(&session_handles);
     let mut shutdown_rx = shutdown_rx;
     let future: std::pin::Pin<Box<dyn std::future::Future<Output = Result<()>> + Send>> = Box::pin(
         async move {
@@ -508,6 +511,19 @@ pub async fn start_daemon(
                     }
                 }
             }
+
+            // 优雅关闭：停止同步服务、关闭连接管理器、取消所有 session 任务
+            info!("Initiating graceful shutdown");
+            if let Err(e) = sync_service_for_shutdown.stop().await {
+                warn!("Failed to stop sync service during shutdown: {}", e);
+            }
+            if let Err(e) = connection_handle_for_shutdown.stop().await {
+                warn!("Failed to stop connection manager during shutdown: {}", e);
+            }
+            for entry in session_handles_for_shutdown.iter() {
+                entry.value().abort();
+            }
+            info!("Graceful shutdown complete");
             Ok(())
         },
     );

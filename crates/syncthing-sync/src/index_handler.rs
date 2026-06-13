@@ -113,7 +113,8 @@ impl IndexHandler {
                             // 检查冲突
                             if self.conflict_resolver.is_conflict(&local_file, remote_file) {
                                 let folder_path = Path::new(&folder.path);
-                                self.conflict_resolver
+                                let resolution = self
+                                    .conflict_resolver
                                     .resolve_conflict(
                                         &folder.id,
                                         &local_file,
@@ -121,6 +122,12 @@ impl IndexHandler {
                                         folder_path,
                                     )
                                     .await?;
+                                // 如果冲突解决后采用 remote 版本，需要下载
+                                if resolution == crate::events::ConflictResolution::UseRemote
+                                    && !remote_file.is_deleted()
+                                {
+                                    needed_files.push(remote_file.clone());
+                                }
                             } else {
                                 // 无冲突，直接更新
                                 self.db.update_file(&folder.id, remote_file.clone()).await?;
@@ -137,9 +144,15 @@ impl IndexHandler {
                         UpdateDecision::Conflict => {
                             debug!(file = %remote_file.name, "Conflict detected");
                             let folder_path = Path::new(&folder.path);
-                            self.conflict_resolver
+                            let resolution = self
+                                .conflict_resolver
                                 .resolve_conflict(&folder.id, &local_file, remote_file, folder_path)
                                 .await?;
+                            if resolution == crate::events::ConflictResolution::UseRemote
+                                && !remote_file.is_deleted()
+                            {
+                                needed_files.push(remote_file.clone());
+                            }
                         }
                     }
                 }
@@ -352,6 +365,7 @@ mod tests {
             modified_by: None,
             blocks_hash: None,
             no_permissions: None,
+            base_version: None,
         }
     }
 

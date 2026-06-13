@@ -203,8 +203,14 @@ async fn test_session_block_request_response() {
         .await
         .unwrap();
 
-    // Should receive Response with mock data [1, 2, 3]
-    let (msg_type, resp_payload) = conn_b.recv_message().await.unwrap();
+    // Should receive Response with mock data [1, 2, 3].
+    // Session 会周期性发送 Ping/Pong，因此需要跳过这些心跳消息。
+    let (msg_type, resp_payload) = loop {
+        let (msg_type, payload) = conn_b.recv_message().await.unwrap();
+        if msg_type == MessageType::Response {
+            break (msg_type, payload);
+        }
+    };
     assert_eq!(msg_type, MessageType::Response);
     let resp =
         bep_protocol::messages::decode_message::<bep_protocol::messages::Response>(&resp_payload)

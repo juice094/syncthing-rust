@@ -5,11 +5,12 @@
 use crate::database::LocalDatabase;
 use crate::error::{Result, SyncError};
 use crate::events::{EventPublisher, ItemAction, SyncEvent};
+use crate::merge::{is_mergeable_text, three_way_merge};
 use bytes::Bytes;
 use sha2::Digest;
 use std::path::Path;
 use std::sync::Arc;
-use syncthing_core::types::{BlockInfo, FileInfo, FileType, Folder};
+use syncthing_core::types::{BlockInfo, FileInfo, FileInfoBase, FileType, Folder};
 use syncthing_versioner::Versioner;
 use tokio::fs;
 use tokio::io::AsyncWriteExt;
@@ -530,6 +531,64 @@ impl Puller {
             }
         }
 
+        // 在覆盖前尝试三路合并（文本文件且本地 DB 有 base_version 时）
+        let mut merged_info = file_info.clone();
+        let local_info = db.get_file(folder_id, &file_info.name).await.ok().flatten();
+        eprintln!(
+            "[puller] file={} exists={} base={:?} versioner={}",
+            file_info.name,
+            file_path.exists(),
+            local_info.as_ref().and_then(|i| i.base_version.as_ref()),
+            versioner.is_some()
+        );
+        if file_path.exists() {
+            if let Some(base) = local_info.as_ref().and_then(|i| i.base_version.as_ref()) {
+                if is_mergeable_text(&file_info.name) {
+                    if let (Ok(local_content), Ok(remote_content)) = (
+                        fs::read_to_string(&file_path).await,
+                        fs::read_to_string(&temp_path).await,
+                    ) {
+                        if let Some(v) = versioner {
+                            eprintln!("[puller] attempting recover base");
+                            if let Some(base_content) =
+                                Self::recover_base_content(&**v, &file_path, base).await
+                            {
+                                eprintln!("[puller] base recovered, merging...");
+                                let merged = three_way_merge(
+                                    &base_content,
+                                    &local_content,
+                                    &remote_content,
+                                    &file_info.name,
+                                );
+                                eprintln!("[puller] merged content: {}", merged.content);
+                                if let Err(e) = fs::write(&temp_path, &merged.content).await {
+                                    warn!(file = %file_info.name, error = %e, "Failed to write merged content");
+                                } else {
+                                    info!(
+                                        file = %file_info.name,
+                                        conflicts = merged.conflict_count,
+                                        has_conflicts = merged.has_conflicts,
+                                        "Three-way merge completed"
+                                    );
+                                    // 更新 base_version 为合并结果
+                                    let hash = Self::content_hash(merged.content.as_bytes());
+                                    merged_info.base_version = Some(FileInfoBase {
+                                        size: merged.content.len() as i64,
+                                        modified_s: file_info.modified_s,
+                                        modified_ns: file_info.modified_ns,
+                                        blocks_hash: None,
+                                        content_hash: Some(hash),
+                                    });
+                                }
+                            } else {
+                                warn!(file = %file_info.name, "Failed to recover base content for merge");
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
         // 在覆盖前存档旧版本
         if let Some(v) = versioner {
             if file_path.exists() {
@@ -557,12 +616,76 @@ impl Puller {
         }
 
         // 更新数据库，标记文件已同步
-        if let Err(e) = db.update_file(folder_id, file_info.clone()).await {
+        if let Err(e) = db.update_file(folder_id, merged_info).await {
             warn!(file = %file_info.name, error = %e, "Failed to update database after download");
         }
 
         info!(file = %file_info.name, "File download completed");
         Ok(())
+    }
+
+    /// 从 versioner 归档中恢复 base 版本内容
+    ///
+    /// 通过 content_hash 匹配，而不是文件修改时间，因为归档文件的 mtime
+    /// 通常由 archive 时刻决定，不一定与原始 base 版本相同。
+    async fn recover_base_content(
+        versioner: &dyn Versioner,
+        file_path: &Path,
+        base: &FileInfoBase,
+    ) -> Option<String> {
+        let expected_hash = base.content_hash.as_ref()?;
+        eprintln!("[recover] expected_hash={:?}", expected_hash);
+        let versions = versioner.get_versions(file_path).await.ok()?;
+        eprintln!("[recover] versions={}", versions.len());
+        for version in versions {
+            eprintln!(
+                "[recover] version_time={:?} size={}",
+                version.version_time, version.size
+            );
+            // 使用临时目录 restore，避免覆盖本地文件
+            let tmp_dir = std::env::temp_dir().join(format!(
+                "syncthing-base-{}-{:x}",
+                std::process::id(),
+                version
+                    .version_time
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_secs()
+            ));
+            let _ = std::fs::create_dir_all(&tmp_dir);
+            let file_name = file_path.file_name().and_then(|n| n.to_str())?;
+            let tmp_path = tmp_dir.join(file_name);
+            eprintln!("[recover] trying restore to {:?}", tmp_path);
+            match versioner.restore(&tmp_path, version.version_time).await {
+                Ok(()) => {
+                    if let Ok(content) = fs::read(&tmp_path).await {
+                        let text = String::from_utf8_lossy(&content);
+                        let hash = sha2::Sha256::digest(&content).to_vec();
+                        eprintln!(
+                            "[recover] restored content={:?} hash={:?} expected={:?}",
+                            text, hash, expected_hash
+                        );
+                        if hash == *expected_hash {
+                            let content = String::from_utf8(content).ok();
+                            let _ = std::fs::remove_dir_all(&tmp_dir);
+                            return content;
+                        }
+                    }
+                    let _ = std::fs::remove_dir_all(&tmp_dir);
+                }
+                Err(e) => {
+                    eprintln!("[recover] restore failed: {}", e);
+                    let _ = std::fs::remove_dir_all(&tmp_dir);
+                }
+            }
+        }
+        None
+    }
+
+    /// 计算字节数组的内容哈希
+    fn content_hash(data: &[u8]) -> Vec<u8> {
+        use sha2::{Digest, Sha256};
+        Sha256::digest(data).to_vec()
     }
 
     /// 查找本地具有相同块哈希的文件（重命名优化）
@@ -604,9 +727,7 @@ impl Puller {
         let dir_path = folder_path.join(&file_info.name);
 
         if dir_path.exists() {
-            if dir_path.is_dir() {
-                trace!(dir = %file_info.name, "Directory already exists");
-            } else {
+            if !dir_path.is_dir() {
                 return Err(SyncError::pull(
                     file_info.name.clone(),
                     format!("Path exists but is not a directory: {}", dir_path.display()),
@@ -669,6 +790,7 @@ impl Puller {
             self.db.get_folder_files(&folder.id).await?;
         let base_path = Path::new(&folder.path);
         let mut needed = Vec::new();
+        let mut dirs_unchanged = 0u64;
 
         for file_info in db_files {
             if file_info.is_deleted() {
@@ -684,7 +806,7 @@ impl Puller {
                     needed.push(file_info);
                 } else if file_info.file_type == FileType::Directory {
                     // 目录只需存在即可，不检查大小/修改时间
-                    trace!(dir = %file_info.name, "Directory exists, no update needed");
+                    dirs_unchanged += 1;
                 } else {
                     // 可以添加更多检查，如大小、修改时间等
                     let metadata = fs::metadata(&file_path).await?;
@@ -693,6 +815,10 @@ impl Puller {
                     }
                 }
             }
+        }
+
+        if dirs_unchanged > 0 {
+            trace!(folder_id = %folder.id, count = dirs_unchanged, "Existing directories need no update");
         }
 
         Ok(needed)

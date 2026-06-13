@@ -168,6 +168,24 @@ pub struct IndexDelta {
     pub files: Vec<FileInfo>,
 }
 
+/// 文件 base 版本信息
+///
+/// 记录上一次全局一致版本的内容标识，用于三路合并。
+/// 不保存完整 blocks，避免 DB 膨胀。
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct FileInfoBase {
+    /// 文件大小
+    pub size: i64,
+    /// 修改时间（秒）
+    pub modified_s: i64,
+    /// 修改时间（纳秒部分）
+    pub modified_ns: i32,
+    /// 块列表哈希（如果原始 FileInfo 有）
+    pub blocks_hash: Option<Vec<u8>>,
+    /// 整体内容哈希（备用标识）
+    pub content_hash: Option<Vec<u8>>,
+}
+
 /// 文件信息
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct FileInfo {
@@ -201,6 +219,9 @@ pub struct FileInfo {
     pub blocks_hash: Option<Vec<u8>>,
     /// 无权限标记（BEP 兼容字段）
     pub no_permissions: Option<bool>,
+    /// 上一次全局一致的 base 版本（用于三路合并）
+    #[serde(default)]
+    pub base_version: Option<FileInfoBase>,
 }
 
 impl FileInfo {
@@ -222,6 +243,7 @@ impl FileInfo {
             modified_by: None,
             blocks_hash: None,
             no_permissions: None,
+            base_version: None,
         }
     }
 
@@ -269,7 +291,7 @@ impl Default for GuiConfig {
     fn default() -> Self {
         Self {
             enabled: true,
-            address: "0.0.0.0:8385".to_string(),
+            address: crate::constants::DEFAULT_GUI_ADDR.to_string(),
             api_key: String::new(),
         }
     }

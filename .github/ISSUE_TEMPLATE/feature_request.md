@@ -11,6 +11,8 @@ assignees: ''
 Is your feature request related to a problem? Please describe.
 A clear and concise description of what the problem is. Ex. I'm always frustrated when [...]
 
+> **Before requesting**: please check [AGENTS.md](../../AGENTS.md) §10.5 for current frozen items (consensus algorithms, QUIC/Web GUI, etc.).
+
 ## Detailed Description
 
 Describe the solution you'd like.
@@ -30,8 +32,15 @@ Which crate or subsystem does this relate to?
 - [ ] `syncthing-sync`
 - [ ] `syncthing-api`
 - [ ] `syncthing-core`
-- [ ] `cmd/syncthing` (CLI / TUI)
+- [ ] `syncthing-fs`
+- [ ] `syncthing-db`
+- [ ] `syncthing-versioner`
+- [ ] `syncthing-test-utils`
+- [ ] `cmd/syncthing` (CLI / TUI / tray)
+- [ ] `cmd/syncthing-cli`
 - [ ] `cmd/syncthing-bench`
+- [ ] `cmd/syncthing-mcp-bridge`
+- [ ] `cmd/syncthing-tray`
 - [ ] Documentation / DevEx
 - [ ] Other: ___
 

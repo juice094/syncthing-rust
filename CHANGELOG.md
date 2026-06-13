@@ -1,5 +1,21 @@
 # Changelog
 
+## [3.0.3] — 2026-06-13
+
+### Headline: TUI stability & modern tray icons.
+
+### TUI
+- **F5 daemon toggle lifecycle fix**: `toggle_daemon` now keeps the daemon `JoinHandle`, shows `Stopping...` while the daemon shuts down asynchronously, and blocks restart until the previous instance fully exits to prevent port conflicts.
+- **Windows raw mode fix**: Wrapped the TUI body in `tokio::task::LocalSet` so crossterm's thread-local console mode state stays on the same OS thread, eliminating the "Initial console modes not set" error and restoring F5/q keyboard handling.
+- **Folder form keyboard navigation**: `Tab`/`Down` from the last text field now enters the "Share with" device list; `BackTab`/`Up` from the first field wraps into the list.
+
+### Tray / UI
+- **Modern tray icon set**: Replaced hand-drawn overlapping-circle icons with Phosphor `git-merge` based status icons (gray default, green idle, blue syncing, red error) and matching Phosphor menu icons.
+
+### Stats
+- **Tests**: 364 passed / 0 failed / 4 ignored
+- **Clippy**: 0 warnings
+
 ## [3.0.2] — 2026-06-07
 
 ### Headline: Text file three-way merge for conflict resolution.

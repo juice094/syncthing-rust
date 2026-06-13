@@ -228,13 +228,27 @@ fn resolve_daemon_config(
 }
 
 #[tokio::main]
-async fn main() -> Result<()> {
+async fn main() {
+    if let Err(e) = run().await {
+        #[cfg(windows)]
+        show_error_message("Syncthing Error", &format!("{:#}", e));
+        std::process::exit(1);
+    }
+}
+
+async fn run() -> Result<()> {
     // 安装 rustls crypto provider，必须在任何 TLS 操作前执行
     rustls::crypto::ring::default_provider()
         .install_default()
         .map_err(|_| anyhow::anyhow!("Failed to install rustls crypto provider"))?;
 
     let cli = Cli::parse();
+
+    // 日志级别需要在单实例锁检查前解析，因为 Auto 模式检测到已有实例时会直接运行 TUI
+    let log_level = cli
+        .log_level
+        .parse::<Level>()
+        .context("invalid log level")?;
 
     // 确定配置目录
     let config_dir = cli
@@ -256,18 +270,26 @@ async fn main() -> Result<()> {
         ),
     };
     if needs_lock {
-        single_instance::acquire(&config_dir).map_err(|e| anyhow::anyhow!(e))?;
+        if let Err(e) = single_instance::acquire(&config_dir) {
+            // Auto 模式下若已有实例在运行，不弹窗，直接在当前进程打开 TUI。
+            // 这样用户重复双击 syncthing.exe 会聚焦到 TUI，而不是报错退出。
+            if cli.command.is_none() {
+                return run_tui_mode(
+                    &config_dir,
+                    CLI_DEFAULT_LISTEN.to_string(),
+                    syncthing_core::constants::DEFAULT_DEVICE_NAME.to_string(),
+                    log_level,
+                )
+                .await;
+            }
+            return Err(anyhow::anyhow!(e));
+        }
     }
     let _instance_guard = if needs_lock {
         Some(SingleInstanceGuard(config_dir.clone()))
     } else {
         None
     };
-
-    let log_level = cli
-        .log_level
-        .parse::<Level>()
-        .context("invalid log level")?;
 
     match cli.command.unwrap_or(Commands::Auto) {
         Commands::Run {
@@ -312,6 +334,7 @@ async fn main() -> Result<()> {
                         startup.sync_service.clone(),
                         startup.device_id,
                         Some(startup.connection_handle.clone()),
+                        startup.shutdown_tx.clone(),
                     )
                     .await
                     {
@@ -381,27 +404,7 @@ async fn main() -> Result<()> {
             listen,
             device_name,
         } => {
-            #[cfg(windows)]
-            ensure_console();
-
-            // 写入 TUI PID 文件，供托盘检测已存在实例
-            write_tui_pid(&config_dir);
-
-            let memory_buffer = logging_buffer::MemoryBuffer::new(100);
-            let memory_layer = logging_buffer::MemoryLayer::new(memory_buffer.clone());
-            // TUI 模式下丢弃 stdout 输出，避免日志穿透到 TUI 外侧
-            let fmt_layer = tracing_subscriber::fmt::layer().with_writer(std::io::sink);
-            let subscriber =
-                tracing_subscriber::registry()
-                    .with(fmt_layer.with_filter(
-                        tracing_subscriber::filter::LevelFilter::from_level(log_level),
-                    ))
-                    .with(memory_layer);
-            tracing::subscriber::set_global_default(subscriber)?;
-            let (listen, device_name) =
-                resolve_daemon_config(&config_dir, listen, device_name, true)?;
-            cmd_tui(&config_dir, &listen, &device_name, memory_buffer).await?;
-            cleanup_tui_pid(&config_dir);
+            run_tui_mode(&config_dir, listen, device_name, log_level).await?;
         }
         Commands::Init => {
             init_wizard::run_wizard(&config_dir)?;
@@ -512,90 +515,189 @@ async fn main() -> Result<()> {
                 false,
             )?;
 
-            match tui::daemon_runner::start_daemon(config_dir.clone(), listen, device_name).await {
-                Ok(startup) => {
-                    let (api_handle, _api_addr) = match api_server::start_api_server(
-                        &config_dir,
-                        startup.sync_service.clone(),
-                        startup.device_id,
-                        Some(startup.connection_handle.clone()),
-                    )
-                    .await
-                    {
-                        Ok(h) => h,
-                        Err(e) => {
-                            warn!("Failed to start REST API server: {}", e);
-                            (tokio::spawn(async {}), SocketAddr::from(([0, 0, 0, 0], 0)))
+            // 启动 daemon 控制器（支持托盘内反复启停）
+            let (daemon_cmd_tx, daemon_cmd_rx) = tokio::sync::mpsc::channel(4);
+            let controller_config_dir = config_dir.clone();
+            let controller_handle = tokio::spawn(async move {
+                daemon_controller(controller_config_dir, listen, device_name, daemon_cmd_rx).await;
+            });
+
+            // 初始自动启动 daemon
+            let _ = daemon_cmd_tx.send(DaemonCommand::Start).await;
+
+            #[cfg(all(windows, feature = "tray"))]
+            {
+                let (event_rx, tray_handle) = tray::spawn();
+
+                // Main thread: process tray events
+                for event in event_rx {
+                    tracing::debug!("Tray event: {:?}", event);
+                    match event {
+                        tray::TrayEvent::OpenTui => spawn_tui_from_tray(&config_dir),
+                        tray::TrayEvent::ToggleDaemon => {
+                            let cmd = if tray::daemon_running() {
+                                DaemonCommand::Stop
+                            } else {
+                                DaemonCommand::Start
+                            };
+                            let _ = daemon_cmd_tx.send(cmd).await;
                         }
-                    };
-
-                    let shutdown_tx = startup.shutdown_tx.clone();
-
-                    // 启动 daemon 主循环（session cleanup + 健康检查），
-                    // 必须与托盘事件循环并发运行，否则托盘阻塞期间 daemon 会僵死。
-                    let daemon_handle = tokio::spawn(startup.future);
-
-                    #[cfg(all(windows, feature = "tray"))]
-                    {
-                        // 从配置读取 GUI 地址，提取端口构造 loopback URL
-                        let config =
-                            load_config(&config_dir.join(CONFIG_FILE_NAME)).unwrap_or_default();
-                        let api_port = config.gui.address.rsplit(':').next().unwrap_or("8385");
-                        let api_url = format!("http://127.0.0.1:{}", api_port);
-
-                        let (event_rx, tray_handle) = tray::spawn();
-                        let client = tray_api::DaemonClient::new(&api_url);
-
-                        let status_shutdown = shutdown_tx.subscribe();
-                        tokio::spawn(async move {
-                            tray_status_loop(client, status_shutdown).await;
-                        });
-
-                        // Main thread: process tray events
-                        for event in event_rx {
-                            tracing::debug!("Tray event: {:?}", event);
-                            match event {
-                                tray::TrayEvent::OpenWebUi => open_web_ui(),
-                                tray::TrayEvent::OpenTui => spawn_tui_from_tray(&config_dir),
-                                tray::TrayEvent::ToggleDaemon => {
-                                    let _ = shutdown_tx.send(true);
-                                }
-                                tray::TrayEvent::Exit => {
-                                    tracing::info!("Exit requested, cleaning up...");
-                                    let _ = shutdown_tx.send(true);
-                                    tray::cleanup();
-                                    // 等待 tray 线程退出（WM_CLOSE → WM_DESTROY → PostQuitMessage → GetMessageW=0）
-                                    let _ = tray_handle.join();
-                                    break;
-                                }
-                            }
+                        tray::TrayEvent::Exit => {
+                            tracing::info!("Exit requested, cleaning up...");
+                            let _ = daemon_cmd_tx.send(DaemonCommand::Exit).await;
+                            tray::cleanup();
+                            // 等待 tray 线程退出（WM_CLOSE → WM_DESTROY → PostQuitMessage → GetMessageW=0）
+                            let _ = tray_handle.join();
+                            break;
                         }
                     }
-
-                    #[cfg(not(all(windows, feature = "tray")))]
-                    {
-                        // Non-Windows or headless: just wait for Ctrl+C
-                        let shutdown_tx_c = shutdown_tx.clone();
-                        tokio::spawn(async move {
-                            tokio::signal::ctrl_c().await.ok();
-                            info!("Received SIGINT, initiating graceful shutdown...");
-                            let _ = shutdown_tx_c.send(true);
-                        });
-                    }
-
-                    let daemon_result = daemon_handle.await;
-                    let _ = api_handle.await;
-                    daemon_result??;
-                }
-                Err(e) => {
-                    tracing::error!("Failed to start daemon: {}", e);
-                    std::process::exit(1);
                 }
             }
+
+            #[cfg(not(all(windows, feature = "tray")))]
+            {
+                // Non-Windows or headless: just wait for Ctrl+C, then exit
+                tokio::signal::ctrl_c().await.ok();
+                info!("Received SIGINT, initiating graceful shutdown...");
+                let _ = daemon_cmd_tx.send(DaemonCommand::Exit).await;
+            }
+
+            let _ = controller_handle.await;
         }
     }
 
     Ok(())
+}
+
+/// Daemon 控制器命令。
+#[cfg(all(windows, feature = "tray"))]
+#[derive(Debug, Clone, Copy)]
+enum DaemonCommand {
+    Start,
+    Stop,
+    Exit,
+}
+
+/// 一次 daemon + API 服务实例的句柄集合。
+#[cfg(all(windows, feature = "tray"))]
+struct DaemonServices {
+    shutdown_tx: tokio::sync::watch::Sender<bool>,
+    daemon_handle: tokio::task::JoinHandle<anyhow::Result<()>>,
+    api_handle: tokio::task::JoinHandle<()>,
+    api_url: String,
+}
+
+/// 启动一组 daemon + REST API 服务。
+///
+/// 与 Auto 模式原始逻辑等价，但可被控制器重复调用以实现托盘内启停。
+#[cfg(all(windows, feature = "tray"))]
+async fn start_daemon_services(
+    config_dir: &Path,
+    listen: &str,
+    device_name: &str,
+) -> anyhow::Result<DaemonServices> {
+    let startup = tui::daemon_runner::start_daemon(
+        config_dir.to_path_buf(),
+        listen.to_string(),
+        device_name.to_string(),
+    )
+    .await?;
+
+    let (api_handle, api_addr) = match api_server::start_api_server(
+        config_dir,
+        startup.sync_service.clone(),
+        startup.device_id,
+        Some(startup.connection_handle.clone()),
+        startup.shutdown_tx.clone(),
+    )
+    .await
+    {
+        Ok(h) => h,
+        Err(e) => {
+            warn!("Failed to start REST API server: {}", e);
+            (tokio::spawn(async {}), SocketAddr::from(([0, 0, 0, 0], 0)))
+        }
+    };
+
+    let api_url = if api_addr.port() != 0 {
+        format!("http://127.0.0.1:{}", api_addr.port())
+    } else {
+        // 无法获取实际端口时回退到配置中的端口
+        let config = load_config(&config_dir.join(CONFIG_FILE_NAME)).unwrap_or_default();
+        let api_port = config.gui.address.rsplit(':').next().unwrap_or("8385");
+        format!("http://127.0.0.1:{}", api_port)
+    };
+
+    let shutdown_tx = startup.shutdown_tx.clone();
+    let daemon_handle = tokio::spawn(startup.future);
+
+    Ok(DaemonServices {
+        shutdown_tx,
+        daemon_handle,
+        api_handle,
+        api_url,
+    })
+}
+
+/// Daemon 生命周期控制器。
+///
+/// 运行在独立的 tokio task 中，接收来自托盘事件循环的 Start/Stop/Exit 命令，
+/// 负责维护 daemon + API 实例并同步运行状态到托盘线程。
+#[cfg(all(windows, feature = "tray"))]
+async fn daemon_controller(
+    config_dir: PathBuf,
+    listen: String,
+    device_name: String,
+    mut cmd_rx: tokio::sync::mpsc::Receiver<DaemonCommand>,
+) {
+    let mut instance: Option<DaemonServices> = None;
+
+    while let Some(cmd) = cmd_rx.recv().await {
+        match cmd {
+            DaemonCommand::Start => {
+                if instance.is_some() {
+                    continue;
+                }
+                match start_daemon_services(&config_dir, &listen, &device_name).await {
+                    Ok(svc) => {
+                        tray::set_daemon_running(true);
+                        let client = tray_api::DaemonClient::new(&svc.api_url);
+                        let status_shutdown = svc.shutdown_tx.subscribe();
+                        tokio::spawn(async move {
+                            tray_status_loop(client, status_shutdown).await;
+                        });
+                        instance = Some(svc);
+                    }
+                    Err(e) => {
+                        warn!("Failed to start daemon: {}", e);
+                        tray::set_daemon_running(false);
+                    }
+                }
+            }
+            DaemonCommand::Stop => {
+                if let Some(svc) = instance.take() {
+                    tray::set_daemon_running(false);
+                    let _ = svc.shutdown_tx.send(true);
+                    let _ = svc.daemon_handle.await;
+                    let _ = svc.api_handle.await;
+                    // 停止后将图标重置为默认离线状态
+                    unsafe {
+                        tray::update_icon(tray::tray_hwnd(), tray::IconType::Default);
+                        tray::update_tooltip(tray::tray_hwnd(), "syncthing-rust\noffline");
+                    }
+                }
+            }
+            DaemonCommand::Exit => {
+                if let Some(svc) = instance.take() {
+                    tray::set_daemon_running(false);
+                    let _ = svc.shutdown_tx.send(true);
+                    let _ = svc.daemon_handle.await;
+                    let _ = svc.api_handle.await;
+                }
+                break;
+            }
+        }
+    }
 }
 
 /// 包装连接管理器的块数据源
@@ -775,6 +877,68 @@ async fn cmd_tui(
     .await
 }
 
+/// 在当前进程运行 TUI 模式。
+///
+/// 供 `Commands::Tui` 和 Auto 模式检测到已有 daemon 实例时复用。
+async fn run_tui_mode(
+    config_dir: &Path,
+    listen: String,
+    device_name: String,
+    log_level: Level,
+) -> Result<()> {
+    #[cfg(windows)]
+    ensure_console();
+
+    let config_dir_buf = config_dir.to_path_buf();
+
+    // TUI 单实例：若已有 TUI 在运行则聚焦其窗口并退出，避免重复打开。
+    #[cfg(windows)]
+    {
+        if let Some(pid) = read_tui_pid(&config_dir_buf) {
+            if is_process_alive(pid) {
+                tracing::info!(
+                    "TUI already running (PID {}), focusing existing window",
+                    pid
+                );
+                focus_window_by_pid(pid);
+                return Ok(());
+            }
+            // PID 文件残留，清理后继续
+            let _ = std::fs::remove_file(tui_pid_path(&config_dir_buf));
+        }
+    }
+
+    // 写入 TUI PID 文件，供托盘检测已存在实例
+    write_tui_pid(&config_dir_buf);
+
+    // LocalSet: 把 TUI 固定在当前 OS 线程，避免 crossterm 在 Windows 下
+    // 因 future 跨线程调度而丢失 raw mode 的 thread-local 状态。
+    let local = tokio::task::LocalSet::new();
+    let config_dir_for_local = config_dir_buf.clone();
+    let result = local
+        .run_until(async move {
+            let memory_buffer = logging_buffer::MemoryBuffer::new(100);
+            let memory_layer = logging_buffer::MemoryLayer::new(memory_buffer.clone());
+            // TUI 模式下丢弃 stdout 输出，避免日志穿透到 TUI 外侧
+            let fmt_layer = tracing_subscriber::fmt::layer().with_writer(std::io::sink);
+            let subscriber =
+                tracing_subscriber::registry()
+                    .with(fmt_layer.with_filter(
+                        tracing_subscriber::filter::LevelFilter::from_level(log_level),
+                    ))
+                    .with(memory_layer);
+            tracing::subscriber::set_global_default(subscriber)?;
+            let (listen, device_name) =
+                resolve_daemon_config(&config_dir_for_local, listen, device_name, true)?;
+            cmd_tui(&config_dir_for_local, &listen, &device_name, memory_buffer).await?;
+            Ok::<(), anyhow::Error>(())
+        })
+        .await;
+
+    cleanup_tui_pid(&config_dir_buf);
+    result
+}
+
 // ==================== tray helpers (Windows + feature = "tray") ====================
 
 #[cfg(all(windows, feature = "tray"))]
@@ -909,20 +1073,51 @@ async fn tray_status_loop(
     }
 }
 
-/// Windows: 为 `windows_subsystem` 二进制分配控制台窗口。
-/// TUI 需要控制台才能渲染；此函数在 `tui` 命令入口处调用。
+/// Windows: 显示致命错误消息框。
+///
+/// 用于 `windows_subsystem = "windows"` 模式下的错误提示，因为此时没有控制台窗口。
+#[cfg(windows)]
+fn show_error_message(title: &str, message: &str) {
+    use std::iter::once;
+    use windows::core::PCWSTR;
+    use windows::Win32::UI::WindowsAndMessaging::{MessageBoxW, MB_ICONERROR, MB_OK};
+
+    let title_wide: Vec<u16> = title.encode_utf16().chain(once(0)).collect();
+    let msg_wide: Vec<u16> = message.encode_utf16().chain(once(0)).collect();
+
+    // SAFETY: title_wide 和 msg_wide 均以 null 结尾，符合 MessageBoxW 要求。
+    unsafe {
+        let _ = MessageBoxW(
+            None,
+            PCWSTR(msg_wide.as_ptr()),
+            PCWSTR(title_wide.as_ptr()),
+            MB_OK | MB_ICONERROR,
+        );
+    }
+}
+
+/// Windows: 为 `windows_subsystem` 二进制分配独立控制台窗口。
+///
+/// TUI 需要独占控制台才能渲染并正确接收键盘输入。本函数**不**使用
+/// `AttachConsole(ATTACH_PARENT_PROCESS)`，因为附加父进程控制台会导致
+/// TUI 输出/输入与父控制台（PowerShell/cmd）互相穿透，表现为“TUI 透到
+/// 后方控制台”和“按键被后方控制台接收”。
+///
+/// 直接 `AllocConsole()` 会为本进程创建一个全新的控制台窗口；crossterm
+/// 的 stdout/stdin 会自动绑定到这个新控制台，从而隔离输入输出。
 #[cfg(windows)]
 fn ensure_console() {
     use windows::Win32::System::Console::{
-        AllocConsole, AttachConsole, GetConsoleWindow, GetStdHandle, SetConsoleScreenBufferSize,
+        AllocConsole, GetConsoleWindow, GetStdHandle, SetConsoleScreenBufferSize,
         SetConsoleWindowInfo, COORD, SMALL_RECT, STD_OUTPUT_HANDLE,
     };
     use windows::Win32::UI::WindowsAndMessaging::{SetForegroundWindow, ShowWindow, SW_SHOWNORMAL};
 
-    // SAFETY: Win32 Console API 是进程级操作。AttachConsole 尝试连接到父进程控制台，
-    // 若失败则 AllocConsole 分配新控制台。这些 API 在进程生命周期内仅需调用一次。
+    // SAFETY: Win32 Console API 是进程级操作。AllocConsole 在当前进程无控制台时
+    // 创建并附加一个新控制台；这些 API 在进程生命周期内仅需调用一次。
     unsafe {
-        if AttachConsole(u32::MAX).is_ok() {
+        // 如果已经附加到某个控制台（例如被显式启动在终端中），不再重复分配。
+        if !GetConsoleWindow().is_invalid() {
             return;
         }
         if AllocConsole().is_ok() {
@@ -948,7 +1143,13 @@ fn ensure_console() {
     }
 }
 
-/// 多终端启动 TUI：按优先级尝试 Windows Terminal → pwsh → PowerShell → CMD。
+/// 从托盘启动 TUI。
+///
+/// 由于 `syncthing.exe` 是 `windows_subsystem = "windows"` 二进制，通过终端
+/// 包装启动反而会产生“终端窗口 + TUI 独立控制台”两个窗口的糟糕体验。
+/// 这里直接 `CreateProcess` 启动 `syncthing.exe tui`，由 `ensure_console()`
+/// 分配一个独占控制台窗口，避免与父进程共享控制台造成的输入/输出穿透。
+///
 /// 启动前检查已有 TUI 实例（通过 PID 文件），若已存在则聚焦窗口而非重复创建。
 #[cfg(all(windows, feature = "tray"))]
 fn spawn_tui_from_tray(config_dir: &Path) {
@@ -974,61 +1175,21 @@ fn spawn_tui_from_tray(config_dir: &Path) {
         std::path::PathBuf::from("syncthing.exe")
     });
     let cd = config_dir.to_string_lossy().to_string();
-    let exe_q = format!("\"{}\"", exe.display());
-    let cd_q = format!("\"{}\"", cd);
 
     std::thread::spawn(move || {
-        // 优先级 1: Windows Terminal（新标签页，最佳体验）
-        let wt = std::process::Command::new("wt.exe")
-            .arg("new-tab")
-            .arg("powershell")
-            .arg("-Command")
-            .arg(format!("& {} tui --config-dir {}", exe_q, cd_q))
-            .spawn();
-        if wt.is_ok() {
-            tracing::info!("TUI spawned via Windows Terminal");
-            return;
-        }
-
-        // 优先级 2: pwsh.exe (PowerShell 7)
-        let pwsh = std::process::Command::new("pwsh.exe")
-            .args(["-NoLogo", "-NoProfile", "-Command"])
-            .arg(format!("& {} tui --config-dir {}", exe_q, cd_q))
-            .spawn();
-        if pwsh.is_ok() {
-            tracing::info!("TUI spawned via pwsh");
-            return;
-        }
-
-        // 优先级 3: powershell.exe (Windows 内置 PowerShell 5.1)
-        let ps = std::process::Command::new("powershell.exe")
-            .args([
-                "-NoLogo",
-                "-NoProfile",
-                "-ExecutionPolicy",
-                "Bypass",
-                "-Command",
-            ])
-            .arg(format!("& {} tui --config-dir {}", exe_q, cd_q))
-            .spawn();
-        if ps.is_ok() {
-            tracing::info!("TUI spawned via PowerShell");
-            return;
-        }
-
-        // 优先级 4: CMD 最后回退（使用引号包裹路径，防止空格路径断裂）
-        let cmd = std::process::Command::new("cmd.exe")
-            .arg("/c")
-            .arg(format!("{} tui --config-dir {}", exe_q, cd_q))
+        let status = std::process::Command::new(&exe)
+            .arg("tui")
+            .arg("--config-dir")
+            .arg(&cd)
             .status();
-        match cmd {
+        match status {
             Ok(s) => tracing::info!("TUI exited with status: {:?}", s.code()),
             Err(e) => tracing::error!("Failed to spawn TUI: {}", e),
         }
     });
 }
 
-#[cfg(all(windows, feature = "tray"))]
+#[cfg(windows)]
 fn read_tui_pid(config_dir: &Path) -> Option<u32> {
     let path = tui_pid_path(config_dir);
     std::fs::read_to_string(&path)
@@ -1038,7 +1199,7 @@ fn read_tui_pid(config_dir: &Path) -> Option<u32> {
         .ok()
 }
 
-#[cfg(all(windows, feature = "tray"))]
+#[cfg(windows)]
 fn is_process_alive(pid: u32) -> bool {
     use windows::Win32::System::Threading::{
         GetExitCodeProcess, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION,
@@ -1060,7 +1221,7 @@ fn is_process_alive(pid: u32) -> bool {
     }
 }
 
-#[cfg(all(windows, feature = "tray"))]
+#[cfg(windows)]
 fn focus_window_by_pid(target_pid: u32) {
     use windows::Win32::Foundation::{BOOL, HWND, LPARAM};
     use windows::Win32::UI::WindowsAndMessaging::{
@@ -1102,25 +1263,6 @@ fn focus_window_by_pid(target_pid: u32) {
         unsafe {
             let _ = ShowWindow(ctx.found, SW_SHOWNORMAL);
             let _ = SetForegroundWindow(ctx.found);
-        }
-    }
-}
-
-#[cfg(all(windows, feature = "tray"))]
-fn open_web_ui() {
-    // SAFETY: ShellExecuteW 以 "open" 动词启动默认浏览器访问 loopback URL (127.0.0.1:8385)。
-    // 所有参数均为安全字符串（无用户输入），不涉及任意命令执行。
-    unsafe {
-        let result = windows::Win32::UI::Shell::ShellExecuteW(
-            None,
-            windows::core::w!("open"),
-            windows::core::w!("http://127.0.0.1:8385"),
-            None,
-            None,
-            windows::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL,
-        );
-        if result.0 as isize <= 32 {
-            tracing::warn!("ShellExecuteW returned error code {:?}", result.0);
         }
     }
 }

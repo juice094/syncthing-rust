@@ -27,11 +27,10 @@ impl IndexManager {
     pub async fn new(db: Arc<dyn LocalDatabase>, folder: impl Into<String>) -> Result<Self> {
         let folder = folder.into();
 
-        // 尝试从数据库加载索引元数据
-        let (local_index_id, local_max_sequence) = match db.get_folder_index_meta(&folder).await? {
-            Some((id, seq)) => (Some(id), seq),
-            None => (None, 0),
-        };
+        // IndexID 从 index_meta 恢复；sequence 的单一权威源是 db.get_sequence()，
+        // 避免与 Scanner 使用的 increment_sequence 路径产生分歧。
+        let local_index_id = db.get_folder_index_meta(&folder).await?.map(|(id, _)| id);
+        let local_max_sequence = db.get_sequence(&folder).await?;
 
         Ok(Self {
             db,
@@ -135,7 +134,8 @@ impl IndexManager {
         self.local_index_id = Some(new_id);
         self.local_max_sequence = 0;
 
-        // 持久化到数据库
+        // sequence 单一权威源是 db；重置 sequence 并持久化新的 IndexID
+        self.db.reset_sequence(&self.folder).await?;
         self.db
             .update_folder_index_meta(&self.folder, new_id, 0)
             .await?;
@@ -163,21 +163,23 @@ impl IndexManager {
             }
         };
 
+        // sequence 单一权威源是 db，避免与 Scanner 的 increment_sequence 路径冲突
         for file in files.iter_mut() {
-            self.local_max_sequence += 1;
-            file.sequence = self.local_max_sequence;
+            file.sequence = self.db.increment_sequence(&self.folder).await?;
         }
 
         // 持久化文件和元数据
         self.db.update_files(&self.folder, files.to_vec()).await?;
+        let max_sequence = self.db.get_sequence(&self.folder).await?;
+        self.local_max_sequence = max_sequence;
         self.db
-            .update_folder_index_meta(&self.folder, index_id, self.local_max_sequence)
+            .update_folder_index_meta(&self.folder, index_id, max_sequence)
             .await?;
 
         debug!(
             folder = %self.folder,
             file_count = files.len(),
-            max_sequence = self.local_max_sequence,
+            max_sequence,
             "Updated full index"
         );
 
@@ -198,21 +200,23 @@ impl IndexManager {
             }
         };
 
+        // sequence 单一权威源是 db，避免与 Scanner 的 increment_sequence 路径冲突
         for file in files.iter_mut() {
-            self.local_max_sequence += 1;
-            file.sequence = self.local_max_sequence;
+            file.sequence = self.db.increment_sequence(&self.folder).await?;
         }
 
         // 持久化文件和元数据
         self.db.update_files(&self.folder, files.to_vec()).await?;
+        let max_sequence = self.db.get_sequence(&self.folder).await?;
+        self.local_max_sequence = max_sequence;
         self.db
-            .update_folder_index_meta(&self.folder, index_id, self.local_max_sequence)
+            .update_folder_index_meta(&self.folder, index_id, max_sequence)
             .await?;
 
         debug!(
             folder = %self.folder,
             file_count = files.len(),
-            max_sequence = self.local_max_sequence,
+            max_sequence,
             "Updated index delta"
         );
 
@@ -277,6 +281,7 @@ mod tests {
             modified_by: None,
             blocks_hash: None,
             no_permissions: None,
+            base_version: None,
         }
     }
 
@@ -387,5 +392,35 @@ mod tests {
         let manager = IndexManager::new(db, "test").await.unwrap();
         assert!(manager.local_index_id().is_some());
         assert_eq!(manager.local_max_sequence(), 1);
+    }
+
+    #[tokio::test]
+    async fn test_sequence_shared_with_scanner_path() {
+        let db = MemoryDatabase::new();
+
+        // 模拟 Scanner 先分配了两个 sequence
+        let scanner_seq_1 = db.increment_sequence("test").await.unwrap();
+        let scanner_seq_2 = db.increment_sequence("test").await.unwrap();
+        assert_eq!(scanner_seq_1, 1);
+        assert_eq!(scanner_seq_2, 2);
+
+        // IndexManager 从 db 恢复 max sequence
+        let mut manager = IndexManager::new(db.clone(), "test").await.unwrap();
+        assert_eq!(manager.local_max_sequence(), 2);
+
+        // IndexManager 继续分配 sequence，应与 Scanner 路径连续
+        let mut files = vec![create_test_file("c.txt")];
+        manager.update_index_delta(&mut files).await.unwrap();
+        assert_eq!(files[0].sequence, 3);
+        assert_eq!(manager.local_max_sequence(), 3);
+
+        // 重启后仍保持单调
+        drop(manager);
+        let mut manager = IndexManager::new(db, "test").await.unwrap();
+        assert_eq!(manager.local_max_sequence(), 3);
+
+        let mut more_files = vec![create_test_file("d.txt")];
+        manager.update_index_delta(&mut more_files).await.unwrap();
+        assert_eq!(more_files[0].sequence, 4);
     }
 }

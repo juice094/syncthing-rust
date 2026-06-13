@@ -10,13 +10,21 @@ use super::ConnectionManager;
 impl ConnectionManager {
     /// 启动事件处理任务
     pub(crate) fn spawn_event_handler(&self) {
-        let mut event_rx = self
-            .event_rx
-            .write()
-            .take()
-            .expect("INVARIANT: spawn_event_handler called only once");
+        let mut event_rx = match self.event_rx.write().take() {
+            Some(rx) => rx,
+            None => {
+                warn!("Event handler already spawned, skipping");
+                return;
+            }
+        };
 
-        let weak = self.self_weak();
+        let weak = match self.self_weak() {
+            Ok(w) => w,
+            Err(e) => {
+                warn!("Failed to get self_weak, aborting event handler: {}", e);
+                return;
+            }
+        };
 
         tokio::spawn(async move {
             while let Some(event) = event_rx.recv().await {
@@ -66,7 +74,13 @@ impl ConnectionManager {
     pub(crate) fn spawn_maintenance_task(&self) {
         let interval_duration = self.config.heartbeat_interval;
 
-        let weak = self.self_weak();
+        let weak = match self.self_weak() {
+            Ok(w) => w,
+            Err(e) => {
+                warn!("Failed to get self_weak, aborting maintenance task: {}", e);
+                return;
+            }
+        };
 
         let handle = tokio::spawn(async move {
             let mut ticker = interval(interval_duration);

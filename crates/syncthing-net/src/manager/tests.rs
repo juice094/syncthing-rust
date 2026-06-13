@@ -68,6 +68,45 @@ async fn test_transport_registry_start_listen() {
     manager.stop().await.expect("failed to stop");
 }
 
+#[tokio::test]
+async fn test_concurrent_connect_is_atomic() {
+    let tls_config = Arc::new(SyncthingTlsConfig::from_pem(b"", b"").unwrap_or_else(|_| {
+        let (cert, key) = crate::tls::generate_certificate("concurrent-connect-test")
+            .expect("failed to generate certificate");
+        SyncthingTlsConfig::from_pem(&cert, &key).expect("failed to load generated certificate")
+    }));
+    let identity = Arc::new(crate::identity::TlsIdentity::new(Arc::clone(&tls_config)));
+    let (manager, _handle) =
+        ConnectionManager::new(ConnectionManagerConfig::default(), identity, tls_config);
+
+    let device_id = DeviceId::default();
+    let addr: SocketAddr = "127.0.0.1:1".parse().unwrap();
+
+    // 并发发起 10 次连接到同一设备
+    let mut handles = Vec::new();
+    for _ in 0..10 {
+        let m = Arc::clone(&manager);
+        handles.push(tokio::spawn(async move {
+            m.connect_to_with_relay(device_id, vec![addr], vec![]).await
+        }));
+    }
+
+    // 等待所有 connect_to_with_relay 调用完成
+    for h in handles {
+        let _ = h.await;
+    }
+
+    // 关键断言：由于所有检查与 insert 都在一个 write lock 内完成，
+    // 并发调用返回后同一设备在 pending 表中最多只有 1 条记录。
+    //（reconnect 调度是异步延迟的，在此时刻尚未触发第二次 insert。）
+    let pending = manager.pending_connections.read().await;
+    assert!(
+        pending.len() <= 1,
+        "concurrent connect_to_with_relay should produce at most one pending entry, got {}",
+        pending.len()
+    );
+}
+
 #[test]
 fn test_should_reconnect_reasons() {
     let tls_config = Arc::new(SyncthingTlsConfig::from_pem(b"", b"").unwrap_or_else(|_| {

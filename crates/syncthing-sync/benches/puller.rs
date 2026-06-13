@@ -68,6 +68,7 @@ fn bench_pull_single_file(c: &mut Criterion) {
             modified_by: None,
             blocks_hash: None,
             no_permissions: None,
+            base_version: None,
         };
 
         group.throughput(Throughput::Bytes(*size as u64));

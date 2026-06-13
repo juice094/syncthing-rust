@@ -63,6 +63,7 @@ async fn test_download_file_with_mock_source() {
         modified_by: None,
         blocks_hash: None,
         no_permissions: None,
+        base_version: None,
     };
 
     let mock_source = Arc::new(MockBlockSource {
@@ -125,6 +126,7 @@ async fn test_check_needed_files_then_pull() {
         modified_by: None,
         blocks_hash: None,
         no_permissions: None,
+        base_version: None,
     };
 
     // 模拟 index_handler 处理远程索引后更新 DB
@@ -343,4 +345,129 @@ fn test_temp_path_preserves_original_extension() {
     assert_ne!(temp, Path::new("/dir/foo.syncthing.tmp"));
     // 验证是正确的格式
     assert_eq!(temp, Path::new("/dir/.syncthing.foo.md.tmp"));
+}
+
+/// 集成测试：Puller 在下载冲突的远程文本文件时执行三路合并
+#[tokio::test]
+async fn test_puller_three_way_merge_on_conflict() {
+    use syncthing_versioner::create_versioner;
+
+    let db = MemoryDatabase::new();
+    let events = EventPublisher::new(10);
+
+    let temp_dir = tempfile::tempdir().unwrap();
+    let folder_path = temp_dir.path().to_path_buf();
+    let folder = syncthing_core::types::Folder::new("test-folder", folder_path.to_str().unwrap());
+
+    let file_name = "merge_test.md";
+    let file_path = folder_path.join(file_name);
+
+    // Step 1: 创建 base 版本并扫描，生成 base_version
+    let base_content = "line1\nline2\n";
+    tokio::fs::write(&file_path, base_content).await.unwrap();
+    let scanner = Scanner::new(db.clone(), events.clone());
+    let mut changed = scanner.scan_folder(&folder).await.unwrap();
+    assert_eq!(changed.len(), 1);
+    let mut local_info = changed.pop().unwrap();
+    assert!(
+        local_info.base_version.is_some(),
+        "Scanner should set base_version"
+    );
+
+    // Step 2: 模拟本地修改
+    let local_content = "line1\nlocal-add\nline2\n";
+    tokio::fs::write(&file_path, local_content).await.unwrap();
+    local_info.version.increment(1);
+    local_info.sequence = 2;
+    db.update_file(&folder.id, local_info.clone())
+        .await
+        .unwrap();
+
+    // Step 3: 归档 base 版本到 .stversions/
+    let versioning_config = syncthing_core::types::VersioningConfig::Simple {
+        params: std::collections::HashMap::from([("keep".to_string(), "5".to_string())]),
+    };
+    let versioner =
+        create_versioner(&versioning_config, &folder_path).expect("versioner should be created");
+    // 先把 base 版本写回文件再归档
+    tokio::fs::write(&file_path, base_content).await.unwrap();
+    versioner.archive(&file_path).await.unwrap();
+    // 验证归档内容
+    let stversions = folder_path.join(".stversions");
+    for entry in std::fs::read_dir(&stversions).unwrap() {
+        let path = entry.unwrap().path();
+        let content = std::fs::read_to_string(&path).unwrap();
+        eprintln!("archived {}: {:?}", path.display(), content);
+    }
+    // 重新写本地修改
+    tokio::fs::write(&file_path, local_content).await.unwrap();
+
+    // Step 4: 准备 remote 版本（与本地冲突）
+    let remote_content = "line1\nline2\nremote-add\n";
+    let hash = sha2::Sha256::digest(remote_content);
+    let remote_info = FileInfo {
+        name: file_name.to_string(),
+        file_type: syncthing_core::types::FileType::File,
+        size: remote_content.len() as i64,
+        permissions: 0o644,
+        modified_s: 1,
+        modified_ns: 0,
+        version: syncthing_core::types::Vector::new().with_counter(2, 1),
+        sequence: 3,
+        block_size: remote_content.len() as i32,
+        blocks: vec![BlockInfo {
+            size: remote_content.len() as i32,
+            hash: hash.to_vec(),
+            offset: 0,
+        }],
+        symlink_target: None,
+        deleted: Some(false),
+        modified_by: None,
+        blocks_hash: None,
+        no_permissions: None,
+        base_version: None,
+    };
+
+    // 模拟 index_handler：检测到冲突后接受 remote，但保留本地 base_version
+    let mut db_info = remote_info.clone();
+    db_info.base_version = local_info.base_version.clone();
+    db.update_file(&folder.id, db_info).await.unwrap();
+
+    // Step 5: Puller 下载 remote 并触发三路合并
+    let mock_source = Arc::new(MockBlockSource {
+        data: Bytes::from_static(remote_content.as_bytes()),
+    });
+    let versioner_arc = Arc::from(versioner);
+    let puller = Puller::new(db.clone(), events.clone())
+        .with_block_source(Some(mock_source))
+        .with_versioner(Some(versioner_arc));
+    let stats = puller
+        .pull_folder(&folder, vec![remote_info.clone()])
+        .await
+        .unwrap();
+    assert_eq!(stats.files_succeeded, 1);
+
+    // Step 6: 验证合并结果
+    let merged_content = tokio::fs::read_to_string(&file_path).await.unwrap();
+    let db_file = db.get_file(&folder.id, file_name).await.unwrap().unwrap();
+    eprintln!("merged content:\n{}", merged_content);
+    eprintln!("db base_version: {:?}", db_file.base_version);
+    eprintln!("local_info base_version: {:?}", local_info.base_version);
+    eprintln!("remote_info base_version: {:?}", remote_info.base_version);
+    assert!(
+        merged_content.contains("local-add"),
+        "Merged content should contain local addition"
+    );
+    assert!(
+        merged_content.contains("remote-add"),
+        "Merged content should contain remote addition"
+    );
+    assert!(
+        !merged_content.contains("<<<<<<<"),
+        "Non-overlapping edits should not conflict"
+    );
+
+    // Step 7: 验证数据库 base_version 已更新
+    let db_file = db.get_file(&folder.id, file_name).await.unwrap().unwrap();
+    assert!(db_file.base_version.is_some());
 }

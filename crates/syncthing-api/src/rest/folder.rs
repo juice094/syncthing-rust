@@ -77,7 +77,10 @@ pub(crate) async fn create_folder(
         label: Some(request.label.unwrap_or_default()),
         folder_type: syncthing_core::types::FolderType::SendReceive,
         paused: false,
-        rescan_interval_secs: request.rescan_interval_secs.unwrap_or(3600) as i32,
+        rescan_interval_secs: request
+            .rescan_interval_secs
+            .unwrap_or(syncthing_core::constants::DEFAULT_SCAN_INTERVAL_SECS as u32)
+            as i32,
         devices: request
             .devices
             .into_iter()

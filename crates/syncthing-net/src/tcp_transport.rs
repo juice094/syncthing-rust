@@ -20,7 +20,7 @@ use crate::metrics;
 use crate::tls::SyncthingTlsConfig;
 
 /// 默认TCP端口
-pub const DEFAULT_TCP_PORT: u16 = 22000;
+pub const DEFAULT_TCP_PORT: u16 = syncthing_core::constants::DEFAULT_BEP_PORT;
 
 /// TCP连接超时
 pub const TCP_CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
@@ -515,13 +515,16 @@ mod tests {
 
     #[test]
     fn test_default_port() {
-        assert_eq!(DEFAULT_TCP_PORT, 22000);
+        assert_eq!(
+            DEFAULT_TCP_PORT,
+            syncthing_core::constants::DEFAULT_BEP_PORT
+        );
     }
 
     #[test]
     fn test_addr_parse() {
-        let addr = addr::parse_addr("127.0.0.1:22000").unwrap();
-        assert_eq!(addr.port(), 22000);
+        let addr = addr::parse_addr("127.0.0.1:22001").unwrap();
+        assert_eq!(addr.port(), syncthing_core::constants::DEFAULT_BEP_PORT);
     }
 
     #[tokio::test]

@@ -24,6 +24,7 @@ fn handle_key(app: &mut App, key: KeyEvent) -> bool {
         return true;
     }
 
+    // F5 由 run_app 事件循环直接处理（需要 daemon 生命周期句柄），此处不拦截。
     if key.code == KeyCode::F(5) {
         return false;
     }
@@ -74,6 +75,22 @@ fn handle_popup_key(app: &mut App, key: KeyEvent) -> bool {
 
     // 文件夹表单的 device 列表特殊处理
     let is_folder = matches!(app.popup, Popup::AddFolder | Popup::EditFolder);
+
+    // 从文本字段 Tab/Down 进入 Share with 列表；BackTab/Up 从首个字段回绕进入列表
+    if is_folder && !form.is_on_list() {
+        let last_field = form.field_count().saturating_sub(1);
+        match key.code {
+            KeyCode::Tab | KeyCode::Down if form.focus == last_field => {
+                form.focus = form.fields.len();
+                return false;
+            }
+            KeyCode::BackTab | KeyCode::Up if form.focus == 0 => {
+                form.focus = form.fields.len();
+                return false;
+            }
+            _ => {}
+        }
+    }
 
     if is_folder && form.is_on_list() {
         match key.code {

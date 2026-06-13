@@ -18,7 +18,7 @@ tags: [index, home, moc, syncthing-rust]
 |------|------|
 | [[KNOWN_ISSUES]] | 已知缺陷登记与项目阶段定位 |
 | [[ENGINEERING_DISCIPLINE]] | 工程纪律规范（部署测试、Windows 一级平台） |
-| [[GRAY_CLOUD_OPS_MANUAL_v0.2.7]] | Gray Cloud 运维手册 |
+| [[GRAY_CLOUD_OPS_MANUAL]] | Gray Cloud 运维手册 |
 
 ---
 
@@ -61,6 +61,6 @@ Tailscale 部署、代理配置。
 
 ## 项目状态
 
-- **当前版本**: v0.2.8
-- **最后更新**: 2026-05-22
-- **活跃路线图**: [[plans/NEXT_STEPS_2026-05-17]]
+- **当前版本**: v3.0.3
+- **最后更新**: 2026-06-13
+- **活跃路线图**: [[plans/POST_V0_2_0_ROADMAP]] / [[plans/NEXT_STEPS_2026-05-15]]

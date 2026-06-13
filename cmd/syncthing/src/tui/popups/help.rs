@@ -23,7 +23,7 @@ pub fn draw(f: &mut Frame, theme: &Theme) {
         (
             "Global",
             vec![
-                ("F5", "Start / Stop daemon"),
+                ("F5", "Start / Stop daemon (disabled for external daemon)"),
                 ("Tab / ← →", "Switch tab"),
                 ("l", "Toggle log filter (Error→Warn→Info→Debug→Trace)"),
                 ("q", "Quit TUI"),

@@ -29,10 +29,11 @@ What actually happened (include logs, stack traces, or screenshots).
 
 ## Environment
 
-- OS: [e.g. Windows 11, Ubuntu 22.04]
+- OS: [e.g. Windows 11, Ubuntu 24.04]
 - Rust version: `rustc --version`
-- syncthing-rust version / commit: [e.g. v0.2.0, main@abc1234]
-- Feature flags: [e.g. default]
+- syncthing-rust version / commit: [e.g. v3.0.3, main@abc1234]
+- Feature flags: [e.g. default, tray]
+- Have you checked [`KNOWN_ISSUES.md`](../../docs/KNOWN_ISSUES.md) and existing issues? [yes/no]
 
 ## Logs
 

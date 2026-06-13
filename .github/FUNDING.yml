@@ -1,0 +1,7 @@
+# Funding and support configuration for GitHub repository
+# See https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/displaying-a-sponsor-button-in-your-repository
+
+custom: ["https://github.com/juice094/syncthing-rust/blob/main/LICENSE-COMMERCIAL.md"]
+
+# For commercial support, priority bug fixes, or integration consulting:
+# See SUPPORT.md or contact juice094@protonmail.com

@@ -82,7 +82,7 @@ impl FolderModel {
         let interval_secs = if self.folder.rescan_interval_secs > 0 {
             self.folder.rescan_interval_secs as u64
         } else {
-            3600 // 默认1小时
+            syncthing_core::constants::DEFAULT_SCAN_INTERVAL_SECS
         };
 
         info!(

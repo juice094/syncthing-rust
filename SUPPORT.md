@@ -14,12 +14,10 @@ For production deployments, priority bug fixes, custom feature development, or i
 
 | Version | Status |
 |:---|:---|
-| v0.2.10-rc3 | Current (alpha) |
-| v0.2.9-rc5 | Superseded |
-| < v0.2.8 | Unsupported |
-
-This is alpha software. Breaking changes may occur between minor versions.
+| v3.0.3 | Current (production) |
+| v3.0.x | Supported — security fixes backported on request |
+| < v3.0.0 | Unsupported (pre-release / alpha) |
 
 ---
 
-*Last updated: 2026-06-03*
+*Last updated: 2026-06-13*
