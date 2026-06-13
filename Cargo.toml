@@ -34,7 +34,7 @@ ed25519-dalek = "2.1"
 # 序列化
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
-prost = "0.12"
+prost = "0.14"
 prost-build = "0.12"
 
 # 错误处理
