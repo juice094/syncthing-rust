@@ -43,7 +43,9 @@ use std::time::Duration;
 use crossterm::{
     event::DisableMouseCapture,
     execute,
-    terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
+    terminal::{
+        disable_raw_mode, enable_raw_mode, size, EnterAlternateScreen, LeaveAlternateScreen,
+    },
 };
 use ratatui::{
     backend::{Backend, CrosstermBackend},
@@ -148,6 +150,12 @@ pub async fn run_tui(
                 Err(e) => app.push_log(format!("Failed to load log file: {}", e)),
             }
         }
+    }
+
+    // Windows 下通过 cmd /c start / wt 启动时，Terminal 首帧可能拿到旧尺寸，
+    // 导致状态栏与主内容下边框错位。在首帧前用 crossterm 重新查询并同步一次。
+    if let Ok((cols, rows)) = size() {
+        let _ = terminal.resize(ratatui::layout::Rect::new(0, 0, cols, rows));
     }
 
     let res = run_app(&mut terminal, &mut app, memory_buffer).await;
