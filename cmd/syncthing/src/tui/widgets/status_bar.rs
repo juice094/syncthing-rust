@@ -21,6 +21,9 @@ pub fn draw(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
         " Run/Stop  "
     };
 
+    // 状态栏内容按重要程度从左到右排列：快捷键 > daemon 状态 > 日志级别。
+    // 使用左对齐，终端宽度不足时右侧自然被截断，避免居中对齐导致的
+    // "中间内容可见、左右提示被切掉" 的初次显示错位问题。
     let text = Text::from(vec![Line::from(vec![
         Span::styled("F5", theme.style_header),
         Span::styled(f5_hint, theme.style_idle),
@@ -38,6 +41,6 @@ pub fn draw(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
         ),
     ])]);
 
-    let para = Paragraph::new(text).alignment(Alignment::Center);
+    let para = Paragraph::new(text).alignment(Alignment::Left);
     f.render_widget(para, area);
 }
