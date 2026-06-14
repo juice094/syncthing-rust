@@ -957,15 +957,22 @@ async fn run_tui_mode(
         .run_until(async move {
             let memory_buffer = logging_buffer::MemoryBuffer::new(100);
             let memory_layer = logging_buffer::MemoryLayer::new(memory_buffer.clone());
-            // TUI 模式下丢弃 stdout 输出，避免日志穿透到 TUI 外侧
-            let fmt_layer = tracing_subscriber::fmt::layer().with_writer(std::io::sink);
-            let subscriber =
-                tracing_subscriber::registry()
-                    .with(fmt_layer.with_filter(
-                        tracing_subscriber::filter::LevelFilter::from_level(log_level),
-                    ))
-                    .with(memory_layer);
+            // TUI 模式下 stdout 已被 crossterm 接管，因此把日志同时写入文件和内存缓冲区。
+            let (tui_file_writer, _tui_log_guard) = init_tui_file_writer(&config_dir_for_local);
+            let subscriber = tracing_subscriber::registry()
+                .with(
+                    tracing_subscriber::fmt::layer()
+                        .with_writer(tui_file_writer)
+                        .with_filter(tracing_subscriber::filter::LevelFilter::from_level(
+                            log_level,
+                        )),
+                )
+                .with(memory_layer);
             tracing::subscriber::set_global_default(subscriber)?;
+            tracing::info!(
+                "TUI started (config_dir={})",
+                config_dir_for_local.display()
+            );
             let (listen, device_name) =
                 resolve_daemon_config(&config_dir_for_local, listen, device_name, true)?;
             cmd_tui(
@@ -985,6 +992,34 @@ async fn run_tui_mode(
 }
 
 // ==================== tray helpers (Windows + feature = "tray") ====================
+
+/// 初始化 TUI 文件日志 appender，返回非阻塞 writer 与 guard。
+///
+/// Guard 需要被调用者持有，防止 tracing_appender 工作线程在 TUI 运行期间被 drop。
+fn init_tui_file_writer(
+    config_dir: &Path,
+) -> (
+    tracing_appender::non_blocking::NonBlocking,
+    tracing_appender::non_blocking::WorkerGuard,
+) {
+    let logs_dir = config_dir.join("logs");
+    if let Err(e) = std::fs::create_dir_all(&logs_dir) {
+        eprintln!("Cannot create TUI logs dir: {}", e);
+    }
+
+    let file_appender = tracing_appender::rolling::Builder::new()
+        .rotation(tracing_appender::rolling::Rotation::DAILY)
+        .max_log_files(7)
+        .filename_prefix("tui")
+        .filename_suffix("log")
+        .build(&logs_dir)
+        .unwrap_or_else(|e| {
+            eprintln!("Failed to create TUI log appender: {}. Using temp dir.", e);
+            tracing_appender::rolling::daily(std::env::temp_dir(), "syncthing-tui-fallback")
+        });
+
+    tracing_appender::non_blocking(file_appender)
+}
 
 #[cfg(all(windows, feature = "tray"))]
 fn init_tray_logging(config_dir: &Path) {
@@ -1141,50 +1176,70 @@ fn show_error_message(title: &str, message: &str) {
     }
 }
 
-/// Windows: 为 `windows_subsystem` 二进制分配独立控制台窗口。
+/// Windows: 确保 `windows_subsystem` 二进制有一个可用的控制台窗口。
 ///
-/// TUI 需要独占控制台才能渲染并正确接收键盘输入。本函数**不**使用
-/// `AttachConsole(ATTACH_PARENT_PROCESS)`，因为附加父进程控制台会导致
-/// TUI 输出/输入与父控制台（PowerShell/cmd）互相穿透，表现为“TUI 透到
-/// 后方控制台”和“按键被后方控制台接收”。
+/// 优先附加到父进程控制台（当从 PowerShell / Windows Terminal 等终端启动时），
+/// 这样 TUI 会渲染在启动它的终端窗口内，避免用户看到两个窗口（一个空终端、
+/// 一个 TUI 控制台）。若父进程没有控制台（例如从资源管理器直接双击），则
+/// 回退到 `AllocConsole()` 创建独立控制台窗口。
 ///
-/// 直接 `AllocConsole()` 会为本进程创建一个全新的控制台窗口；crossterm
-/// 的 stdout/stdin 会自动绑定到这个新控制台，从而隔离输入输出。
+/// 注意：附加父控制台时，输入/输出会与父进程共享。托盘场景下父进程是
+/// 专门为本 TUI 实例启动的 `pwsh.exe`/`wt.exe`，共享是可接受的；直接
+/// 在终端中运行 `syncthing tui` 时，附加行为正好让 TUI 显示在当前标签页。
 #[cfg(windows)]
 fn ensure_console() {
     use windows::Win32::System::Console::{
-        AllocConsole, GetConsoleWindow, GetStdHandle, SetConsoleScreenBufferSize,
-        SetConsoleWindowInfo, COORD, SMALL_RECT, STD_OUTPUT_HANDLE,
+        AllocConsole, AttachConsole, GetConsoleWindow, SetConsoleTitleW, ATTACH_PARENT_PROCESS,
     };
-    use windows::Win32::UI::WindowsAndMessaging::{SetForegroundWindow, ShowWindow, SW_SHOWNORMAL};
 
-    // SAFETY: Win32 Console API 是进程级操作。AllocConsole 在当前进程无控制台时
-    // 创建并附加一个新控制台；这些 API 在进程生命周期内仅需调用一次。
+    // SAFETY: Win32 Console API 是进程级操作。AttachConsole/AllocConsole 在
+    // 当前进程无控制台时附加/创建新控制台；这些 API 在进程生命周期内仅需调用一次。
     unsafe {
         // 如果已经附加到某个控制台（例如被显式启动在终端中），不再重复分配。
         if !GetConsoleWindow().is_invalid() {
             return;
         }
-        if AllocConsole().is_ok() {
-            // 调整控制台缓冲区与窗口，避免 TUI 底部被截断
-            if let Ok(handle) = GetStdHandle(STD_OUTPUT_HANDLE) {
-                let buf = COORD { X: 120, Y: 40 };
-                let _ = SetConsoleScreenBufferSize(handle, buf);
-                let rect = SMALL_RECT {
-                    Left: 0,
-                    Top: 0,
-                    Right: 119,
-                    Bottom: 39,
-                };
-                let _ = SetConsoleWindowInfo(handle, true, &rect);
-            }
 
-            let hwnd = GetConsoleWindow();
-            if !hwnd.is_invalid() {
-                let _ = ShowWindow(hwnd, SW_SHOWNORMAL);
-                let _ = SetForegroundWindow(hwnd);
-            }
+        // 优先附加到父进程控制台。托盘启动 TUI 时，父进程是 pwsh/wt，
+        // 它们已经通过 cmd /c start 分配了控制台窗口。
+        if AttachConsole(ATTACH_PARENT_PROCESS).is_ok() {
+            let _ = SetConsoleTitleW(windows::core::w!("syncthing-rust TUI"));
+            configure_console_window();
+            return;
         }
+
+        // 父进程没有控制台时，创建独立控制台窗口。
+        if AllocConsole().is_ok() {
+            configure_console_window();
+        }
+    }
+}
+
+/// Windows: 调整并聚焦当前进程的控制台窗口。
+#[cfg(windows)]
+unsafe fn configure_console_window() {
+    use windows::Win32::System::Console::{
+        GetConsoleWindow, GetStdHandle, SetConsoleScreenBufferSize, SetConsoleWindowInfo, COORD,
+        SMALL_RECT, STD_OUTPUT_HANDLE,
+    };
+    use windows::Win32::UI::WindowsAndMessaging::{SetForegroundWindow, ShowWindow, SW_SHOWNORMAL};
+
+    if let Ok(handle) = GetStdHandle(STD_OUTPUT_HANDLE) {
+        let buf = COORD { X: 120, Y: 40 };
+        let _ = SetConsoleScreenBufferSize(handle, buf);
+        let rect = SMALL_RECT {
+            Left: 0,
+            Top: 0,
+            Right: 119,
+            Bottom: 39,
+        };
+        let _ = SetConsoleWindowInfo(handle, true, &rect);
+    }
+
+    let hwnd = GetConsoleWindow();
+    if !hwnd.is_invalid() {
+        let _ = ShowWindow(hwnd, SW_SHOWNORMAL);
+        let _ = SetForegroundWindow(hwnd);
     }
 }
 
@@ -1228,10 +1283,14 @@ fn spawn_tui_from_tray(config_dir: &Path, tray_pipe_name: &str) {
         let exe_quoted = escape_ps_single_quote(&exe.to_string_lossy());
         let cd_quoted = escape_ps_single_quote(&cd);
         let pipe_quoted = escape_ps_single_quote(&pipe);
+        // PowerShell 命令：使用 Start-Process -NoNewWindow 让 TUI 与 pwsh 共用同一个
+        // 控制台窗口；Wait-Process 阻塞 pwsh 读取输入，避免 TUI 运行期间父 shell
+        // 抢占键盘输入。使用 -EncodedCommand 避免 cmd/PowerShell 引号转义地狱。
         let ps_cmd = format!(
-            "& '{}' tui --config-dir '{}' --tray-pipe '{}'",
+            "$proc = Start-Process -FilePath '{}' -ArgumentList 'tui','--config-dir','{}','--tray-pipe','{}' -NoNewWindow -PassThru; Wait-Process -Id $proc.Id",
             exe_quoted, cd_quoted, pipe_quoted
         );
+        let encoded = encode_ps_command(&ps_cmd);
         let title = "syncthing-rust TUI";
 
         // 1. 优先 Windows Terminal：wt.exe 通过 cmd /c start 启动，以正确处理 WindowsApps alias
@@ -1240,7 +1299,14 @@ fn spawn_tui_from_tray(config_dir: &Path, tray_pipe_name: &str) {
             title,
             "wt.exe",
             &[
-                "new-tab", "--title", title, "--", "pwsh.exe", "-NoExit", "-Command", &ps_cmd,
+                "new-tab",
+                "--title",
+                title,
+                "--",
+                "pwsh.exe",
+                "-NoExit",
+                "-EncodedCommand",
+                &encoded,
             ],
         ) {
             tracing::info!("TUI launched via Windows Terminal");
@@ -1250,7 +1316,12 @@ fn spawn_tui_from_tray(config_dir: &Path, tray_pipe_name: &str) {
 
         // 2. PowerShell 7：同样通过 cmd /c start，确保 pwsh 获得独立控制台窗口，
         //    并成为 TUI 的载体（TUI 渲染在 pwsh 窗口内）。
-        if try_start_tui(&cd, title, "pwsh.exe", &["-NoExit", "-Command", &ps_cmd]) {
+        if try_start_tui(
+            &cd,
+            title,
+            "pwsh.exe",
+            &["-NoExit", "-EncodedCommand", &encoded],
+        ) {
             tracing::info!("TUI launched via PowerShell 7");
             return;
         }
@@ -1261,7 +1332,7 @@ fn spawn_tui_from_tray(config_dir: &Path, tray_pipe_name: &str) {
             &cd,
             title,
             "powershell.exe",
-            &["-NoExit", "-Command", &ps_cmd],
+            &["-NoExit", "-EncodedCommand", &encoded],
         ) {
             tracing::info!("TUI launched via Windows PowerShell");
             return;
@@ -1317,6 +1388,18 @@ fn try_start_tui(config_dir: &str, title: &str, program: &str, args: &[&str]) ->
             false
         }
     }
+}
+
+/// 将 PowerShell 命令字符串编码为 UTF-16 LE Base64，供 `-EncodedCommand` 使用。
+#[cfg(all(windows, feature = "tray"))]
+fn encode_ps_command(cmd: &str) -> String {
+    use base64::{engine::general_purpose::STANDARD, Engine as _};
+    let utf16: Vec<u16> = cmd.encode_utf16().collect();
+    let mut bytes = Vec::with_capacity(utf16.len() * 2);
+    for unit in utf16 {
+        bytes.extend_from_slice(&unit.to_le_bytes());
+    }
+    STANDARD.encode(&bytes)
 }
 
 /// 将字符串中的单引号替换为两个单引号，供 PowerShell 单引号字符串使用。
