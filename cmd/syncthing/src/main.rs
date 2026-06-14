@@ -921,7 +921,7 @@ async fn run_tui_mode(
     config_dir: &Path,
     listen: String,
     device_name: String,
-    log_level: Level,
+    _log_level: Level,
     tray_pipe: Option<String>,
 ) -> Result<()> {
     #[cfg(windows)]
@@ -958,14 +958,13 @@ async fn run_tui_mode(
             let memory_buffer = logging_buffer::MemoryBuffer::new(100);
             let memory_layer = logging_buffer::MemoryLayer::new(memory_buffer.clone());
             // TUI 模式下 stdout 已被 crossterm 接管，因此把日志同时写入文件和内存缓冲区。
+            // 文件日志固定 DEBUG 级别，便于诊断布局/启动问题；内存日志仍按用户选择过滤。
             let (tui_file_writer, _tui_log_guard) = init_tui_file_writer(&config_dir_for_local);
             let subscriber = tracing_subscriber::registry()
                 .with(
                     tracing_subscriber::fmt::layer()
                         .with_writer(tui_file_writer)
-                        .with_filter(tracing_subscriber::filter::LevelFilter::from_level(
-                            log_level,
-                        )),
+                        .with_filter(tracing_subscriber::filter::LevelFilter::DEBUG),
                 )
                 .with(memory_layer);
             tracing::subscriber::set_global_default(subscriber)?;

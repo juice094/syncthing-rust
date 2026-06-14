@@ -10,6 +10,13 @@ use crate::tui::forms::render;
 pub fn draw(f: &mut Frame, app: &mut App) {
     let area = f.area();
 
+    tracing::debug!(
+        "ui::draw area={}x{} tab={:?}",
+        area.width,
+        area.height,
+        app.tab
+    );
+
     if area.width < 40 || area.height < 12 {
         let msg = Paragraph::new("Terminal too small. Please resize to at least 40x12.")
             .alignment(Alignment::Center)
@@ -26,6 +33,13 @@ pub fn draw(f: &mut Frame, app: &mut App) {
             Constraint::Length(1),
         ])
         .split(area);
+
+    tracing::debug!(
+        "ui::draw chunks header={:?} main={:?} status={:?}",
+        chunks[0],
+        chunks[1],
+        chunks[2]
+    );
 
     crate::tui::widgets::header::draw(f, app, chunks[0]);
     draw_main_content(f, app, chunks[1]);

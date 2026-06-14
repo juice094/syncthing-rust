@@ -43,9 +43,7 @@ use std::time::Duration;
 use crossterm::{
     event::DisableMouseCapture,
     execute,
-    terminal::{
-        disable_raw_mode, enable_raw_mode, size, EnterAlternateScreen, LeaveAlternateScreen,
-    },
+    terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
 use ratatui::{
     backend::{Backend, CrosstermBackend},
@@ -153,10 +151,8 @@ pub async fn run_tui(
     }
 
     // Windows 下通过 cmd /c start / wt 启动时，Terminal 首帧可能拿到旧尺寸，
-    // 导致状态栏与主内容下边框错位。在首帧前用 crossterm 重新查询并同步一次。
-    if let Ok((cols, rows)) = size() {
-        let _ = terminal.resize(ratatui::layout::Rect::new(0, 0, cols, rows));
-    }
+    // 导致状态栏与主内容下边框错位。在首帧前让 ratatui 重新自动调整尺寸。
+    let _ = terminal.autoresize();
 
     let res = run_app(&mut terminal, &mut app, memory_buffer).await;
 
@@ -262,6 +258,28 @@ async fn run_app<B: Backend>(
     let mut daemon_handle: Option<syncthing_net::ConnectionManagerHandle> = None;
     let mut event_tx: Option<tokio::sync::mpsc::Sender<TuiEvent>> = None;
     let mut daemon_shutdown_tx: Option<tokio::sync::watch::Sender<bool>> = None;
+
+    // 首帧前等待终端尺寸稳定：Windows Terminal / cmd start 刚创建窗口时，
+    // 控制台 srWindow 可能尚未同步到实际可见行数，导致首帧布局错位。
+    // 这里轮询尺寸直到连续两次一致，最多等 300ms。
+    let mut stable_size = (0, 0);
+    for _ in 0..6 {
+        if let Ok((w, h)) = crossterm::terminal::size() {
+            if w == stable_size.0 && h == stable_size.1 && w > 0 && h > 0 {
+                break;
+            }
+            stable_size = (w, h);
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    if stable_size.0 > 0 && stable_size.1 > 0 {
+        let _ = terminal.resize(ratatui::layout::Rect::new(
+            0,
+            0,
+            stable_size.0,
+            stable_size.1,
+        ));
+    }
 
     loop {
         terminal
