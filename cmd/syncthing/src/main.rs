@@ -1232,36 +1232,41 @@ fn spawn_tui_from_tray(config_dir: &Path, tray_pipe_name: &str) {
             "& '{}' tui --config-dir '{}' --tray-pipe '{}'",
             exe_quoted, cd_quoted, pipe_quoted
         );
+        let title = "syncthing-rust TUI";
 
-        // 1. 优先 Windows Terminal
-        if shell_execute(
+        // 1. 优先 Windows Terminal：wt.exe 通过 cmd /c start 启动，以正确处理 WindowsApps alias
+        if try_start_tui(
+            &cd,
+            title,
             "wt.exe",
-            &format!(
-                "new-tab --title \"syncthing-rust TUI\" -- pwsh.exe -NoExit -Command \"{}\"",
-                ps_cmd
-            ),
+            &[
+                "new-tab", "--title", title, "--", "pwsh.exe", "-NoExit", "-Command", &ps_cmd,
+            ],
         ) {
             tracing::info!("TUI launched via Windows Terminal");
             return;
         }
-        tracing::debug!("wt.exe not available, trying PowerShell 7");
+        tracing::debug!("wt.exe not available or failed, trying PowerShell 7");
 
-        // 2. PowerShell 7
-        if shell_execute("pwsh.exe", &format!("-NoExit -Command \"{}\"", ps_cmd)) {
+        // 2. PowerShell 7：同样通过 cmd /c start，确保 pwsh 获得独立控制台窗口，
+        //    并成为 TUI 的载体（TUI 渲染在 pwsh 窗口内）。
+        if try_start_tui(&cd, title, "pwsh.exe", &["-NoExit", "-Command", &ps_cmd]) {
             tracing::info!("TUI launched via PowerShell 7");
             return;
         }
-        tracing::debug!("pwsh.exe not available, trying Windows PowerShell");
+        tracing::debug!("pwsh.exe not available or failed, trying Windows PowerShell");
 
         // 3. Windows PowerShell
-        if shell_execute(
+        if try_start_tui(
+            &cd,
+            title,
             "powershell.exe",
-            &format!("-NoExit -Command \"{}\"", ps_cmd),
+            &["-NoExit", "-Command", &ps_cmd],
         ) {
             tracing::info!("TUI launched via Windows PowerShell");
             return;
         }
-        tracing::debug!("powershell.exe not available, falling back to direct spawn");
+        tracing::debug!("powershell.exe not available or failed, falling back to direct spawn");
 
         // 4. 最终回退：直接 CreateProcess，由 ensure_console() 分配控制台
         let status = std::process::Command::new(&exe)
@@ -1278,35 +1283,40 @@ fn spawn_tui_from_tray(config_dir: &Path, tray_pipe_name: &str) {
     });
 }
 
-/// 使用 ShellExecuteW 启动外部程序，正确处理 WindowsApps AppExecutionAlias。
+/// 通过 `cmd /c start` 启动 TUI，并验证 `syncthing-tui.pid` 是否已写入，
+/// 以确认目标终端程序真实存在并成功启动了 syncthing.exe tui。
 ///
-/// 返回 true 表示 ShellExecuteW 调用成功（程序已被提交启动）。
-/// 返回 false 表示目标未找到或无法启动。
+/// 使用 `cmd /c start` 的原因：
+/// - `start` 会为控制台程序分配新的控制台窗口；
+/// - `cmd.exe` 能正确解析 WindowsApps（Microsoft Store）安装的 AppExecutionAlias，
+///   而 Rust 的 `CreateProcessW` 直接调用 `pwsh.exe`/`wt.exe` 会找不到这些文件。
 #[cfg(all(windows, feature = "tray"))]
-fn shell_execute(file: &str, parameters: &str) -> bool {
-    use windows::core::PCWSTR;
-    use windows::Win32::UI::Shell::ShellExecuteW;
-    use windows::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL;
+fn try_start_tui(config_dir: &str, title: &str, program: &str, args: &[&str]) -> bool {
+    let mut cmd = std::process::Command::new("cmd.exe");
+    cmd.arg("/c").arg("start").arg(title);
+    cmd.arg(program);
+    cmd.args(args);
 
-    let op: Vec<u16> = "open".encode_utf16().chain(Some(0)).collect();
-    let file: Vec<u16> = file.encode_utf16().chain(Some(0)).collect();
-    let params: Vec<u16> = parameters.encode_utf16().chain(Some(0)).collect();
-
-    // SAFETY: ShellExecuteW 接收以 null 结尾的 UTF-16 字符串指针。字符串在调用期间保持存活，
-    // 调用后立即返回，不会跨 await 持引用。
-    let result = unsafe {
-        ShellExecuteW(
-            None,
-            PCWSTR(op.as_ptr()),
-            PCWSTR(file.as_ptr()),
-            PCWSTR(params.as_ptr()),
-            None,
-            SW_SHOWNORMAL,
-        )
-    };
-
-    // ShellExecuteW 返回值 > 32 表示成功；<= 32 为错误码。
-    result.0 as isize > 32
+    match cmd.status() {
+        Ok(_) => {
+            // cmd /c start 会立即返回，即使目标程序不存在也会成功。
+            // 等待一小段时间后检查 tui.pid，确认 TUI 真实启动。
+            for _ in 0..10 {
+                std::thread::sleep(std::time::Duration::from_millis(100));
+                if let Some(pid) = read_tui_pid(std::path::Path::new(config_dir)) {
+                    if is_process_alive(pid) {
+                        return true;
+                    }
+                }
+            }
+            tracing::debug!("{} started but tui.pid did not appear", program);
+            false
+        }
+        Err(e) => {
+            tracing::debug!("Failed to start {} via cmd /c start: {}", program, e);
+            false
+        }
+    }
 }
 
 /// 将字符串中的单引号替换为两个单引号，供 PowerShell 单引号字符串使用。
