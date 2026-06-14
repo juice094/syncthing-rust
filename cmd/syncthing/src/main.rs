@@ -1196,23 +1196,54 @@ fn ensure_console() {
     // 当前进程无控制台时附加/创建新控制台；这些 API 在进程生命周期内仅需调用一次。
     unsafe {
         // 如果已经附加到某个控制台（例如被显式启动在终端中），不再重复分配。
-        if !GetConsoleWindow().is_invalid() {
+        let existing = GetConsoleWindow();
+        console_diag_log(format!(
+            "ensure_console: existing_console_hwnd={:?}",
+            existing.0
+        ));
+        if !existing.is_invalid() {
+            console_diag_log("ensure_console: already has console, returning".to_string());
             return;
         }
 
         // 优先附加到父进程控制台。托盘启动 TUI 时，父进程是 pwsh/wt，
         // 它们已经通过 cmd /c start 分配了控制台窗口。
-        if AttachConsole(ATTACH_PARENT_PROCESS).is_ok() {
+        let attach_result = AttachConsole(ATTACH_PARENT_PROCESS);
+        console_diag_log(format!(
+            "ensure_console: AttachConsole result={:?}",
+            attach_result
+        ));
+        if attach_result.is_ok() {
             let _ = SetConsoleTitleW(windows::core::w!("syncthing-rust TUI"));
             configure_console_window();
             return;
         }
 
         // 父进程没有控制台时，创建独立控制台窗口。
-        if AllocConsole().is_ok() {
+        let alloc_result = AllocConsole();
+        console_diag_log(format!(
+            "ensure_console: AllocConsole result={:?}",
+            alloc_result
+        ));
+        if alloc_result.is_ok() {
+            let _ = SetConsoleTitleW(windows::core::w!("syncthing-rust TUI"));
             configure_console_window();
         }
     }
+}
+
+/// 用于 ensure_console 诊断的临时日志（此时 tracing 尚未初始化）。
+#[cfg(windows)]
+fn console_diag_log(msg: String) {
+    use std::io::Write;
+    let path = std::env::temp_dir().join("syncthing-tui-console-diag.log");
+    let timestamp = chrono::Local::now().format("%Y-%m-%d %H:%M:%S%.3f");
+    let line = format!("[{}] {}\n", timestamp, msg);
+    let _ = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(path)
+        .and_then(|mut f| f.write_all(line.as_bytes()));
 }
 
 /// Windows: 调整并聚焦当前进程的控制台窗口。
@@ -1363,16 +1394,25 @@ fn spawn_tui_from_tray(config_dir: &Path, tray_pipe_name: &str) {
 ///   而 Rust 的 `CreateProcessW` 直接调用 `pwsh.exe`/`wt.exe` 会找不到这些文件。
 #[cfg(all(windows, feature = "tray"))]
 fn try_start_tui(config_dir: &str, title: &str, program: &str, args: &[&str]) -> bool {
+    use std::os::windows::process::CommandExt;
+
+    // CREATE_NO_WINDOW: 托盘本身是 windows_subsystem（无控制台），
+    // 直接启动 cmd.exe 会导致 cmd 先弹出一个黑色控制台窗口，再执行 start。
+    // 加上此标志后 cmd 在后台执行，只保留 start 启动的目标终端窗口。
+    const CREATE_NO_WINDOW: u32 = 0x08000000;
+
     let mut cmd = std::process::Command::new("cmd.exe");
     cmd.arg("/c").arg("start").arg(title);
     cmd.arg(program);
     cmd.args(args);
+    cmd.creation_flags(CREATE_NO_WINDOW);
 
     match cmd.status() {
         Ok(_) => {
             // cmd /c start 会立即返回，即使目标程序不存在也会成功。
-            // 等待一小段时间后检查 tui.pid，确认 TUI 真实启动。
-            for _ in 0..10 {
+            // 等待 TUI 真实启动：Windows Terminal 冷启动可能需要 2~3 秒，
+            // 因此把超时从 1 秒延长到 5 秒，避免误判为失败并回退到第二个终端。
+            for _ in 0..50 {
                 std::thread::sleep(std::time::Duration::from_millis(100));
                 if let Some(pid) = read_tui_pid(std::path::Path::new(config_dir)) {
                     if is_process_alive(pid) {
