@@ -119,8 +119,3 @@ pub fn colored_log_line<'a>(line: &'a str, theme: &Theme) -> Line<'a> {
 
     Line::from(spans)
 }
-
-/// 批量转换日志行
-pub fn colored_logs<'a>(lines: &'a [String], theme: &Theme) -> Vec<Line<'a>> {
-    lines.iter().map(|l| colored_log_line(l, theme)).collect()
-}
