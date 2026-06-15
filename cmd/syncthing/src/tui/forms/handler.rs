@@ -62,7 +62,12 @@ fn paste_into(form: &mut FormState) {
         if let Ok(text) = clipboard.get_text() {
             if let Some(field) = form.fields.get_mut(form.focus) {
                 if field.editable {
-                    field.value.push_str(&text);
+                    if field.name == "device_id" {
+                        let combined = format!("{}{}", field.value, text);
+                        field.value = FormState::format_device_id(&combined);
+                    } else {
+                        field.value.push_str(&text);
+                    }
                 }
             }
         }

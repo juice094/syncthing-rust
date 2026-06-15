@@ -3,13 +3,13 @@
 #![allow(dead_code)]
 
 //!
-//! 基于 ratatui::widgets::Gauge，使用 theme 配色。
+//! 基于 ratatui::widgets::LineGauge，使用 theme 配色。
 //! 支持百分比和字节双显示模式。
 
 use ratatui::{
     style::Style,
     text::{Line, Span},
-    widgets::{Gauge, LineGauge},
+    widgets::LineGauge,
     Frame,
 };
 
@@ -30,7 +30,7 @@ pub fn format_bytes(bytes: u64) -> String {
     }
 }
 
-/// 标准进度条（带百分比标签）
+/// 标准进度条（带百分比标签，紧凑行内样式）
 pub fn draw_gauge(
     f: &mut Frame,
     area: ratatui::layout::Rect,
@@ -39,15 +39,11 @@ pub fn draw_gauge(
     ratio: f64,
 ) {
     let ratio = ratio.clamp(0.0, 1.0);
-    let gauge = Gauge::default()
-        .block(
-            ratatui::widgets::Block::default()
-                .borders(ratatui::widgets::Borders::ALL)
-                .title(label),
-        )
-        .gauge_style(Style::default().fg(theme.primary).bg(theme.surface))
+    let gauge = LineGauge::default()
+        .filled_style(Style::default().fg(theme.primary))
+        .unfilled_style(Style::default().fg(theme.border))
         .ratio(ratio)
-        .label(format!("{:.0}%", ratio * 100.0));
+        .label(label.to_string());
     f.render_widget(gauge, area);
 }
 

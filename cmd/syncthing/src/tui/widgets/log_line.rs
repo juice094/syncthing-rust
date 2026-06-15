@@ -11,32 +11,91 @@ use ratatui::{
 use crate::tui::theme::Theme;
 
 /// 检测日志级别
+///
+/// 优先匹配 tracing 默认格式前缀：
+/// `2026-04-20T12:15:03.581593Z DEBUG ...`
+/// 不匹配时回退到行首 `[LEVEL]` 格式，最后再按关键字 contains 检测。
 fn detect_level(line: &str) -> &str {
-    // tracing 格式: "2026-04-20T12:15:03.581593Z DEBUG syncthing_sync::folder_model ..."
-    // 也可能是: "[DEBUG] ..." 或 "DEBUG: ..."
-    let trimmed = line.trim();
+    let trimmed = line.trim_start();
 
-    // 尝试匹配常见级别关键字
+    // 1. tracing 默认格式：时间戳 + 级别在第二个 token
+    let mut parts = trimmed.split_whitespace();
+    if let (Some(ts), Some(level)) = (parts.next(), parts.next()) {
+        if is_tracing_timestamp(ts) {
+            match level {
+                "ERROR" | "WARN" | "INFO" | "DEBUG" | "TRACE" => return level,
+                _ => {}
+            }
+        }
+    }
+
+    // 2. 回退：行首括号格式
+    if trimmed.starts_with("[ERROR]") {
+        return "ERROR";
+    }
+    if trimmed.starts_with("[WARN]") {
+        return "WARN";
+    }
+    if trimmed.starts_with("[INFO]") {
+        return "INFO";
+    }
+    if trimmed.starts_with("[DEBUG]") {
+        return "DEBUG";
+    }
+    if trimmed.starts_with("[TRACE]") {
+        return "TRACE";
+    }
+
+    // 3. 最后尝试关键字包含
     for level in &["ERROR", "WARN", "INFO", "DEBUG", "TRACE"] {
         if trimmed.contains(level) {
             return level;
         }
     }
 
-    // 回退：检查行首括号格式
-    if trimmed.starts_with("[ERROR]") || trimmed.contains("error") {
-        "ERROR"
-    } else if trimmed.starts_with("[WARN]") || trimmed.contains("warn") {
-        "WARN"
-    } else if trimmed.starts_with("[INFO]") {
-        "INFO"
-    } else if trimmed.starts_with("[DEBUG]") {
-        "DEBUG"
-    } else if trimmed.starts_with("[TRACE]") {
-        "TRACE"
-    } else {
-        "INFO"
+    "INFO"
+}
+
+/// 校验 tracing 默认时间戳前缀：`YYYY-MM-DDTHH:MM:SS.ssssssZ`
+fn is_tracing_timestamp(ts: &str) -> bool {
+    let b = ts.as_bytes();
+    // 最短形式：YYYY-MM-DDTHH:MM:SS.0Z => 21 字节
+    if b.len() < 21 {
+        return false;
     }
+    if b.last() != Some(&b'Z') {
+        return false;
+    }
+
+    let expected = [(4, b'-'), (7, b'-'), (10, b'T'), (13, b':'), (16, b':')];
+    for &(pos, ch) in &expected {
+        if b.get(pos) != Some(&ch) {
+            return false;
+        }
+    }
+
+    for &i in &[0, 1, 2, 3, 5, 6, 8, 9, 11, 12, 14, 15] {
+        if b.get(i).is_none_or(|c| !c.is_ascii_digit()) {
+            return false;
+        }
+    }
+
+    // 秒后面必须是 `.` + 数字
+    let mut found_dot = false;
+    for &c in &b[17..b.len() - 1] {
+        if c == b'.' {
+            if found_dot {
+                return false;
+            }
+            found_dot = true;
+            continue;
+        }
+        if !c.is_ascii_digit() {
+            return false;
+        }
+    }
+
+    found_dot
 }
 
 /// 解析并高亮 span 字段
@@ -118,4 +177,42 @@ pub fn colored_log_line<'a>(line: &'a str, theme: &Theme) -> Line<'a> {
     };
 
     Line::from(spans)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn detects_tracing_levels() {
+        assert_eq!(
+            detect_level("2026-04-20T12:15:03.581593Z DEBUG syncthing_sync::folder_model foo"),
+            "DEBUG"
+        );
+        assert_eq!(
+            detect_level("2026-04-20T12:15:03.581593Z ERROR something failed"),
+            "ERROR"
+        );
+        assert_eq!(detect_level("2026-04-20T12:15:03.581593Z WARN x"), "WARN");
+        assert_eq!(detect_level("2026-04-20T12:15:03.581593Z INFO x"), "INFO");
+        assert_eq!(detect_level("2026-04-20T12:15:03.581593Z TRACE x"), "TRACE");
+    }
+
+    #[test]
+    fn info_with_error_substring_stays_info() {
+        let line = "2026-04-20T12:15:03.581593Z INFO finished handling error request";
+        assert_eq!(detect_level(line), "INFO");
+    }
+
+    #[test]
+    fn bracket_prefix_overrides_contains() {
+        assert_eq!(detect_level("[WARN] everything is fine DEBUG"), "WARN");
+        assert_eq!(detect_level("[ERROR] lower warn word"), "ERROR");
+    }
+
+    #[test]
+    fn fallback_contains_level() {
+        assert_eq!(detect_level("Something ERROR happened"), "ERROR");
+        assert_eq!(detect_level("DEBUG log without prefix"), "DEBUG");
+    }
 }

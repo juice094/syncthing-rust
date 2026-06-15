@@ -33,7 +33,6 @@ pub fn draw_device_form(f: &mut Frame, form: &FormState, theme: &Theme) {
     let field_count = form.field_count();
     let mut constraints: Vec<Constraint> =
         form.fields.iter().map(|_| Constraint::Length(3)).collect();
-    constraints.push(Constraint::Length(2)); // footer
     let hints_present = form.fields.iter().any(|f| {
         f.hint.is_some()
             && form.focus
@@ -44,8 +43,12 @@ pub fn draw_device_form(f: &mut Frame, form: &FormState, theme: &Theme) {
                     .unwrap_or(usize::MAX)
     });
     if hints_present {
-        constraints.insert(field_count, Constraint::Length(1));
+        constraints.push(Constraint::Length(1));
     }
+    if form.error.is_some() {
+        constraints.push(Constraint::Length(1));
+    }
+    constraints.push(Constraint::Length(2)); // footer
 
     let chunks = Layout::default()
         .direction(Direction::Vertical)
@@ -85,6 +88,23 @@ pub fn draw_device_form(f: &mut Frame, form: &FormState, theme: &Theme) {
         f.render_widget(para, chunks[i]);
     }
 
+    let mut next_idx = field_count;
+    if hints_present {
+        let hint_text = form
+            .fields
+            .get(form.focus)
+            .and_then(|f| f.hint)
+            .unwrap_or("");
+        let hint = Paragraph::new(Span::styled(hint_text, theme.style_idle));
+        f.render_widget(hint, chunks[next_idx]);
+        next_idx += 1;
+    }
+    if let Some(ref error) = form.error {
+        let error_line = Paragraph::new(Span::styled(format!("⚠ {}", error), theme.style_error));
+        f.render_widget(error_line, chunks[next_idx]);
+        next_idx += 1;
+    }
+
     // Footer
     let footer = Paragraph::new(Line::from(vec![
         Span::styled("Tab", theme.style_header),
@@ -94,8 +114,7 @@ pub fn draw_device_form(f: &mut Frame, form: &FormState, theme: &Theme) {
         Span::styled("Esc", theme.style_header),
         Span::styled(" cancel", theme.style_idle),
     ]));
-    let footer_idx = field_count;
-    f.render_widget(footer, chunks[footer_idx]);
+    f.render_widget(footer, chunks[next_idx]);
     f.render_widget(block, area);
 }
 
@@ -126,6 +145,9 @@ pub fn draw_folder_form(
     let mut constraints: Vec<Constraint> =
         form.fields.iter().map(|_| Constraint::Length(3)).collect();
     constraints.push(Constraint::Length(1)); // hint
+    if form.error.is_some() {
+        constraints.push(Constraint::Length(1)); // error
+    }
     constraints.push(Constraint::Min(4)); // device list
     constraints.push(Constraint::Length(2)); // footer
 
@@ -177,6 +199,13 @@ pub fn draw_folder_form(
     let hint = Paragraph::new(Span::styled(hint_text, theme.style_idle));
     f.render_widget(hint, chunks[field_count]);
 
+    let mut next_idx = field_count + 1;
+    if let Some(ref error) = form.error {
+        let error_line = Paragraph::new(Span::styled(format!("⚠ {}", error), theme.style_error));
+        f.render_widget(error_line, chunks[next_idx]);
+        next_idx += 1;
+    }
+
     // Device selection list
     let list_focus = form.is_on_list();
     let items: Vec<ListItem> = devices
@@ -208,7 +237,8 @@ pub fn draw_folder_form(
             })
             .title(Span::styled(" Share with ", theme.style_header)),
     );
-    f.render_widget(list, chunks[field_count + 1]);
+    f.render_widget(list, chunks[next_idx]);
+    next_idx += 1;
 
     // Footer
     let footer = Paragraph::new(Line::from(vec![
@@ -221,6 +251,6 @@ pub fn draw_folder_form(
         Span::styled("Esc", theme.style_header),
         Span::styled(" cancel", theme.style_idle),
     ]));
-    f.render_widget(footer, chunks[field_count + 2]);
+    f.render_widget(footer, chunks[next_idx]);
     f.render_widget(block, area);
 }
