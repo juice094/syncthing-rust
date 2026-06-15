@@ -45,7 +45,7 @@ anyhow = "1.0"
 sha2 = "0.10"
 rand = "0.8"
 hex = "0.4"
-base64 = "0.21"
+base64 = "0.22"
 
 # 工具
 tracing = "0.1"
