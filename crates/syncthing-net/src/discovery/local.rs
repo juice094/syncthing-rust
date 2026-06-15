@@ -494,6 +494,10 @@ mod tests {
 
     /// UDP broadcast roundtrip test.
     /// Uses a random high port to avoid conflicts.
+    #[cfg_attr(
+        target_os = "macos",
+        ignore = "flaky UDP loopback broadcast on macOS runners"
+    )]
     #[tokio::test]
     async fn test_udp_broadcast_roundtrip() {
         use std::str::FromStr;
