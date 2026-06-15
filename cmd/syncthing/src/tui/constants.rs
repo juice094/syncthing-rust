@@ -27,3 +27,5 @@ pub const HELP_POPUP_W: u16 = 70;
 pub const HELP_POPUP_H: u16 = 22;
 pub const ERROR_POPUP_W: u16 = 50;
 pub const ERROR_POPUP_H: u16 = 12;
+pub const CONFIRM_POPUP_W: u16 = 52;
+pub const CONFIRM_POPUP_H: u16 = 12;
