@@ -1,34 +1,24 @@
 use ratatui::{
     layout::{Constraint, Direction, Layout},
+    style::Style,
     text::{Line, Span, Text},
     widgets::{Block, Borders, Paragraph, Wrap},
     Frame,
 };
 
+use syncthing_core::types::FolderStatus;
+
 use crate::tui::app::App;
 use crate::tui::widgets::progress;
 
 pub fn draw(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
-    let mut constraints = vec![
-        Constraint::Length(6), // 设备信息
-    ];
-
-    // 如果有活跃的同步状态，预留空间
-    let active_folders: Vec<(&String, &syncthing_core::types::FolderStatus)> = app
-        .folder_states
-        .iter()
-        .filter(|(_, s)| !matches!(s, syncthing_core::types::FolderStatus::Idle))
-        .collect();
-    if !active_folders.is_empty() || !app.sync_progress.is_empty() {
-        constraints.push(Constraint::Length(
-            (active_folders.len().max(app.sync_progress.len()) + 1) as u16 + 1,
-        ));
-    }
-    constraints.push(Constraint::Min(0)); // 日志
-
     let chunks = Layout::default()
         .direction(Direction::Vertical)
-        .constraints(constraints)
+        .constraints([
+            Constraint::Length(6), // 设备信息
+            Constraint::Length(6), // Sync Status 总览卡片
+            Constraint::Fill(1),   // 日志：占据剩余全部空间
+        ])
         .split(area);
 
     let device_id = app
@@ -77,81 +67,156 @@ pub fn draw(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
         .wrap(Wrap { trim: true });
     f.render_widget(para, chunks[0]);
 
-    let mut chunk_idx = 1;
+    // Sync Status 总览卡片
+    let sync_area = chunks[1];
+    let inner = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(1),
+            Constraint::Length(1),
+            Constraint::Length(1),
+            Constraint::Length(1),
+        ])
+        .margin(1)
+        .split(sync_area);
 
-    // 活跃同步状态区域（文本 + LineGauge 进度条）
-    if !active_folders.is_empty() || !app.sync_progress.is_empty() {
-        let theme = &app.theme;
-        let sync_area = chunks[chunk_idx];
+    let block = Block::default().borders(Borders::ALL).title("Sync Status");
+    f.render_widget(block, sync_area);
 
-        // 内部垂直布局：标题 + 每文件夹一行
-        let row_count = active_folders.len().max(1) + 1; // +1 for header
-        let inner_constraints: Vec<Constraint> = std::iter::once(Constraint::Length(1))
-            .chain(std::iter::repeat_n(Constraint::Length(1), row_count - 1))
-            .collect();
-        let inner = Layout::default()
-            .direction(Direction::Vertical)
-            .constraints(inner_constraints)
-            .margin(1) // 1-cell margin inside the block border
-            .split(sync_area);
+    // 收集非 Idle 的活跃 folder
+    let active_folders: Vec<(&String, &FolderStatus)> = app
+        .folder_states
+        .iter()
+        .filter(|(_, s)| !matches!(s, FolderStatus::Idle))
+        .collect();
 
-        // 渲染边框
-        let block = Block::default().borders(Borders::ALL).title("Sync Status");
-        f.render_widget(block, sync_area);
+    // 总体同步进度：非 Idle folder 的进度平均
+    let overall_ratio = if active_folders.is_empty() {
+        1.0
+    } else {
+        let sum: f64 = active_folders
+            .iter()
+            .map(|(folder, _)| {
+                app.sync_progress
+                    .get(folder.as_str())
+                    .cloned()
+                    .unwrap_or(0.0)
+                    .clamp(0.0, 1.0)
+            })
+            .sum();
+        (sum / active_folders.len() as f64).clamp(0.0, 1.0)
+    };
 
-        // 标题行
-        f.render_widget(
-            Paragraph::new(Text::from(vec![Line::from(Span::styled(
-                "Active sync tasks:",
-                theme.style_header,
-            ))])),
-            inner[0],
-        );
+    // 第 1 行：Overall sync
+    let label_col = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([Constraint::Length(14), Constraint::Min(10)])
+        .split(inner[0]);
+    f.render_widget(
+        Paragraph::new(Line::from(Span::styled(
+            "Overall sync: ",
+            theme.style_header,
+        ))),
+        label_col[0],
+    );
+    progress::draw_gauge(
+        f,
+        label_col[1],
+        theme,
+        &format!("{:.0}%", overall_ratio * 100.0),
+        overall_ratio,
+    );
 
-        // 每文件夹一行：标签文本 + LineGauge
-        for (idx, (folder, status)) in active_folders.iter().enumerate() {
-            let row = inner.get(idx + 1).copied().unwrap_or(sync_area);
+    // 第 2 行：Devices online
+    let online_count = app.connected_devices.len();
+    let total_devices = app.config.devices.len();
+    let online_style = if online_count == total_devices && total_devices > 0 {
+        theme.style_online
+    } else if online_count == 0 {
+        theme.style_offline
+    } else {
+        Style::default().fg(theme.text_primary)
+    };
+    f.render_widget(
+        Paragraph::new(Line::from(vec![
+            Span::styled("Devices online: ", theme.style_header),
+            Span::styled(
+                format!("{} / {}", online_count, total_devices),
+                online_style,
+            ),
+        ])),
+        inner[1],
+    );
 
-            let label = match status {
-                syncthing_core::types::FolderStatus::Scanning => "Scanning",
-                syncthing_core::types::FolderStatus::Pulling => "Pulling",
-                syncthing_core::types::FolderStatus::Pushing => "Pushing",
-                syncthing_core::types::FolderStatus::SyncWaiting => "SyncWait",
-                syncthing_core::types::FolderStatus::ScanWaiting => "ScanWait",
-                _ => "Working",
-            };
-            let color = match status {
-                syncthing_core::types::FolderStatus::Scanning
-                | syncthing_core::types::FolderStatus::ScanWaiting => theme.warning,
-                syncthing_core::types::FolderStatus::Pulling
-                | syncthing_core::types::FolderStatus::Pushing
-                | syncthing_core::types::FolderStatus::SyncWaiting => theme.info,
-                _ => theme.muted,
-            };
-            let progress_ratio = app
-                .sync_progress
-                .get(folder.as_str())
-                .cloned()
-                .unwrap_or(0.0)
-                .clamp(0.0, 1.0);
+    // 第 3 行：Folders active / All folders up to date
+    let active_line = if active_folders.is_empty() {
+        Line::from(Span::styled(
+            "All folders up to date",
+            Style::default().fg(theme.success),
+        ))
+    } else {
+        let mut counts: Vec<String> = Vec::new();
+        let scanning = active_folders
+            .iter()
+            .filter(|(_, s)| matches!(s, FolderStatus::Scanning))
+            .count();
+        let scan_waiting = active_folders
+            .iter()
+            .filter(|(_, s)| matches!(s, FolderStatus::ScanWaiting))
+            .count();
+        let pulling = active_folders
+            .iter()
+            .filter(|(_, s)| matches!(s, FolderStatus::Pulling))
+            .count();
+        let pushing = active_folders
+            .iter()
+            .filter(|(_, s)| matches!(s, FolderStatus::Pushing))
+            .count();
+        let sync_waiting = active_folders
+            .iter()
+            .filter(|(_, s)| matches!(s, FolderStatus::SyncWaiting))
+            .count();
 
-            // 水平分割：左侧标签（20宽），右侧进度条
-            let cols = Layout::default()
-                .direction(Direction::Horizontal)
-                .constraints([Constraint::Length(20), Constraint::Min(10)])
-                .split(row);
-
-            let label_text = Text::from(vec![Line::from(vec![
-                Span::raw(format!("{} ", folder)),
-                Span::styled(label, ratatui::style::Style::default().fg(color)),
-            ])]);
-            f.render_widget(Paragraph::new(label_text), cols[0]);
-
-            progress::draw_line_gauge(f, cols[1], theme, progress_ratio);
+        if scanning + scan_waiting > 0 {
+            counts.push(format!("{} scanning", scanning + scan_waiting));
         }
-        chunk_idx += 1;
-    }
+        if pulling > 0 {
+            counts.push(format!("{} pulling", pulling));
+        }
+        if pushing > 0 {
+            counts.push(format!("{} pushing", pushing));
+        }
+        if sync_waiting > 0 {
+            counts.push(format!("{} waiting", sync_waiting));
+        }
 
+        Line::from(vec![
+            Span::styled("Folders active: ", theme.style_header),
+            Span::raw(counts.join(", ")),
+        ])
+    };
+    f.render_widget(Paragraph::new(active_line), inner[2]);
+
+    // 第 4 行：Last update
+    let last_update_text = if let Some(instant) = app.last_sync_progress_update {
+        let secs = instant.elapsed().as_secs();
+        if secs < 1 {
+            "just now".to_string()
+        } else {
+            format!("{}s ago", secs)
+        }
+    } else {
+        "never".to_string()
+    };
+    f.render_widget(
+        Paragraph::new(Line::from(vec![
+            Span::styled("Last update: ", theme.style_header),
+            Span::raw(last_update_text),
+        ])),
+        inner[3],
+    );
+
+    // Recent Logs
     let logs: Text = app
         .log_lines
         .iter()
@@ -167,5 +232,5 @@ pub fn draw(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
     let logs_para = Paragraph::new(logs)
         .block(Block::default().borders(Borders::ALL).title("Recent Logs"))
         .wrap(Wrap { trim: true });
-    f.render_widget(logs_para, chunks[chunk_idx]);
+    f.render_widget(logs_para, chunks[2]);
 }
