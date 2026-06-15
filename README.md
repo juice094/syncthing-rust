@@ -2,14 +2,16 @@
 
 # 🔄 syncthing-rust
 
-> **Syncthing 协议栈的 Rust 实现**
+> **Syncthing BEP 协议的 Rust 实现**
+
+[English](./README.md) · [中文](./README-zh.md)
 
 零运行时依赖 · 与 Go 版 Syncthing 线路兼容 · 单静态二进制（~13 MB）
 
 [![Rust](https://img.shields.io/badge/rust-1.85%2B-orange?logo=rust)](https://www.rust-lang.org)
 [![CI](https://github.com/juice094/syncthing-rust/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/juice094/syncthing-rust/actions/workflows/ci.yml)
 [![Tests](https://img.shields.io/badge/tests-364%20passed-brightgreen)](https://github.com/juice094/syncthing-rust/actions)
-[![Version](https://img.shields.io/badge/version-v3.0.3-blue)](https://github.com/juice094/syncthing-rust/releases)
+[![Version](https://img.shields.io/badge/version-v3.0.3-blue)](https://github.com/juice094/syncthing-rust/releases/tag/v3.0.3)
 [![License](https://img.shields.io/badge/license-MIT%20%2B%20Commercial-blue)](./LICENSE)
 
 </div>
@@ -22,7 +24,20 @@
 
 **当前阶段**：Production。核心协议、端到端同步、Windows 系统托盘与 TUI 均已稳定运行。
 
-> [最新发布：v3.0.3](https://github.com/juice094/syncthing-rust/releases/tag/v3.0.3) — TUI 稳定性修复 + 现代托盘图标
+> [最新发布：v3.0.3](https://github.com/juice094/syncthing-rust/releases/tag/v3.0.3)
+
+---
+
+## 📚 目录
+
+- [核心亮点](#-核心亮点)
+- [技术栈](#-技术栈)
+- [项目结构](#-项目结构)
+- [已知限制](#-已知限制)
+- [快速开始](#-快速开始)
+- [参与贡献](#-参与贡献)
+- [社区与支持](#-社区与支持)
+- [许可证](#-许可证)
 
 ---
 
@@ -31,12 +46,13 @@
 | 亮点 | 说明 |
 |:---|:---|
 | 🔐 **完整 BEP 协议** | prost 编解码, TLS + Hello + ClusterConfig + Index, LZ4 压缩 |
-| 📁 **端到端文件同步** | 块级拉取/推送, SHA-256 扫描, 双向同步 ~1 秒检测到推送 |
-| 🔄 **主动 Push** | 本地文件变更立即推送到已连接对端 |
+| 📁 **端到端文件同步** | 块级拉取/推送, SHA-256 扫描, 双向同步 ~1 秒检测到变更 |
+| 🚀 **主动 Push** | 本地文件变更立即推送到已连接对端 |
 | 🗂️ **版本控制** | Simple (keep=N) + Staggered (4 时间窗口), `.stversions/` 归档 |
 | 🌐 **多路径发现** | LAN UDP · 全球 HTTPS mTLS · STUN · UPnP · Relay v1 |
 | 🖥️ **实时 TUI** | 事件桥接实时同步状态, 配置热重载 |
-| 🔄 **Go 互操作** | 与 Go Syncthing v2.1.0 线路兼容 (跨版本已验证) |
+| 🔌 **Go 互操作** | 与 Go Syncthing v2.1.0 线路兼容（跨版本已验证） |
+| 📦 **单静态二进制** | release 构建 ~13 MB，零运行时依赖 |
 
 ---
 
@@ -45,11 +61,14 @@
 | 组件 | 技术 |
 |:---|:---|
 | 协议 | BEP over TLS (prost + LZ4) |
-| 网络 | Tokio + rustls + ParallelDialer |
-| 发现 | UDP 广播 + HTTPS mTLS + STUN + UPnP + Relay v1 |
-| 存储 | 元数据与块缓存抽象 |
-| REST API | Axum (Go 版布局兼容) |
-| TUI | 自定义事件桥接 |
+| 异步运行时 | Tokio |
+| TLS | rustls + ed25519-dalek |
+| 网络 | Tokio + rustls + ParallelDialer + Relay v1 |
+| 发现 | UDP 广播 + HTTPS mTLS + STUN + UPnP |
+| 存储 | sled（元数据 + 块缓存抽象） |
+| REST API | Axum（Go 版布局兼容） |
+| TUI | ratatui + crossterm |
+| CLI | clap |
 
 ---
 
@@ -57,17 +76,16 @@
 
 ```
 syncthing-rust/
-├── cmd/syncthing/          # CLI 入口 + TUI 主循环
+├── cmd/syncthing/          # CLI 入口 + TUI 主循环 + 守护进程
 ├── crates/
-│   ├── syncthing-core/     # 核心类型 (DeviceId, FileInfo, VersionVector)
-│   │                       # 信任边界：对下游 crate 只读
-│   ├── bep-protocol/       # BEP 编解码 (prost) + 握手
+│   ├── syncthing-core/     # 核心类型（DeviceId, FileInfo, VersionVector）
+│   ├── bep-protocol/       # BEP 编解码（prost）+ 握手
 │   ├── syncthing-net/      # TCP+TLS, ConnectionManager, 拨号, 发现, Relay
 │   ├── syncthing-sync/     # Scanner, Puller, IndexHandler, 文件监控
-│   ├── syncthing-fs/       # 文件系统抽象 (ignore, scanner, watcher)
-│   ├── syncthing-api/      # REST API (Axum, Go 版布局兼容)
+│   ├── syncthing-fs/       # 文件系统抽象（ignore, scanner, watcher）
+│   ├── syncthing-api/      # REST API（Axum, Go 版布局兼容）
 │   ├── syncthing-db/       # 元数据与块缓存
-│   └── syncthing-versioner/# 文件版本控制 (Simple + Staggered)
+│   └── syncthing-versioner/# 文件版本控制（Simple + Staggered）
 ├── docs/                   # 设计文档, 计划, 报告
 └── scripts/                # 健康检查, cloud-deploy, 压力测试
 ```
@@ -88,7 +106,15 @@ syncthing-rust/
 ```bash
 git clone https://github.com/juice094/syncthing-rust.git && cd syncthing-rust
 cargo build --release
+
+# 初始化配置
+cargo run --release -- init
+
+# 启动守护进程
 cargo run --release -- run --config-dir ~/.syncthing
+
+# 或启动 TUI
+cargo run --release -- tui --config-dir ~/.syncthing
 ```
 
 首次运行自动生成 Ed25519 TLS 证书。默认端口：BEP `22001`, REST API `8385`。
@@ -99,9 +125,12 @@ cargo run --release -- run --config-dir ~/.syncthing
 
 详见 [CONTRIBUTING.md](CONTRIBUTING.md)。
 
+提交前请运行：
+
 ```bash
 cargo test --workspace        # 364 passed / 4 ignored / 0 failed
-cargo clippy --workspace --all-targets -- -D warnings -W clippy::await_holding_lock  # 0 警告
+cargo clippy --workspace --all-targets -- -D warnings -W clippy::await_holding_lock
+cargo fmt --all -- --check
 ```
 
 ---

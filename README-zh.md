@@ -1,40 +1,63 @@
-# syncthing-rust
+<div align="center">
+
+# 🔄 syncthing-rust
+
+> **Syncthing BEP 协议的 Rust 实现**
+
+[English](./README.md) · [中文](./README-zh.md)
+
+零运行时依赖 · 与 Go 版 Syncthing 线路兼容 · 单静态二进制（~13 MB）
 
 [![Rust](https://img.shields.io/badge/rust-1.85%2B-orange?logo=rust)](https://www.rust-lang.org)
 [![CI](https://github.com/juice094/syncthing-rust/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/juice094/syncthing-rust/actions/workflows/ci.yml)
 [![Tests](https://img.shields.io/badge/tests-364%20passed-brightgreen)](https://github.com/juice094/syncthing-rust/actions)
-[![Version](https://img.shields.io/badge/version-v3.0.3-blue)](https://github.com/juice094/syncthing-rust/releases)
+[![Version](https://img.shields.io/badge/version-v3.0.3-blue)](https://github.com/juice094/syncthing-rust/releases/tag/v3.0.3)
 [![License](https://img.shields.io/badge/license-MIT%20%2B%20Commercial-blue)](./LICENSE)
 
-[Syncthing](https://syncthing.net/) 协议栈的 Rust 实现，设计目标为**零运行时依赖**部署，与官方 Go Syncthing 守护进程线级兼容互操作。
+</div>
 
-> ✅ **当前阶段（2026-06-13 v3.0.3）**：**Production — 364 passed / 4 ignored / 0 failures，E2E 双向同步已实测，Windows 托盘 + TUI 稳定**。
->
-> - ✅ **连接层稳定**：retry_count 累加、TCP keepalive
-> - ✅ **协议层健全**：prost 编解码 + LZ4 压缩、wire_compat 10 tests
-> - ✅ **同步链路完整**：Pull/Push 双向、~1 秒检测到推送
-> - ✅ **版本控制**：Simple + Staggered、`.stversions/` 归档
-> - ✅ **5/5 E2E CRUD 测试通过**
-> - ⏳ **72h 耐久测试**：v3.1.0 准入线，基础设施就绪，待实际跑测
->
-> 当前适用于：个人/辅助节点 P2P 同步、BEP 协议研究、Rust 实现参考、生产环境谨慎部署。完整替代 Go Syncthing 的路线图见 [`docs/plans/POST_V0_2_0_ROADMAP.md`](docs/plans/POST_V0_2_0_ROADMAP.md)。
+---
+
+## 简介
+
+[Syncthing](https://syncthing.net/) 协议栈的 Rust 实现，目标为**零运行时依赖**部署，与官方 Go Syncthing 守护进程线路兼容互操作。
+
+**当前阶段（v3.0.3）**：Production — 364 passed / 4 ignored / 0 failures，E2E 双向同步已实测，Windows 托盘 + TUI 稳定。
+
+- ✅ 连接层：retry 累加、TCP keepalive
+- ✅ 协议层：prost 编解码 + LZ4 压缩、wire_compat 10 tests
+- ✅ 同步链路：Pull/Push 双向、~1 秒检测到变更
+- ✅ 版本控制：Simple + Staggered、`.stversions/` 归档
+- ✅ Go 互操作：v3.0.3 ↔ Go Syncthing v2.1.0 已验证
+
+完整路线图见 [`docs/plans/POST_V0_2_0_ROADMAP.md`](docs/plans/POST_V0_2_0_ROADMAP.md)。
+
+---
+
+## 目录
+
+- [概览](#概览)
+- [快速开始](#快速开始)
+- [项目结构](#项目结构)
+- [贡献](#贡献)
+- [社区与支持](#社区与支持)
+- [许可证](#许可证)
 
 ---
 
 ## 概览
 
 | 维度 | 状态 |
-|-----------|-------|
-| BEP 协议 (TLS + Hello + ClusterConfig + Index + Request/Response) | ✅ prost + LZ4 |
-| **端到端文件同步** (双向) | ✅ Push/Pull 双向验证 |
-| 文件同步核心模块 (puller / scanner / folder_model) | ✅ 364 tests / 0 failed |
+|:---|:---|
+| BEP 协议（TLS + Hello + ClusterConfig + Index + Request/Response） | ✅ prost + LZ4 |
+| 端到端文件同步（双向） | ✅ Push/Pull 双向验证 |
+| 文件同步核心（puller / scanner / folder_model） | ✅ 364 tests / 0 failed |
 | 版本控制 | ✅ Simple + Staggered |
 | 连接稳定性 | ✅ retry 累加 + TCP keepalive |
-| **Rust↔Rust 双向互通** | ✅ v3.0.3 ↔ v3.0.3 E2E 验证 |
-| **Go Syncthing 互操作** | ✅ v3.0.3 ↔ Go v2.1.0 已验证 |
-| **72h 耐久测试** | ⏳ v3.1.0 准入线 |
-| **Symlink 同步** | 🔲 未实现（未来规划） |
-| **Web GUI** | ❌ 无（TUI + 托盘 + CLI + REST API，见 AGENTS.md 冻结声明） |
+| Rust↔Rust 双向互通 | ✅ v3.0.3 ↔ v3.0.3 E2E 验证 |
+| Go Syncthing 互操作 | ✅ v3.0.3 ↔ Go v2.1.0 已验证 |
+| Symlink 同步 | 🔲 未实现（未来规划） |
+| Web GUI | ❌ 无（TUI + 托盘 + CLI + REST API，见 AGENTS.md 冻结声明） |
 
 ---
 
@@ -50,36 +73,45 @@ cargo run --release -- init
 # 启动守护进程
 cargo run --release -- run --config-dir ~/.syncthing
 
-# TUI 模式
-cargo run --release -- tui
+# 启动 TUI
+cargo run --release -- tui --config-dir ~/.syncthing
 ```
+
+首次运行自动生成 Ed25519 TLS 证书。默认端口：BEP `22001`，REST API `8385`。
 
 ---
 
 ## 项目结构
 
 ```
-crates/
-├── syncthing-core/       # 核心类型 (只读给下游)
-├── bep-protocol/         # BEP 编解码 (prost) + 握手
-├── syncthing-net/        # TCP+TLS, ConnectionManager, 发现, Relay
-├── syncthing-sync/       # Scanner, Puller, IndexHandler, watcher
-├── syncthing-fs/         # 文件系统抽象 (ignore, scanner)
-├── syncthing-api/        # REST API (Axum)
-├── syncthing-db/         # 元数据存储
-└── syncthing-versioner/  # 版本控制 (Simple + Staggered)
+syncthing-rust/
+├── cmd/syncthing/          # CLI 入口 + TUI 主循环 + 守护进程
+├── crates/
+│   ├── syncthing-core/     # 核心类型（只读给下游）
+│   ├── bep-protocol/       # BEP 编解码（prost）+ 握手
+│   ├── syncthing-net/      # TCP+TLS, ConnectionManager, 发现, Relay
+│   ├── syncthing-sync/     # Scanner, Puller, IndexHandler, watcher
+│   ├── syncthing-fs/       # 文件系统抽象（ignore, scanner）
+│   ├── syncthing-api/      # REST API（Axum）
+│   ├── syncthing-db/       # 元数据存储
+│   └── syncthing-versioner/# 版本控制（Simple + Staggered）
+├── docs/                   # 设计文档、计划、报告
+└── scripts/                # 健康检查、cloud-deploy、压力测试
 ```
 
 ---
 
 ## 贡献
 
-见 [CONTRIBUTING.md](./CONTRIBUTING.md)。提交前：
+详见 [CONTRIBUTING.md](./CONTRIBUTING.md)。提交前：
 
 ```bash
 cargo test --workspace
 cargo clippy --workspace --all-targets -- -D warnings -W clippy::await_holding_lock
+cargo fmt --all -- --check
 ```
+
+---
 
 ## 社区与支持
 
@@ -96,3 +128,11 @@ cargo clippy --workspace --all-targets -- -D warnings -W clippy::await_holding_l
 ## 许可证
 
 [MIT + Commercial](./LICENSE) · [商业许可](./LICENSE-COMMERCIAL.md)
+
+---
+
+<div align="center">
+
+**[⭐ Star](https://github.com/juice094/syncthing-rust) · [🐛 Issues](https://github.com/juice094/syncthing-rust/issues) · [💬 Discussions](https://github.com/juice094/syncthing-rust/discussions) · [🤝 Contribute](CONTRIBUTING.md)**
+
+</div>
