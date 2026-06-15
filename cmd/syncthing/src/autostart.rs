@@ -7,6 +7,11 @@ use std::path::Path;
 /// 注册表值名
 const REG_VALUE_NAME: &str = "syncthing-rust";
 
+// ============================================================
+// Windows implementation
+// ============================================================
+
+#[cfg(windows)]
 /// 安装开机自启动
 pub fn install(config_dir: &Path) -> anyhow::Result<()> {
     let exe = std::env::current_exe().map_err(|e| anyhow::anyhow!("get current exe: {}", e))?;
@@ -22,12 +27,25 @@ pub fn install(config_dir: &Path) -> anyhow::Result<()> {
     Ok(())
 }
 
+#[cfg(windows)]
 /// 取消开机自启动
 pub fn uninstall() -> anyhow::Result<()> {
     let hkey = open_run_key(true)?;
     delete_reg_value(hkey, REG_VALUE_NAME)?;
     close_key(hkey);
     Ok(())
+}
+
+#[cfg(not(windows))]
+/// 安装开机自启动（非 Windows 平台不支持）
+pub fn install(_config_dir: &Path) -> anyhow::Result<()> {
+    anyhow::bail!("autostart is only supported on Windows")
+}
+
+#[cfg(not(windows))]
+/// 取消开机自启动（非 Windows 平台不支持）
+pub fn uninstall() -> anyhow::Result<()> {
+    anyhow::bail!("autostart is only supported on Windows")
 }
 
 // ============================================================
@@ -109,18 +127,3 @@ fn close_key(hkey: HKEY) {
         let _ = RegCloseKey(hkey);
     }
 }
-
-#[cfg(not(windows))]
-fn open_run_key(_writable: bool) -> anyhow::Result<HKEY> {
-    anyhow::bail!("not supported on this platform")
-}
-#[cfg(not(windows))]
-fn set_reg_value(_hkey: HKEY, _name: &str, _value: &str) -> anyhow::Result<()> {
-    anyhow::bail!("not supported on this platform")
-}
-#[cfg(not(windows))]
-fn delete_reg_value(_hkey: HKEY, _name: &str) -> anyhow::Result<()> {
-    anyhow::bail!("not supported on this platform")
-}
-#[cfg(not(windows))]
-fn close_key(_hkey: HKEY) {}

@@ -64,8 +64,20 @@ pub fn running_instance_pid(config_dir: &Path) -> Option<u32> {
     if pid == std::process::id() {
         return None;
     }
+    if is_process_alive(pid) {
+        Some(pid)
+    } else {
+        None
+    }
+}
+
+/// 检查指定 PID 的进程是否仍在运行。
+pub fn is_process_alive(pid: u32) -> bool {
+    if pid == 0 {
+        return false;
+    }
     let s = System::new_with_specifics(
         RefreshKind::new().with_processes(ProcessRefreshKind::everything()),
     );
-    s.process(sysinfo::Pid::from(pid as usize)).map(|_| pid)
+    s.process(sysinfo::Pid::from(pid as usize)).is_some()
 }
