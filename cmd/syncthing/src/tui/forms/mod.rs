@@ -8,6 +8,7 @@ pub mod render;
 
 /// 表单字段定义
 pub struct FormField {
+    pub name: &'static str,
     pub label: &'static str,
     pub value: String,
     /// true = add 模式（可编辑），false = edit 模式（只读）
@@ -22,6 +23,7 @@ pub struct FormState {
     pub title: &'static str,
     pub width: u16,
     pub height: u16,
+    pub error: Option<String>,
 }
 
 /// 表单操作结果
@@ -40,17 +42,20 @@ impl FormState {
             title,
             width,
             height,
+            error: None,
         }
     }
 
     pub fn add_field(
         mut self,
+        name: &'static str,
         label: &'static str,
         value: String,
         editable: bool,
         hint: Option<&'static str>,
     ) -> Self {
         self.fields.push(FormField {
+            name,
             label,
             value,
             editable,
@@ -59,13 +64,57 @@ impl FormState {
         self
     }
 
+    /// 按字段名取值
+    pub fn value(&self, name: &str) -> Option<&str> {
+        self.fields
+            .iter()
+            .find(|f| f.name == name)
+            .map(|f| f.value.as_str())
+    }
+
     /// 文本字段数量（不含 device 列表等扩展选区）
     pub fn field_count(&self) -> usize {
         self.fields.len()
     }
 
+    pub fn set_error(&mut self, msg: String) {
+        self.error = Some(msg);
+    }
+
+    pub fn clear_error(&mut self) {
+        self.error = None;
+    }
+
+    pub fn focused_field_name(&self) -> Option<&'static str> {
+        self.fields.get(self.focus).map(|f| f.name)
+    }
+
+    /// 将 Device ID 输入格式化为 8 组、每组 7 个字母数字，用 `-` 连接。
+    pub fn format_device_id(input: &str) -> String {
+        let cleaned: Vec<char> = input
+            .chars()
+            .filter(|c| c.is_ascii_alphanumeric())
+            .collect();
+        let groups: Vec<String> = cleaned
+            .chunks(7)
+            .take(8)
+            .map(|chunk| chunk.iter().collect())
+            .collect();
+        groups.join("-")
+    }
+
     pub fn append_char(&mut self, c: char) {
-        if let Some(field) = self.fields.get_mut(self.focus) {
+        if self.focused_field_name() == Some("device_id") {
+            if !c.is_ascii_alphanumeric() {
+                return;
+            }
+            if let Some(field) = self.fields.get_mut(self.focus) {
+                if field.editable {
+                    field.value.push(c);
+                    field.value = Self::format_device_id(&field.value);
+                }
+            }
+        } else if let Some(field) = self.fields.get_mut(self.focus) {
             if field.editable {
                 field.value.push(c);
             }
@@ -73,7 +122,22 @@ impl FormState {
     }
 
     pub fn backspace(&mut self) {
-        if let Some(field) = self.fields.get_mut(self.focus) {
+        if self.focused_field_name() == Some("device_id") {
+            if let Some(field) = self.fields.get_mut(self.focus) {
+                if field.editable {
+                    let cleaned: String = field
+                        .value
+                        .chars()
+                        .filter(|c| c.is_ascii_alphanumeric())
+                        .collect();
+                    let trimmed: String = cleaned
+                        .chars()
+                        .take(cleaned.len().saturating_sub(1))
+                        .collect();
+                    field.value = Self::format_device_id(&trimmed);
+                }
+            }
+        } else if let Some(field) = self.fields.get_mut(self.focus) {
             if field.editable {
                 field.value.pop();
             }
