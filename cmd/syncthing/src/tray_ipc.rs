@@ -3,10 +3,12 @@
 //! 仅在 Windows + tray feature 下提供真正的命名管道实现；
 //! 其他平台为 no-op 桩，保证代码跨平台可编译。
 
-use std::path::{Path, PathBuf};
-
 use serde::{Deserialize, Serialize};
 
+#[cfg(all(windows, feature = "tray"))]
+use std::path::{Path, PathBuf};
+
+#[cfg(all(windows, feature = "tray"))]
 const TRAY_PIPE_FILE_NAME: &str = "tray.pipe";
 
 /// TUI → 托盘的命令。
@@ -217,6 +219,7 @@ mod imp {
 }
 
 #[cfg(not(all(windows, feature = "tray")))]
+#[allow(dead_code)]
 mod imp {
     use super::*;
     use tokio::sync::mpsc;

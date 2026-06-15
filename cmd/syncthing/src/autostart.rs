@@ -4,12 +4,13 @@
 
 use std::path::Path;
 
-/// 注册表值名
-const REG_VALUE_NAME: &str = "syncthing-rust";
-
 // ============================================================
 // Windows implementation
 // ============================================================
+
+#[cfg(windows)]
+/// 注册表值名
+const REG_VALUE_NAME: &str = "syncthing-rust";
 
 #[cfg(windows)]
 /// 安装开机自启动
@@ -37,12 +38,14 @@ pub fn uninstall() -> anyhow::Result<()> {
 }
 
 #[cfg(not(windows))]
+#[allow(dead_code)]
 /// 安装开机自启动（非 Windows 平台不支持）
 pub fn install(_config_dir: &Path) -> anyhow::Result<()> {
     anyhow::bail!("autostart is only supported on Windows")
 }
 
 #[cfg(not(windows))]
+#[allow(dead_code)]
 /// 取消开机自启动（非 Windows 平台不支持）
 pub fn uninstall() -> anyhow::Result<()> {
     anyhow::bail!("autostart is only supported on Windows")

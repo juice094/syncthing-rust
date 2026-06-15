@@ -234,9 +234,9 @@ fn resolve_daemon_config(
 
 #[tokio::main]
 async fn main() {
-    if let Err(e) = run().await {
+    if let Err(_e) = run().await {
         #[cfg(windows)]
-        show_error_message("Syncthing Error", &format!("{:#}", e));
+        show_error_message("Syncthing Error", &format!("{:#}", _e));
         std::process::exit(1);
     }
 }
