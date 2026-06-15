@@ -9,10 +9,18 @@ use crate::tui::app::App;
 
 pub fn draw(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
     let theme = &app.theme;
+
+    let title = if let Some(q) = &app.list_filter {
+        format!("Devices (filtered: '{q}') [↑↓ navigate, Enter edit, d delete]")
+    } else {
+        "Devices (Ins/a: add, Enter/e: edit, Del/d: delete)".to_string()
+    };
+
     let items: Vec<ListItem> = app
-        .config
-        .devices
+        .device_filter_matches
         .iter()
+        .copied()
+        .filter_map(|idx| app.config.devices.get(idx))
         .map(|d| {
             let id_short = d.id.to_string();
             let addr = d
@@ -46,16 +54,16 @@ pub fn draw(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
         .collect();
 
     let list = List::new(items)
-        .block(
-            Block::default()
-                .borders(Borders::ALL)
-                .title("Devices (Ins/a: add, Enter/e: edit, Del/d: delete)"),
-        )
+        .block(Block::default().borders(Borders::ALL).title(title.as_str()))
         .highlight_style(theme.style_header.add_modifier(Modifier::REVERSED))
         .highlight_spacing(HighlightSpacing::Always)
         .scroll_padding(1);
 
     let mut state = ratatui::widgets::ListState::default();
-    state.select(Some(app.device_selected));
+    state.select(if app.device_filter_matches.is_empty() {
+        None
+    } else {
+        Some(app.list_filter_selected)
+    });
     f.render_stateful_widget(list, area, &mut state);
 }
