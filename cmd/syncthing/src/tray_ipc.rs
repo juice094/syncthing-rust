@@ -24,11 +24,13 @@ pub enum TrayIpcRequest {
 }
 
 /// 托盘 IPC 管道名持久化文件路径。
+#[cfg(all(windows, feature = "tray"))]
 pub fn tray_pipe_path(config_dir: &Path) -> PathBuf {
     config_dir.join(TRAY_PIPE_FILE_NAME)
 }
 
 /// 将当前托盘 IPC 管道名写入持久化文件，供外部新进程发现。
+#[cfg(all(windows, feature = "tray"))]
 pub fn write_tray_pipe(config_dir: &Path, pipe_name: &str) -> std::io::Result<()> {
     let path = tray_pipe_path(config_dir);
     std::fs::create_dir_all(config_dir)?;
@@ -36,6 +38,7 @@ pub fn write_tray_pipe(config_dir: &Path, pipe_name: &str) -> std::io::Result<()
 }
 
 /// 读取持久化的托盘 IPC 管道名（若存在且非空）。
+#[cfg(all(windows, feature = "tray"))]
 pub fn read_tray_pipe(config_dir: &Path) -> Option<String> {
     let path = tray_pipe_path(config_dir);
     let content = std::fs::read_to_string(&path).ok()?;
@@ -48,6 +51,7 @@ pub fn read_tray_pipe(config_dir: &Path) -> Option<String> {
 }
 
 /// 清理托盘 IPC 管道名持久化文件。
+#[cfg(all(windows, feature = "tray"))]
 pub fn clear_tray_pipe(config_dir: &Path) {
     let _ = std::fs::remove_file(tray_pipe_path(config_dir));
 }
@@ -59,6 +63,7 @@ pub struct TrayIpcResponse {
     pub error: Option<String>,
 }
 
+#[allow(dead_code)]
 impl TrayIpcResponse {
     pub fn ok() -> Self {
         Self {
