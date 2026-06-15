@@ -9,15 +9,16 @@ tags: [plan, roadmap]
 
 > **维护原则**：计划不是墓碑，是活文档。过时计划必须归档，避免误导决策。
 > **最后审计**：2026-04-27，详见 [`PLAN_AUDIT_2026-04-27.md`](./PLAN_AUDIT_2026-04-27.md)
-> **最后更新**：2026-06-13（v3.0.3 Production，托盘/TUI 稳定性修复完成，双节点 E2E 验证通过，72h 耐久测试为 v3.1.0 准入线）
+> **最后更新**：2026-06-15（v3.0.3 已发布，新增 POST_V3_0_3_ROADMAP：72h stress test、Symlink、网络优化、冻结项说明）
 
 ---
 
-## 当前有效计划（4 份）
+## 当前有效计划（5 份）
 
 | 文件 | 状态 | 说明 |
 |------|------|------|
-| [`POST_V0_2_0_ROADMAP.md`](./POST_V0_2_0_ROADMAP.md) | ✅ **权威路线图** | 当前最高层级路线图。制定日期 2026-04-26，审计修正后 2026-04-27。含优先级矩阵（P0~P5）、分阶段执行计划、决策记录（ADR）。 |
+| [`POST_V3_0_3_ROADMAP.md`](./POST_V3_0_3_ROADMAP.md) | ✅ **最新后续计划** | v3.0.3 发布后制定。覆盖 72h stress test、Symlink 同步、高延迟网络优化、Web GUI/QUIC 冻结说明、P0~P2 优先级矩阵与 ADR。 |
+| [`POST_V0_2_0_ROADMAP.md`](./POST_V0_2_0_ROADMAP.md) | ✅ 历史权威路线图 | v0.2.0 后最高层级路线图。制定日期 2026-04-26，审计修正后 2026-04-27。含早期 P0~P5 矩阵与分阶段执行计划。 |
 | [`NEXT_STEPS_2026-05-15.md`](./NEXT_STEPS_2026-05-15.md) | ✅ **最新行动计划** | v0.2.6 发布后行动计划。基于真实网络双节点测试 + Error-Budget 架构审计，含 Tailscale/Headscale 穿透方案、Transport Plugin RFC、v0.3.0/v0.4.0 规划。 |
 | [`TUNING_PLAN_2026-05-11.md`](./TUNING_PLAN_2026-05-11.md) | ✅ 活跃 | 横向调优。T-A~T-G 七大任务组。v0.2.4 周期完成 T-F1/F2/A1/B1/E1/G2，待执行 T-C/D3/F3（参考 NEXT_STEPS_2026-05-15）。 |
 | [`PHASE3_PLAN.md`](./PHASE3_PLAN.md) | ⚠️ 保留+勘误 | BepSession 硬化计划。3.1~3.3 已完成，3.4（72h stress test）⏳ 已调整为双节点真实网络 72h（v3.1.0 准入线）。 |
