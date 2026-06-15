@@ -3,7 +3,11 @@
 //! 仅在 Windows + tray feature 下提供真正的命名管道实现；
 //! 其他平台为 no-op 桩，保证代码跨平台可编译。
 
+use std::path::{Path, PathBuf};
+
 use serde::{Deserialize, Serialize};
+
+const TRAY_PIPE_FILE_NAME: &str = "tray.pipe";
 
 /// TUI → 托盘的命令。
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -15,6 +19,37 @@ pub enum TrayIpcRequest {
     StartDaemon,
     /// 通知托盘停止 daemon
     StopDaemon,
+    /// 通知托盘打开或聚焦 TUI 窗口
+    OpenTui,
+}
+
+/// 托盘 IPC 管道名持久化文件路径。
+pub fn tray_pipe_path(config_dir: &Path) -> PathBuf {
+    config_dir.join(TRAY_PIPE_FILE_NAME)
+}
+
+/// 将当前托盘 IPC 管道名写入持久化文件，供外部新进程发现。
+pub fn write_tray_pipe(config_dir: &Path, pipe_name: &str) -> std::io::Result<()> {
+    let path = tray_pipe_path(config_dir);
+    std::fs::create_dir_all(config_dir)?;
+    std::fs::write(&path, pipe_name)
+}
+
+/// 读取持久化的托盘 IPC 管道名（若存在且非空）。
+pub fn read_tray_pipe(config_dir: &Path) -> Option<String> {
+    let path = tray_pipe_path(config_dir);
+    let content = std::fs::read_to_string(&path).ok()?;
+    let trimmed = content.trim();
+    if trimmed.is_empty() {
+        None
+    } else {
+        Some(trimmed.to_string())
+    }
+}
+
+/// 清理托盘 IPC 管道名持久化文件。
+pub fn clear_tray_pipe(config_dir: &Path) {
+    let _ = std::fs::remove_file(tray_pipe_path(config_dir));
 }
 
 /// 托盘 → TUI 的响应。
@@ -195,7 +230,8 @@ mod imp {
         }
 
         pub async fn run(self) -> Result<(), TrayIpcError> {
-            futures::future::pending().await
+            std::future::pending::<()>().await;
+            unreachable!()
         }
     }
 

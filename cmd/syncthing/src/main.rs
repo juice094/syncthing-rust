@@ -276,9 +276,13 @@ async fn run() -> Result<()> {
     };
     if needs_lock {
         if let Err(e) = single_instance::acquire(&config_dir) {
-            // Auto 模式下若已有实例在运行，不弹窗，直接在当前进程打开 TUI。
-            // 这样用户重复双击 syncthing.exe 会聚焦到 TUI，而不是报错退出。
+            // Auto 模式下若已有实例在运行，优先尝试让已有托盘进程打开/聚焦 TUI；
+            // 若不存在托盘或通信失败，再在当前进程打开独立 TUI。
             if cli.command.is_none() {
+                #[cfg(all(windows, feature = "tray"))]
+                if request_tray_open_tui(&config_dir).await {
+                    return Ok(());
+                }
                 return run_tui_mode(
                     &config_dir,
                     CLI_DEFAULT_LISTEN.to_string(),
@@ -297,7 +301,21 @@ async fn run() -> Result<()> {
         None
     };
 
-    match cli.command.unwrap_or(Commands::Auto) {
+    let command = cli.command.unwrap_or(Commands::Auto);
+
+    // Auto mode (daemon + in-process tray) is only meaningful on Windows.
+    // On Linux/macOS we treat it as `syncthing run` so the platform-specific
+    // tray types do not need to be available.
+    #[cfg(not(windows))]
+    let command = match command {
+        Commands::Auto => Commands::Run {
+            listen: CLI_DEFAULT_LISTEN.to_string(),
+            device_name: syncthing_core::constants::DEFAULT_DEVICE_NAME.to_string(),
+        },
+        other => other,
+    };
+
+    match command {
         Commands::Run {
             listen,
             device_name,
@@ -505,14 +523,13 @@ async fn run() -> Result<()> {
                 std::process::exit(1);
             }
         }
+        #[cfg(all(windows, feature = "tray"))]
         Commands::Auto => {
             // Auto mode: daemon + in-process tray icon (Windows only).
-            // On Linux/macOS this is equivalent to `syncthing run`.
             std::fs::create_dir_all(&config_dir)
                 .with_context(|| format!("create config dir {}", config_dir.display()))?;
 
             // Tray mode: file-only logging (no console)
-            #[cfg(all(windows, feature = "tray"))]
             init_tray_logging(&config_dir);
 
             let (listen, device_name) = resolve_daemon_config(
@@ -532,6 +549,7 @@ async fn run() -> Result<()> {
             // 启动托盘 IPC 服务端，供从托盘打开的 TUI 发送 Start/Stop 命令
             let tray_pipe_name = tray_ipc::generate_pipe_name();
             tracing::info!("Tray IPC server listening on {}", tray_pipe_name);
+            let _ = tray_ipc::write_tray_pipe(&config_dir, &tray_pipe_name);
             let (tray_ipc_tx, mut tray_ipc_rx) =
                 tokio::sync::mpsc::channel::<tray_ipc::TrayIpcRequest>(4);
             let ipc_pipe_name_for_server = tray_pipe_name.clone();
@@ -542,15 +560,21 @@ async fn run() -> Result<()> {
                 }
             });
             let daemon_cmd_tx_for_ipc = daemon_cmd_tx.clone();
+            let ipc_config_dir = config_dir.clone();
+            let ipc_pipe_name = tray_pipe_name.clone();
             tokio::spawn(async move {
                 while let Some(req) = tray_ipc_rx.recv().await {
-                    let cmd = match req {
-                        tray_ipc::TrayIpcRequest::StartDaemon => Some(DaemonCommand::Start),
-                        tray_ipc::TrayIpcRequest::StopDaemon => Some(DaemonCommand::Stop),
-                        tray_ipc::TrayIpcRequest::Ping => None,
-                    };
-                    if let Some(cmd) = cmd {
-                        let _ = daemon_cmd_tx_for_ipc.send(cmd).await;
+                    match req {
+                        tray_ipc::TrayIpcRequest::StartDaemon => {
+                            let _ = daemon_cmd_tx_for_ipc.send(DaemonCommand::Start).await;
+                        }
+                        tray_ipc::TrayIpcRequest::StopDaemon => {
+                            let _ = daemon_cmd_tx_for_ipc.send(DaemonCommand::Stop).await;
+                        }
+                        tray_ipc::TrayIpcRequest::OpenTui => {
+                            spawn_tui_from_tray(&ipc_config_dir, &ipc_pipe_name);
+                        }
+                        tray_ipc::TrayIpcRequest::Ping => {}
                     }
                 }
             });
@@ -558,46 +582,38 @@ async fn run() -> Result<()> {
             // 初始自动启动 daemon
             let _ = daemon_cmd_tx.send(DaemonCommand::Start).await;
 
-            #[cfg(all(windows, feature = "tray"))]
-            {
-                let (event_rx, tray_handle) = tray::spawn();
+            let (event_rx, tray_handle) = tray::spawn();
 
-                // Main thread: process tray events
-                for event in event_rx {
-                    tracing::debug!("Tray event: {:?}", event);
-                    match event {
-                        tray::TrayEvent::OpenTui => {
-                            spawn_tui_from_tray(&config_dir, &tray_pipe_name)
-                        }
-                        tray::TrayEvent::ToggleDaemon => {
-                            let cmd = if tray::daemon_running() {
-                                DaemonCommand::Stop
-                            } else {
-                                DaemonCommand::Start
-                            };
-                            let _ = daemon_cmd_tx.send(cmd).await;
-                        }
-                        tray::TrayEvent::Exit => {
-                            tracing::info!("Exit requested, cleaning up...");
-                            let _ = daemon_cmd_tx.send(DaemonCommand::Exit).await;
-                            tray::cleanup();
-                            // 等待 tray 线程退出（WM_CLOSE → WM_DESTROY → PostQuitMessage → GetMessageW=0）
-                            let _ = tray_handle.join();
-                            break;
-                        }
+            // Main thread: process tray events
+            for event in event_rx {
+                tracing::debug!("Tray event: {:?}", event);
+                match event {
+                    tray::TrayEvent::OpenTui => spawn_tui_from_tray(&config_dir, &tray_pipe_name),
+                    tray::TrayEvent::ToggleDaemon => {
+                        let cmd = if tray::daemon_running() {
+                            DaemonCommand::Stop
+                        } else {
+                            DaemonCommand::Start
+                        };
+                        let _ = daemon_cmd_tx.send(cmd).await;
+                    }
+                    tray::TrayEvent::Exit => {
+                        tracing::info!("Exit requested, cleaning up...");
+                        let _ = daemon_cmd_tx.send(DaemonCommand::Exit).await;
+                        tray::cleanup();
+                        // 等待 tray 线程退出（WM_CLOSE → WM_DESTROY → PostQuitMessage → GetMessageW=0）
+                        let _ = tray_handle.join();
+                        tray_ipc::clear_tray_pipe(&config_dir);
+                        break;
                     }
                 }
             }
 
-            #[cfg(not(all(windows, feature = "tray")))]
-            {
-                // Non-Windows or headless: just wait for Ctrl+C, then exit
-                tokio::signal::ctrl_c().await.ok();
-                info!("Received SIGINT, initiating graceful shutdown...");
-                let _ = daemon_cmd_tx.send(DaemonCommand::Exit).await;
-            }
-
             let _ = controller_handle.await;
+        }
+        #[cfg(not(windows))]
+        Commands::Auto => {
+            unreachable!("Auto mode on non-Windows is converted to Run before matching")
         }
     }
 
@@ -992,6 +1008,62 @@ async fn run_tui_mode(
 
 // ==================== tray helpers (Windows + feature = "tray") ====================
 
+/// 尝试连接已有托盘的 IPC 管道并请求其打开/聚焦 TUI。
+///
+/// 返回 true 表示请求已发送给托盘；返回 false 表示没有托盘或通信失败，
+/// 调用方应回退到在当前进程直接启动 TUI。
+#[cfg(all(windows, feature = "tray"))]
+async fn request_tray_open_tui(config_dir: &Path) -> bool {
+    let pipe_name = match tray_ipc::read_tray_pipe(config_dir) {
+        Some(name) => name,
+        None => {
+            tracing::debug!("No tray pipe file found; falling back to local TUI");
+            return false;
+        }
+    };
+
+    let mut client = match tokio::time::timeout(
+        std::time::Duration::from_secs(2),
+        tray_ipc::TrayIpcClient::connect(&pipe_name),
+    )
+    .await
+    {
+        Ok(Ok(client)) => client,
+        Ok(Err(e)) => {
+            tracing::debug!("Failed to connect to tray IPC pipe: {}", e);
+            return false;
+        }
+        Err(_) => {
+            tracing::debug!("Timeout connecting to tray IPC pipe");
+            return false;
+        }
+    };
+
+    match tokio::time::timeout(
+        std::time::Duration::from_secs(3),
+        client.send(tray_ipc::TrayIpcRequest::OpenTui),
+    )
+    .await
+    {
+        Ok(Ok(resp)) if resp.ok => {
+            tracing::info!("Requested existing tray to open/focus TUI");
+            true
+        }
+        Ok(Ok(resp)) => {
+            tracing::debug!("Tray rejected OpenTui request: {:?}", resp.error);
+            false
+        }
+        Ok(Err(e)) => {
+            tracing::debug!("Failed to send OpenTui request: {}", e);
+            false
+        }
+        Err(_) => {
+            tracing::debug!("Timeout sending OpenTui request to tray");
+            false
+        }
+    }
+}
+
 /// 初始化 TUI 文件日志 appender，返回非阻塞 writer 与 guard。
 ///
 /// Guard 需要被调用者持有，防止 tracing_appender 工作线程在 TUI 运行期间被 drop。
@@ -1245,26 +1317,14 @@ fn console_diag_log(msg: String) {
         .and_then(|mut f| f.write_all(line.as_bytes()));
 }
 
-/// Windows: 调整并聚焦当前进程的控制台窗口。
+/// Windows: 聚焦并显示当前进程的控制台窗口，但不强制调整大小。
+///
+/// 窗口尺寸跟随用户系统默认 / shell 设置；TUI 启动后 `runner.rs` 会通过
+/// `sync_console_buffer_size()` 把屏幕缓冲区同步为当前窗口可见大小，避免滚动条。
 #[cfg(windows)]
 unsafe fn configure_console_window() {
-    use windows::Win32::System::Console::{
-        GetConsoleWindow, GetStdHandle, SetConsoleScreenBufferSize, SetConsoleWindowInfo, COORD,
-        SMALL_RECT, STD_OUTPUT_HANDLE,
-    };
+    use windows::Win32::System::Console::GetConsoleWindow;
     use windows::Win32::UI::WindowsAndMessaging::{SetForegroundWindow, ShowWindow, SW_SHOWNORMAL};
-
-    if let Ok(handle) = GetStdHandle(STD_OUTPUT_HANDLE) {
-        let buf = COORD { X: 120, Y: 40 };
-        let _ = SetConsoleScreenBufferSize(handle, buf);
-        let rect = SMALL_RECT {
-            Left: 0,
-            Top: 0,
-            Right: 119,
-            Bottom: 39,
-        };
-        let _ = SetConsoleWindowInfo(handle, true, &rect);
-    }
 
     let hwnd = GetConsoleWindow();
     if !hwnd.is_invalid() {
@@ -1310,77 +1370,49 @@ fn spawn_tui_from_tray(config_dir: &Path, tray_pipe_name: &str) {
     let pipe = tray_pipe_name.to_string();
 
     std::thread::spawn(move || {
+        let title = "syncthing-rust TUI";
+
+        // 1. 优先 PowerShell 7：字体平滑、配色细腻，用户首选。
+        //    不再使用 Start-Process -NoNewWindow -Wait，而是让 PowerShell 直接执行
+        //    syncthing.exe tui 并阻塞等待。这样 TUI 就是 PowerShell 的子进程，
+        //    自然接管整个 PowerShell 窗口，避免父 shell 与 TUI 竞争控制台输入/输出。
         let exe_quoted = escape_ps_single_quote(&exe.to_string_lossy());
         let cd_quoted = escape_ps_single_quote(&cd);
         let pipe_quoted = escape_ps_single_quote(&pipe);
-        // PowerShell 命令：使用 Start-Process -NoNewWindow 让 TUI 与 pwsh 共用同一个
-        // 控制台窗口；Wait-Process 阻塞 pwsh 读取输入，避免 TUI 运行期间父 shell
-        // 抢占键盘输入。使用 -EncodedCommand 避免 cmd/PowerShell 引号转义地狱。
         let ps_cmd = format!(
-            "$proc = Start-Process -FilePath '{}' -ArgumentList 'tui','--config-dir','{}','--tray-pipe','{}' -NoNewWindow -PassThru; Wait-Process -Id $proc.Id",
+            "Clear-Host; & '{}' tui --config-dir '{}' --tray-pipe '{}'",
             exe_quoted, cd_quoted, pipe_quoted
         );
         let encoded = encode_ps_command(&ps_cmd);
-        let title = "syncthing-rust TUI";
 
-        // 1. 优先 Windows Terminal：wt.exe 通过 cmd /c start 启动，以正确处理 WindowsApps alias
-        if try_start_tui(
-            &cd,
-            title,
-            "wt.exe",
-            &[
-                "new-tab",
-                "--title",
-                title,
-                "--",
-                "pwsh.exe",
-                "-NoExit",
-                "-EncodedCommand",
-                &encoded,
-            ],
-        ) {
-            tracing::info!("TUI launched via Windows Terminal");
-            return;
-        }
-        tracing::debug!("wt.exe not available or failed, trying PowerShell 7");
-
-        // 2. PowerShell 7：同样通过 cmd /c start，确保 pwsh 获得独立控制台窗口，
-        //    并成为 TUI 的载体（TUI 渲染在 pwsh 窗口内）。
-        if try_start_tui(
-            &cd,
-            title,
-            "pwsh.exe",
-            &["-NoExit", "-EncodedCommand", &encoded],
-        ) {
-            tracing::info!("TUI launched via PowerShell 7");
+        if try_start_tui(&cd, title, "pwsh.exe", &["-EncodedCommand", &encoded]) {
+            tracing::info!("TUI launched via PowerShell 7 (direct invoke)");
             return;
         }
         tracing::debug!("pwsh.exe not available or failed, trying Windows PowerShell");
 
-        // 3. Windows PowerShell
-        if try_start_tui(
-            &cd,
-            title,
-            "powershell.exe",
-            &["-NoExit", "-EncodedCommand", &encoded],
-        ) {
-            tracing::info!("TUI launched via Windows PowerShell");
+        // 2. Windows PowerShell
+        if try_start_tui(&cd, title, "powershell.exe", &["-EncodedCommand", &encoded]) {
+            tracing::info!("TUI launched via Windows PowerShell (direct invoke)");
             return;
         }
-        tracing::debug!("powershell.exe not available or failed, falling back to direct spawn");
+        tracing::debug!("powershell.exe not available or failed, trying Windows Terminal");
 
-        // 4. 最终回退：直接 CreateProcess，由 ensure_console() 分配控制台
-        let status = std::process::Command::new(&exe)
-            .arg("tui")
-            .arg("--config-dir")
-            .arg(&cd)
-            .arg("--tray-pipe")
-            .arg(&pipe)
-            .status();
-        match status {
-            Ok(s) => tracing::info!("TUI exited with status: {:?}", s.code()),
-            Err(e) => tracing::error!("Failed to spawn TUI: {}", e),
+        // 3. Windows Terminal 直接启动 TUI：不经过 PowerShell 中间层。
+        if try_start_wt_tui_direct(&cd, title, &exe, &pipe) {
+            tracing::info!("TUI launched via Windows Terminal (direct)");
+            return;
         }
+        tracing::debug!(
+            "wt.exe direct launch not available or failed, falling back to direct CreateProcess"
+        );
+
+        // 4. 最终回退：直接 CreateProcess，分配独立控制台窗口。
+        if try_start_tui_direct(&cd, &exe, &pipe) {
+            tracing::info!("TUI launched via direct CreateProcess");
+            return;
+        }
+        tracing::error!("All TUI launch strategies failed");
     });
 }
 
@@ -1427,6 +1459,93 @@ fn try_start_tui(config_dir: &str, title: &str, program: &str, args: &[&str]) ->
             false
         }
     }
+}
+
+/// 通过 Windows Terminal 直接启动 TUI，不经过 PowerShell 中间层。
+///
+/// 命令形式：
+/// `wt.exe new-tab --title <title> -- <exe> tui --config-dir <cd> --tray-pipe <pipe>`
+///
+/// 仍通过 `cmd /c start` 调用 `wt.exe`，以正确处理 Microsoft Store 安装的
+/// WindowsApps AppExecutionAlias。
+#[cfg(all(windows, feature = "tray"))]
+fn try_start_wt_tui_direct(
+    config_dir: &str,
+    title: &str,
+    exe: &std::path::Path,
+    tray_pipe: &str,
+) -> bool {
+    use std::os::windows::process::CommandExt;
+    const CREATE_NO_WINDOW: u32 = 0x08000000;
+
+    let exe_str = exe.to_string_lossy();
+    let mut cmd = std::process::Command::new("cmd.exe");
+    cmd.arg("/c")
+        .arg("start")
+        .arg(title)
+        .arg("wt.exe")
+        .arg("new-tab")
+        .arg("--title")
+        .arg(title)
+        .arg("--")
+        .arg(&*exe_str)
+        .arg("tui")
+        .arg("--config-dir")
+        .arg(config_dir)
+        .arg("--tray-pipe")
+        .arg(tray_pipe);
+    cmd.creation_flags(CREATE_NO_WINDOW);
+
+    match cmd.status() {
+        Ok(_) => wait_for_tui_pid(config_dir, 50),
+        Err(e) => {
+            tracing::debug!("Failed to start wt.exe direct: {}", e);
+            false
+        }
+    }
+}
+
+/// 直接通过 CreateProcess 启动 TUI，分配新的控制台窗口。
+///
+/// 不经过 cmd / PowerShell 等任何中间 shell，启动速度最快，也不会出现
+/// shell 提示符一闪而过的情况。
+#[cfg(all(windows, feature = "tray"))]
+fn try_start_tui_direct(config_dir: &str, exe: &std::path::Path, tray_pipe: &str) -> bool {
+    use std::os::windows::process::CommandExt;
+    // CREATE_NEW_CONSOLE: 为 TUI 分配一个独立的新控制台窗口；
+    // 否则托盘进程没有控制台，子进程也会没有控制台，TUI 将不可见。
+    const CREATE_NEW_CONSOLE: u32 = 0x00000010;
+
+    let mut cmd = std::process::Command::new(exe);
+    cmd.arg("tui")
+        .arg("--config-dir")
+        .arg(config_dir)
+        .arg("--tray-pipe")
+        .arg(tray_pipe);
+    cmd.creation_flags(CREATE_NEW_CONSOLE);
+
+    match cmd.spawn() {
+        Ok(_) => wait_for_tui_pid(config_dir, 30),
+        Err(e) => {
+            tracing::debug!("Failed to spawn TUI directly: {}", e);
+            false
+        }
+    }
+}
+
+/// 等待 TUI 进程把 PID 写入文件，最多等待 `ticks * 100ms`。
+#[cfg(all(windows, feature = "tray"))]
+fn wait_for_tui_pid(config_dir: &str, ticks: usize) -> bool {
+    for _ in 0..ticks {
+        std::thread::sleep(std::time::Duration::from_millis(100));
+        if let Some(pid) = read_tui_pid(std::path::Path::new(config_dir)) {
+            if is_process_alive(pid) {
+                return true;
+            }
+        }
+    }
+    tracing::debug!("tui.pid did not appear after waiting");
+    false
 }
 
 /// 将 PowerShell 命令字符串编码为 UTF-16 LE Base64，供 `-EncodedCommand` 使用。
