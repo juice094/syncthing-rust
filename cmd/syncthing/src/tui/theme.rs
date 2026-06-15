@@ -34,6 +34,7 @@ pub struct Theme {
     pub style_idle: Style,
     pub style_error: Style,
     pub style_header: Style,
+    pub style_status_bg: Style,
     pub style_popup_border: Style,
     pub style_log_trace: Style,
     pub style_log_debug: Style,
@@ -88,6 +89,7 @@ impl Theme {
             style_header: Style::default()
                 .fg(text_primary)
                 .add_modifier(Modifier::BOLD),
+            style_status_bg: Style::default().bg(surface),
             style_popup_border: Style::default().fg(border_focused),
             style_log_trace: Style::default().fg(Color::Rgb(100, 100, 100)),
             style_log_debug: Style::default().fg(info),

@@ -71,7 +71,7 @@ rayon = "1.10"
 num_cpus = "1.16"
 
 # 基准测试（T-A1）
-criterion = { version = "0.5", features = ["html_reports", "async_tokio"] }
+criterion = { version = "0.8", features = ["html_reports", "async_tokio"] }
 
 [profile.release]
 lto = true

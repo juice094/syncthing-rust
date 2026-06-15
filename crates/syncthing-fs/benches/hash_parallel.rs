@@ -1,5 +1,6 @@
-use criterion::{black_box, criterion_group, criterion_main, Criterion};
+use criterion::{criterion_group, criterion_main, Criterion};
 use sha2::{Digest, Sha256};
+use std::hint::black_box;
 
 fn bench_sha256_single_block(c: &mut Criterion) {
     let data = vec![0u8; 128 * 1024];

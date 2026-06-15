@@ -1,6 +1,6 @@
 # Agent 环境指引 · syncthing-rust
 
-> 本文档面向 AI 编程 Agent。读者应被假设对项目一无所知。所有信息基于仓库实际内容（`Cargo.toml`、`README.md`、源码、CI、脚本、文档等），不做推测。
+> 本文档面向 AI 编程 Agent。读者应被假设对项目一无所知。所有信息基于仓库实际内容（`Cargo.toml`、`README.md`、源码、CI、脚本、文档等）实测整理，不做推测。
 
 ---
 
@@ -8,8 +8,8 @@
 
 `syncthing-rust` 是 [Syncthing](https://syncthing.net/) BEP（Block Exchange Protocol）协议的 Rust 实现，目标是成为 Go 版 Syncthing 的替代实现。
 
-- **当前版本**：`3.0.3`（工作区内所有 crate 统一版本 `3.0.0`，发布标签 `v3.0.3`）
-- **当前阶段**：Production（谨慎生产），核心 P2P 文件同步、Windows 托盘、TUI、REST API 已稳定运行
+- **当前版本**：`CHANGELOG.md` 声明为 `3.0.3`（2026-06-13），最新 Git 标签为 `v3.0.2`，工作区内所有 crate 的 `Cargo.toml` 版本统一为 `3.0.0`。
+- **当前阶段**：Production（谨慎生产）。核心 P2P 文件同步、Windows 托盘、TUI、REST API 已稳定运行；72h 耐久测试为 `v3.1.0` 准入线（尚未完成）。
 - **主要特性**：
   - BEP over TLS（prost 编解码 + LZ4 压缩）
   - 块级 Pull/Push 双向同步
@@ -29,8 +29,8 @@
 | 异步运行时 | Tokio（`workspace` 统一 `tokio = { version = "1.35", features = ["full"] }`） |
 | TLS | rustls 0.23 + tokio-rustls，ed25519-dalek 设备身份证书 |
 | 协议 | BEP（prost 0.12）+ LZ4 压缩 |
-| 网络 | TCP + TLS，ParallelDialer，Relay v1，DERP（自研），可选 WebSocket |
-| 发现 | UDP 广播、HTTPS mTLS Global Discovery、STUN、UPnP |
+| 网络 | TCP + TLS，`ParallelDialer`，Relay v1，自研 DERP，可选 WebSocket（`websocket` feature） |
+| 发现 | UDP 广播、HTTPS mTLS Global Discovery、STUN、UPnP、PCP、NAT-PMP |
 | 存储 | sled 0.34（元数据 + 块缓存），LRU 缓存 |
 | REST API | Axum 0.7 + tower-http |
 | TUI | ratatui 0.30 + crossterm 0.28 |
@@ -51,7 +51,7 @@ syncthing-rust/
 ├── justfile                # 常用开发命令
 ├── rust-toolchain.toml     # stable + rustfmt + clippy
 ├── .cargo/config.toml      # release-thin / bench profile
-├── deny.toml               # cargo-deny 配置
+├── deny.toml               # cargo-deny 配置（CI 使用）
 ├── cargo-deny.toml         # CI 兼容版 cargo-deny 配置
 ├── .cargo/audit.toml       # cargo audit 忽略项
 │
@@ -90,6 +90,7 @@ syncthing-rust/
 | `syncthing-db` | 存储后端 | 禁止暴露 sled 特有 API；同步逻辑应通过 `BlockStore` trait |
 | `syncthing-api` | REST + 事件总线 + 配置 | 禁止直接持有 `ConnectionManagerHandle`/`LocalDatabase` 等具体类型；必须走 trait |
 | `syncthing-versioner` | 文件版本归档策略 | 禁止 FS I/O |
+| `syncthing-test-utils` | 测试辅助（`MemoryPipe`、`TestNode`） | 仅用于测试 / 开发工具 |
 
 ### 3.2 关键入口与模块
 
@@ -158,12 +159,13 @@ just build-release       # 编译 release 二进制（syncthing / cli / monitor�
 
 ## 5. 测试策略
 
-### 5.1 测试基线
+### 5.1 测试基线（实测）
 
-- 当前基线：`cargo test --workspace` 364 passed / 4 ignored / 0 failed
-- clippy：`cargo clippy --workspace --all-targets -- -D warnings -W clippy::await_holding_lock` 0 warnings
-- cargo-deny：`cargo deny check all` 通过
-- cargo audit：3 个 unmaintained 上游传递依赖已记录在 `.cargo/audit.toml` 中接受为债务
+- `cargo test --workspace`：**364 passed / 4 ignored / 0 failed**
+- `cargo clippy --workspace --all-targets -- -D warnings -W clippy::await_holding_lock`：0 warnings
+- `cargo doc --no-deps --workspace`：通过
+- `cargo audit`：3 个 unmaintained 上游传递依赖已记录在 `.cargo/audit.toml` 中接受为债务
+- `cargo deny check all`：通过（仅保留 `zune-jpeg` 等重复版本警告，已接受）
 
 ### 5.2 测试组织
 
@@ -173,7 +175,7 @@ just build-release       # 编译 release 二进制（syncthing / cli / monitor�
 | 集成测试 | `crates/*/tests/*.rs` | 如 `bep-protocol/tests/wire_compat.rs` |
 | E2E 测试 | `cmd/syncthing/tests/e2e_sync.rs` | 双节点真实同步链路 |
 | 验收测试 | `acceptance-tests/` | 独立包 |
-| Benchmark | `crates/*/benches/*.rs` | criterion：device_id、encode_decode、scanner、puller、hash_parallel |
+| Benchmark | `crates/*/benches/*.rs` | criterion：`device_id`、`encode_decode`、`scanner`、`hash_parallel`、`puller` |
 | 压力测试 | `cmd/syncthing/src/bin/stress_test.rs` + `cmd/syncthing/src/bin/monitor.rs` | 72h 耐久测试基础设施 |
 
 ### 5.3 E2E / 网络测试要求
@@ -199,6 +201,12 @@ cargo doc --no-deps --workspace
 
 - 必须运行 `cargo fmt` 后提交
 - 单文件软上限 **600 行**；CI 会检查并警告
+- **当前超过 600 行的生产文件**（需拆分或保持关注）：
+  - `cmd/syncthing/src/main.rs`（1699 行）
+  - `crates/syncthing-sync/src/puller/mod.rs`（837 行）
+  - `crates/syncthing-sync/src/scanner.rs`（812 行）
+  - `cmd/syncthing/src/tui/mod.rs`（703 行）
+  - `cmd/syncthing/src/tray.rs`（635 行）
 
 ### 6.2 日志级别约定
 
@@ -256,7 +264,7 @@ fix(sync): Windows rename fallback with exponential backoff
 4. 创建 `FileSystemDatabase`（`db/`）
 5. 创建 `SyncService`（持有配置和 DB）
 6. 创建 `ConnectionManager` + `TlsIdentity`
-7. 注册传输层：`RawTcpTransport`（默认）、可选 `WebSocketTransport`、`DerpTransport`、代理感知 `ProxiedTransport`
+7. 注册传输层：`RawTcpTransport`（默认）、可选 `WebSocketTransport`（需 `websocket` feature）、自研 `DerpTransport`、代理感知 `ProxiedTransport`
 8. 启动 Local Discovery / Global Discovery / STUN / UPnP / Relay listener
 9. 启动 REST API 服务器（Axum）
 10. 当对端连接建立时，启动 `BepSession` + `DaemonBepHandler`
@@ -268,7 +276,7 @@ fix(sync): Windows rename fallback with exponential backoff
 |------|--------------|------|
 | `ConnectionManager` | `syncthing-net` | 维护连接池、拨号、重试、地址评分 |
 | `BepSession` | `syncthing-net` | 单条 BEP 连接上的消息收发、心跳 |
-| `SyncService` | `syncthing-sync` | 文件夹生命周期、扫描/拉取/watcher 调度 |
+| `SyncService` / `SyncManager` | `syncthing-sync` | 文件夹生命周期、扫描/拉取/watcher 调度 |
 | `FolderModel` | `syncthing-sync` | 单个文件夹的本地/远程索引与状态 |
 | `Puller` | `syncthing-sync` | 块请求、下载、组装文件 |
 | `Scanner` | `syncthing-sync` / `syncthing-fs` | 本地文件扫描、SHA-256 哈希 |
@@ -277,6 +285,7 @@ fix(sync): Windows rename fallback with exponential backoff
 | `RestApi` | `syncthing-api` | REST 端点、配置热重载、事件流 |
 | `TUI` | `cmd/syncthing/src/tui/` | 实时状态、文件夹/设备表单、日志视图 |
 | `Tray` | `cmd/syncthing/src/tray.rs` | Windows 托盘图标、右键菜单、daemon 启停 |
+| `MCP Bridge` | `cmd/syncthing-mcp-bridge` | MCP stdio JSON-RPC → REST API 桥接 |
 
 ### 7.3 默认端口
 
@@ -326,7 +335,13 @@ fix(sync): Windows rename fallback with exponential backoff
 
 **禁止**为消除这些警告而引入 breaking change 的依赖升级。
 
-### 8.4 部署安全建议
+### 8.4 cargo-deny 状态
+
+- `cargo deny check all`（使用 `deny.toml` 或 `cargo-deny.toml`）**已通过**。
+- 历史问题：`cmd/syncthing-tray/Cargo.toml` 缺少 `license` 字段且未声明 `publish = false`，导致 cargo-deny 将其视为需许可证的发布 crate。
+- 修复方式：已为 `syncthing-tray` 添加 `license = "MIT"` 与 `publish = false`。
+
+### 8.5 部署安全建议
 
 - REST API 默认绑定 `127.0.0.1:8385`，不要暴露到公网
 - 将 `config.json` 视为机密（含 API key）
@@ -339,11 +354,12 @@ fix(sync): Windows rename fallback with exponential backoff
 
 ### 9.1 产物
 
-- `target/release/syncthing.exe` / `syncthing`：主守护进程（Windows ~12.6MB，Linux ~13.6MB）
+- `target/release/syncthing.exe` / `syncthing`：主守护进程
 - `target/release/syncthing-cli`：CLI 工具
 - `target/release/syncthing-monitor`：监控工具
 - `target/release/syncthing-bench`：基准测试
 - `target/release/syncthing-mcp-bridge`：MCP Bridge
+- `target/release/syncthing-tray.exe`：托盘薄 wrapper（启动同目录 `syncthing.exe`）
 
 ### 9.2 部署脚本
 
@@ -351,6 +367,7 @@ fix(sync): Windows rename fallback with exponential backoff
 - `scripts/72h_stress_test.sh` / `72h_monitor.sh` / `72h_report.sh`：长跑测试
 - `scripts/check-health.ps1` / `check-sync-consistency.ps1`：健康检查
 - `scripts/recover-remote.sh`：对侧格式化/重装后的灾备恢复
+- `scripts/two-node-real-network-test.ps1` / `scripts/stop-two-node-test.ps1`：真实网络双节点测试
 
 ### 9.3 灾备恢复协议（对侧格式化/重装后）
 
@@ -367,7 +384,7 @@ fix(sync): Windows rename fallback with exponential backoff
 - 平台：GitHub Actions（`.github/workflows/ci.yml`）
 - 矩阵：ubuntu-latest / windows-latest / macos-latest
 - Job：fmt、clippy、test、audit、cargo-deny、all-features、bench-smoke、release-check、doc-check、e2e-test、file-size（600 行软限制检查）
-- 当前状态：19/19 jobs passing
+- **注意**：`README.md` / `CHANGELOG.md` 声称 19/19 jobs passing；本地 `cargo deny check all` 也已通过，CI 状态需以最新 GitHub Actions 运行结果为准。
 
 ---
 
@@ -382,7 +399,7 @@ fix(sync): Windows rename fallback with exponential backoff
 ### 10.2 文件规模
 
 - `daemon_runner.rs` 禁止继续膨胀；新增网络组件必须拆分为独立模块
-- 单文件软上限 600 行；超过需拆分
+- 单文件软上限 600 行；超过需拆分或保持关注
 
 ### 10.3 Trait 唯一性
 
@@ -436,4 +453,4 @@ fix(sync): Windows rename fallback with exponential backoff
 
 ---
 
-*最后更新：2026-06-13（基于仓库 v3.0.3 实际内容整理）*
+*最后更新：2026-06-14（基于仓库实际内容实测整理）*
