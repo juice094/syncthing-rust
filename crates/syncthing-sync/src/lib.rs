@@ -17,6 +17,7 @@ pub mod index;
 pub mod index_handler;
 pub mod merge;
 pub mod model;
+pub mod orchestrator;
 pub mod puller;
 pub mod scanner;
 pub mod service;
@@ -29,5 +30,9 @@ pub use supervisor::{RestartConfig, RestartPolicy, Supervisor};
 pub use error::{Result, SyncError};
 pub use events::{EventPublisher, EventSubscriber, SyncEvent};
 pub use model::{FolderState, SyncManager};
-pub use puller::BlockSource;
+pub use orchestrator::{FolderOrchestrator, OrchestratorConfig, OrchestratorLoad};
+pub use puller::{
+    concurrency::{ConcurrencyPolicy, RttTracker},
+    BlockSource,
+};
 pub use service::SyncService;

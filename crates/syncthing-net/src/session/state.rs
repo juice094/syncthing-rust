@@ -6,6 +6,9 @@
 use std::sync::atomic::Ordering;
 use std::time::{Duration, Instant};
 
+/// BEP 单条消息处理超时。防止消息处理中的同步 I/O 阻塞整个会话心跳。
+const MESSAGE_HANDLING_TIMEOUT: Duration = Duration::from_secs(30);
+
 use tracing::{debug, info, warn};
 
 use syncthing_core::{ConnectionState, Result, SyncthingError};
@@ -103,6 +106,7 @@ impl BepSession {
             match self.handler.generate_index(folder_id, self.device_id).await {
                 Ok(index) => {
                     let file_count = index.files.len();
+                    let last_sequence = index.files.iter().map(|f| f.sequence).max().unwrap_or(0);
                     if let Err(e) = self.conn.send_index(&index).await {
                         warn!(
                             "Failed to send Index for {} to {}: {}",
@@ -111,13 +115,14 @@ impl BepSession {
                         self.metrics.errors.fetch_add(1, Ordering::Relaxed);
                     } else {
                         info!(
-                            "Sent Index for {} to {} ({} files)",
-                            folder_id, self.device_id, file_count
+                            "Sent Index for {} to {} ({} files, last_sequence {})",
+                            folder_id, self.device_id, file_count, last_sequence
                         );
                         self.emit(BepSessionEvent::IndexSent {
                             device_id: self.device_id,
                             folder: folder_id.clone(),
                             file_count,
+                            last_sequence,
                         });
                     }
                 }
@@ -149,10 +154,29 @@ impl BepSession {
                             self.metrics.messages_recv.fetch_add(1, Ordering::Relaxed);
                             self.metrics.bytes_recv.fetch_add(payload_len, Ordering::Relaxed);
                             last_recv = Instant::now();
-                            if let Err(e) = self.handle_message(msg_type, payload).await {
-                                warn!("BEP session loop error for {}: {}", self.device_id, e);
-                                session_end_reason = format!("handle_message error: {}", e);
-                                break;
+                            match tokio::time::timeout(
+                                MESSAGE_HANDLING_TIMEOUT,
+                                self.handle_message(msg_type, payload),
+                            )
+                            .await
+                            {
+                                Ok(Ok(())) => {}
+                                Ok(Err(e)) => {
+                                    warn!("BEP session loop error for {}: {}", self.device_id, e);
+                                    session_end_reason = format!("handle_message error: {}", e);
+                                    break;
+                                }
+                                Err(_) => {
+                                    warn!(
+                                        "BEP message handling timeout for {} after {:?}",
+                                        self.device_id, MESSAGE_HANDLING_TIMEOUT
+                                    );
+                                    session_end_reason = format!(
+                                        "handle_message timeout after {:?}",
+                                        MESSAGE_HANDLING_TIMEOUT
+                                    );
+                                    break;
+                                }
                             }
                         }
                         Err(e) => {

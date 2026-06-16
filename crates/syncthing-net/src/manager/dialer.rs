@@ -4,7 +4,7 @@ use std::sync::Arc;
 use tokio::sync::oneshot;
 use tracing::{debug, warn};
 
-use syncthing_core::DeviceId;
+use syncthing_core::{ConnectionType, DeviceId};
 
 use super::ConnectionManager;
 
@@ -59,8 +59,23 @@ impl ConnectionManager {
             cancel_rx
         };
 
+        // 在 TLS ClientHello 前注册握手竞争状态。
+        // 若根据 device ID 竞争规则本端应保留 incoming，则直接放弃 outgoing 拨号，
+        // 避免无效的双向 TLS ClientHello / BEP Hello。
+        let handshake_guard = match self.begin_handshake(device_id, ConnectionType::Outgoing) {
+            Ok(guard) => guard,
+            Err(e) => {
+                debug!(
+                    "Outgoing handshake race lost for {} before ClientHello: {}",
+                    device_id, e
+                );
+                self.pending_connections.write().await.remove(&device_id);
+                return Ok(());
+            }
+        };
+
         // 启动连接任务（必须在释放 pending write lock 之后，避免任务执行时死锁）
-        self.spawn_connect_task(device_id, addresses, relay_urls, cancel_rx);
+        self.spawn_connect_task(device_id, addresses, relay_urls, cancel_rx, handshake_guard);
 
         Ok(())
     }
@@ -72,6 +87,7 @@ impl ConnectionManager {
         addresses: Vec<SocketAddr>,
         relay_urls: Vec<String>,
         mut cancel_rx: oneshot::Receiver<()>,
+        #[allow(dead_code)] handshake_guard: super::handshake::HandshakeGuard,
     ) {
         let parallel_dialer = Arc::clone(&self.parallel_dialer);
         let tls_config = Arc::clone(&self.tls_config);
@@ -85,6 +101,9 @@ impl ConnectionManager {
         };
 
         tokio::spawn(async move {
+            // 保持握手守卫直到拨号任务结束，在 BEP Hello / 注册前避免竞争。
+            let _handshake_guard = handshake_guard;
+
             tokio::select! {
                 _ = &mut cancel_rx => {
                     debug!("Connection task for {} cancelled", device_id);

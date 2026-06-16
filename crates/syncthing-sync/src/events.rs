@@ -30,6 +30,15 @@ pub enum SyncEvent {
     /// 文件夹扫描失败
     FolderScanFailed { folder: String, error: String },
 
+    /// Watcher 脏路径集合大小（用于观测增量扫描压力）
+    WatcherDirtySetSize { folder: String, size: usize },
+
+    /// Watcher 事件丢失计数
+    WatcherEventsDropped { folder: String, dropped: u64 },
+
+    /// 增量扫描被触发（相对于全量扫描）
+    IncrementalScanTriggered { folder: String, paths: usize },
+
     /// 项目开始处理
     ItemStarted {
         folder: String,
@@ -97,6 +106,16 @@ pub enum SyncEvent {
 
     /// 同步完成
     SyncComplete { folder: String, stats: SyncStats },
+
+    /// IndexUpdate 分片发送
+    IndexUpdateChunkSent {
+        folder: String,
+        device: syncthing_core::DeviceId,
+        chunk_index: usize,
+        total_chunks: usize,
+        files: usize,
+        bytes: usize,
+    },
 }
 
 /// 项目动作

@@ -15,6 +15,7 @@ pub mod session_logger;
 pub mod theme;
 pub mod ui;
 pub mod views;
+pub mod watchdog;
 pub mod widgets;
 
 /// Sync engine → TUI 事件

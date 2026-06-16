@@ -35,6 +35,7 @@
 #![warn(rust_2018_idioms)]
 
 pub mod block_cache;
+pub mod blocking;
 pub mod kv;
 pub mod metadata;
 pub mod store;

@@ -110,6 +110,43 @@ MagicSocket::dial(device_id) → 自动尝试 direct → ICE → DERP
 
 ---
 
+## AD-008: 移动端混合网络连接韧性（2026-06-16 实战结论）
+
+**来源**: ROG-X / Gray-Cloud / Honor 70 Pro 生产环境排障  
+**日期**: 2026-06-16  
+**状态**: Phase 1 已实现 / P0
+
+### 问题
+
+在 **Tailscale DERP + Syncthing Relay** 混合网络下，单条长连接 TCP 无法同时满足"稳定保活"与"低延迟传输"：
+
+- Tailscale DERP 会把长空闲 TCP 在约 90 秒内掐断（`i/o timeout`、`software caused connection abort`）。
+- Syncthing Relay 为长连接设计，能承受高延迟，但带宽和延迟不如 DERP 直连。
+- 当前 `ConnectionManager` 在单条连接上同时跑 BEP 索引和块数据；一旦该连接断开，所有传输必须等重连。
+
+### 观察到的最佳配置（临时 workaround）
+
+- 云端设备地址固定为 `tcp://100.69.11.71:22001`（Tailscale 直连，给云端主动拨手机用）。
+- 手机端云端设备地址保持 `dynamic`，让手机通过 **Syncthing Relay** 入站到云端。
+- 结果：云端→手机走 Tailscale 直连（快），手机→云端走 Relay（稳），互为补充。
+
+### 已实现（Phase 1）
+
+2. **连接竞争静默期**：`ConnectionManager::begin_handshake` 在 TLS 握手完成后、BEP Hello 前注册握手状态并按 device ID 竞争规则提前结束失败连接；同时 outgoing 拨号在本端 device ID 较小时加入 50~250ms 退让窗口，降低双向 TLS ClientHello 同时发生的概率。
+3. **指数退避上限**：`RetryConfig::max_backoff_ms` 已设为 5 分钟。
+4. **心跳/keepalive 按路径调优**：`ConnectionManagerConfig.heartbeat_interval` 作为全局可配置基准；relay/proxy/websocket/DERP 路径自动收紧为 `min(config, 30s)`，TCP keepalive 对 relay 路径使用 `30s/5s/2`，直连使用 `60s/10s/3`。
+5. **DB 锁死自愈**：新增内部健康看门狗（`cmd/syncthing/src/tui/watchdog.rs`），每 30s 检查 `/rest/system/status`，连续两次失败/超时则 spawn 新进程并退出当前进程，实现自愈重启。
+
+### 仍待未来（Phase 2）
+
+1. **双通道保活**：需要 `ConnectionManager` 支持同设备多连接并按消息类型分流（relay 通道负责心跳/索引，direct 通道负责块数据）。
+
+### 阻塞
+
+- 需要 `ConnectionManager` 支持同设备多连接、按消息类型分流。
+
+---
+
 ## 决策记录索引
 
 | AD | 主题 | 状态 | 优先级 |
@@ -121,3 +158,4 @@ MagicSocket::dial(device_id) → 自动尝试 direct → ICE → DERP
 | AD-005 | MagicSocket | 未开始 | P2（阻塞于网络发现层） |
 | AD-006 | DERP 回退 | 未开始 | P2 |
 | AD-007 | QUIC 预留 | 未开始 | P3 |
+| AD-008 | 移动端混合网络连接韧性 | Phase 1 已实现 | P0 |

@@ -10,7 +10,7 @@
 
 [![Rust](https://img.shields.io/badge/rust-1.85%2B-orange?logo=rust)](https://www.rust-lang.org)
 [![CI](https://github.com/juice094/syncthing-rust/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/juice094/syncthing-rust/actions/workflows/ci.yml)
-[![Tests](https://img.shields.io/badge/tests-364%20passed-brightgreen)](https://github.com/juice094/syncthing-rust/actions)
+[![Tests](https://img.shields.io/badge/tests-385%20passed-brightgreen)](https://github.com/juice094/syncthing-rust/actions)
 [![Version](https://img.shields.io/badge/version-v3.0.3-blue)](https://github.com/juice094/syncthing-rust/releases/tag/v3.0.3)
 [![License](https://img.shields.io/badge/license-MIT%20%2B%20Commercial-blue)](./LICENSE)
 
@@ -52,6 +52,10 @@
 | 🌐 **多路径发现** | LAN UDP · 全球 HTTPS mTLS · STUN · UPnP · Relay v1 |
 | 🖥️ **实时 TUI** | 事件桥接实时同步状态, 配置热重载 |
 | 🔌 **Go 互操作** | 与 Go Syncthing v2.1.0 线路兼容（跨版本已验证） |
+| ⚙️ **Folder Orchestrator** | 多文件夹扫描/拉取统一调度，并发限制 + 抖动 + 优先级 |
+| 🔮 **预测性健康检查** | 实时评估失败率 / watcher 丢事件 / 状态翻转，自动节流 |
+| 📈 **自适应拉取并发** | 基于块请求 RTT 动态调整 downloads/blocks 并发 |
+| 🧩 **增量扫描** | watcher 脏路径集合触发子树/单文件增量扫描，降低大 folder 开销 |
 | 📦 **单静态二进制** | release 构建 ~13 MB，零运行时依赖 |
 
 ---

@@ -15,7 +15,7 @@ async fn dummy_bep_connection() -> Arc<BepConnection> {
     let stream = tokio::net::TcpStream::connect(addr).await.unwrap();
     let (tx, _rx) = tokio::sync::mpsc::channel(256);
     BepConnection::new(
-        Box::new(crate::connection::TcpBiStream::Plain(stream)),
+        Box::new(crate::connection::TcpBiStream::plain(stream)),
         ConnectionType::Outgoing,
         tx,
     )

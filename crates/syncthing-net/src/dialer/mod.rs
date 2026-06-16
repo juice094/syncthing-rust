@@ -150,10 +150,13 @@ impl RelayDialConnector for RelayBepConnector {
         &self,
         relay_url: &str,
         target_device_id: DeviceId,
-        _local_device_id: DeviceId,
+        local_device_id: DeviceId,
         device_name: &str,
         tls_config: &Arc<SyncthingTlsConfig>,
     ) -> Result<Arc<BepConnection>, SyncthingError> {
+        // 若本端 device ID 较小，在 relay 握手前短暂退让。
+        crate::manager::handshake::pre_handshake_yield(local_device_id, target_device_id).await;
+
         crate::relay::connect_bep_via_relay(relay_url, target_device_id, device_name, tls_config)
             .await
     }
@@ -444,6 +447,15 @@ impl ParallelDialer {
                         task.abort();
                     }
                     self.record_success(addr, rtt);
+                    crate::metrics::global().record_dial_rtt(
+                        device_id.to_string(),
+                        addr,
+                        rtt,
+                        top.iter()
+                            .find(|(_, a, _, _, _)| *a == addr)
+                            .map(|(_, _, _, _, scheme)| scheme.as_str())
+                            .unwrap_or("unknown"),
+                    );
                     return Ok(conn);
                 }
                 Ok(Err(e)) => {

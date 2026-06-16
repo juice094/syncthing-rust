@@ -196,6 +196,8 @@ pub async fn filter_healthy_relays_tls(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::tls::SyncthingTlsConfig;
+    use std::sync::Arc;
 
     #[test]
     fn test_relay_pool_response_parse() {
@@ -203,5 +205,26 @@ mod tests {
         let parsed: RelayPoolResponse = serde_json::from_str(json).unwrap();
         assert_eq!(parsed.relays.len(), 1);
         assert_eq!(parsed.relays[0].url, "relay://192.168.1.1:22067/?id=ABCD");
+    }
+
+    /// 与 Syncthing 官方 relay pool 进行真实 TLS 健康检查。
+    /// 验证本实现能与公共 relay 服务器完成 Protocol Mode TLS + JoinRelay。
+    #[tokio::test]
+    #[ignore = "requires external network and public relay pool"]
+    async fn test_public_relay_pool_tls_health_check() {
+        let urls = fetch_relay_pool(None).await.expect("fetch relay pool");
+        assert!(!urls.is_empty(), "relay pool should not be empty");
+
+        let tls_config = Arc::new(SyncthingTlsConfig::from_pem(b"", b"").unwrap_or_else(|_| {
+            let (cert, key) =
+                crate::tls::generate_certificate("relay-pool-test").expect("generate cert");
+            SyncthingTlsConfig::from_pem(&cert, &key).expect("load cert")
+        }));
+
+        let healthy = filter_healthy_relays_tls(urls, 10, &tls_config, 1).await;
+        assert!(
+            !healthy.is_empty(),
+            "at least one public relay should pass TLS + JoinRelay health check"
+        );
     }
 }

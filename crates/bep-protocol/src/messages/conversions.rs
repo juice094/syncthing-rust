@@ -115,10 +115,17 @@ impl From<WireFileInfo> for syncthing_core::types::FileInfo {
 
 impl From<syncthing_core::types::Index> for Index {
     fn from(idx: syncthing_core::types::Index) -> Self {
+        let last_sequence = idx
+            .files
+            .iter()
+            .map(|f| f.sequence)
+            .max()
+            .unwrap_or(0)
+            .min(i64::MAX as u64) as i64;
         Self {
             folder: idx.folder,
             files: idx.files.into_iter().map(Into::into).collect(),
-            last_sequence: 0,
+            last_sequence,
         }
     }
 }
@@ -134,11 +141,19 @@ impl From<Index> for syncthing_core::types::Index {
 
 impl From<syncthing_core::types::IndexUpdate> for IndexUpdate {
     fn from(upd: syncthing_core::types::IndexUpdate) -> Self {
+        let sequences: Vec<u64> = upd.files.iter().map(|f| f.sequence).collect();
+        let last_sequence = sequences.iter().copied().max().unwrap_or(0);
+        let prev_sequence = sequences.iter().copied().min().unwrap_or(0);
+        let prev_sequence = if prev_sequence > 0 {
+            prev_sequence - 1
+        } else {
+            0
+        };
         Self {
             folder: upd.folder,
             files: upd.files.into_iter().map(Into::into).collect(),
-            last_sequence: 0,
-            prev_sequence: 0,
+            last_sequence: last_sequence.min(i64::MAX as u64) as i64,
+            prev_sequence: prev_sequence.min(i64::MAX as u64) as i64,
         }
     }
 }

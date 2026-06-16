@@ -7,28 +7,12 @@ use std::net::SocketAddr;
 use tokio::net::{TcpListener, TcpStream};
 use tracing::{debug, info};
 
-use socket2::SockRef;
 use syncthing_core::traits::ReliablePipe;
 use syncthing_core::{
     BoxedPipe, Result, SyncthingError, Transport, TransportListener, TransportType,
 };
 
-/// Enable TCP keepalive on a tokio TcpStream to prevent NAT/firewall drops.
-/// Non-fatal: warns and continues if the platform doesn't support socket options.
-fn set_tcp_keepalive(stream: &TcpStream) {
-    if let Ok(sock) = std::io::Result::Ok(SockRef::from(stream)) {
-        let _ = sock.set_keepalive(true);
-        #[cfg(target_os = "linux")]
-        {
-            let _ = sock.set_tcp_keepalive(
-                &socket2::TcpKeepalive::new()
-                    .with_time(std::time::Duration::from_secs(60))
-                    .with_interval(std::time::Duration::from_secs(10))
-                    .with_retries(3),
-            );
-        }
-    }
-}
+use super::keepalive::apply_tcp_keepalive;
 
 /// 原始 TCP 传输（不做 TLS，不做 BEP Hello）。
 ///
@@ -77,7 +61,7 @@ impl Transport for RawTcpTransport {
         stream
             .set_nodelay(true)
             .map_err(|e| SyncthingError::connection(format!("TCP set_nodelay failed: {}", e)))?;
-        set_tcp_keepalive(&stream);
+        apply_tcp_keepalive(&stream, TransportType::Tcp);
         let peer_addr = stream
             .peer_addr()
             .map_err(|e| SyncthingError::connection(format!("TCP peer_addr failed: {}", e)))?;
@@ -104,7 +88,7 @@ impl TransportListener for RawTcpListener {
         stream
             .set_nodelay(true)
             .map_err(|e| SyncthingError::connection(format!("TCP set_nodelay failed: {}", e)))?;
-        set_tcp_keepalive(&stream);
+        apply_tcp_keepalive(&stream, TransportType::Tcp);
         debug!("RawTcpListener accepted connection from {}", addr);
         Ok((Box::new(RawTcpStream { stream }), addr))
     }

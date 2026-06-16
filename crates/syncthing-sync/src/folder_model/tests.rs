@@ -116,3 +116,92 @@ async fn test_pull_notify_wakeup() {
     tx.send(true).unwrap();
     handle.await.unwrap();
 }
+
+/// 验证增量扫描能只发现新增文件，而不重新全量扫描
+#[tokio::test]
+async fn test_scan_incremental_new_file() {
+    let db = MemoryDatabase::new();
+    let events = EventPublisher::new(10);
+
+    let temp_dir = tempfile::tempdir().unwrap();
+    let folder_path = temp_dir.path().to_path_buf();
+    let folder = Folder::new("test-folder", folder_path.to_str().unwrap());
+
+    // 先全量扫描建立 baseline
+    let model = FolderModel::new(folder.clone(), db.clone(), events.clone(), None);
+    model.scan().await.unwrap();
+
+    // 新增一个文件
+    let new_file = folder_path.join("new.txt");
+    tokio::fs::write(&new_file, "hello").await.unwrap();
+
+    // 只扫描 new.txt 所在的子树
+    let changed = model
+        .scan_incremental(vec!["new.txt".to_string()], vec![])
+        .await
+        .unwrap();
+
+    assert_eq!(changed.len(), 1);
+    assert_eq!(changed[0].name, "new.txt");
+
+    // DB 中应包含该文件
+    let db_file = db.get_file(&folder.id, "new.txt").await.unwrap();
+    assert!(db_file.is_some());
+}
+
+/// 验证增量扫描能处理显式删除事件
+#[tokio::test]
+async fn test_scan_incremental_delete() {
+    let db = MemoryDatabase::new();
+    let events = EventPublisher::new(10);
+
+    let temp_dir = tempfile::tempdir().unwrap();
+    let folder_path = temp_dir.path().to_path_buf();
+    let folder = Folder::new("test-folder", folder_path.to_str().unwrap());
+
+    // 预置文件并全量扫描
+    let existing = folder_path.join("old.txt");
+    tokio::fs::write(&existing, "content").await.unwrap();
+    let model = FolderModel::new(folder.clone(), db.clone(), events.clone(), None);
+    model.scan().await.unwrap();
+    assert!(db.get_file(&folder.id, "old.txt").await.unwrap().is_some());
+
+    // 删除文件
+    tokio::fs::remove_file(&existing).await.unwrap();
+
+    // 增量扫描只处理删除路径
+    let changed = model
+        .scan_incremental(vec![], vec!["old.txt".to_string()])
+        .await
+        .unwrap();
+
+    assert_eq!(changed.len(), 1);
+    assert!(changed[0].is_deleted());
+
+    let db_file = db.get_file(&folder.id, "old.txt").await.unwrap().unwrap();
+    assert!(db_file.is_deleted());
+}
+
+/// 验证脏路径超过阈值时回退到全量扫描
+#[tokio::test]
+async fn test_dirty_set_fallback_to_full() {
+    let db = MemoryDatabase::new();
+    let events = EventPublisher::new(10);
+
+    let temp_dir = tempfile::tempdir().unwrap();
+    let folder_path = temp_dir.path().to_path_buf();
+    let folder = Folder::new("test-folder", folder_path.to_str().unwrap());
+
+    let model = FolderModel::new(folder.clone(), db.clone(), events.clone(), None);
+
+    // 直接写入大量脏路径，超过默认阈值（max(100, local_files/10) = 100）
+    for i in 0..150usize {
+        model.dirty_changes.insert(format!("file_{}.txt", i));
+    }
+
+    let changed = model.process_dirty_set().await.unwrap();
+    // 全量扫描空目录，没有变更
+    assert!(changed.is_empty());
+    // 脏集合应已被清空
+    assert!(model.dirty_changes.is_empty());
+}

@@ -5,7 +5,7 @@ use syncthing_core::DeviceId;
 
 use crate::connection::BepConnection;
 
-use super::{ConnectionManager, ManagerStats};
+use super::{handshake::HandshakeGuard, ConnectionManager, ManagerStats};
 
 /// 连接管理器句柄（用于跨线程共享）
 #[derive(Clone)]
@@ -14,6 +14,18 @@ pub struct ConnectionManagerHandle {
 }
 
 impl ConnectionManagerHandle {
+    /// 在 TLS 握手完成后、BEP Hello 前注册一个待完成的握手。
+    ///
+    /// 如果根据 device ID 竞争规则本连接应当失败，则返回 `Err`，调用方应立即关闭
+    /// 已建立的 socket。
+    pub fn begin_handshake(
+        &self,
+        device_id: DeviceId,
+        conn_type: syncthing_core::ConnectionType,
+    ) -> syncthing_core::Result<HandshakeGuard> {
+        self.inner.begin_handshake(device_id, conn_type)
+    }
+
     /// 注册新连接（由传输层调用）
     pub async fn register_connection(
         &self,

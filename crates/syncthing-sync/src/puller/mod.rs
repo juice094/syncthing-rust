@@ -2,6 +2,9 @@
 //!
 //! 实现从远程设备下载文件的功能
 
+pub mod concurrency;
+pub use concurrency::{ConcurrencyPolicy, RttTracker};
+
 use crate::database::LocalDatabase;
 use crate::error::{Result, SyncError};
 use crate::events::{EventPublisher, ItemAction, SyncEvent};
@@ -9,7 +12,7 @@ use crate::merge::{is_mergeable_text, three_way_merge};
 use bytes::Bytes;
 use sha2::Digest;
 use std::path::Path;
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
 use syncthing_core::types::{BlockInfo, FileInfo, FileInfoBase, FileType, Folder};
 use syncthing_versioner::Versioner;
 use tokio::fs;
@@ -153,6 +156,7 @@ pub struct Puller {
     events: EventPublisher,
     max_concurrent_downloads: usize,
     max_concurrent_blocks: usize,
+    concurrency_policy: RwLock<Option<Arc<ConcurrencyPolicy>>>,
     block_source: Option<Arc<dyn BlockSource>>,
     versioner: Option<Arc<dyn Versioner>>,
 }
@@ -165,6 +169,7 @@ impl Puller {
             events,
             max_concurrent_downloads: 2, // 保守默认 — 高延迟链路友好
             max_concurrent_blocks: 4,    // 减少并发避免 HEAD-of-line blocking
+            concurrency_policy: RwLock::new(None),
             block_source: None,
             versioner: None,
         }
@@ -180,6 +185,19 @@ impl Puller {
     pub fn with_max_concurrent_blocks(mut self, max: usize) -> Self {
         self.max_concurrent_blocks = max;
         self
+    }
+
+    /// 设置共享并发策略
+    pub fn with_concurrency_policy(mut self, policy: Option<Arc<ConcurrencyPolicy>>) -> Self {
+        self.concurrency_policy = RwLock::new(policy);
+        self
+    }
+
+    /// 动态更新共享并发策略
+    pub fn set_concurrency_policy(&self, policy: Option<Arc<ConcurrencyPolicy>>) {
+        if let Ok(mut guard) = self.concurrency_policy.write() {
+            *guard = policy;
+        }
     }
 
     /// 设置块数据源
@@ -213,8 +231,13 @@ impl Puller {
             )
         })?;
 
-        // 使用信号量限制并发
-        let semaphore = Arc::new(tokio::sync::Semaphore::new(self.max_concurrent_downloads));
+        // 使用信号量限制并发：优先读取共享并发策略，否则使用固定默认值
+        let policy = self.concurrency_policy.read().ok().and_then(|g| g.clone());
+        let max_concurrent_downloads = policy
+            .as_ref()
+            .map(|p| p.downloads())
+            .unwrap_or(self.max_concurrent_downloads);
+        let semaphore = Arc::new(tokio::sync::Semaphore::new(max_concurrent_downloads));
         let mut handles = Vec::new();
 
         for file_info in needed_files {
@@ -230,7 +253,10 @@ impl Puller {
             let folder_id = folder.id.clone();
             let folder_path = base_path.to_path_buf();
             let block_source = self.block_source.clone();
-            let max_concurrent_blocks = self.max_concurrent_blocks;
+            let max_concurrent_blocks = policy
+                .as_ref()
+                .map(|p| p.blocks())
+                .unwrap_or(self.max_concurrent_blocks);
             let versioner = self.versioner.clone();
 
             let handle = tokio::spawn(async move {

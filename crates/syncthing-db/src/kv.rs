@@ -20,7 +20,7 @@ pub type Result<T> = std::result::Result<T, SyncthingError>;
 ///
 /// Provides a simple interface for storing and retrieving
 /// byte arrays keyed by byte arrays.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct SledStore {
     db: sled::Db,
 }
@@ -166,7 +166,7 @@ impl SledStore {
 }
 
 /// A tree (namespace) within the database
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct SledTree {
     tree: sled::Tree,
 }

@@ -29,6 +29,7 @@ pub enum BepSessionEvent {
         device_id: DeviceId,
         folder: String,
         file_count: usize,
+        last_sequence: u64,
     },
     /// Received full Index from peer.
     IndexReceived {

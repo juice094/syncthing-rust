@@ -17,7 +17,7 @@ use syncthing_net::{
     BepSession, BepSessionEvent, ConnectionManager, ConnectionManagerConfig,
     ConnectionManagerHandle, SyncthingTlsConfig,
 };
-use syncthing_sync::{database::FileSystemDatabase, SyncManager, SyncService};
+use syncthing_sync::{database::FileSystemDatabase, ConcurrencyPolicy, SyncManager, SyncService};
 
 use crate::{load_config, save_config, ManagerBlockSource, CONFIG_FILE_NAME};
 
@@ -199,19 +199,84 @@ pub async fn start_daemon(
         manager: handle.clone(),
         next_id: AtomicI32::new(1),
         pending_responses: Arc::clone(&pending_responses),
+        rtt_tracker: syncthing_sync::RttTracker::new(),
     });
-    sync_service.set_block_source(block_source).await;
+    sync_service
+        .set_block_source(Arc::clone(&block_source) as Arc<dyn syncthing_sync::BlockSource>)
+        .await;
+
+    // Phase C: 自适应并发策略 — 根据 RTT 动态调整 Puller 并发度
+    let concurrency_policy = Arc::new(ConcurrencyPolicy::new());
+    sync_service
+        .set_concurrency_policy(Arc::clone(&concurrency_policy))
+        .await;
+
+    // Phase D: Folder Orchestrator — 统一调度多文件夹扫描/拉取，避免 I/O 与 CPU 尖峰
+    let orchestrator = syncthing_sync::FolderOrchestrator::with_config(
+        syncthing_sync::OrchestratorConfig::default(),
+    );
+    orchestrator.set_priority(
+        "obsidian-notes",
+        syncthing_sync::orchestrator::FolderPriority::High,
+    );
+    orchestrator.set_priority(
+        "claw-workspace",
+        syncthing_sync::orchestrator::FolderPriority::High,
+    );
+    orchestrator.set_priority(
+        "stress-test-72h",
+        syncthing_sync::orchestrator::FolderPriority::Low,
+    );
+    sync_service
+        .set_orchestrator(Arc::clone(&orchestrator))
+        .await;
+
+    // Phase E: 预测性健康检查 — 订阅事件并周期性评估趋势，必要时自动节流
+    let health_subscriber = sync_service.events().subscribe();
+    let health_orchestrator = Some(orchestrator.clone());
+    let health_shutdown_rx = shutdown_rx.clone();
+    let _health_handle =
+        syncthing::health_predictor::HealthPredictor::new(health_subscriber, health_orchestrator)
+            .spawn(health_shutdown_rx);
+
+    let block_source_for_policy = Arc::clone(&block_source);
+    let mut policy_shutdown_rx = shutdown_rx.clone();
+    tokio::spawn(async move {
+        let mut interval = tokio::time::interval(Duration::from_secs(30));
+        loop {
+            tokio::select! {
+                _ = interval.tick() => {
+                    let rtt_ms = block_source_for_policy.rtt_tracker().rtt_ms();
+                    concurrency_policy.set_for_rtt(rtt_ms);
+                    info!(
+                        "Adaptive concurrency updated: downloads={} blocks={} (rtt={} ms)",
+                        concurrency_policy.downloads(),
+                        concurrency_policy.blocks(),
+                        if rtt_ms == u64::MAX { "unknown".to_string() } else { rtt_ms.to_string() }
+                    );
+                }
+                _ = policy_shutdown_rx.changed() => {
+                    if *policy_shutdown_rx.borrow() {
+                        break;
+                    }
+                }
+            }
+        }
+    });
 
     let session_handles: Arc<DashMap<DeviceId, JoinHandle<()>>> = Arc::new(DashMap::new());
 
     // 存储每个设备的共享文件夹列表（用于 IndexUpdate 过滤）
     let device_shared_folders: Arc<DashMap<DeviceId, Vec<String>>> = Arc::new(DashMap::new());
+    // 记录已向每个设备的每个文件夹发送过初始 Index 的最大序列号
+    let indexed_folders: Arc<DashMap<(DeviceId, String), u64>> = Arc::new(DashMap::new());
 
     let sync_service_clone = Arc::clone(&sync_service);
     let handle_clone = handle.clone();
     let pending_responses_clone = Arc::clone(&pending_responses);
     let session_handles_clone = Arc::clone(&session_handles);
     let device_shared_folders_clone = Arc::clone(&device_shared_folders);
+    let indexed_folders_clone = Arc::clone(&indexed_folders);
     manager.on_connected(move |device_id| {
         syncthing_net::metrics::global().record_reconnect(device_id.to_string());
         info!("Device connected: {}", device_id);
@@ -220,6 +285,7 @@ pub async fn start_daemon(
         let pending = Arc::clone(&pending_responses_clone);
         let sessions = Arc::clone(&session_handles_clone);
         let shared_folders_map = Arc::clone(&device_shared_folders_clone);
+        let indexed_folders_for_session = Arc::clone(&indexed_folders_clone);
         tokio::spawn(async move {
             if let Err(e) = sync_service.connect_device(device_id).await {
                 warn!(
@@ -236,7 +302,12 @@ pub async fn start_daemon(
                     tokio::sync::mpsc::channel::<BepSessionEvent>(constants::EVENT_CHANNEL_CAP);
                 let event_device_id = device_id;
                 let shared_folders_map = Arc::clone(&shared_folders_map);
-                spawn_session_event_logger(event_device_id, event_rx, shared_folders_map);
+                spawn_session_event_logger(
+                    event_device_id,
+                    event_rx,
+                    shared_folders_map,
+                    indexed_folders_for_session,
+                );
 
                 let handler = DaemonBepHandler {
                     sync_service: Arc::clone(&sync_service),
@@ -296,6 +367,7 @@ pub async fn start_daemon(
         sync_service.clone(),
         handle.clone(),
         Arc::clone(&device_shared_folders),
+        Arc::clone(&indexed_folders),
     );
 
     let actual_addr = manager
