@@ -19,6 +19,7 @@ use syncthing_core::{
     BlockHash, FileInfo, FolderId, Result, SyncthingError,
 };
 
+use crate::blocking::run_blocking;
 use crate::kv::SledStore;
 use crate::metadata::MetadataStore;
 
@@ -135,9 +136,14 @@ impl CachedBlockStore {
     pub async fn prefetch(&self, hashes: &[BlockHash]) -> Result<()> {
         for hash in hashes {
             let key = make_block_key(hash);
-            if let Some(data) = self.store.get(&key).map_err(|e| {
-                SyncthingError::Storage(format!("Failed to get block for prefetch: {}", e))
-            })? {
+            let store = self.store.clone();
+            if let Some(data) = run_blocking("block store prefetch", move || {
+                store.get(&key).map_err(|e| {
+                    SyncthingError::Storage(format!("Failed to get block for prefetch: {}", e))
+                })
+            })
+            .await?
+            {
                 let mut cache = self.cache.write().await;
                 if !cache.contains(hash) {
                     let evicted = cache.put(*hash, data);
@@ -164,10 +170,15 @@ impl BlockStore for CachedBlockStore {
 
         let key = make_block_key(&hash);
 
-        // Store in sled
-        self.store
-            .put(&key, data)
-            .map_err(|e| SyncthingError::Storage(format!("Failed to store block: {}", e)))?;
+        // Store in sled on a blocking thread to avoid stalling the tokio runtime
+        let store = self.store.clone();
+        let data_vec = data.to_vec();
+        run_blocking("block store put", move || {
+            store
+                .put(&key, &data_vec)
+                .map_err(|e| SyncthingError::Storage(format!("Failed to store block: {}", e)))
+        })
+        .await?;
 
         // Add to cache
         let mut cache = self.cache.write().await;
@@ -198,12 +209,15 @@ impl BlockStore for CachedBlockStore {
             stats.misses += 1;
         }
 
-        // Fetch from store
+        // Fetch from store on a blocking thread
         let key = make_block_key(&hash);
-        match self
-            .store
-            .get(&key)
-            .map_err(|e| SyncthingError::Storage(format!("Failed to get block: {}", e)))?
+        let store = self.store.clone();
+        match run_blocking("block store get", move || {
+            store
+                .get(&key)
+                .map_err(|e| SyncthingError::Storage(format!("Failed to get block: {}", e)))
+        })
+        .await?
         {
             Some(data) => {
                 // Add to cache
@@ -226,20 +240,28 @@ impl BlockStore for CachedBlockStore {
             }
         }
 
-        // Check store
+        // Check store on a blocking thread
         let key = make_block_key(&hash);
-        self.store
-            .contains(&key)
-            .map_err(|e| SyncthingError::Storage(format!("Failed to check block: {}", e)))
+        let store = self.store.clone();
+        run_blocking("block store contains", move || {
+            store
+                .contains(&key)
+                .map_err(|e| SyncthingError::Storage(format!("Failed to check block: {}", e)))
+        })
+        .await
     }
 
     async fn delete(&self, hash: BlockHash) -> Result<()> {
         let key = make_block_key(&hash);
 
-        // Remove from store
-        self.store
-            .delete(&key)
-            .map_err(|e| SyncthingError::Storage(format!("Failed to delete block: {}", e)))?;
+        // Remove from store on a blocking thread
+        let store = self.store.clone();
+        run_blocking("block store delete", move || {
+            store
+                .delete(&key)
+                .map_err(|e| SyncthingError::Storage(format!("Failed to delete block: {}", e)))
+        })
+        .await?;
 
         // Remove from cache
         let mut cache = self.cache.write().await;

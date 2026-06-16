@@ -1,5 +1,25 @@
 # Changelog
 
+## [Unreleased] — 2026-06-16
+
+### Headline: Orchestration, observability & adaptive concurrency upgrades.
+
+### Sync Core
+- **Incremental scanning from watcher events**: `FolderModel` maintains `dirty_changes`/`dirty_deletes` sets and triggers incremental subtree/file scans on debounced watcher events, falling back to full scans when the dirty set exceeds `max(100, local_files/10)`.
+- **Folder Orchestrator**: new `FolderOrchestrator` in `syncthing-sync` limits global concurrent scans and pulls via `tokio::sync::Semaphore`, staggers first scans deterministically by folder id, and supports per-folder priorities (Low/Normal/High/Critical). All folder scan/pull loops acquire orchestrator permits before running.
+- **Adaptive Puller concurrency**: `ConcurrencyPolicy` + `RttTracker` sample block-request RTTs and dynamically adjust puller `downloads`/`blocks` limits every 30 s based on link quality.
+- **Predictive health checks**: new `HealthPredictor` subscribes to `SyncEvent`s and periodically evaluates scan failure rate, pull failure rate, watcher dropped events, folder state flapping, and incremental-scan ratio. When trends look unhealthy it warns and throttles the `FolderOrchestrator`; it recovers throttle automatically when metrics normalize.
+
+### Network / Protocol
+- **IndexUpdate chunking**: `index_dispatcher.rs` splits outgoing `IndexUpdate` messages into chunks whose encoded size is ≤ 1 MiB, sends them in sequence, and updates the per-device/folder indexed sequence map after each chunk.
+
+### Operations
+- **syncthing-monitor rewrite**: split into 8 modules (`args`, `sample`, `api`, `log_parser`, `format`, `alerts`, `util`, `main`), added JSONL telemetry output, REST API polling, daemon log parsing for scan/pull/InvalidFile events, CSV header deduplication, RSS linear-regression prediction, and sync-backlog prediction alerts.
+
+### Stats
+- **Tests**: 385 passed / 0 failed / 4 ignored
+- **Clippy**: 0 warnings
+
 ## [3.0.3] — 2026-06-13
 
 ### Headline: TUI stability & modern tray icons.

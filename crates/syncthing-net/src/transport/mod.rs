@@ -11,6 +11,7 @@
 //! 本模块只提供具体实现和注册表工具。
 
 pub mod bep_adapter;
+pub mod keepalive;
 pub mod proxy;
 pub mod tcp;
 

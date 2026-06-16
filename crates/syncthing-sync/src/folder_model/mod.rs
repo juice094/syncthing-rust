@@ -6,10 +6,14 @@ use crate::database::LocalDatabase;
 use crate::error::Result;
 use crate::events::{EventPublisher, SyncEvent};
 use crate::model::FolderState;
-use crate::puller::{BlockSource, Puller};
+use crate::orchestrator::FolderOrchestrator;
+use crate::puller::{BlockSource, ConcurrencyPolicy, Puller};
 use crate::scanner::Scanner;
 use crate::watcher::FolderWatcher;
-use std::sync::Arc;
+use dashmap::DashSet;
+use std::path::Path;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, RwLock as SyncRwLock};
 use std::time::Duration;
 use syncthing_core::types::{FileInfo, Folder, FolderStatus, FolderType};
 use syncthing_core::DeviceId;
@@ -24,9 +28,21 @@ pub struct FolderModel {
     events: EventPublisher,
     scanner: Scanner,
     puller: Puller,
+    concurrency_policy: SyncRwLock<Option<Arc<ConcurrencyPolicy>>>,
+    orchestrator: SyncRwLock<Option<Arc<FolderOrchestrator>>>,
     watcher: RwLock<Option<notify::RecommendedWatcher>>,
     pull_notify: tokio::sync::Notify,
     pending_pulls: RwLock<Vec<FileInfo>>,
+    /// watcher 观测到的变更路径集合（用于增量扫描）
+    dirty_changes: Arc<DashSet<String>>,
+    /// watcher 观测到的删除路径集合
+    dirty_deletes: Arc<DashSet<String>>,
+    /// watcher 收到的事件总数
+    watcher_events_received: Arc<AtomicU64>,
+    /// watcher 通道丢弃的事件数（由 watcher.rs 维护）
+    watcher_dropped: Arc<AtomicU64>,
+    /// 上一次已报告的丢弃数，用于计算差值
+    last_reported_dropped: AtomicU64,
 }
 
 impl FolderModel {
@@ -36,6 +52,18 @@ impl FolderModel {
         db: Arc<dyn LocalDatabase>,
         events: EventPublisher,
         block_source: Option<Arc<dyn BlockSource>>,
+    ) -> Self {
+        Self::new_with_policy_and_orchestrator(folder, db, events, block_source, None, None)
+    }
+
+    /// 创建文件夹模型并指定共享并发策略与编排器
+    fn new_with_policy_and_orchestrator(
+        folder: Folder,
+        db: Arc<dyn LocalDatabase>,
+        events: EventPublisher,
+        block_source: Option<Arc<dyn BlockSource>>,
+        concurrency_policy: Option<Arc<ConcurrencyPolicy>>,
+        orchestrator: Option<Arc<FolderOrchestrator>>,
     ) -> Self {
         let scanner = Scanner::new(db.clone(), events.clone());
         let versioner: Option<Arc<dyn syncthing_versioner::Versioner>> = folder
@@ -47,7 +75,8 @@ impl FolderModel {
             .map(Arc::from);
         let puller = Puller::new(db.clone(), events.clone())
             .with_block_source(block_source)
-            .with_versioner(versioner);
+            .with_versioner(versioner)
+            .with_concurrency_policy(concurrency_policy.clone());
         let folder_id = folder.id.clone();
         Self {
             folder,
@@ -56,9 +85,44 @@ impl FolderModel {
             events,
             scanner,
             puller,
+            concurrency_policy: SyncRwLock::new(concurrency_policy),
+            orchestrator: SyncRwLock::new(orchestrator),
             watcher: RwLock::new(None),
             pull_notify: tokio::sync::Notify::new(),
             pending_pulls: RwLock::new(Vec::new()),
+            dirty_changes: Arc::new(DashSet::new()),
+            dirty_deletes: Arc::new(DashSet::new()),
+            watcher_events_received: Arc::new(AtomicU64::new(0)),
+            watcher_dropped: Arc::new(AtomicU64::new(0)),
+            last_reported_dropped: AtomicU64::new(0),
+        }
+    }
+
+    /// 设置共享并发策略（构建器模式）
+    pub fn with_concurrency_policy(mut self, policy: Option<Arc<ConcurrencyPolicy>>) -> Self {
+        self.concurrency_policy = SyncRwLock::new(policy.clone());
+        self.puller = self.puller.with_concurrency_policy(policy);
+        self
+    }
+
+    /// 动态更新共享并发策略
+    pub fn set_concurrency_policy(&self, policy: Arc<ConcurrencyPolicy>) {
+        if let Ok(mut guard) = self.concurrency_policy.write() {
+            *guard = Some(policy.clone());
+        }
+        self.puller.set_concurrency_policy(Some(policy));
+    }
+
+    /// 设置文件夹编排器（构建器模式）
+    pub fn with_orchestrator(mut self, orchestrator: Option<Arc<FolderOrchestrator>>) -> Self {
+        self.orchestrator = SyncRwLock::new(orchestrator);
+        self
+    }
+
+    /// 动态更新文件夹编排器
+    pub fn set_orchestrator(&self, orchestrator: Arc<FolderOrchestrator>) {
+        if let Ok(mut guard) = self.orchestrator.write() {
+            *guard = Some(orchestrator);
         }
     }
 
@@ -97,6 +161,12 @@ impl FolderModel {
             tokio::select! {
                 _ = interval.tick() => {
                     debug!(folder_id = %self.folder.id, "Scan loop tick triggered by interval");
+                    let orchestrator = self.orchestrator.read().ok().and_then(|g| g.clone());
+                    let _permit = if let Some(ref orch) = orchestrator {
+                        Some(orch.clone().begin_scan(&self.folder.id).await)
+                    } else {
+                        None
+                    };
                     if let Err(e) = self.scan().await {
                         error!(folder_id = %self.folder.id, error = %e, "Scan failed");
                     }
@@ -116,7 +186,7 @@ impl FolderModel {
         let folder_id = self.folder.id.clone();
         let path = self.folder.path.clone();
 
-        let mut rx = match FolderWatcher::watch(&folder_id, &path) {
+        let mut rx = match FolderWatcher::watch(&folder_id, &path, self.watcher_dropped.clone()) {
             Ok((w, rx)) => {
                 *self.watcher.write().await = Some(w);
                 rx
@@ -133,19 +203,39 @@ impl FolderModel {
         let mut debounce_timer: Option<std::pin::Pin<Box<tokio::time::Sleep>>> = None;
         let mut last_scan = tokio::time::Instant::now() - MIN_SCAN_GAP;
 
+        // 绑定共享集合，供同步 watcher 回调使用
+        let dirty_changes = self.dirty_changes.clone();
+        let dirty_deletes = self.dirty_deletes.clone();
+        let events_received = self.watcher_events_received.clone();
+
         loop {
             tokio::select! {
                 Some(event) = rx.recv() => {
-                    // Skip events for syncthing temp files to break positive feedback
-                    let skip = event.paths.iter().any(|p| {
-                        let s = p.to_string_lossy();
-                        s.contains(".syncthing.") && s.ends_with(".tmp")
-                    });
-                    if skip {
-                        trace!(folder_id = %folder_id, "Skipping watcher event for syncthing temp");
-                        continue;
+                    events_received.fetch_add(1, Ordering::Relaxed);
+
+                    let is_remove = matches!(event.kind, notify::EventKind::Remove(_));
+
+                    for p in event.paths {
+                        let relative = match Self::relative_path(&path, &p) {
+                            Some(r) => r,
+                            None => continue,
+                        };
+
+                        // Skip events for syncthing temp files to break positive feedback
+                        if relative.contains(".syncthing.") && relative.ends_with(".tmp") {
+                            trace!(folder_id = %folder_id, path = %relative, "Skipping watcher event for syncthing temp");
+                            continue;
+                        }
+
+                        trace!(folder_id = %folder_id, path = %relative, is_remove, "Watcher event recorded");
+
+                        if is_remove {
+                            dirty_deletes.insert(relative);
+                        } else {
+                            dirty_changes.insert(relative);
+                        }
                     }
-                    trace!(folder_id = %folder_id, event = ?event, "Watcher event received");
+
                     debounce_timer = Some(Box::pin(tokio::time::sleep(WATCHER_DEBOUNCE)));
                 }
                 _ = async {
@@ -162,7 +252,13 @@ impl FolderModel {
                         continue;
                     }
                     info!(folder_id = %folder_id, "Debounced watcher scan triggered");
-                    if let Err(e) = self.scan().await {
+                    let orchestrator = self.orchestrator.read().ok().and_then(|g| g.clone());
+                    let _permit = if let Some(ref orch) = orchestrator {
+                        Some(orch.clone().begin_scan(&folder_id).await)
+                    } else {
+                        None
+                    };
+                    if let Err(e) = self.process_dirty_set().await {
                         error!(folder_id = %folder_id, error = %e, "Watcher-triggered scan failed");
                     }
                     last_scan = tokio::time::Instant::now();
@@ -177,6 +273,15 @@ impl FolderModel {
         }
     }
 
+    /// 将绝对路径转换为 folder 根目录下的相对路径（统一正斜杠）。
+    fn relative_path(folder_path: &str, abs_path: &Path) -> Option<String> {
+        let base = Path::new(folder_path);
+        abs_path
+            .strip_prefix(base)
+            .ok()
+            .map(|p| p.to_string_lossy().replace('\\', "/"))
+    }
+
     /// 启动拉取循环
     pub async fn start_pull_loop(&self, mut shutdown: tokio::sync::watch::Receiver<bool>) {
         info!(folder_id = %self.folder.id, "Starting pull loop");
@@ -186,12 +291,24 @@ impl FolderModel {
         loop {
             tokio::select! {
                 _ = interval.tick() => {
+                    let orchestrator = self.orchestrator.read().ok().and_then(|g| g.clone());
+                    let _permit = if let Some(ref orch) = orchestrator {
+                        Some(orch.clone().begin_pull(&self.folder.id).await)
+                    } else {
+                        None
+                    };
                     if let Err(e) = self.pull().await {
                         error!(folder_id = %self.folder.id, error = %e, "Pull failed");
                     }
                 }
                 _ = self.pull_notify.notified() => {
                     trace!(folder_id = %self.folder.id, "Pull triggered by remote index");
+                    let orchestrator = self.orchestrator.read().ok().and_then(|g| g.clone());
+                    let _permit = if let Some(ref orch) = orchestrator {
+                        Some(orch.clone().begin_pull(&self.folder.id).await)
+                    } else {
+                        None
+                    };
                     if let Err(e) = self.pull().await {
                         error!(folder_id = %self.folder.id, error = %e, "Pull failed");
                     }
@@ -296,6 +413,221 @@ impl FolderModel {
             folder: self.folder.id.clone(),
             from: FolderStatus::Scanning,
             to: FolderStatus::Idle,
+        });
+
+        Ok(changed_files)
+    }
+
+    /// 处理 watcher 累积的脏路径集合，决定全量或增量扫描。
+    async fn process_dirty_set(&self) -> Result<Vec<FileInfo>> {
+        let folder_id = self.folder.id.clone();
+
+        // 取出并清空脏集合
+        let changes: Vec<String> = {
+            let mut v = Vec::with_capacity(self.dirty_changes.len());
+            for entry in self.dirty_changes.iter() {
+                v.push(entry.clone());
+            }
+            self.dirty_changes.clear();
+            v
+        };
+        let deletes: Vec<String> = {
+            let mut v = Vec::with_capacity(self.dirty_deletes.len());
+            for entry in self.dirty_deletes.iter() {
+                v.push(entry.clone());
+            }
+            self.dirty_deletes.clear();
+            v
+        };
+
+        let dirty_count = changes.len() + deletes.len();
+        if dirty_count == 0 {
+            return Ok(vec![]);
+        }
+
+        self.events.publish(SyncEvent::WatcherDirtySetSize {
+            folder: folder_id.clone(),
+            size: dirty_count,
+        });
+
+        // 报告 watcher 丢事件数
+        let total_dropped = self.watcher_dropped.load(Ordering::Relaxed);
+        let last = self.last_reported_dropped.load(Ordering::Relaxed);
+        if total_dropped > last {
+            self.last_reported_dropped
+                .store(total_dropped, Ordering::Relaxed);
+            self.events.publish(SyncEvent::WatcherEventsDropped {
+                folder: folder_id.clone(),
+                dropped: total_dropped - last,
+            });
+        }
+
+        // 阈值：取 max(100, local_files / 10)，避免小 folder 过度碎片化
+        let local_files = self.state.read().await.local_files;
+        let threshold = std::cmp::max(100usize, local_files / 10);
+
+        // 如果脏路径包含根目录或超过阈值，回退到全量扫描
+        let fallback_to_full = dirty_count > threshold
+            || changes.iter().any(|p| p.is_empty() || p == "/")
+            || deletes.iter().any(|p| p.is_empty() || p == "/");
+
+        if fallback_to_full {
+            info!(
+                folder_id = %folder_id,
+                dirty_count = dirty_count,
+                threshold = threshold,
+                "Dirty set too large, falling back to full scan"
+            );
+            return self.scan().await;
+        }
+
+        info!(
+            folder_id = %folder_id,
+            changes = changes.len(),
+            deletes = deletes.len(),
+            "Incremental scan triggered by watcher"
+        );
+
+        self.events.publish(SyncEvent::IncrementalScanTriggered {
+            folder: folder_id.clone(),
+            paths: dirty_count,
+        });
+
+        self.scan_incremental(changes, deletes).await
+    }
+
+    /// 执行增量扫描：只扫描脏路径涉及的子树，并处理显式删除事件。
+    async fn scan_incremental(
+        &self,
+        changes: Vec<String>,
+        deletes: Vec<String>,
+    ) -> Result<Vec<FileInfo>> {
+        let folder_id = self.folder.id.clone();
+
+        // 进入 Scanning 状态
+        let old_status = {
+            let mut state = self.state.write().await;
+            let old = state.status;
+            state.status = FolderStatus::Scanning;
+            old
+        };
+        self.events.publish(SyncEvent::FolderStateChanged {
+            folder: folder_id.clone(),
+            from: old_status,
+            to: FolderStatus::Scanning,
+        });
+
+        let mut changed_files = Vec::new();
+
+        // 1. 处理变更路径：目录用 scan_sub，单文件用 scan_changed_file
+        let base_path = Path::new(&self.folder.path);
+        for relative in changes {
+            let full = base_path.join(&relative);
+            match tokio::fs::metadata(&full).await {
+                Ok(m) if m.is_dir() => {
+                    match self.scanner.scan_folder_sub(&self.folder, &relative).await {
+                        Ok(mut files) => changed_files.append(&mut files),
+                        Err(e) => {
+                            error!(folder_id = %folder_id, root = %relative, error = %e, "Incremental scan subtree failed");
+                        }
+                    }
+                    // 补全子树内删除的文件
+                    match self
+                        .scanner
+                        .mark_deleted_subtree(&self.folder, &relative)
+                        .await
+                    {
+                        Ok(mut files) => changed_files.append(&mut files),
+                        Err(e) => {
+                            error!(folder_id = %folder_id, root = %relative, error = %e, "Incremental scan subtree delete check failed");
+                        }
+                    }
+                }
+                Ok(_) => {
+                    match self
+                        .scanner
+                        .scan_changed_file(&self.folder, &relative)
+                        .await
+                    {
+                        Ok(Some(file)) => changed_files.push(file),
+                        Ok(None) => {}
+                        Err(e) => {
+                            error!(folder_id = %folder_id, path = %relative, error = %e, "Incremental scan file failed");
+                        }
+                    }
+                }
+                Err(e) => {
+                    trace!(folder_id = %folder_id, path = %relative, error = %e, "Changed path no longer exists, skipping");
+                }
+            }
+        }
+
+        // 2. 处理显式删除事件（文件或子树）
+        for relative in deletes {
+            match self
+                .scanner
+                .mark_deleted_subtree(&self.folder, &relative)
+                .await
+            {
+                Ok(mut files) => changed_files.append(&mut files),
+                Err(e) => {
+                    error!(folder_id = %folder_id, path = %relative, error = %e, "Mark deleted subtree failed");
+                }
+            }
+        }
+
+        // 3. 重命名检测与 blocks 清理
+        changed_files = Scanner::detect_and_reorder_renames(changed_files);
+        for file in &mut changed_files {
+            if file.is_deleted() {
+                file.blocks.clear();
+            }
+        }
+
+        // 4. 更新数据库
+        if let Err(e) = self
+            .db
+            .update_files(&folder_id, changed_files.clone())
+            .await
+        {
+            error!(folder_id = %folder_id, error = %e, "Incremental scan DB update failed");
+
+            let mut state = self.state.write().await;
+            state.status = old_status;
+            state.errors.push(e.to_string());
+            self.events.publish(SyncEvent::FolderStateChanged {
+                folder: folder_id.clone(),
+                from: FolderStatus::Scanning,
+                to: old_status,
+            });
+            return Err(e);
+        }
+
+        // 5. 发布索引更新
+        if !changed_files.is_empty() {
+            self.events.publish(SyncEvent::LocalIndexUpdated {
+                folder: folder_id.clone(),
+                files: changed_files.clone(),
+            });
+        }
+
+        // 6. 更新状态
+        {
+            let mut state = self.state.write().await;
+            state.status = FolderStatus::Idle;
+            state.last_scan = Some(chrono::Utc::now());
+            if let Ok(all_files) = self.db.get_folder_files(&folder_id).await {
+                state.local_files = all_files.len();
+            }
+        }
+        self.events.publish(SyncEvent::FolderStateChanged {
+            folder: folder_id.clone(),
+            from: FolderStatus::Scanning,
+            to: FolderStatus::Idle,
+        });
+        self.events.publish(SyncEvent::FolderScanCompleted {
+            folder: folder_id,
+            files_changed: changed_files.len(),
         });
 
         Ok(changed_files)

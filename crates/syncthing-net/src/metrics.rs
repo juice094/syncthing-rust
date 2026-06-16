@@ -84,6 +84,22 @@ impl MetricsCollector {
         self.record("reconnect", Some(device_id), None, None);
     }
 
+    /// 记录单次拨号成功时的路径 RTT，用于连接质量分析。
+    pub fn record_dial_rtt(
+        &self,
+        device_id: String,
+        addr: std::net::SocketAddr,
+        rtt: Duration,
+        scheme: &str,
+    ) {
+        self.record(
+            format!("dial_rtt:{}:{}", scheme, addr),
+            Some(device_id),
+            Some(rtt),
+            None,
+        );
+    }
+
     pub fn flush_to_csv(&self, path: impl AsRef<std::path::Path>) -> std::io::Result<()> {
         let records = self.records.lock().clone();
         let mut file = std::fs::File::create(path)?;

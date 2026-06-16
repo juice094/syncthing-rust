@@ -22,8 +22,17 @@ use syncthing_core::{
 /// 默认消息超时
 pub const DEFAULT_MESSAGE_TIMEOUT: Duration = Duration::from_secs(60);
 
-/// 心跳间隔
+/// 默认心跳间隔（未通过配置覆盖时）
 pub const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(90);
+
+/// 全局默认心跳间隔，由 `ConnectionManager::new` 从配置注入。
+/// 允许外部通过配置覆盖默认 90s，同时仍按路径类型保留上限。
+static DEFAULT_HEARTBEAT_INTERVAL: std::sync::OnceLock<Duration> = std::sync::OnceLock::new();
+
+/// 设置全局默认心跳间隔。
+pub fn set_default_heartbeat_interval(interval: Duration) {
+    let _ = DEFAULT_HEARTBEAT_INTERVAL.set(interval);
+}
 
 /// BEP header 最大大小 (64 KiB)
 pub const MAX_BEP_HEADER_SIZE: usize = 64 * 1024;
@@ -73,6 +82,8 @@ pub(super) struct ConnectionInner {
     pub last_ping: RwLock<Instant>,
     /// 最后pong时间
     pub last_pong: RwLock<Instant>,
+    /// 本连接的心跳间隔（按路径类型调优）
+    pub heartbeat_interval: Duration,
 }
 
 mod tcp_pipe;
@@ -123,6 +134,19 @@ impl BepConnection {
         let local_addr = pipe
             .local_addr()
             .unwrap_or_else(|| SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), 0));
+        let transport_type = pipe.transport_type();
+
+        // 按路径类型选择心跳间隔：中间 relay/proxy/websocket/derp 使用更短心跳防止被掐断。
+        // 全局默认心跳可由配置覆盖，relay 路径最多不超过 30s。
+        let base_interval = DEFAULT_HEARTBEAT_INTERVAL
+            .get()
+            .copied()
+            .unwrap_or(HEARTBEAT_INTERVAL);
+        let heartbeat_interval = match transport_type {
+            syncthing_core::TransportType::Tcp => base_interval,
+            syncthing_core::TransportType::Memory => base_interval.min(Duration::from_secs(10)),
+            _ => base_interval.min(Duration::from_secs(30)),
+        };
 
         let (message_tx, message_rx) = mpsc::channel(256);
         let (incoming_tx, incoming_rx) = mpsc::channel(256);
@@ -146,6 +170,7 @@ impl BepConnection {
                 device_id: RwLock::new(None),
                 last_ping: RwLock::new(Instant::now()),
                 last_pong: RwLock::new(Instant::now()),
+                heartbeat_interval,
             }),
             read_half: Arc::new(Mutex::new(Some(read_half))),
             write_half: Arc::new(Mutex::new(Some(write_half))),

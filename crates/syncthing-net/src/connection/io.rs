@@ -15,9 +15,7 @@ use crate::connection::{BepConnection, ConnectionEvent, Message};
 use crate::protocol::MessageHeader;
 use syncthing_core::{Result, SyncthingError};
 
-use super::{
-    DEFAULT_MESSAGE_TIMEOUT, HEARTBEAT_INTERVAL, MAX_BEP_HEADER_SIZE, MAX_BEP_MESSAGE_SIZE,
-};
+use super::{DEFAULT_MESSAGE_TIMEOUT, MAX_BEP_HEADER_SIZE, MAX_BEP_MESSAGE_SIZE};
 
 impl BepConnection {
     /// 启动读取任务
@@ -239,17 +237,21 @@ impl BepConnection {
     /// 启动心跳任务
     pub(crate) fn spawn_heartbeat_task(&self) -> tokio::task::JoinHandle<()> {
         let inner = Arc::clone(&self.inner);
+        let heartbeat_interval = inner.heartbeat_interval;
 
         tokio::spawn(async move {
-            let mut interval = tokio::time::interval(HEARTBEAT_INTERVAL);
+            let mut interval = tokio::time::interval(heartbeat_interval);
 
             loop {
                 interval.tick().await;
 
                 let last_pong = *inner.last_pong.read();
-                if last_pong.elapsed() > HEARTBEAT_INTERVAL * 3 {
+                if last_pong.elapsed() > heartbeat_interval * 3 {
                     // 心跳超时，应该断开连接
-                    warn!("Heartbeat timeout, closing connection");
+                    warn!(
+                        "Heartbeat timeout (interval={:?}), closing connection",
+                        heartbeat_interval
+                    );
                     break;
                 }
             }

@@ -87,6 +87,12 @@ pub async fn connect_bep_via_relay(
     .await
     .map_err(|_| SyncthingError::timeout("relay session join timeout"))??;
 
+    // Relay 路径更容易被中间节点掐断，使用更积极的 TCP keepalive。
+    crate::transport::keepalive::apply_tcp_keepalive(
+        &session_stream,
+        syncthing_core::TransportType::Relay,
+    );
+
     debug!("Relay session mode connected to {}", session_addr);
 
     // 5. 在 session stream 上启动 BEP TLS 握手 + Hello + 创建连接
@@ -117,7 +123,7 @@ pub async fn connect_bep_via_relay(
         let _remote_hello = BepHandshaker::server_handshake(&mut tls_stream, device_name).await?;
 
         BepConnection::new(
-            Box::new(TcpBiStream::Server(tls_stream)),
+            Box::new(TcpBiStream::relay_server(tls_stream)),
             ConnectionType::Outgoing,
             event_tx,
         )
@@ -146,7 +152,7 @@ pub async fn connect_bep_via_relay(
         let _remote_hello = BepHandshaker::client_handshake(&mut tls_stream, device_name).await?;
 
         BepConnection::new(
-            Box::new(TcpBiStream::Client(tls_stream)),
+            Box::new(TcpBiStream::relay_client(tls_stream)),
             ConnectionType::Outgoing,
             event_tx,
         )

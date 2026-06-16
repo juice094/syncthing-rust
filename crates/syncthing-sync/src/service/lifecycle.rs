@@ -11,7 +11,8 @@ use crate::events::EventPublisher;
 use crate::folder_model::FolderModel;
 use crate::index_handler::IndexHandler;
 use crate::model::SyncManager;
-use crate::puller::BlockSource;
+use crate::orchestrator::{FolderOrchestrator, OrchestratorConfig};
+use crate::puller::{BlockSource, ConcurrencyPolicy};
 use crate::service::{FolderTaskHandles, SyncService};
 use dashmap::DashMap;
 use std::sync::Arc;
@@ -36,6 +37,8 @@ impl SyncService {
             connected_devices: DashMap::new(),
             index_handler,
             block_source: RwLock::new(None),
+            concurrency_policy: RwLock::new(None),
+            orchestrator: RwLock::new(None),
             folder_tasks: DashMap::new(),
             peer_sync_states: DashMap::new(),
         }
@@ -56,6 +59,43 @@ impl SyncService {
     /// 设置块数据源
     pub async fn set_block_source(&self, source: Arc<dyn BlockSource>) {
         *self.block_source.write().await = Some(source);
+    }
+
+    /// 设置共享并发策略（构建器模式）
+    pub fn with_concurrency_policy(self, policy: Arc<ConcurrencyPolicy>) -> Self {
+        *self.concurrency_policy.blocking_write() = Some(policy);
+        self
+    }
+
+    /// 设置共享并发策略并动态下发到所有已存在的文件夹模型
+    pub async fn set_concurrency_policy(&self, policy: Arc<ConcurrencyPolicy>) {
+        *self.concurrency_policy.write().await = Some(policy.clone());
+        for entry in self.folders.iter() {
+            entry.value().set_concurrency_policy(policy.clone());
+        }
+    }
+
+    /// 设置文件夹编排器（构建器模式）
+    pub fn with_orchestrator(self, orchestrator: Arc<FolderOrchestrator>) -> Self {
+        *self.orchestrator.blocking_write() = Some(orchestrator);
+        self
+    }
+
+    /// 设置文件夹编排器并动态下发到所有已存在的文件夹模型
+    pub async fn set_orchestrator(&self, orchestrator: Arc<FolderOrchestrator>) {
+        *self.orchestrator.write().await = Some(orchestrator.clone());
+        for entry in self.folders.iter() {
+            entry.value().set_orchestrator(orchestrator.clone());
+        }
+    }
+
+    /// 设置编排器配置（当编排器已存在时）
+    pub fn set_orchestrator_config(&self, config: OrchestratorConfig) {
+        if let Ok(guard) = self.orchestrator.try_read() {
+            if let Some(ref orch) = *guard {
+                orch.set_config(config);
+            }
+        }
     }
 
     /// 启动同步服务
@@ -117,12 +157,13 @@ impl SyncService {
 
         // 创建文件夹模型
         let block_source = self.block_source.read().await.clone();
-        let folder_model = Arc::new(FolderModel::new(
-            folder,
-            self.db.clone(),
-            self.events.clone(),
-            block_source,
-        ));
+        let concurrency_policy = self.concurrency_policy.read().await.clone();
+        let orchestrator = self.orchestrator.read().await.clone();
+        let folder_model = Arc::new(
+            FolderModel::new(folder, self.db.clone(), self.events.clone(), block_source)
+                .with_concurrency_policy(concurrency_policy)
+                .with_orchestrator(orchestrator),
+        );
 
         self.folders.insert(folder_id.clone(), folder_model);
         info!(folder_id = %folder_id, "Folder added");

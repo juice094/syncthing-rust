@@ -552,7 +552,7 @@ impl Scanner {
     /// 当新文件的块哈希与某个已删除文件完全匹配时，识别为重命名。
     /// 将新文件移到列表前面，确保接收端先创建新文件（可从旧文件复制内容），
     /// 再删除旧文件。
-    fn detect_and_reorder_renames(changed_files: Vec<FileInfo>) -> Vec<FileInfo> {
+    pub fn detect_and_reorder_renames(changed_files: Vec<FileInfo>) -> Vec<FileInfo> {
         let mut rename_targets: Vec<usize> = Vec::new();
 
         for (idx, file) in changed_files.iter().enumerate() {
@@ -598,6 +598,99 @@ impl Scanner {
         }
 
         reordered
+    }
+
+    /// 扫描单个相对路径（用于增量扫描）。
+    /// 返回变更的 FileInfo；如果文件未变更或不存在，返回 None。
+    pub async fn scan_changed_file(
+        &self,
+        folder: &Folder,
+        relative_path: &str,
+    ) -> Result<Option<FileInfo>> {
+        let base_path = Path::new(&folder.path);
+        let full_path = base_path.join(relative_path);
+
+        let metadata = match tokio::fs::metadata(&full_path).await {
+            Ok(m) if m.is_file() => m,
+            Ok(_) => return Ok(None),
+            Err(e) => {
+                return Err(SyncError::scan(
+                    folder.id.clone(),
+                    format!("Failed to get metadata for {}: {}", relative_path, e),
+                ))
+            }
+        };
+
+        let file_info = self
+            .scan_file(&full_path, relative_path, &metadata, &folder.id)
+            .await?;
+        match self.db.get_file(&folder.id, relative_path).await? {
+            Some(existing) if !Self::has_file_changed(&existing, &file_info) => Ok(None),
+            Some(existing) => {
+                let mut new_info = file_info;
+                new_info.sequence = self.db.increment_sequence(&folder.id).await?;
+                new_info.version = existing.version.clone();
+                new_info.version.increment(1);
+                new_info.base_version = existing.base_version.clone();
+                Ok(Some(new_info))
+            }
+            None => {
+                let mut new_info = file_info;
+                new_info.sequence = self.db.increment_sequence(&folder.id).await?;
+                new_info.version = Vector::new().with_counter(1, 1);
+                Ok(Some(new_info))
+            }
+        }
+    }
+
+    /// 将单个相对路径标记为已删除（如果它存在于 DB 中且尚未删除）。
+    pub async fn mark_deleted(
+        &self,
+        folder: &Folder,
+        relative_path: &str,
+    ) -> Result<Option<FileInfo>> {
+        match self.db.get_file(&folder.id, relative_path).await? {
+            Some(db_file) if !db_file.is_deleted() => {
+                let mut deleted_info = db_file.clone();
+                deleted_info.deleted = Some(true);
+                deleted_info.size = 0;
+                deleted_info.blocks.clear();
+                deleted_info.sequence = self.db.increment_sequence(&folder.id).await?;
+                deleted_info.version.increment(1);
+                Ok(Some(deleted_info))
+            }
+            _ => Ok(None),
+        }
+    }
+
+    /// 将某个子树下的所有 DB 文件标记为已删除（用于增量扫描发现子树内删除）。
+    pub async fn mark_deleted_subtree(
+        &self,
+        folder: &Folder,
+        relative_prefix: &str,
+    ) -> Result<Vec<FileInfo>> {
+        let prefix_with_slash = if relative_prefix.ends_with('/') {
+            relative_prefix.to_string()
+        } else {
+            format!("{}/", relative_prefix)
+        };
+        let db_files = self.db.get_folder_files(&folder.id).await?;
+        let mut deleted = Vec::new();
+        for db_file in db_files {
+            if db_file.is_deleted() {
+                continue;
+            }
+            if db_file.name == relative_prefix || db_file.name.starts_with(&prefix_with_slash) {
+                let mut deleted_info = db_file.clone();
+                deleted_info.deleted = Some(true);
+                deleted_info.size = 0;
+                deleted_info.blocks.clear();
+                deleted_info.sequence = self.db.increment_sequence(&folder.id).await?;
+                deleted_info.version.increment(1);
+                deleted.push(deleted_info);
+            }
+        }
+        Ok(deleted)
     }
 
     /// 快速扫描（仅检查修改时间）

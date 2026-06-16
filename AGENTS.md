@@ -262,7 +262,7 @@ fix(sync): Windows rename fallback with exponential backoff
 2. 解析 CLI / 配置文件（`config.json`）
 3. 加载或生成 Ed25519 TLS 证书（`cert.pem` / `key.pem`）→ 派生 `DeviceId`
 4. 创建 `FileSystemDatabase`（`db/`）
-5. 创建 `SyncService`（持有配置和 DB）
+5. 创建 `SyncService`（持有配置和 DB），注入 `BlockSource`、自适应并发策略、`FolderOrchestrator` 与 `HealthPredictor`
 6. 创建 `ConnectionManager` + `TlsIdentity`
 7. 注册传输层：`RawTcpTransport`（默认）、可选 `WebSocketTransport`（需 `websocket` feature）、自研 `DerpTransport`、代理感知 `ProxiedTransport`
 8. 启动 Local Discovery / Global Discovery / STUN / UPnP / Relay listener
@@ -282,6 +282,8 @@ fix(sync): Windows rename fallback with exponential backoff
 | `Scanner` | `syncthing-sync` / `syncthing-fs` | 本地文件扫描、SHA-256 哈希 |
 | `IndexHandler` | `syncthing-sync` | 处理收到的 Index/IndexUpdate |
 | `Versioner` | `syncthing-versioner` | 文件修改/删除前归档到 `.stversions/` |
+| `FolderOrchestrator` | `syncthing-sync` | 多文件夹扫描/拉取统一调度、并发限制、抖动与优先级 |
+| `HealthPredictor` | `cmd/syncthing/src/health_predictor.rs` | 订阅同步事件，评估失败率/丢事件/状态翻转趋势并自动节流 |
 | `RestApi` | `syncthing-api` | REST 端点、配置热重载、事件流 |
 | `TUI` | `cmd/syncthing/src/tui/` | 实时状态、文件夹/设备表单、日志视图 |
 | `Tray` | `cmd/syncthing/src/tray.rs` | Windows 托盘图标、右键菜单、daemon 启停 |
@@ -453,4 +455,4 @@ fix(sync): Windows rename fallback with exponential backoff
 
 ---
 
-*最后更新：2026-06-14（基于仓库实际内容实测整理）*
+*最后更新：2026-06-16（完成 Phase D/E：Folder Orchestrator + 预测性健康检查）*

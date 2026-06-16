@@ -21,6 +21,7 @@ use syncthing_core::{
     BlockHash, FileInfo, FolderId, Result, SyncthingError,
 };
 
+use crate::blocking::run_blocking;
 use crate::kv::SledStore;
 use crate::metadata::MetadataStore;
 
@@ -117,7 +118,13 @@ impl BlockStoreImpl {
 
     /// Flush all pending writes to disk
     pub async fn flush(&self) -> Result<()> {
-        self.store.flush()?;
+        let store = self.store.clone();
+        run_blocking("store flush", move || {
+            store
+                .flush()
+                .map_err(|e| SyncthingError::Storage(format!("Failed to flush store: {}", e)))
+        })
+        .await?;
         self.metadata.flush().await?;
         Ok(())
     }
@@ -155,7 +162,13 @@ impl BlockStoreImpl {
     /// List all folders in the database
     pub async fn list_folders(&self) -> Result<Vec<FolderId>> {
         // Scan for folder stats keys to find all folders
-        let results = self.store.scan_prefix(key_prefix::FOLDER)?;
+        let store = self.store.clone();
+        let results = run_blocking("store list folders", move || {
+            store
+                .scan_prefix(key_prefix::FOLDER)
+                .map_err(|e| SyncthingError::Storage(format!("Failed to list folders: {}", e)))
+        })
+        .await?;
         let mut folders = Vec::new();
 
         for (key, _) in results {
@@ -191,10 +204,15 @@ impl BlockStore for BlockStoreImpl {
 
         let key = Self::block_key(&hash);
 
-        // Store in database
-        self.store
-            .put(&key, data)
-            .map_err(|e| SyncthingError::Storage(format!("Failed to store block: {}", e)))?;
+        // Store in database on a blocking thread
+        let store = self.store.clone();
+        let data_vec = data.to_vec();
+        run_blocking("block store impl put", move || {
+            store
+                .put(&key, &data_vec)
+                .map_err(|e| SyncthingError::Storage(format!("Failed to store block: {}", e)))
+        })
+        .await?;
 
         // Update cache
         let mut cache = self.block_cache.write().await;
@@ -212,12 +230,15 @@ impl BlockStore for BlockStoreImpl {
             }
         }
 
-        // Fetch from store
+        // Fetch from store on a blocking thread
         let key = Self::block_key(&hash);
-        match self
-            .store
-            .get(&key)
-            .map_err(|e| SyncthingError::Storage(format!("Failed to get block: {}", e)))?
+        let store = self.store.clone();
+        match run_blocking("block store impl get", move || {
+            store
+                .get(&key)
+                .map_err(|e| SyncthingError::Storage(format!("Failed to get block: {}", e)))
+        })
+        .await?
         {
             Some(data) => {
                 // Add to cache
@@ -238,20 +259,28 @@ impl BlockStore for BlockStoreImpl {
             }
         }
 
-        // Check store
+        // Check store on a blocking thread
         let key = Self::block_key(&hash);
-        self.store
-            .contains(&key)
-            .map_err(|e| SyncthingError::Storage(format!("Failed to check block: {}", e)))
+        let store = self.store.clone();
+        run_blocking("block store impl contains", move || {
+            store
+                .contains(&key)
+                .map_err(|e| SyncthingError::Storage(format!("Failed to check block: {}", e)))
+        })
+        .await
     }
 
     async fn delete(&self, hash: BlockHash) -> Result<()> {
         let key = Self::block_key(&hash);
 
-        // Remove from store
-        self.store
-            .delete(&key)
-            .map_err(|e| SyncthingError::Storage(format!("Failed to delete block: {}", e)))?;
+        // Remove from store on a blocking thread
+        let store = self.store.clone();
+        run_blocking("block store impl delete", move || {
+            store
+                .delete(&key)
+                .map_err(|e| SyncthingError::Storage(format!("Failed to delete block: {}", e)))
+        })
+        .await?;
 
         // Remove from cache
         let mut cache = self.block_cache.write().await;

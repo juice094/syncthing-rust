@@ -18,7 +18,8 @@ use crate::database::LocalDatabase;
 use crate::events::EventPublisher;
 use crate::folder_model::FolderModel;
 use crate::index_handler::IndexHandler;
-use crate::puller::BlockSource;
+use crate::orchestrator::FolderOrchestrator;
+use crate::puller::{BlockSource, ConcurrencyPolicy};
 use dashmap::DashMap;
 use std::sync::Arc;
 use syncthing_core::types::Config;
@@ -42,6 +43,8 @@ pub struct SyncService {
     pub(super) connected_devices: DashMap<DeviceId, ()>,
     pub(super) index_handler: IndexHandler,
     pub(super) block_source: RwLock<Option<Arc<dyn BlockSource>>>,
+    pub(super) concurrency_policy: RwLock<Option<Arc<ConcurrencyPolicy>>>,
+    pub(super) orchestrator: RwLock<Option<Arc<FolderOrchestrator>>>,
     /// Per-(device, folder) needed file count for completion tracking.
     pub(super) peer_sync_states: DashMap<(DeviceId, String), usize>,
     /// Per-folder task handles for individual start/stop control.

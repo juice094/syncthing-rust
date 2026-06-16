@@ -28,6 +28,7 @@ pub mod dialer;
 pub mod entry;
 pub mod events;
 pub mod handle;
+pub mod handshake;
 pub mod registry;
 pub mod stats;
 
@@ -57,6 +58,8 @@ pub struct ConnectionManager {
     pub(crate) connections: DashMap<DeviceId, DashMap<uuid::Uuid, ConnectionEntry>>,
     /// 按连接ID索引 (conn_id -> device_id)
     pub(crate) conn_id_index: DashMap<uuid::Uuid, DeviceId>,
+    /// 进行中的 TLS/BEP 握手（用于在 Hello 前解决连接竞争）
+    pub(crate) pending_handshakes: DashMap<DeviceId, handshake::HandshakeState>,
     /// 待连接设备
     pub(crate) pending_connections: TokioRwLock<HashMap<DeviceId, PendingConnection>>,
     /// 重试计数器（独立于 pending_connections，连接成功后清除）
@@ -108,6 +111,9 @@ impl ConnectionManager {
         let local_device_id = identity.device_id();
         let (event_tx, event_rx) = mpsc::channel(256);
 
+        // 注入全局默认心跳间隔，供后续 BepConnection 按路径类型调优使用。
+        crate::connection::set_default_heartbeat_interval(config.heartbeat_interval);
+
         let parallel_dialer = Arc::new(ParallelDialer::with_tcp_connector(
             local_device_id,
             "syncthing-rust".to_string(),
@@ -119,6 +125,7 @@ impl ConnectionManager {
             local_device_id,
             connections: DashMap::new(),
             conn_id_index: DashMap::new(),
+            pending_handshakes: DashMap::new(),
             pending_connections: TokioRwLock::new(HashMap::new()),
             retry_counts: TokioRwLock::new(HashMap::new()),
             device_addresses: DashMap::new(),

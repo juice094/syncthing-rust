@@ -9,6 +9,8 @@
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicI32, Ordering};
+use std::sync::Arc;
+use std::time::Instant;
 
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
@@ -17,7 +19,7 @@ use tracing_subscriber::{layer::SubscriberExt, Layer as _};
 
 use syncthing_core::types::Config;
 
-use syncthing_sync::BlockSource;
+use syncthing_sync::{BlockSource, RttTracker};
 
 /// CLI default for listen address (references syncthing_core::constants).
 const CLI_DEFAULT_LISTEN: &str = syncthing_core::constants::DEFAULT_LISTEN_ADDR;
@@ -353,7 +355,7 @@ async fn run() -> Result<()> {
             match tui::daemon_runner::start_daemon(config_dir.clone(), listen, device_name).await {
                 Ok(startup) => {
                     // 启动 REST API 服务器
-                    let (api_handle, _api_addr) = match api_server::start_api_server(
+                    let (api_handle, api_addr) = match api_server::start_api_server(
                         &config_dir,
                         startup.sync_service.clone(),
                         startup.device_id,
@@ -413,6 +415,13 @@ async fn run() -> Result<()> {
                             }
                         });
                     }
+
+                    // 启动内部健康看门狗（仅 headless run 模式；托盘模式由托盘控制器管理生命周期）
+                    let _watchdog_handle = crate::tui::watchdog::spawn(
+                        api_addr,
+                        config_dir.clone(),
+                        startup.shutdown_tx.clone(),
+                    );
 
                     let daemon_result = startup.future.await;
                     let _ = api_handle.await;
@@ -758,6 +767,7 @@ pub(crate) struct ManagerBlockSource {
     pending_responses: std::sync::Arc<
         dashmap::DashMap<i32, tokio::sync::oneshot::Sender<bep_protocol::messages::Response>>,
     >,
+    rtt_tracker: Arc<RttTracker>,
 }
 
 impl ManagerBlockSource {
@@ -772,6 +782,7 @@ impl ManagerBlockSource {
         block_no: usize,
     ) -> syncthing_sync::Result<bytes::Bytes> {
         let id = self.next_id.fetch_add(1, Ordering::SeqCst);
+        let start = Instant::now();
 
         let request = bep_protocol::messages::Request {
             id,
@@ -852,7 +863,21 @@ impl ManagerBlockSource {
                 ),
             ));
         }
+
+        self.rtt_tracker.sample(start.elapsed());
+        debug!(
+            "Block request RTT from {}: {} ms (avg {} ms)",
+            device_id,
+            start.elapsed().as_millis() as u64,
+            self.rtt_tracker.rtt_ms()
+        );
+
         Ok(bytes::Bytes::from(response.data))
+    }
+
+    /// 获取 RTT 跟踪器引用
+    pub(crate) fn rtt_tracker(&self) -> Arc<RttTracker> {
+        Arc::clone(&self.rtt_tracker)
     }
 }
 

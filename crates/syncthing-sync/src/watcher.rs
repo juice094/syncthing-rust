@@ -4,6 +4,8 @@
 
 use crate::error::{Result, SyncError};
 use notify::{Config, Event, RecommendedWatcher, RecursiveMode, Watcher};
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Arc;
 use tokio::sync::mpsc;
 use tracing::{info, warn};
 
@@ -13,11 +15,13 @@ pub struct FolderWatcher;
 impl FolderWatcher {
     /// 启动对指定路径的递归监听。
     ///
-    /// 返回 watcher 和事件接收器。调用者需在异步循环中读取事件、
-    /// 实现去抖动，并在 drop watcher 时自动停止监听。
+    /// 返回 watcher 和事件接收器。
+    /// 调用者需在异步循环中读取事件、实现去抖动，并在 drop watcher 时自动停止监听。
+    /// `dropped` 计数器会在 watcher 回调因通道满而丢事件时递增。
     pub fn watch(
         folder_id: &str,
         path: &str,
+        dropped: Arc<AtomicU64>,
     ) -> Result<(RecommendedWatcher, mpsc::Receiver<Event>)> {
         let watch_path = std::path::PathBuf::from(path);
         if !watch_path.exists() {
@@ -28,6 +32,7 @@ impl FolderWatcher {
         }
 
         let (tx, rx) = mpsc::channel::<Event>(256);
+        let dropped_for_cb = dropped.clone();
         let folder_id_for_log = folder_id.to_string();
         let folder_id_for_err = folder_id.to_string();
 
@@ -40,6 +45,7 @@ impl FolderWatcher {
                             notify::EventKind::Access(_) => {}
                             _ => {
                                 if let Err(e) = tx.try_send(event) {
+                                    dropped_for_cb.fetch_add(1, Ordering::Relaxed);
                                     warn!(folder_id = %folder_id_for_log, error = %e, "Watcher event dropped (channel full)");
                                 }
                             }
@@ -89,7 +95,9 @@ mod tests {
         let path = temp_dir.path().to_str().unwrap();
 
         // 启动 watcher
-        let (_watcher, mut rx) = FolderWatcher::watch("test-folder", path).unwrap();
+        let (_watcher, mut rx) =
+            FolderWatcher::watch("test-folder", path, std::sync::Arc::new(AtomicU64::new(0)))
+                .unwrap();
 
         // 短暂等待 watcher 初始化（Windows 需要）
         tokio::time::sleep(Duration::from_millis(500)).await;

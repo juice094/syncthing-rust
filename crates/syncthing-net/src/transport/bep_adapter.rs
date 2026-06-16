@@ -112,7 +112,7 @@ impl DialConnector for TransportBepConnector {
         &self,
         addr: SocketAddr,
         device_id: DeviceId,
-        _local_device_id: DeviceId,
+        local_device_id: DeviceId,
         device_name: &str,
         tls_config: &Arc<SyncthingTlsConfig>,
     ) -> CoreResult<Arc<BepConnection>> {
@@ -120,6 +120,9 @@ impl DialConnector for TransportBepConnector {
             "TransportBepConnector dialing {} for device {}",
             addr, device_id
         );
+
+        // 若本端 device ID 较小，在发起 TLS ClientHello 前短暂退让。
+        crate::manager::handshake::pre_handshake_yield(local_device_id, device_id).await;
 
         // 1. 原始传输层拨号（优先使用 dial_device，支持 DERP 等中继传输）
         let pipe = self
@@ -235,6 +238,17 @@ impl BepTransportListener {
             "Server TLS handshake completed: peer_device_id={}",
             device_id
         );
+
+        // 在 BEP Hello 前解决连接竞争。
+        let _handshake_guard = manager
+            .begin_handshake(device_id, ConnectionType::Incoming)
+            .map_err(|e| {
+                warn!(
+                    "Incoming handshake race lost for {} before BEP Hello: {}",
+                    device_id, e
+                );
+                e
+            })?;
 
         // BEP Hello 交换
         let mut tls_stream = tls_stream;

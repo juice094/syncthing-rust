@@ -22,7 +22,7 @@
 
 [Syncthing](https://syncthing.net/) 协议栈的 Rust 实现，目标为**零运行时依赖**部署，与官方 Go Syncthing 守护进程线路兼容互操作。
 
-**当前阶段（v3.0.3）**：Production — 364 passed / 4 ignored / 0 failures，E2E 双向同步已实测，Windows 托盘 + TUI 稳定。
+**当前阶段（v3.0.3）**：Production — 385 passed / 4 ignored / 0 failures，E2E 双向同步已实测，Windows 托盘 + TUI 稳定。
 
 - ✅ 连接层：retry 累加、TCP keepalive
 - ✅ 协议层：prost 编解码 + LZ4 压缩、wire_compat 10 tests
@@ -51,11 +51,15 @@
 |:---|:---|
 | BEP 协议（TLS + Hello + ClusterConfig + Index + Request/Response） | ✅ prost + LZ4 |
 | 端到端文件同步（双向） | ✅ Push/Pull 双向验证 |
-| 文件同步核心（puller / scanner / folder_model） | ✅ 364 tests / 0 failed |
+| 文件同步核心（puller / scanner / folder_model / orchestrator） | ✅ 385 tests / 0 failed |
 | 版本控制 | ✅ Simple + Staggered |
 | 连接稳定性 | ✅ retry 累加 + TCP keepalive |
 | Rust↔Rust 双向互通 | ✅ v3.0.3 ↔ v3.0.3 E2E 验证 |
 | Go Syncthing 互操作 | ✅ v3.0.3 ↔ Go v2.1.0 已验证 |
+| Folder Orchestrator（统一调度 / 并发限制 / 抖动 / 优先级） | ✅ 多 folder 扫描/拉取协调 |
+| 预测性健康检查（失败率 / 丢事件 / 状态翻转 / 自动节流） | ✅ 事件驱动趋势评估 |
+| 自适应拉取并发（RTT 动态调整 downloads/blocks） | ✅ 根据链路质量自动换挡 |
+| watcher 增量扫描 | ✅ 脏路径子树/单文件增量扫描 |
 | Symlink 同步 | 🔲 未实现（未来规划） |
 | Web GUI | ❌ 无（TUI + 托盘 + CLI + REST API，见 AGENTS.md 冻结声明） |
 

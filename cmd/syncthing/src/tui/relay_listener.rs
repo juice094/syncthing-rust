@@ -91,7 +91,7 @@ pub fn spawn_relay_listeners(
 /// 收到后建立 session mode 连接并完成 BEP TLS + Hello，注册到 ConnectionManager。
 async fn run_relay_listener(
     relay_url: &str,
-    local_device_id: syncthing_core::DeviceId,
+    _local_device_id: syncthing_core::DeviceId,
     tls_config: &Arc<syncthing_net::SyncthingTlsConfig>,
     handle: &syncthing_net::ConnectionManagerHandle,
     device_name: &str,
@@ -136,12 +136,24 @@ async fn run_relay_listener(
         if invitation.server_socket {
             let (mut tls_stream, peer_device) =
                 accept_tls_stream(session_stream, tls_config).await?;
+
+            // 在 BEP Hello 前解决连接竞争。
+            let _handshake_guard = handle
+                .begin_handshake(peer_device, ConnectionType::Incoming)
+                .map_err(|e| {
+                    warn!(
+                        "Relay incoming handshake race lost for {}: {}",
+                        peer_device, e
+                    );
+                    e
+                })?;
+
             let _remote_hello =
                 BepHandshaker::server_handshake(&mut tls_stream, device_name).await?;
             let (event_tx, mut event_rx) = tokio::sync::mpsc::channel(256);
             tokio::spawn(async move { while event_rx.recv().await.is_some() {} });
             let conn = BepConnection::new(
-                Box::new(TcpBiStream::Server(tls_stream)),
+                Box::new(TcpBiStream::relay_server(tls_stream)),
                 ConnectionType::Incoming,
                 event_tx,
             )
@@ -155,13 +167,25 @@ async fn run_relay_listener(
             );
         } else {
             let (mut tls_stream, peer_device) =
-                connect_tls_stream(session_stream, tls_config, Some(local_device_id)).await?;
+                connect_tls_stream(session_stream, tls_config, None).await?;
+
+            // 在 BEP Hello 前解决连接竞争。
+            let _handshake_guard = handle
+                .begin_handshake(peer_device, ConnectionType::Incoming)
+                .map_err(|e| {
+                    warn!(
+                        "Relay incoming handshake race lost for {}: {}",
+                        peer_device, e
+                    );
+                    e
+                })?;
+
             let _remote_hello =
                 BepHandshaker::client_handshake(&mut tls_stream, device_name).await?;
             let (event_tx, mut event_rx) = tokio::sync::mpsc::channel(256);
             tokio::spawn(async move { while event_rx.recv().await.is_some() {} });
             let conn = BepConnection::new(
-                Box::new(TcpBiStream::Client(tls_stream)),
+                Box::new(TcpBiStream::relay_client(tls_stream)),
                 ConnectionType::Incoming,
                 event_tx,
             )

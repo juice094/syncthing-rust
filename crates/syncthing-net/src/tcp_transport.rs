@@ -182,6 +182,17 @@ impl SyncthingTcpListener {
             device_id
         );
 
+        // 在 BEP Hello 前解决连接竞争，避免无效的双向握手。
+        let _handshake_guard = manager
+            .begin_handshake(device_id, ConnectionType::Incoming)
+            .map_err(|e| {
+                warn!(
+                    "Incoming handshake race lost for {} before BEP Hello: {}",
+                    device_id, e
+                );
+                e
+            })?;
+
         // BEP Hello 交换
         let mut tls_stream = tls_stream;
         let _remote_hello =
@@ -193,7 +204,7 @@ impl SyncthingTcpListener {
         tokio::spawn(async move { while event_rx.recv().await.is_some() {} });
 
         let conn = BepConnection::new(
-            Box::new(TcpBiStream::Server(tls_stream)),
+            Box::new(TcpBiStream::server(tls_stream)),
             ConnectionType::Incoming,
             event_tx,
         )
@@ -218,18 +229,10 @@ impl SyncthingTcpListener {
             .set_nodelay(true)
             .map_err(|e| SyncthingError::connection(format!("failed to set TCP_NODELAY: {}", e)))?;
         // TCP keepalive to prevent NAT/firewall silent drops (non-fatal)
-        if let Ok(sock) = std::io::Result::Ok(socket2::SockRef::from(stream)) {
-            let _ = sock.set_keepalive(true);
-            #[cfg(target_os = "linux")]
-            {
-                let _ = sock.set_tcp_keepalive(
-                    &socket2::TcpKeepalive::new()
-                        .with_time(std::time::Duration::from_secs(60))
-                        .with_interval(std::time::Duration::from_secs(10))
-                        .with_retries(3),
-                );
-            }
-        }
+        crate::transport::keepalive::apply_tcp_keepalive(
+            stream,
+            syncthing_core::TransportType::Tcp,
+        );
         Ok(())
     }
 }
@@ -238,11 +241,15 @@ impl SyncthingTcpListener {
 pub async fn connect_bep(
     addr: SocketAddr,
     target_device: syncthing_core::DeviceId,
-    _local_device_id: syncthing_core::DeviceId,
+    local_device_id: syncthing_core::DeviceId,
     device_name: &str,
     tls_config: &Arc<SyncthingTlsConfig>,
 ) -> Result<Arc<BepConnection>> {
     trace!("Dialing {} for device {}", addr, target_device);
+
+    // 若本端 device ID 较小，在发起 TLS ClientHello 前短暂退让，
+    // 降低两端同时发送 ClientHello 的概率。
+    crate::manager::handshake::pre_handshake_yield(local_device_id, target_device).await;
 
     // 建立TCP连接
     let stream = timeout(TCP_CONNECT_TIMEOUT, TcpStream::connect(addr))
@@ -284,7 +291,7 @@ pub async fn connect_bep(
     tokio::spawn(async move { while event_rx.recv().await.is_some() {} });
 
     let conn = BepConnection::new(
-        Box::new(TcpBiStream::Client(tls_stream)),
+        Box::new(TcpBiStream::client(tls_stream)),
         ConnectionType::Outgoing,
         event_tx,
     )

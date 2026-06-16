@@ -620,3 +620,30 @@ v0.3.0 路线图详见 [`NEXT_STEPS_2026-05-15.md`](./plans/NEXT_STEPS_2026-05-1
 - [ ] C: 首次连接握手时引入"generation"标记 — 检测对侧为全新实例后，本侧自动重置该 folder 的 DB
 
 **追踪**：2026-06-04 生产部署中发现，已通过 git bundle + DB reset 恢复。
+
+---
+
+## §18. 移动端经 Tailscale DERP + Syncthing Relay 混合网络时连接断续（中等 — 网络层 / P0 设计方向）
+
+**症状**：Honor 70 Pro（Syncthing-Fork v2.1.1）经 Tailscale `relay hkg` 与 Gray-Cloud 同步时：
+- 连接建立后 60–90 秒被 DERP 掐断，报错 `i/o timeout` 或 `software caused connection abort`。
+- 不是对端主动 `Close`；BEP 协议层已无异常（`IndexUpdate` 序列号正确）。
+- 每次重连都能增量推进，最终能同步完，但用户体验差。
+
+**根因**：
+- Tailscale DERP 中继并非为长连接设计，会把长空闲 TCP 提前断开。
+- Syncthing Relay 为长连接设计，但带宽/延迟不如 DERP 直连。
+- 当前 `ConnectionManager` 只有单条 BEP 连接，断了就要等重连。
+
+**临时 workaround（已验证有效）**：
+- 云端设备地址固定为 `tcp://<cloud-tailscale-ip>:22001`，让云端能 Tailscale 直连手机。
+- 手机端云端设备地址保持 `dynamic`，让手机通过 **Syncthing Relay** 入站到云端。
+- 效果：云端→手机走 Tailscale 直连（快），手机→云端走 Relay（稳）。
+
+**长期修复方向**：见 `docs/design/ARCHITECTURE_DECISIONS.md` **AD-008: 移动端混合网络连接韧性**。核心思路：
+1. 双通道保活：Relay 通道保心跳/索引，direct/DERP 通道传块数据。
+2. 连接竞争静默期，避免双向 TLS ClientHello 碰撞。
+3. 重连 backoff 加 `max = 5 min` 上限。
+4. 对 DERP 路径启用更短心跳或 TCP keepalive。
+
+**阻塞**：需先完成官方 Relay Protocol 客户端；当前 `derp/` 模块无法与 Go 节点互通。

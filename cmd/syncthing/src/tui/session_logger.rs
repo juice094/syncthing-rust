@@ -14,11 +14,13 @@ use syncthing_net::BepSessionEvent;
 /// 为某一设备的 BepSession 启动事件日志记录任务。
 ///
 /// 监听 `event_rx`，将每个 `BepSessionEvent` 转为人类可读的 info/warn 日志，
-/// 同时在收到 `ClusterConfigComplete` 时更新 `shared_folders_map`。
+/// 同时在收到 `ClusterConfigComplete` 时更新 `shared_folders_map`，
+/// 在收到 `IndexSent` 时更新 `indexed_folders_map`（记录已向该设备发送过初始 Index 的最大序列号）。
 pub fn spawn_session_event_logger(
     event_device_id: DeviceId,
     mut event_rx: tokio::sync::mpsc::Receiver<BepSessionEvent>,
     shared_folders_map: Arc<DashMap<DeviceId, Vec<String>>>,
+    indexed_folders_map: Arc<DashMap<(DeviceId, String), u64>>,
 ) -> JoinHandle<()> {
     tokio::spawn(async move {
         while let Some(event) = event_rx.recv().await {
@@ -31,12 +33,16 @@ pub fn spawn_session_event_logger(
                     shared_folders_map.insert(event_device_id, shared_folders.clone());
                 }
                 BepSessionEvent::IndexSent {
-                    folder, file_count, ..
+                    folder,
+                    file_count,
+                    last_sequence,
+                    ..
                 } => {
                     info!(
-                        "[{}] Index sent for {} ({} files)",
-                        event_device_id, folder, file_count
+                        "[{}] Index sent for {} ({} files, last_sequence {})",
+                        event_device_id, folder, file_count, last_sequence
                     );
+                    indexed_folders_map.insert((event_device_id, folder.clone()), *last_sequence);
                 }
                 BepSessionEvent::IndexReceived {
                     folder, file_count, ..

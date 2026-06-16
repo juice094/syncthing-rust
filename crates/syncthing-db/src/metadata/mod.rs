@@ -15,18 +15,19 @@ use serde::{Deserialize, Serialize};
 
 use syncthing_core::{BlockHash, FileInfo, FolderId, Result, SyncthingError};
 
+use crate::blocking::run_blocking;
 use crate::kv::{SledStore, SledTree};
 
 /// Metadata store for file and folder information
 ///
 /// Stores file metadata (FileInfo) organized by folder.
 /// Each folder has its own sled tree for isolation.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct MetadataStore {
     inner: StoreInner,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 enum StoreInner {
     Db(SledStore),
     Tree(SledTree),
@@ -169,9 +170,13 @@ impl MetadataStore {
         let value = serde_json::to_vec(info)
             .map_err(|e| SyncthingError::Storage(format!("Failed to serialize FileInfo: {}", e)))?;
 
-        self.inner
-            .put(&key, &value)
-            .map_err(|e| SyncthingError::Storage(format!("Failed to store file info: {}", e)))?;
+        let inner = self.inner.clone();
+        run_blocking("metadata put file", move || {
+            inner
+                .put(&key, &value)
+                .map_err(|e| SyncthingError::Storage(format!("Failed to store file info: {}", e)))
+        })
+        .await?;
 
         // Update folder stats
         self.update_folder_stats(folder).await?;
@@ -189,10 +194,13 @@ impl MetadataStore {
     /// `Ok(Some(FileInfo))` if found, `Ok(None)` if not
     pub async fn get_file(&self, folder: &FolderId, name: &str) -> Result<Option<FileInfo>> {
         let key = make_file_key(folder, name);
-        let value = self
-            .inner
-            .get(&key)
-            .map_err(|e| SyncthingError::Storage(format!("Failed to get file info: {}", e)))?;
+        let inner = self.inner.clone();
+        let value = run_blocking("metadata get file", move || {
+            inner
+                .get(&key)
+                .map_err(|e| SyncthingError::Storage(format!("Failed to get file info: {}", e)))
+        })
+        .await?;
 
         match value {
             Some(bytes) => {
@@ -214,10 +222,13 @@ impl MetadataStore {
     /// Vector of all FileInfo in the folder
     pub async fn get_folder_index(&self, folder: &FolderId) -> Result<Vec<FileInfo>> {
         let prefix = make_folder_prefix(folder);
-        let results = self
-            .inner
-            .scan_prefix(&prefix)
-            .map_err(|e| SyncthingError::Storage(format!("Failed to scan folder index: {}", e)))?;
+        let inner = self.inner.clone();
+        let results = run_blocking("metadata scan folder index", move || {
+            inner
+                .scan_prefix(&prefix)
+                .map_err(|e| SyncthingError::Storage(format!("Failed to scan folder index: {}", e)))
+        })
+        .await?;
 
         let mut files = Vec::new();
         for (_, value) in results {
@@ -243,9 +254,13 @@ impl MetadataStore {
     pub async fn update_index(&self, folder: &FolderId, files: Vec<FileInfo>) -> Result<()> {
         // First, delete all existing entries for this folder
         let prefix = make_folder_prefix(folder);
-        let existing = self.inner.scan_prefix(&prefix).map_err(|e| {
-            SyncthingError::Storage(format!("Failed to scan existing index: {}", e))
-        })?;
+        let inner = self.inner.clone();
+        let existing = run_blocking("metadata scan existing index", move || {
+            inner.scan_prefix(&prefix).map_err(|e| {
+                SyncthingError::Storage(format!("Failed to scan existing index: {}", e))
+            })
+        })
+        .await?;
 
         let mut batch: Vec<(Vec<u8>, Option<Vec<u8>>)> =
             existing.into_iter().map(|(key, _)| (key, None)).collect();
@@ -259,9 +274,13 @@ impl MetadataStore {
             batch.push((key, Some(value)));
         }
 
-        self.inner
-            .apply_batch(batch)
-            .map_err(|e| SyncthingError::Storage(format!("Failed to update index: {}", e)))?;
+        let inner = self.inner.clone();
+        run_blocking("metadata update index", move || {
+            inner
+                .apply_batch(batch)
+                .map_err(|e| SyncthingError::Storage(format!("Failed to update index: {}", e)))
+        })
+        .await?;
 
         // Update folder stats
         self.update_folder_stats(folder).await?;
@@ -290,9 +309,13 @@ impl MetadataStore {
             batch.push((key, Some(value)));
         }
 
-        self.inner
-            .apply_batch(batch)
-            .map_err(|e| SyncthingError::Storage(format!("Failed to apply index delta: {}", e)))?;
+        let inner = self.inner.clone();
+        run_blocking("metadata update index delta", move || {
+            inner
+                .apply_batch(batch)
+                .map_err(|e| SyncthingError::Storage(format!("Failed to apply index delta: {}", e)))
+        })
+        .await?;
 
         // Update folder stats
         self.update_folder_stats(folder).await?;
@@ -307,9 +330,13 @@ impl MetadataStore {
     /// * `name` - The file name
     pub async fn delete_file(&self, folder: &FolderId, name: &str) -> Result<()> {
         let key = make_file_key(folder, name);
-        self.inner
-            .delete(&key)
-            .map_err(|e| SyncthingError::Storage(format!("Failed to delete file: {}", e)))?;
+        let inner = self.inner.clone();
+        run_blocking("metadata delete file", move || {
+            inner
+                .delete(&key)
+                .map_err(|e| SyncthingError::Storage(format!("Failed to delete file: {}", e)))
+        })
+        .await?;
 
         // Update folder stats
         self.update_folder_stats(folder).await?;
@@ -323,10 +350,13 @@ impl MetadataStore {
     /// * `folder` - The folder ID
     pub async fn get_folder_stats(&self, folder: &FolderId) -> Result<FolderStats> {
         let key = make_folder_stats_key(folder);
-        let value = self
-            .inner
-            .get(&key)
-            .map_err(|e| SyncthingError::Storage(format!("Failed to get folder stats: {}", e)))?;
+        let inner = self.inner.clone();
+        let value = run_blocking("metadata get folder stats", move || {
+            inner
+                .get(&key)
+                .map_err(|e| SyncthingError::Storage(format!("Failed to get folder stats: {}", e)))
+        })
+        .await?;
 
         match value {
             Some(bytes) => {
@@ -364,9 +394,13 @@ impl MetadataStore {
         let value = serde_json::to_vec(&stats)
             .map_err(|e| SyncthingError::Storage(format!("Failed to serialize stats: {}", e)))?;
 
-        self.inner
-            .put(&key, &value)
-            .map_err(|e| SyncthingError::Storage(format!("Failed to store folder stats: {}", e)))?;
+        let inner = self.inner.clone();
+        run_blocking("metadata update folder stats", move || {
+            inner.put(&key, &value).map_err(|e| {
+                SyncthingError::Storage(format!("Failed to store folder stats: {}", e))
+            })
+        })
+        .await?;
 
         Ok(())
     }
@@ -374,26 +408,37 @@ impl MetadataStore {
     /// Check if a file exists in the index
     pub async fn file_exists(&self, folder: &FolderId, name: &str) -> Result<bool> {
         let key = make_file_key(folder, name);
-        self.inner
-            .contains(&key)
-            .map_err(|e| SyncthingError::Storage(format!("Failed to check file existence: {}", e)))
+        let inner = self.inner.clone();
+        run_blocking("metadata file exists", move || {
+            inner.contains(&key).map_err(|e| {
+                SyncthingError::Storage(format!("Failed to check file existence: {}", e))
+            })
+        })
+        .await
     }
 
     /// Get the number of files in a folder
     pub async fn file_count(&self, folder: &FolderId) -> Result<usize> {
         let prefix = make_folder_prefix(folder);
-        let results = self
-            .inner
-            .scan_prefix(&prefix)
-            .map_err(|e| SyncthingError::Storage(format!("Failed to count files: {}", e)))?;
+        let inner = self.inner.clone();
+        let results = run_blocking("metadata file count", move || {
+            inner
+                .scan_prefix(&prefix)
+                .map_err(|e| SyncthingError::Storage(format!("Failed to count files: {}", e)))
+        })
+        .await?;
         Ok(results.len())
     }
 
     /// Flush all pending changes to disk
     pub async fn flush(&self) -> Result<()> {
-        self.inner
-            .flush()
-            .map_err(|e| SyncthingError::Storage(format!("Failed to flush metadata store: {}", e)))
+        let inner = self.inner.clone();
+        run_blocking("metadata flush", move || {
+            inner.flush().map_err(|e| {
+                SyncthingError::Storage(format!("Failed to flush metadata store: {}", e))
+            })
+        })
+        .await
     }
 
     /// Store file info for a specific device
@@ -412,9 +457,13 @@ impl MetadataStore {
         let value = serde_json::to_vec(info)
             .map_err(|e| SyncthingError::Storage(format!("Failed to serialize FileInfo: {}", e)))?;
 
-        self.inner.put(&key, &value).map_err(|e| {
-            SyncthingError::Storage(format!("Failed to store device file info: {}", e))
-        })?;
+        let inner = self.inner.clone();
+        run_blocking("metadata put device file", move || {
+            inner.put(&key, &value).map_err(|e| {
+                SyncthingError::Storage(format!("Failed to store device file info: {}", e))
+            })
+        })
+        .await?;
 
         Ok(())
     }
@@ -432,9 +481,13 @@ impl MetadataStore {
         name: &str,
     ) -> Result<Option<FileInfo>> {
         let key = make_device_file_key(device_id, folder, name);
-        let value = self.inner.get(&key).map_err(|e| {
-            SyncthingError::Storage(format!("Failed to get device file info: {}", e))
-        })?;
+        let inner = self.inner.clone();
+        let value = run_blocking("metadata get device file", move || {
+            inner.get(&key).map_err(|e| {
+                SyncthingError::Storage(format!("Failed to get device file info: {}", e))
+            })
+        })
+        .await?;
 
         match value {
             Some(bytes) => {
@@ -454,10 +507,13 @@ impl MetadataStore {
         folder: &FolderId,
     ) -> Result<Vec<FileInfo>> {
         let prefix = format!("device/{}/folder/{}/", device_id, folder.as_str());
-        let results = self
-            .inner
-            .scan_prefix(prefix.as_bytes())
-            .map_err(|e| SyncthingError::Storage(format!("Failed to scan device files: {}", e)))?;
+        let inner = self.inner.clone();
+        let results = run_blocking("metadata scan device files", move || {
+            inner
+                .scan_prefix(prefix.as_bytes())
+                .map_err(|e| SyncthingError::Storage(format!("Failed to scan device files: {}", e)))
+        })
+        .await?;
 
         let mut files = Vec::new();
         for (_, value) in results {

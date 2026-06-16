@@ -15,7 +15,7 @@ path = "src/bin/stress_test.rs"
 
 [[bin]]
 name = "syncthing-monitor"
-path = "src/bin/monitor.rs"
+path = "src/bin/monitor/main.rs"
 
 [[bin]]
 name = "gen_test_config"
