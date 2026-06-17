@@ -25,7 +25,7 @@ impl Default for ConnectionManagerConfig {
         Self {
             listen_addr: ([0, 0, 0, 0], DEFAULT_TCP_PORT).into(),
             retry_config: RetryConfig::default(),
-            heartbeat_interval: Duration::from_secs(90),
+            heartbeat_interval: Duration::from_secs(30),
             connection_timeout: Duration::from_secs(120),
             max_connections: 1000,
         }

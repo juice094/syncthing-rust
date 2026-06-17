@@ -134,7 +134,7 @@ impl BepSession {
 
         // 4. Steady-state message loop
         info!("Entering steady-state BEP loop for {}", self.device_id);
-        let mut heartbeat = tokio::time::interval(Duration::from_secs(90));
+        let mut heartbeat = tokio::time::interval(Duration::from_secs(30));
         let mut last_recv = Instant::now();
         #[allow(unused_assignments)]
         let mut session_end_reason = String::new();
@@ -188,7 +188,7 @@ impl BepSession {
                 }
                 _ = heartbeat.tick() => {
                     let idle = last_recv.elapsed();
-                    if idle > Duration::from_secs(600) {
+                    if idle > Duration::from_secs(120) {
                         warn!("Heartbeat timeout for {} (idle {:?})", self.device_id, idle);
                         self.metrics.heartbeat_timeouts.fetch_add(1, Ordering::Relaxed);
                         self.emit(BepSessionEvent::HeartbeatTimeout {
@@ -436,7 +436,16 @@ impl BepSession {
             }
             MessageType::Close => {
                 self.metrics.closes_received.fetch_add(1, Ordering::Relaxed);
-                info!("Received Close from {}", self.device_id);
+                let reason = String::from_utf8_lossy(&payload);
+                info!(
+                    "Received Close from {}: {}",
+                    self.device_id,
+                    if reason.is_empty() {
+                        "<no reason>"
+                    } else {
+                        &reason
+                    }
+                );
                 return Err(SyncthingError::ConnectionClosed);
             }
             _ => {}
