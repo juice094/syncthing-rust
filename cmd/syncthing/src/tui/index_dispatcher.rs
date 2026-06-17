@@ -14,6 +14,7 @@ const MAX_INDEX_UPDATE_BYTES: usize = 1_000_000;
 use std::sync::Arc;
 
 use dashmap::DashMap;
+use sha2::{Digest, Sha256};
 use tokio::task::JoinHandle;
 use tracing::{debug, info, warn};
 
@@ -67,7 +68,9 @@ pub fn spawn_index_propagation_loop(
                         }
                     };
 
-                    // 防御性清空：确保 deleted 文件的 block list 为空（BEP 协议要求）
+                    // 防御性处理：
+                    // - deleted 文件的 block list 必须为空（BEP 协议要求）
+                    // - 零字节普通文件必须有一个空 block，否则对端会报 "file with empty block list"
                     let mut files_to_send: Vec<syncthing_core::types::FileInfo> = files
                         .iter()
                         .filter(|f| f.sequence > prev_sequence)
@@ -76,6 +79,15 @@ pub fn spawn_index_propagation_loop(
                     for file in &mut files_to_send {
                         if file.is_deleted() {
                             file.blocks.clear();
+                        } else if file.file_type == syncthing_core::types::FileType::File
+                            && file.size == 0
+                            && file.blocks.is_empty()
+                        {
+                            file.blocks.push(syncthing_core::types::BlockInfo {
+                                size: 0,
+                                hash: Sha256::new().finalize().to_vec(),
+                                offset: 0,
+                            });
                         }
                     }
 

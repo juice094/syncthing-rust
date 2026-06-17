@@ -84,9 +84,21 @@ impl BepSessionHandler for DaemonBepHandler {
                 ))
             })?;
         // BEP protocol requires deleted files to have empty block lists
+        // 同时防御性补齐零字节文件的 block（hash 为 SHA256("")），避免旧 DB 条目触发
+        // 对端 "file with empty block list" 协议错误。
         for file in &mut files {
             if file.is_deleted() {
                 file.blocks.clear();
+            } else if file.file_type == syncthing_core::types::FileType::File
+                && file.size == 0
+                && file.blocks.is_empty()
+            {
+                use sha2::{Digest, Sha256};
+                file.blocks.push(syncthing_core::types::BlockInfo {
+                    size: 0,
+                    hash: Sha256::new().finalize().to_vec(),
+                    offset: 0,
+                });
             }
         }
         Ok(syncthing_core::types::Index {

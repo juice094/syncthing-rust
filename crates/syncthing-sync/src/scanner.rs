@@ -477,6 +477,15 @@ impl Scanner {
                     trace!(file = %relative_path, block = i, "Scanning block");
                 }
             }
+        } else {
+            // BEP 兼容：零字节文件也必须有一个 block，hash 为 SHA256("")
+            // 否则 Syncthing-Fork 等客户端会报 "file with empty block list" 并 Close。
+            let empty_hash = Sha256::new().finalize().to_vec();
+            blocks.push(BlockInfo {
+                size: 0,
+                hash: empty_hash,
+                offset: 0,
+            });
         }
 
         let content_hash = content_hasher.finalize().to_vec();
@@ -764,6 +773,31 @@ mod tests {
         let result = scanner.scan_folder(&folder).await;
         assert!(result.is_ok());
         assert!(result.unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_scan_zero_byte_file_has_one_empty_block() {
+        use sha2::{Digest, Sha256};
+
+        let db = MemoryDatabase::new();
+        let events = EventPublisher::new(10);
+        let scanner = Scanner::new(db, events);
+
+        let temp_dir = tempfile::tempdir().unwrap();
+        let empty_path = temp_dir.path().join("empty.txt");
+        tokio::fs::write(&empty_path, b"").await.unwrap();
+
+        let folder = Folder::new("test", temp_dir.path().to_str().unwrap());
+        let result = scanner.scan_folder(&folder).await.unwrap();
+
+        assert_eq!(result.len(), 1);
+        let file = &result[0];
+        assert_eq!(file.name, "empty.txt");
+        assert_eq!(file.size, 0);
+        assert_eq!(file.blocks.len(), 1);
+        assert_eq!(file.blocks[0].size, 0);
+        assert_eq!(file.blocks[0].offset, 0);
+        assert_eq!(file.blocks[0].hash, Sha256::new().finalize().to_vec());
     }
 
     #[test]

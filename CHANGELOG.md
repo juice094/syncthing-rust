@@ -11,7 +11,8 @@
 - **Predictive health checks**: new `HealthPredictor` subscribes to `SyncEvent`s and periodically evaluates scan failure rate, pull failure rate, watcher dropped events, folder state flapping, and incremental-scan ratio. When trends look unhealthy it warns and throttles the `FolderOrchestrator`; it recovers throttle automatically when metrics normalize.
 
 ### Network / Protocol
-- **IndexUpdate chunking**: `index_dispatcher.rs` splits outgoing `IndexUpdate` messages into chunks whose encoded size is ≤ 1 MiB, sends them in sequence, and updates the per-device/folder indexed sequence map after each chunk.
+- **IndexUpdate chunking**: `index_dispatcher.rs` splits outgoing `IndexUpdate` messages into chunks whose encoded size is ≤ 1 MiB, sends them in sequence, and updates the per-device/folder indexed map after each chunk.
+- **Zero-byte file block list fix**: BEP expects every regular file (including 0-byte files) to have at least one block. Scanner now synthesizes a single `size=0` block with `SHA256("")`; `generate_index` and `index_dispatcher` also defensively backfill stale DB entries before sending, preventing Syncthing-Fork v2.1.1 from closing the connection with `protocol error on index: ... file with empty block list`.
 
 ### Operations
 - **syncthing-monitor rewrite**: split into 8 modules (`args`, `sample`, `api`, `log_parser`, `format`, `alerts`, `util`, `main`), added JSONL telemetry output, REST API polling, daemon log parsing for scan/pull/InvalidFile events, CSV header deduplication, RSS linear-regression prediction, and sync-backlog prediction alerts.
