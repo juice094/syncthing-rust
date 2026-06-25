@@ -1,8 +1,12 @@
 ---
-type: design
-status: active
+type: Design Document
+title: TUI Design
+description: syncthing-rust TUI 的美学诊断、状态分层设计与工程重构方案草案。
+resource: ./TUI_DESIGN.md
+tags: [design, tui, ui, okf]
+status: draft
 project: syncthing-rust
-tags: [design, tui, ui]
+timestamp: 2026-06-25T00:00:00Z
 ---
 
 # TUI Design — 美学与工程迭代方案

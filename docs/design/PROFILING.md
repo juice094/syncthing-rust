@@ -1,8 +1,12 @@
 ---
-type: design
+type: Guide
+title: Profiling Guide
+description: syncthing-rust 性能分析工具栈与采集流程：cargo-flamegraph、dhat-rs、tokio-console、一键脚本与常见热点定位。
+resource: ./PROFILING.md
+tags: [design, performance, profiling, okf]
 status: active
 project: syncthing-rust
-tags: [design, performance, profiling]
+timestamp: 2026-06-25T00:00:00Z
 ---
 
 # Profiling Guide · syncthing-rust

@@ -41,7 +41,7 @@
 
 <!-- All items must pass before merge. -->
 
-- [ ] `cargo test --workspace` passes locally (364 passed / 4 ignored / 0 failed)
+- [ ] `cargo test --workspace` passes locally (392 passed / 6 ignored / 0 failed)
 - [ ] `cargo clippy --workspace --all-targets -- -D warnings -W clippy::await_holding_lock` reports **0 warnings**
 - [ ] `cargo fmt --all -- --check` passes (or I ran `cargo fmt --all`)
 - [ ] `cargo doc --no-deps --workspace` passes

@@ -1,8 +1,12 @@
 ---
-type: guide
+type: Runbook
+title: Gray-Cloud Operations Manual
+description: Gray-Cloud（Ubuntu 24.04）节点的 syncthing-rust 部署、运维、灾备与真实网络双节点验证 SOP。
+resource: ./GRAY_CLOUD_OPS_MANUAL.md
+tags: [ops, manual, gray-cloud, runbook, okf]
 status: active
 project: syncthing-rust
-tags: [ops, manual, gray-cloud]
+timestamp: 2026-06-25T00:00:00Z
 ---
 
 # Gray-Cloud 操作手册 — syncthing-rust

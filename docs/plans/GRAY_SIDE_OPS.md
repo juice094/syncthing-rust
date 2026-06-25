@@ -1,17 +1,20 @@
 ---
-type: plan
-status: active
+type: Plan
+status: archived
 project: syncthing-rust
-tags: [plan, ops, gray-cloud]
+tags: [plan, ops, gray-cloud, archived]
+description: 2026-04-27 针对格雷侧 40GB 虚拟机的旧版互通验证指南。当前 Gray-Cloud 运维见 docs/GRAY_CLOUD_OPS_MANUAL.md。
+resource: ./GRAY_SIDE_OPS.md
 ---
 
-# 格雷侧操作指南 · syncthing-rust 互通验证
+# 格雷侧操作指南 · syncthing-rust 互通验证（已归档）
 
-> **制定日期**: 2026-04-27
-> **对侧环境**: 40GB 磁盘虚拟机，无 Rust 工具链
-> **工作流**: 本侧编译 → GitHub Release → 格雷侧下载运行
+> ⚠️ **已归档**：本文档为 2026-04-27 针对特定测试环境（40GB 磁盘虚拟机、无 Rust 工具链）的旧版指南。当前 Gray-Cloud 运维见 [GRAY_CLOUD_OPS_MANUAL.md](../GRAY_CLOUD_OPS_MANUAL.md)。
+>
+> **制定日期**: 2026-04-27  
+> **对侧环境**: 40GB 磁盘虚拟机，无 Rust 工具链  
+> **工作流**: 本侧编译 → GitHub Release → 格雷侧下载运行  
 > **本机版本**: `main` @ `785bd5c`
-> **通信方式**: 校园网内网 / 公网直连 / Relay 中继（Tailscale 当前不可用）
 
 ---
 

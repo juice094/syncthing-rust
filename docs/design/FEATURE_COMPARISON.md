@@ -1,11 +1,17 @@
 ---
-type: design
-status: active
+type: Comparison Matrix
+title: Feature Comparison with Go Syncthing
+description: 2026-04-09 的 syncthing-rust 与 Go Syncthing 功能对标快照，内容已过时。当前功能状态见 topology.md 核心声明验证表。
+resource: ./FEATURE_COMPARISON.md
+tags: [design, comparison, go, okf, archived]
+status: archived
 project: syncthing-rust
-tags: [design, comparison, go]
+timestamp: 2026-06-25T00:00:00Z
 ---
 
-# syncthing-rust-rearch vs Go Syncthing 功能比对
+# syncthing-rust vs Go Syncthing 功能比对（已归档）
+
+> ⚠️ **已归档**：本文档基于 2026-04-09 的代码状态，大量条目（如 LZ4、Push、.stignore 集成、持久化配置等）与当前 v3.0.3 不符。当前功能状态见 [topology.md §5 核心声明验证](topology.md)。
 
 **比对日期**: 2026-04-09  
 **Go Syncthing 参考版本**: `dev/third_party/syncthing` (lib/model, lib/protocol, lib/connections)

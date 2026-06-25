@@ -1,8 +1,12 @@
 ---
-type: design
+type: Design Document
+title: Network Discovery Layer Design
+description: syncthing-rust 自建网络发现层设计：Local Discovery、Global Discovery、STUN、UPnP/NAT-PMP、Relay v1 的架构与数据流。
+resource: ./NETWORK_DISCOVERY_DESIGN.md
+tags: [design, network, discovery, nat, stun, upnp, relay, okf]
 status: active
 project: syncthing-rust
-tags: [design, network, discovery, nat]
+timestamp: 2026-06-25T00:00:00Z
 ---
 
 # Syncthing-Rust 自建网络发现层设计文档

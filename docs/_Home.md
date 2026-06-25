@@ -1,14 +1,16 @@
 ---
 title: Home
-type: index
-status: active
+type: Index
+status: archived
 project: syncthing-rust
-tags: [index, home, moc, syncthing-rust]
+tags: [index, home, moc, syncthing-rust, archived]
+description: 已归档的 Obsidian 风格文档主页。当前 OKF bundle 入口为 docs/README.md。
+resource: ./_Home.md
 ---
 
-# syncthing-rust 文档中心
+# syncthing-rust 文档中心（已归档）
 
-> 本项目文档的 Obsidian 导航主页。GitHub 兼容入口见 [[README]]。
+> ⚠️ **已归档**：此文件为早期 Obsidian 导航主页，使用 `[[WikiLink]]` 语法，与 OKF / GitHub 渲染不兼容。当前权威入口见 [README.md](README.md)。
 
 ---
 

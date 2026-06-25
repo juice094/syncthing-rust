@@ -1,171 +1,102 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+This file provides quick guidance to Claude Code (claude.ai/code) when working with code in this repository.
+
+> **Detailed reference** (build commands, feature flags, daemon lifecycle, CLI commands, TUI bindings, REST APIs) lives in [`docs/agent/claude_reference.md`](docs/agent/claude_reference.md).  
+> **Canonical Agent constraints** (crate boundaries, forbidden items, testing requirements, security, operations) live in [`docs/agent/`](docs/agent/index.md).  
+> **Project topology and architecture** live in [`docs/design/topology.md`](docs/design/topology.md).
+
+---
 
 ## Project Identity
 
 `syncthing-rust` is a Rust reimplementation of the Syncthing BEP protocol for P2P file sync — zero runtime deps, single static binary, wire-compatible with Go Syncthing. Currently **v3.0.3** (production-grade), deployed on ROG-X (Windows 11) ↔ Gray-Cloud (Ubuntu 24.04) via Tailscale.
 
-## Build & Test
+---
+
+## Build & Test (Pre-Submit)
 
 ```bash
-# Full CI check (run before every commit)
 cargo fmt --all
 cargo clippy --workspace --all-targets -- -D warnings
-cargo test --workspace
+cargo test --workspace          # 392 passed / 6 ignored / 0 failed
 cargo audit
-
-# Build release (Windows desktop — includes tray)
-cargo build --release --bin syncthing --features tray
-
-# Build release (headless / server — no tray)
-cargo build --release --bin syncthing --no-default-features
-
-# Build aux binaries
-cargo build --release --bin syncthing-tray       # Thin wrapper (Windows only, backward compat)
-cargo build --release --bin syncthing-monitor    # Process/resource monitor (from cmd/syncthing)
-cargo build --release --bin stress_test          # 72h dual-node endurance stress test
-cargo build --release --bin gen_test_config      # Generate test configs for dual-node test
-cargo build --release -p syncthing-cli           # generate-cert, show-id, metrics-flush
-cargo build --release -p syncthing-bench         # Criterion benchmarks
-cargo build --release -p syncthing-mcp-bridge    # MCP stdio ↔ REST API bridge
-
-# Run a single test
-cargo test -p syncthing-net --lib -- session::tests::test_session_ping_pong
-
-# Cross-compile Linux (musl)
-cargo build --release --bin syncthing --no-default-features --target x86_64-unknown-linux-musl
 ```
 
-## Feature Flags
+Release builds:
+- Windows desktop (tray): `cargo build --release --bin syncthing --features tray`
+- Headless/server: `cargo build --release --bin syncthing --no-default-features`
 
-| Feature | Default | Effect |
-|---------|---------|--------|
-| `tray` | ✅ | Windows system tray integration (`#![windows_subsystem = "windows"]`, Win32 `Shell_NotifyIconW`) |
-| `websocket` | ❌ | Enables WebSocket transport in `syncthing-net` |
+See [`docs/agent/claude_reference.md`](docs/agent/claude_reference.md) for full build matrix, feature flags, and cross-compilation.
 
-Headless builds exclude all Windows UI code. `-p syncthing-cli` / `-p syncthing-bench` / `-p syncthing-mcp-bridge` are separate workspace members unaffected by syncthing's features.
+---
 
-## Architecture: Crate DAG
+## Architecture at a Glance
 
 ```
-cmd/syncthing              # CLI (clap) + TUI (ratatui) + daemon lifecycle + tray + aux bins
-  ├─ syncthing-api         # REST + WebSocket (axum), EventBus, handlers
-  ├─ syncthing-net         # ConnectionManager, ParallelDialer, discovery, relay (DERP)
-  ├─ syncthing-sync        # Scanner, Puller, IndexHandler, folder_model, watcher
-  ├─ syncthing-core        # Types (DeviceId, FileInfo, Vector), traits — no internal deps
-  ├─ syncthing-fs          # Filesystem ops, .stignore matcher, scanner/hash
-  ├─ syncthing-db          # Metadata store + block cache (sled-backed)
-  ├─ syncthing-versioner   # Simple (keep=N) + Staggered (time windows)
-  └─ bep-protocol          # Wire protocol encode/decode (prost), handshake
-
-cmd/syncthing-tray          # 15-line thin wrapper — spawns syncthing.exe (backward compat)
-cmd/syncthing-cli            # generate-cert, show-id, metrics-flush
-cmd/syncthing-bench          # Criterion benchmarks
-cmd/syncthing-mcp-bridge     # MCP stdio ↔ REST API bridge
+cmd/syncthing
+  ├─ syncthing-api
+  ├─ syncthing-net
+  ├─ syncthing-sync (consumes syncthing-db, syncthing-fs internally)
+  ├─ syncthing-core   # types & traits only — no internal deps
+  ├─ syncthing-versioner
+  ├─ bep-protocol
+  └─ syncthing-test-utils
 ```
 
-Binaries inside `cmd/syncthing/src/bin/`:
-- `stress_test.rs` — 72h dual-node endurance test with SHA-256 content hash consistency checks
-- `monitor.rs` — cross-platform process monitor (RSS, CPU, log growth, silence detection)
-- `gen_test_config.rs` — generates test configs for dual-node stress testing
+Full DAG, runtime components, and key entry points: [`docs/design/topology.md`](docs/design/topology.md).
 
-**Coupling rules:**
-- `syncthing-core` — no internal crate deps (pure traits + types)
-- `syncthing-api` — depends on `syncthing-core` only; must NOT hold concrete `ConnectionManagerHandle` or `LocalDatabase`
-- `cmd/syncthing` — glues everything together; tray code is behind `#[cfg(all(windows, feature = "tray"))]`
-- File soft limit: 600 lines per module
+---
+
+## Hard Rules
+
+- No `unwrap()` / `expect()` in production paths.
+- No breaking-change dependency upgrades just to silence cargo audit.
+- No sled-specific APIs exposed from `syncthing-db`.
+- No QUIC / MagicSocket / Web GUI / consensus / reputation / custom crypto.
+- Network-layer changes must be validated with dual `TestNode` instances.
+- New end-to-end behavior needs integration or E2E tests, not just `#[cfg(test)]` unit tests.
+
+Full constraints: [`docs/agent/constraints.md`](docs/agent/constraints.md).
+
+---
 
 ## Daemon Lifecycle
 
-Entry point: `cmd/syncthing/src/main.rs`:
-1. `tui::daemon_runner::start_daemon()` — TLS, ConnectionManager, SyncService, NAT, relay pool, discovery
-2. `api_server::start_api_server()` — binds REST API (default `0.0.0.0:8385`)
-3. `startup.future.await` — main event loop (session cleanup, reconnect checks)
-4. Shutdown: `watch::Sender<bool>` propagated to all subsystems (Ctrl+C, ConsoleCtrlEvent, REST API `/rest/system/shutdown`)
+1. `tui::daemon_runner::start_daemon()` — TLS, ConnectionManager, SyncService, discovery
+2. `api_server::start_api_server()` — binds REST API from `config.gui.address` (default `127.0.0.1:8385`)
+3. `startup.future.await` — main event loop
+4. Shutdown via `watch::Sender<bool>` (Ctrl+C, ConsoleCtrlEvent, `POST /rest/system/shutdown`)
 
-**API becomes available 30–90s after daemon start** — relay pool TLS health check (100 relays) runs before bind. In dev/testing, set `relays_enabled: false` in config to skip.
+Details: [`docs/agent/claude_reference.md`](docs/agent/claude_reference.md).
 
-## CLI Commands
+---
 
-```
-syncthing                      # No args: daemon + tray (Windows) or daemon only (Linux)
-syncthing run                  # Daemon only (foreground, no tray)
-syncthing tui                  # TUI client (connects to existing daemon)
-syncthing init                 # Interactive config wizard
-syncthing status [--json]      # Query daemon status via REST API
-syncthing devices list         # List configured devices with online status
-syncthing folders list [--status]  # List folders with sync state
-syncthing logs --tail N        # Tail log file (last N lines)
-syncthing install-autostart    # Windows: register HKCU Run key
-syncthing uninstall-autostart  # Windows: remove HKCU Run key
+## Quick CLI / TUI / API
+
+```bash
+syncthing run                  # daemon foreground
+syncthing tui                  # TUI client
+syncthing init                 # interactive config wizard
+syncthing status [--json]      # query daemon status
 ```
 
-## Windows Desktop Mode
+Default ports: BEP `22001`, REST API `8385` (loopback-only).
 
-`syncthing.exe` (no args) starts daemon + in-process tray icon. Process model:
+TUI keys: `F5` toggle daemon, `Tab`/`←→` switch tabs, `q` quit, `?` help, `a/e/d` add/edit/delete.
 
-```
-Main thread (tokio)
-  ├── daemon_runner::start_daemon()  ← BEP sync engine
-  ├── api_server::start_api_server() ← REST API on :8385
-  └── tokio::spawn(tray_status_loop) ← 5s polling, icon/tooltip updates
+REST highlights: `GET /rest/health`, `GET /rest/system/status`, `GET /rest/events/poll`, `POST /rest/system/shutdown`.
 
-Background thread
-  └── Win32 message loop (hidden window + Shell_NotifyIconW + context menu)
-```
+Full reference: [`docs/agent/claude_reference.md`](docs/agent/claude_reference.md).
 
-`syncthing-tray.exe` is a thin wrapper that finds `syncthing.exe` in the same directory and spawns it. It exists solely for backward compatibility with existing shortcuts and autostart registry entries.
-
-Tray sources in `cmd/syncthing/src/`:
-- `tray.rs` — Win32 `Shell_NotifyIconW`, hidden window, context menu, icon/tooltip/notification helpers
-- `tray_api.rs` — `DaemonClient` REST client for status polling
-- `build.rs` — generates 32×32 hard-drive ICO in `OUT_DIR`
-
-TUI launch from tray uses multi-terminal fallback: Windows Terminal (`wt.exe`) → PowerShell → CMD, with `AllocConsole()` + `SetConsoleScreenBufferSize` (120×40) for console window sizing.
-
-## TUI Key Bindings
-
-| Key | Context | Action |
-|-----|---------|--------|
-| `F5` | Global | Start / Stop daemon |
-| `Tab` / `←→` | Global | Switch tab (Overview / Devices / Folders / Logs) |
-| `l` | Global | Cycle log filter level (Error→Warn→Info→Debug→Trace) |
-| `q` | No popup | Quit TUI |
-| `?` | No popup | Help overlay |
-| `Insert` / `a` | Devices / Folders tab | Add new item |
-| `Enter` / `e` | Devices / Folders tab | Edit selected item |
-| `Delete` / `d` | Devices / Folders tab | Delete selected item |
-| `i` | Folders tab | Open `.stignore` in system editor |
-| `↑↓` | List views | Navigate items |
-
-Popups (Add/Edit forms): `Tab`/`↑↓` navigate fields, `Space` toggles device checkboxes, `Ctrl+V` pastes, `Enter` saves, `Esc` cancels.
-
-## Config
-
-Defaults: BEP `0.0.0.0:22001`, REST API `127.0.0.1:8385`.
-Config: `%LOCALAPPDATA%/syncthing-rust/config.json` (Windows), `~/.config/syncthing-rust/config.json` (Linux).
-Key options: `global_announce_enabled`, `relays_enabled`, `transports: ["tcp"]`.
-`GET /rest/health` is the ping endpoint — `/rest/system/ping` does not exist.
-
-## Key REST APIs (syncthing-api)
-
-Handler pattern: `Result<Json<T>, (StatusCode, String)>`. All handlers receive `State<ApiState>`.
-
-Notable endpoints:
-- `GET /rest/health` — daemon liveness check
-- `GET /rest/system/status` — my_id, uptime, folder_count
-- `GET /rest/system/connections` — `{device_id: {connected, address, ...}}`
-- `GET /rest/db/browse?folder=X&prefix=Y&levels=N` — tree browse
-- `GET /rest/db/file?folder=X&file=Y` — single file metadata
-- `GET /rest/events/poll?since=N&limit=M` — REST long-poll (60s timeout)
-- `GET /rest/events` — WebSocket upgrade
-- `POST /rest/system/shutdown` — graceful shutdown
-
-## Test Status
-
-364 passed / 4 ignored / 0 failed (workspace total, including unit + integration + doc-tests). Ignored: `test_two_node_single_file_sync` (ClusterConfig race under parallel test load) and two external-network STUN doc-tests.
+---
 
 ## Facts Register
 
 `docs/KNOWN_ISSUES.md` is the authoritative project-wide bug tracker. It takes precedence over handoffs and NEXT_STEPS documents when verifying claims. New defects must be registered there.
+
+For operational constraints and checklists, also consult [`docs/agent/`](docs/agent/index.md).
+
+---
+
+*Last updated: 2026-06-25 (trimmed to quick reference; detailed content moved to docs/agent/ OKF bundle).*
