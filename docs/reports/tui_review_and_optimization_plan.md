@@ -1,3 +1,14 @@
+---
+type: Review Report
+title: TUI Review and Optimization Plan
+description: cmd/syncthing/src/tui/ 界面检查报告与优化建议：结构、交互、性能、可维护性改进项。
+resource: ./tui_review_and_optimization_plan.md
+tags: [tui, review, optimization, okf]
+status: active
+project: syncthing-rust
+timestamp: 2026-06-25T00:00:00Z
+---
+
 # TUI 界面检查报告与优化建议
 
 > 检查范围：`cmd/syncthing/src/tui/` 及其子模块  

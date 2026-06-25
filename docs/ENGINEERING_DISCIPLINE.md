@@ -1,8 +1,12 @@
 ---
-type: policy
+type: Policy
+title: Engineering Discipline
+description: syncthing-rust 工程纪律规范：部署测试、代码审查、文档同步、事故复盘与合并门禁。
+resource: ./ENGINEERING_DISCIPLINE.md
+tags: [policy, engineering, discipline, okf]
 status: active
 project: syncthing-rust
-tags: [policy, engineering, discipline]
+timestamp: 2026-06-25T00:00:00Z
 ---
 
 # 工程纪律规范

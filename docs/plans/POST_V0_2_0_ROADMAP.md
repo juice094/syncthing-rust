@@ -1,18 +1,20 @@
 ---
-type: plan
-status: active
+type: Plan
+status: archived
 project: syncthing-rust
-tags: [plan, roadmap]
+tags: [plan, roadmap, archived]
+description: v0.2.0-beta 后的历史路线图（2026-04-26 制定）。具体任务已被 POST_V3_0_3_ROADMAP.md 取代，保留作为项目演进背景参考。
+resource: ./POST_V0_2_0_ROADMAP.md
 ---
 
-# Post-v0.2.0-beta 开发路线图
+# Post-v0.2.0-beta 开发路线图（已归档）
 
-> 📋 **计划索引**：[`docs/plans/INDEX.md`](./INDEX.md) — 查看所有计划文件关系与跳转速查
-> 📋 **审计报告**：[`docs/plans/PLAN_AUDIT_2026-04-27.md`](./PLAN_AUDIT_2026-04-27.md) — 计划时效性审计与定位重定义
+> ⚠️ **已归档**：本文档为 2026-04-26 制定的历史路线图，具体任务状态与当前 v3.0.3 不符。当前后续计划见 [POST_V3_0_3_ROADMAP.md](./POST_V3_0_3_ROADMAP.md)。
 >
-> **制定原则**：风险驱动开发（Risk-Driven Development）+ 技术债务优先 + 单人维护约束
+> 📋 **计划索引**：[INDEX.md](./INDEX.md)  
+> 📋 **审计报告**：[PLAN_AUDIT_2026-04-27.md](./PLAN_AUDIT_2026-04-27.md)  
+> **制定原则**：风险驱动开发 + 技术债务优先 + 单人维护约束  
 > **制定日期**：2026-04-26（审计修正 2026-04-27）
-> **维护者**：juice094（单人维护，Windows 环境，零运行时依赖优先）
 
 ---
 

@@ -1,3 +1,14 @@
+---
+type: Situation Report
+title: 项目推进情况说明 — 2026-06-03
+description: v0.2.10-rc2 阶段推进情况：Phase 0 完成项、关键修复、云端部署与测试基线。
+resource: ./SITUATION_2026-06-03.md
+tags: [plan, situation, phase0, okf]
+status: archived
+project: syncthing-rust
+timestamp: 2026-06-25T00:00:00Z
+---
+
 # 项目推进情况说明 — 2026-06-03
 
 ## 当前版本: v0.2.10-rc2

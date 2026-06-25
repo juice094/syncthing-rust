@@ -1,16 +1,21 @@
 ---
-type: report
-status: active
+type: Report
+status: archived
 project: syncthing-rust
-tags: [report, audit, testing]
+tags: [report, audit, testing, archived]
+description: 2026-04-26 之前的项目实现总结，内容已严重过时。当前项目状态见 README.md、topology.md 与 KNOWN_ISSUES.md。
+resource: ./IMPLEMENTATION_SUMMARY.md
 ---
 
-# syncthing-rust-rearch 项目实现总结
+# syncthing-rust-rearch 项目实现总结（已归档）
 
-> **项目说明**：基于 Rust 的 Syncthing 兼容实现，采用多 crate 工作区结构。目标是通过直接参照 Go Syncthing 源码，构建一个功能完整的去中心化文件同步 daemon。
+> ⚠️ **已归档**：本文档基于 2026-04-26 左右的 v0.2.0 早期代码状态，大量描述（如 Push 未实现、数据库为 JSON、iroh QUIC 路径等）与当前 v3.0.3 不符。当前权威状态见：
+> - [项目拓扑与架构](../design/topology.md)
+> - [已知问题](../KNOWN_ISSUES.md)
+> - 根目录 [README.md](../../README.md)
 >
 > **仓库位置**：`C:\Users\22414`  
-> **最新更新**：2026-04-26（Phase 5 Discovery→ConnectionManager 动态地址注入、REST API write endpoints、TUI event bridge + real-time sync state、config hot-reload、E2E test harness、Relay 接入 ParallelDialer、clippy 0 warnings）
+> **最后更新**：2026-04-26
 
 ---
 

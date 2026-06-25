@@ -1,3 +1,14 @@
+---
+type: Roadmap Draft
+title: TUI Optimization Roadmap v2
+description: syncthing-rust TUI 优化路线图 v2：当前基线、待优化项、优先级与验收标准。
+resource: ./tui_optimization_roadmap_v2.md
+tags: [tui, roadmap, optimization, okf]
+status: draft
+project: syncthing-rust
+timestamp: 2026-06-25T00:00:00Z
+---
+
 # TUI 优化路线图 v2
 
 > 状态：自由规划与探索阶段  

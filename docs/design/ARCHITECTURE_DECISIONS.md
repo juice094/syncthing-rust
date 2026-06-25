@@ -1,8 +1,12 @@
 ---
-type: design
+type: ADR Bundle
+title: Architecture Decisions
+description: 汇总 syncthing-rust 所有粗粒度架构决策（ADR），包括已冻结项、网络韧性设计与未来预留方案。
+resource: ./ARCHITECTURE_DECISIONS.md
+tags: [design, architecture, adr, okf]
 status: active
 project: syncthing-rust
-tags: [design, architecture, adr]
+timestamp: 2026-06-25T00:00:00Z
 ---
 
 # Architecture Decisions

@@ -20,7 +20,7 @@ tags: [plan, roadmap, post-v3.0.3]
 | 维度 | 状态 |
 |:---|:---|
 | 核心功能 | Production：BEP/TLS、块级同步、发现、Relay v1、REST API、TUI、Windows 托盘均稳定 |
-| 测试基线 | 364 passed / 4 ignored / 0 failed |
+| 测试基线 | 392 passed / 6 ignored / 0 failed |
 | CI | 19/19 jobs passing |
 | 真实部署 | ROG-X ↔ Gray-Cloud 双端生产同步运行中 |
 | 当前最新 Release | [v3.0.3](https://github.com/juice094/syncthing-rust/releases/tag/v3.0.3) |

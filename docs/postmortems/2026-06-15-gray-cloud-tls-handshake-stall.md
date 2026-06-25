@@ -1,3 +1,14 @@
+---
+type: Postmortem
+title: 2026-06-15 Gray-Cloud TLS Handshake Stall
+description: Gray-Cloud 节点在 72h 压测准备阶段出现 daemon 停滞、TLS 握手超时的故障复盘与时间线。
+resource: ./2026-06-15-gray-cloud-tls-handshake-stall.md
+tags: [postmortem, tls, handshake, gray-cloud, stall, okf]
+status: active
+project: syncthing-rust
+timestamp: 2026-06-25T00:00:00Z
+---
+
 # 2026-06-15 Gray-Cloud TLS 握手停滞事件
 
 ## 摘要

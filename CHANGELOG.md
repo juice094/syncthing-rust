@@ -18,7 +18,7 @@
 - **syncthing-monitor rewrite**: split into 8 modules (`args`, `sample`, `api`, `log_parser`, `format`, `alerts`, `util`, `main`), added JSONL telemetry output, REST API polling, daemon log parsing for scan/pull/InvalidFile events, CSV header deduplication, RSS linear-regression prediction, and sync-backlog prediction alerts.
 
 ### Stats
-- **Tests**: 385 passed / 0 failed / 4 ignored
+- **Tests**: 392 passed / 0 failed / 6 ignored
 - **Clippy**: 0 warnings
 
 ## [3.0.3] — 2026-06-13

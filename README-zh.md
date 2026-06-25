@@ -10,7 +10,7 @@
 
 [![Rust](https://img.shields.io/badge/rust-1.85%2B-orange?logo=rust)](https://www.rust-lang.org)
 [![CI](https://github.com/juice094/syncthing-rust/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/juice094/syncthing-rust/actions/workflows/ci.yml)
-[![Tests](https://img.shields.io/badge/tests-364%20passed-brightgreen)](https://github.com/juice094/syncthing-rust/actions)
+[![Tests](https://img.shields.io/badge/tests-392%20passed-brightgreen)](https://github.com/juice094/syncthing-rust/actions)
 [![Version](https://img.shields.io/badge/version-v3.0.3-blue)](https://github.com/juice094/syncthing-rust/releases/tag/v3.0.3)
 [![License](https://img.shields.io/badge/license-MIT%20%2B%20Commercial-blue)](./LICENSE)
 
@@ -22,7 +22,7 @@
 
 [Syncthing](https://syncthing.net/) 协议栈的 Rust 实现，目标为**零运行时依赖**部署，与官方 Go Syncthing 守护进程线路兼容互操作。
 
-**当前阶段（v3.0.3）**：Production — 385 passed / 4 ignored / 0 failures，E2E 双向同步已实测，Windows 托盘 + TUI 稳定。
+**当前阶段（v3.0.3）**：Production — 392 passed / 6 ignored / 0 failures，E2E 双向同步已实测，Windows 托盘 + TUI 稳定。
 
 - ✅ 连接层：retry 累加、TCP keepalive
 - ✅ 协议层：prost 编解码 + LZ4 压缩、wire_compat 10 tests
@@ -30,7 +30,7 @@
 - ✅ 版本控制：Simple + Staggered、`.stversions/` 归档
 - ✅ Go 互操作：v3.0.3 ↔ Go Syncthing v2.1.0 已验证
 
-完整路线图见 [`docs/plans/POST_V0_2_0_ROADMAP.md`](docs/plans/POST_V0_2_0_ROADMAP.md)。
+完整路线图见 [`docs/plans/INDEX.md`](docs/plans/INDEX.md)。
 
 ---
 
@@ -39,6 +39,7 @@
 - [概览](#概览)
 - [快速开始](#快速开始)
 - [项目结构](#项目结构)
+- [文档](#文档)
 - [贡献](#贡献)
 - [社区与支持](#社区与支持)
 - [许可证](#许可证)
@@ -51,7 +52,7 @@
 |:---|:---|
 | BEP 协议（TLS + Hello + ClusterConfig + Index + Request/Response） | ✅ prost + LZ4 |
 | 端到端文件同步（双向） | ✅ Push/Pull 双向验证 |
-| 文件同步核心（puller / scanner / folder_model / orchestrator） | ✅ 385 tests / 0 failed |
+| 文件同步核心（puller / scanner / folder_model / orchestrator） | ✅ 392 tests / 0 failed |
 | 版本控制 | ✅ Simple + Staggered |
 | 连接稳定性 | ✅ retry 累加 + TCP keepalive |
 | Rust↔Rust 双向互通 | ✅ v3.0.3 ↔ v3.0.3 E2E 验证 |
@@ -103,11 +104,28 @@ syncthing-rust/
 └── scripts/                # 健康检查、cloud-deploy、压力测试
 ```
 
+### 完整架构
+
+- 项目拓扑与运行时架构：[`docs/design/topology.md`](docs/design/topology.md)
+- Agent 开发约束与代码规范：[`docs/agent/constraints.md`](docs/agent/constraints.md)
+
+---
+
+## 文档
+
+| 文档 | 内容 |
+|:---|:---|
+| [`docs/design/topology.md`](docs/design/topology.md) | 项目拓扑、crate 依赖图、运行时组件、关键入口 |
+| [`docs/agent/index.md`](docs/agent/index.md) | Agent 开发指南总览（约束、测试、安全、运维） |
+| [`docs/agent/constraints.md`](docs/agent/constraints.md) | Crate 边界红线、禁止事项、代码规范 |
+| [`docs/KNOWN_ISSUES.md`](docs/KNOWN_ISSUES.md) | 权威缺陷登记与事实核查 |
+| [`docs/plans/INDEX.md`](docs/plans/INDEX.md) | 路线图与计划索引 |
+
 ---
 
 ## 贡献
 
-详见 [CONTRIBUTING.md](./CONTRIBUTING.md)。提交前：
+详见 [CONTRIBUTING.md](./CONTRIBUTING.md) 与 [`docs/agent/constraints.md`](docs/agent/constraints.md)。提交前：
 
 ```bash
 cargo test --workspace

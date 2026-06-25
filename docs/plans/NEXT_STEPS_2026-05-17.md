@@ -1,16 +1,20 @@
 ---
-type: plan
-status: active
+type: Plan
+status: archived
 project: syncthing-rust
 date: 2026-05-17
-tags: [plan, roadmap]
+tags: [plan, roadmap, archived]
+description: 2026-05-17 的后续任务清单，基于 v0.2.9-rc1。当前行动计划已被 POST_V3_0_3_ROADMAP.md 取代。
+resource: ./NEXT_STEPS_2026-05-17.md
 ---
 
-# 后续任务清单 — 2026-05-17
+# 后续任务清单 — 2026-05-17（已归档）
 
-> 承接 [NEXT_STEPS_2026-05-15.md](./NEXT_STEPS_2026-05-15.md)
-> 本文档基于 v0.2.9-rc1 维护轮次完成后的状态快照生成。
-> **状态快照（2026-05-17 23:59）**：11 commits 已推送至 origin/main，tag `v0.2.9-rc1` 已发布；CI 全绿；Prometheus /metrics、跨平台监控、双节点编排基础设施全部就绪。
+> ⚠️ **已归档**：本文档为 2026-05-17 的历史行动计划。当前后续计划见 [POST_V3_0_3_ROADMAP.md](./POST_V3_0_3_ROADMAP.md)。
+>
+> 承接 [NEXT_STEPS_2026-05-15.md](./NEXT_STEPS_2026-05-15.md)  
+> 本文档基于 v0.2.9-rc1 维护轮次完成后的状态快照生成。  
+> **状态快照（2026-05-17 23:59）**：11 commits 已推送至 origin/main，tag `v0.2.9-rc1` 已发布。
 
 ---
 

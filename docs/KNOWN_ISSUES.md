@@ -1,14 +1,18 @@
 ---
-type: tracker
+type: Issue Tracker
+title: Known Issues
+description: syncthing-rust 已知未修复功能性与行为性问题的权威登记，决定项目当前“事实可用性”边界。
+resource: ./KNOWN_ISSUES.md
+tags: [issues, bugs, tracker, syncthing-rust, okf]
 status: active
 project: syncthing-rust
-tags: [issues, bugs, tracker, syncthing-rust]
+timestamp: 2026-06-25T00:00:00Z
 ---
 
 # Known Issues
 
 > **维护原则**：发现的缺陷必须显式登记，避免误判项目成熟度。  
-> **最后更新**：2026-06-10（v3.0.0 — 代码清理、托盘 TUI 修复、测试基础设施、§7.3 修复）
+> **最后更新**：2026-06-25（v3.0.3 — 文档同步、测试基线刷新）
 
 本文档列举当前已知未修复的功能性 / 行为性问题。  
 **这些问题决定了项目目前的"事实可用性"边界**。
@@ -20,7 +24,7 @@ tags: [issues, bugs, tracker, syncthing-rust]
 | 维度 | 状态 |
 |------|------|
 | 代码完成度 | ~92%（Phase 0 完成，Phase 1 版本控制完成，托盘合并完成） |
-| 单元测试覆盖 | 304/304 通过（86 syncthing-net + 58 syncthing-sync + 66 syncthing-fs + 36 syncthing-db + 24 syncthing-core + 23 syncthing-api + 18 bep-protocol + 6 syncthing-versioner + 4 syncthing + 5 e2e + 1 test-utils） |
+| 单元测试覆盖 | 383/383 通过（90 syncthing-net + 76 syncthing-sync + 66 syncthing-fs + 36 syncthing-db + 24 syncthing-core + 23 syncthing-api + 18 bep-protocol + 8 syncthing-versioner + 23 syncthing + 6 e2e + 1 test-utils；另有 9 doc-tests 与 6 ignored） |
 | 连接层稳定性 | ✅ retry_count 累加 + TCP keepalive + 有界 channel |
 | **端到端同步** | ✅ Push/Pull 双向 574 文件验证 |
 | 跨版本互通 | ✅ Rust v0.2.10-rc3 ↔ v0.2.10-rc3 E2E 验证 |

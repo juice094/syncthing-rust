@@ -7,7 +7,7 @@
 | Metric | Status |
 |:---|:---|
 | Version | v3.0.3 |
-| Tests | 364 passed / 4 ignored / 0 failed |
+| Tests | 392 passed / 6 ignored / 0 failed |
 | Clippy | 0 warnings |
 | License | MIT (dual: commercial available) |
 | Rust | 1.85+ |
@@ -47,11 +47,11 @@ cargo run -p syncthing-cli -- status
 
 | What | Entry | Key Files | Must Read |
 |:---|:---|:---|:---|
-| **Report bug** | [New Issue](https://github.com/juice094/syncthing-rust/issues/new) | — | This file "Commit Convention" |
-| **Fix bug** | [open issues](https://github.com/juice094/syncthing-rust/issues) | `crates/` matching module | [AGENTS.md](AGENTS.md) |
-| **Add feature** | Open Issue first | `crates/syncthing-core/src/traits/` | Architecture below |
-| **Improve docs** | Edit `.md` files directly | `README.md`, `AGENTS.md` | — |
-| **Refactor** | Open Issue first | — | [AGENTS.md](AGENTS.md) "Crate boundary hygiene" |
+| **Report bug** | [New Issue](https://github.com/juice094/syncthing-rust/issues/new) | — | [docs/KNOWN_ISSUES.md](docs/KNOWN_ISSUES.md) |
+| **Fix bug** | [open issues](https://github.com/juice094/syncthing-rust/issues) | `crates/` matching module | [docs/agent/constraints.md](docs/agent/constraints.md) |
+| **Add feature** | Open Issue first | `crates/syncthing-core/src/traits/` | [docs/design/topology.md](docs/design/topology.md) |
+| **Improve docs** | Edit `.md` files directly | `README.md`, `docs/agent/`, `docs/design/` | [docs/README.md](docs/README.md) |
+| **Refactor** | Open Issue first | — | [docs/agent/constraints.md](docs/agent/constraints.md) "Crate boundary hygiene" |
 
 ---
 
@@ -59,7 +59,7 @@ cargo run -p syncthing-cli -- status
 
 Before submitting a PR:
 
-- [ ] `cargo test --workspace` — 364 passed / 4 ignored / 0 failed
+- [ ] `cargo test --workspace` — 392 passed / 6 ignored / 0 failed
 - [ ] `cargo clippy --workspace --all-targets -- -D warnings -W clippy::await_holding_lock` — 0 warnings
 - [ ] `cargo fmt --check` — pass (or run `cargo fmt --all`)
 - [ ] New public API has doc comment
@@ -121,7 +121,10 @@ when the target is opened by editors/AV/desktop search.
 
 | Document | Content |
 |:---|:---|
-| [`AGENTS.md`](AGENTS.md) | Project conventions, safety rules, progress log |
+| [`AGENTS.md`](AGENTS.md) | Quick agent fact-checklist and entry points |
+| [`docs/agent/index.md`](docs/agent/index.md) | Full agent constraints, testing, security, operations bundle |
+| [`docs/design/topology.md`](docs/design/topology.md) | Project topology, crate DAG, runtime architecture |
+| [`docs/KNOWN_ISSUES.md`](docs/KNOWN_ISSUES.md) | Authoritative defect register and verification facts |
 | [`docs/plans/`](docs/plans/) | Implementation plans and situation reports |
 | [`scripts/cloud-deploy.sh`](scripts/cloud-deploy.sh) | Automated cloud deployment |
 
@@ -129,7 +132,7 @@ when the target is opened by editors/AV/desktop search.
 
 ## Architecture Constraints
 
-Read [`AGENTS.md`](AGENTS.md) before modifying core logic.
+Read [`docs/agent/constraints.md`](docs/agent/constraints.md) before modifying core logic. A short summary:
 
 - **`syncthing-core` is read-only** for downstream crates. Do not add dependencies or change public APIs without an ADR.
 - **Crate boundary hygiene**: Core = traits + types only. No concrete implementations leak into core.
@@ -139,7 +142,7 @@ Read [`AGENTS.md`](AGENTS.md) before modifying core logic.
 
 ## Frozen Items
 
-The following are **stage-frozen** per [AGENTS.md](AGENTS.md). Do not implement without an ADR and prior discussion:
+The following are **stage-frozen** per [`docs/agent/constraints.md`](docs/agent/constraints.md). Do not implement without an ADR and prior discussion:
 
 - Consensus algorithms / distributed verification extensions
 - Reputation systems
