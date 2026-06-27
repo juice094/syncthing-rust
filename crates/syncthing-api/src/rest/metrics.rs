@@ -135,6 +135,8 @@ pub(crate) async fn get_metrics(State(state): State<ApiState>) -> impl IntoRespo
     }
 
     // --- Folder file counts (via db if available) ---
+    let mut total_db_files = 0u64;
+    let mut total_db_size_estimate = 0u64;
     if let Some(ref db) = state.db {
         if let Ok(config) = state.config_store.load().await {
             writeln!(
@@ -145,11 +147,14 @@ pub(crate) async fn get_metrics(State(state): State<ApiState>) -> impl IntoRespo
             writeln!(body, "# TYPE syncthing_folder_files_total gauge").ok();
             for folder in &config.folders {
                 if let Ok(files) = db.get_folder_files(&folder.id).await {
+                    let count = files.len();
+                    total_db_files += count as u64;
+                    // 粗略估算: 每条记录 ~2KB (路径+哈希+元数据)
+                    total_db_size_estimate += (count * 2048) as u64;
                     writeln!(
                         body,
                         r#"syncthing_folder_files_total{{folder="{}"}} {}"#,
-                        folder.id,
-                        files.len()
+                        folder.id, count
                     )
                     .ok();
                 }
@@ -157,6 +162,81 @@ pub(crate) async fn get_metrics(State(state): State<ApiState>) -> impl IntoRespo
             writeln!(body).ok();
         }
     }
+
+    // --- Database metrics ---
+    writeln!(
+        body,
+        "# HELP syncthing_db_files_total Total indexed files across all folders"
+    )
+    .ok();
+    writeln!(body, "# TYPE syncthing_db_files_total gauge").ok();
+    writeln!(body, "syncthing_db_files_total {}", total_db_files).ok();
+    writeln!(body).ok();
+
+    writeln!(
+        body,
+        "# HELP syncthing_db_size_estimate_bytes Estimated database size in bytes"
+    )
+    .ok();
+    writeln!(body, "# TYPE syncthing_db_size_estimate_bytes gauge").ok();
+    writeln!(
+        body,
+        "syncthing_db_size_estimate_bytes {}",
+        total_db_size_estimate
+    )
+    .ok();
+    writeln!(body).ok();
+
+    // --- Connection manager detailed stats ---
+    if let Some(ref cm) = state.connection_manager {
+        let stats = cm.connection_stats();
+        writeln!(
+            body,
+            "# HELP syncthing_connection_bytes_sent_total Total bytes sent (cumulative)"
+        )
+        .ok();
+        writeln!(body, "# TYPE syncthing_connection_bytes_sent_total counter").ok();
+        writeln!(
+            body,
+            "syncthing_connection_bytes_sent_total {}",
+            stats.total_bytes_sent
+        )
+        .ok();
+        writeln!(body).ok();
+
+        writeln!(
+            body,
+            "# HELP syncthing_connection_bytes_received_total Total bytes received (cumulative)"
+        )
+        .ok();
+        writeln!(
+            body,
+            "# TYPE syncthing_connection_bytes_received_total counter"
+        )
+        .ok();
+        writeln!(
+            body,
+            "syncthing_connection_bytes_received_total {}",
+            stats.total_bytes_received
+        )
+        .ok();
+        writeln!(body).ok();
+    }
+
+    // --- API key configured ---
+    let api_configured = if let Some(ref key) = state.api_key {
+        (!key.is_empty()) as u8
+    } else {
+        0u8
+    };
+    writeln!(
+        body,
+        "# HELP syncthing_api_auth_enabled Whether REST API authentication is enabled"
+    )
+    .ok();
+    writeln!(body, "# TYPE syncthing_api_auth_enabled gauge").ok();
+    writeln!(body, "syncthing_api_auth_enabled {}", api_configured).ok();
+    writeln!(body).ok();
 
     (
         axum::http::StatusCode::OK,

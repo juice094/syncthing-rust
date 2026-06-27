@@ -307,11 +307,25 @@ pub struct HealthResponse {
     pub version: String,
 }
 
-async fn health_check() -> impl IntoResponse {
-    Json(HealthResponse {
-        status: "ok".to_string(),
-        version: env!("CARGO_PKG_VERSION").to_string(),
-    })
+async fn health_check(State(state): State<ApiState>) -> impl IntoResponse {
+    let db_ok = state
+        .db
+        .as_ref()
+        .map(|_| true) // DB trait object exists = reachable
+        .unwrap_or(true); // No DB configured = not an error
+    let cm_ok = state.connection_manager.is_some();
+    let config_ok = state.config_store.load().await.is_ok();
+    let all_ok = db_ok && cm_ok && config_ok;
+
+    Json(serde_json::json!({
+        "status": if all_ok { "ok" } else { "degraded" },
+        "version": env!("CARGO_PKG_VERSION"),
+        "checks": {
+            "database": db_ok,
+            "connection_manager": cm_ok,
+            "config_store": config_ok,
+        }
+    }))
 }
 
 pub(crate) fn parse_device_id(id: &str) -> DeviceId {
@@ -359,7 +373,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_health_check() {
-        let _response = health_check().await;
+        let state = create_test_state();
+        let _response = health_check(State(state)).await;
         // Should succeed - just verify it doesn't panic
     }
 
