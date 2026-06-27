@@ -4,13 +4,16 @@
 //! WebSocket 流量通常被防火墙允许（因为看起来像正常的 Web 流量），
 //! 因此是 TCP+TLS 被封锁时的有效 fallback。
 //!
-//! 当前实现使用 `tokio-tungstenite`，将 WebSocket binary frames 桥接为
-//! 连续的字节流（通过内部 duplex 缓冲）。
+//! 支持两种方案：
+//! - `ws://` (WebSocketTransport): 明文 WebSocket，仅适合 trusted LAN
+//! - `wss://` (WssWebSocketTransport): TLS-over-WebSocket，适合生产/政企环境
 
 #[cfg(feature = "websocket")]
 use std::net::SocketAddr;
 #[cfg(feature = "websocket")]
 use std::pin::Pin;
+#[cfg(feature = "websocket")]
+use std::sync::Arc;
 #[cfg(feature = "websocket")]
 use std::task::{Context, Poll};
 
@@ -32,9 +35,9 @@ use syncthing_core::{
     BoxedPipe, Result, SyncthingError, Transport, TransportListener, TransportType,
 };
 
-/// WebSocket 传输层。
+/// WebSocket 传输层（明文 ws://）。
 ///
-/// 通过 `ws://` 建立连接。`wss://`（TLS over WebSocket）可后续添加。
+/// 仅适合可信局域网环境。生产/政企部署请使用 WssWebSocketTransport。
 #[cfg(feature = "websocket")]
 #[derive(Debug)]
 pub struct WebSocketTransport;
@@ -82,6 +85,142 @@ impl Transport for WebSocketTransport {
         })?;
         info!("WebSocket connected to {}", url);
         Ok(Box::new(WebSocketPipe::new(ws_stream)))
+    }
+}
+
+/// WSS (WebSocket Secure) 传输层。
+///
+/// 在标准 TLS 之上进行 WebSocket 握手，复用项目的 SyncthingTlsConfig
+/// 进行设备身份验证。`wss://` 流量在网络上呈现为 HTTPS WebSocket，
+/// 可通过大多数企业防火墙和 GFW。
+#[cfg(feature = "websocket")]
+#[derive(Clone)]
+pub struct WssWebSocketTransport {
+    tls_config: Arc<crate::tls::SyncthingTlsConfig>,
+}
+
+// Manual Debug impl — SyncthingTlsConfig 可能未实现 Debug
+#[cfg(feature = "websocket")]
+impl std::fmt::Debug for WssWebSocketTransport {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("WssWebSocketTransport")
+            .finish_non_exhaustive()
+    }
+}
+
+#[cfg(feature = "websocket")]
+impl WssWebSocketTransport {
+    pub fn new(tls_config: Arc<crate::tls::SyncthingTlsConfig>) -> Self {
+        Self { tls_config }
+    }
+}
+
+#[cfg(feature = "websocket")]
+#[async_trait::async_trait]
+impl Transport for WssWebSocketTransport {
+    fn scheme(&self) -> &'static str {
+        "wss"
+    }
+
+    async fn bind(&self, addr: SocketAddr) -> Result<Box<dyn TransportListener>> {
+        let listener = TcpListener::bind(addr).await.map_err(|e| {
+            SyncthingError::connection(format!("WSS TCP bind failed on {}: {}", addr, e))
+        })?;
+        let actual_addr = listener
+            .local_addr()
+            .map_err(|e| SyncthingError::connection(format!("WSS local_addr failed: {}", e)))?;
+        info!("WSS listener bound to {}", actual_addr);
+        Ok(Box::new(WssListener {
+            listener,
+            local_addr: actual_addr,
+            tls_config: Arc::clone(&self.tls_config),
+        }))
+    }
+
+    async fn dial(&self, addr: SocketAddr) -> Result<BoxedPipe> {
+        use tokio::net::TcpStream;
+        use tokio_rustls::TlsConnector;
+
+        let tcp = TcpStream::connect(addr).await.map_err(|e| {
+            SyncthingError::connection(format!("WSS TCP connect to {} failed: {}", addr, e))
+        })?;
+
+        // TLS 客户端握手
+        let client_config = self
+            .tls_config
+            .client_config()
+            .map_err(|e| SyncthingError::Tls(format!("WSS client TLS config: {}", e)))?;
+        let connector = TlsConnector::from(Arc::new(client_config));
+        let server_name = tokio_rustls::rustls::pki_types::ServerName::try_from("syncthing")
+            .map_err(|_| SyncthingError::Tls("invalid server name for WSS".to_string()))?;
+        let tls_stream = connector
+            .connect(server_name, tcp)
+            .await
+            .map_err(|e| SyncthingError::Tls(format!("WSS TLS handshake failed: {}", e)))?;
+
+        // WebSocket 客户端握手 over TLS
+        let url = format!("wss://{}/", addr);
+        let ws_stream = tokio_tungstenite::client_async(&url, tls_stream)
+            .await
+            .map_err(|e| {
+                SyncthingError::connection(format!("WSS WebSocket handshake failed: {}", e))
+            })?
+            .0;
+
+        info!("WSS connected to {}", addr);
+        Ok(Box::new(WebSocketPipe::new(ws_stream)))
+    }
+}
+
+/// WSS 监听器 — TLS accept → WebSocket upgrade
+#[cfg(feature = "websocket")]
+struct WssListener {
+    listener: TcpListener,
+    local_addr: SocketAddr,
+    tls_config: Arc<crate::tls::SyncthingTlsConfig>,
+}
+
+#[cfg(feature = "websocket")]
+impl std::fmt::Debug for WssListener {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("WssListener")
+            .field("local_addr", &self.local_addr)
+            .finish_non_exhaustive()
+    }
+}
+
+#[cfg(feature = "websocket")]
+#[async_trait::async_trait]
+impl TransportListener for WssListener {
+    async fn accept(&self) -> Result<(BoxedPipe, SocketAddr)> {
+        let (stream, peer_addr) = self
+            .listener
+            .accept()
+            .await
+            .map_err(|e| SyncthingError::connection(format!("WSS TCP accept failed: {}", e)))?;
+
+        // TLS 服务端握手
+        let server_config = self
+            .tls_config
+            .server_config()
+            .map_err(|e| SyncthingError::Tls(format!("WSS server TLS config: {}", e)))?;
+        let acceptor = tokio_rustls::TlsAcceptor::from(Arc::new(server_config));
+        let tls_stream = acceptor
+            .accept(stream)
+            .await
+            .map_err(|e| SyncthingError::Tls(format!("WSS TLS accept failed: {}", e)))?;
+
+        // WebSocket 握手 over TLS
+        let ws_stream = accept_async(tls_stream).await.map_err(|e| {
+            SyncthingError::connection(format!("WSS WebSocket accept failed: {}", e))
+        })?;
+
+        debug!("WSS accepted connection from {}", peer_addr);
+        Ok((Box::new(WebSocketPipe::new(ws_stream)), peer_addr))
+    }
+
+    fn local_addr(&self) -> Result<SocketAddr> {
+        Ok(self.local_addr)
     }
 }
 

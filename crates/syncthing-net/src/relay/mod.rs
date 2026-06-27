@@ -15,6 +15,7 @@ pub mod client;
 pub mod dial;
 pub mod pool;
 pub mod protocol;
+pub mod server;
 pub mod types;
 
 pub use client::{join_session, RelayProtocolClient};

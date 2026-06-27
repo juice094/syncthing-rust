@@ -6,34 +6,36 @@ resource: ./KNOWN_ISSUES.md
 tags: [issues, bugs, tracker, syncthing-rust, okf]
 status: active
 project: syncthing-rust
-timestamp: 2026-06-25T00:00:00Z
+timestamp: 2026-06-27T00:00:00Z
 ---
 
 # Known Issues
 
 > **维护原则**：发现的缺陷必须显式登记，避免误判项目成熟度。  
-> **最后更新**：2026-06-25（v3.0.3 — 文档同步、测试基线刷新）
+> **最后更新**：2026-06-27（v3.0.4 — 安全加固 + Relay Server + WSS + 性能优化）
 
 本文档列举当前已知未修复的功能性 / 行为性问题。  
 **这些问题决定了项目目前的"事实可用性"边界**。
 
 ---
 
-## ⚠️ 项目阶段定位（2026-06-10 v3.0.0）
+## ⚠️ 项目阶段定位（2026-06-27 v3.0.4）
 
 | 维度 | 状态 |
 |------|------|
-| 代码完成度 | ~92%（Phase 0 完成，Phase 1 版本控制完成，托盘合并完成） |
-| 单元测试覆盖 | 383/383 通过（90 syncthing-net + 76 syncthing-sync + 66 syncthing-fs + 36 syncthing-db + 24 syncthing-core + 23 syncthing-api + 18 bep-protocol + 8 syncthing-versioner + 23 syncthing + 6 e2e + 1 test-utils；另有 9 doc-tests 与 6 ignored） |
-| 连接层稳定性 | ✅ retry_count 累加 + TCP keepalive + 有界 channel |
+| 代码完成度 | ~94%（+Relay Server v1 + WSS + 安全加固） |
+| 单元测试覆盖 | 392/392 通过（93 syncthing-net + 76 syncthing-sync + 66 syncthing-fs + 36 syncthing-db + 24 syncthing-core + 23 syncthing-api + 18 bep-protocol + 8 syncthing-versioner + 23 syncthing + 6 e2e + 1 test-utils） |
+| 连接层稳定性 | ✅ retry_count 累加 + TCP keepalive + 有界 channel + 连接限流(max_connections) + SSRF防护 |
 | **端到端同步** | ✅ Push/Pull 双向 574 文件验证 |
 | 跨版本互通 | ✅ Rust v0.2.10-rc3 ↔ v0.2.10-rc3 E2E 验证 |
 | 版本控制 | ✅ Simple (keep=N) + Staggered (4 时间窗口) |
 | 托盘/TUI | ✅ 单二进制（feature=tray）、多终端 TUI 启动、编辑弹窗、日志过滤 |
-| 运行时安全 | ✅ §7.1~§7.6 全部修复（debounce + hourly 日志 + 有界 channel + panic 清除 + shutdown select） |
+| 运行时安全 | ✅ §7.1~§7.6 + §19 全部修复（路径穿越 + 内容泄露 + 连接限流 + SSRF + 密钥权限 + WSS） |
+| Relay Server | ✅ v1 协议模式 + Session 模式 + 双向转发（与 Go Syncthing relay 互操作） |
+| WebSocket | ✅ ws:// + wss:// (TLS-over-WebSocket，复用设备证书认证) |
 | 长跑（72h） | ⏳ **v3.1.0 准入线** — 一致性校验 + watchdog 基础设施就绪，待实际跑测 |
 | **高延迟/不稳定网络** | ⚠️ 见 §14 |
-| 生产就绪度 | **谨慎生产**（辅助节点可用，主同步需 72h 验证） |
+| 生产就绪度 | **中型部署可用**（安全基线达标，Relay 自建可替代 Tailscale） |
 
 ---
 
@@ -497,18 +499,87 @@ v0.2.8 完成首次双节点真实网络环境下的完整文件同步验证。
 
 ---
 
+## §19. v3.0.4 安全加固（2026-06-27）— **全部修复 ✅**
+
+> 系统性安全审计覆盖 Crypto/TLS、网络、数据、代码质量、依赖、政企合规 6 个维度。
+
+### §19.1 路径穿越（C-1，CRITICAL — **已修复 ✅**）
+
+**症状**：Puller 和 IndexHandler 未验证来自远程对端的 `file_info.name`，恶意对端发送 `../../../etc/cron.d/backdoor` 可将文件写出同步目录。
+
+**修复**：
+- `block_server.rs`: 新增 `validate_remote_name()` 公开函数，校验 `..`、`\0`、绝对路径、空段
+- `puller/mod.rs`: `download_file`、`create_directory`、`delete_file` 入口处调用 `validate_remote_name()`
+- `index_handler.rs`: `process_files` 循环中对每个远程条目调用验证，恶意条目跳过并 warn
+
+### §19.2 文件内容泄露（C-2，CRITICAL — **已修复 ✅**）
+
+**症状**：`puller/mod.rs` 中 10 处 `eprintln!()` 将文件内容、哈希值、路径直接输出到 stderr。
+
+**修复**：全部替换为 `debug!()` / `trace!()` / `warn!()` 日志调用，移除所有内容输出。
+
+### §19.3 连接洪泛 DoS（H-1，HIGH — **已修复 ✅**）
+
+**症状**：`ConnectionManagerConfig.max_connections` 定义为 1000 但从未执行。
+
+**修复**：
+- `manager/mod.rs`: 新增 `active_connection_count()` + `can_accept_connection()`
+- `manager/handle.rs`: 公开 `can_accept_connection()` 到 `ConnectionManagerHandle`
+- `tcp_transport.rs`: TCP accept 循环入口处调用 `can_accept_connection()`，满时拒绝新连接
+
+### §19.4 出站地址 SSRF（H-2，HIGH — **已修复 ✅**）
+
+**症状**：来自 Discovery/Relay/Config 的地址未经验证直接拨号，可被利用访问内网服务。
+
+**修复**：
+- `tcp_transport.rs`: 新增 `validate_outbound_addr()` — 拒绝 multicast/unspecified/link-local
+- `manager/dialer.rs`: `connect_to_with_relay` 入口处过滤不安全地址
+- `relay/dial.rs`: `resolve_session_addr` 额外拒绝 relay 重定向到 loopback
+
+### §19.5 私钥文件权限（H-6，HIGH — **已修复 ✅**）
+
+**症状**：`tls.rs:load_or_generate` 写入 `key.pem` 后未设权限，Linux 上默认为 0644。
+
+**修复**：Unix 平台上 `set_permissions(0o600)` 加固私钥和证书文件。
+
+### §19.6 WebSocket WSS（H-3，HIGH — **已修复 ✅**）
+
+**症状**：WebSocket 仅支持 `ws://` 明文。
+
+**修复**：新增 `WssWebSocketTransport`，复用 `SyncthingTlsConfig` 进行 TLS 握手 + 设备认证，流量伪装为 HTTPS WebSocket。
+
+### §19.7 quinn-proto 漏洞（Dep，HIGH — **已修复 ✅**）
+
+**症状**：`cargo audit` 报告 RUSTSEC-2026-0185 (CVSS 7.5)。
+
+**修复**：`cargo update -p quinn-proto` → 0.11.15。
+
+### §19.8 Relay Server v1（Phase 1 — **已实现 ✅**）
+
+新增 `syncthing-net/src/relay/server.rs` (~400 行)：
+- Protocol Mode: TLS + `bep-relay` ALPN，JoinRelay/ConnectRequest/SessionInvitation/Ping-Pong
+- Session Mode: TCP 双向转发，两阶段配对
+- 优雅关闭 + 连接限流 + 客户端注册
+
+### §19.9 代码质量优化
+
+- `send_index()`/`send_index_update()` 双克隆优化 → 新增 `From<&Index>` 引用版本
+- IO 读取循环空闲超时修复 → 3 次超时后主动断连
+- 事件 drain channel 256→8 + 设计注释
+- `unused_variables`/`dead_code` 清理
+
+---
+
 ## 路线图影响
 
-按本文档现状（2026-05-15 Error-Budget 审计后）：
+按本文档现状（2026-06-27 安全审计后）：
 
-| v0.X.Y | 必须包含 |
-|--------|---------|
-| **v0.2.5** | ✅ §2 已修复 — 已发布 |
-| **v0.2.6（hotfix）** | ✅ §7 运行时安全缺陷（H-1~H-6）：debounce + 日志上限 + 有界 channel + panic 清除 + shutdown select — 已合并 |
-| **v0.3.0** | ✅ §11 Scanner 默认排除元数据 — 已修复 / §1 ClusterConfig race + §8 Transport Plugin + §9 Windows 块传输修复（Bug-1/2/3）+ §10 配置 UX（C-UX-1~5）+ §12 双节点真实网络通过 + §13 `.stignore` 目录排除 + §14 重命名优化 + §15 FileInfo 字段兼容 + §16 LocalIndexUpdated 桥接 + §15 Stale DB 索引误删 + 双节点 72h + Prometheus metrics + T3.1/T3.4 |
-| **v0.4.0** | 国密 TLS（SM2/SM3/SM4）+ 证书外部化 + SQLite WAL + 审计日志 + 跨版本互通自动化 |
-
-v0.3.0 路线图详见 [`NEXT_STEPS_2026-05-15.md`](./plans/NEXT_STEPS_2026-05-15.md)。
+| 版本 | 内容 |
+|------|------|
+| **v3.0.4** | ✅ §19 安全加固全部修复 + Relay Server v1 + WSS + 性能优化 |
+| **v3.1.0** | 72h 长跑验证 + Relay Server 完善(数据转发优化、WebSocket upgrade、CLI) + 结构化日志 |
+| **v3.2.0** | RBAC 多用户 + DB 静态加密 + 灾备流程 + 配置 Schema 版本化 |
+| **v4.0.0** | 国密评估 + FIPS 合规 + HA 集群 |
 
 ---
 

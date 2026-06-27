@@ -342,6 +342,25 @@ impl ConnectionManager {
         self.get_connection(device_id).is_some()
     }
 
+    /// 获取当前活跃连接总数
+    pub fn active_connection_count(&self) -> usize {
+        let mut count = 0usize;
+        for device_entry in self.connections.iter() {
+            for conn_entry in device_entry.value().iter() {
+                if conn_entry.value().conn.is_alive() {
+                    count += 1;
+                }
+            }
+        }
+        count
+    }
+
+    /// 检查是否可以接受新连接（基于 max_connections 配置）
+    pub fn can_accept_connection(&self) -> bool {
+        let current = self.active_connection_count();
+        current < self.config.max_connections
+    }
+
     /// 获取所有已连接的设备
     pub fn connected_devices(&self) -> Vec<DeviceId> {
         self.connections

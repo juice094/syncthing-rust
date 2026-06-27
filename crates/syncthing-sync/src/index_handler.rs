@@ -2,6 +2,7 @@
 //!
 //! 处理接收到的远程索引和索引更新消息
 
+use crate::block_server::validate_remote_name;
 use crate::conflict_resolver::{ConflictResolver, VersionComparison};
 use crate::database::LocalDatabase;
 use crate::error::{Result, SyncError};
@@ -9,7 +10,7 @@ use crate::events::{EventPublisher, SyncEvent};
 use std::path::Path;
 use std::sync::Arc;
 use syncthing_core::types::{FileInfo, Folder, Index, IndexUpdate};
-use tracing::{debug, info, trace};
+use tracing::{debug, info, trace, warn};
 
 /// 索引处理器
 pub struct IndexHandler {
@@ -101,6 +102,16 @@ impl IndexHandler {
         let mut needed_files = Vec::new();
 
         for remote_file in files {
+            // SAFETY: 防御路径穿越 — 拒绝来自远程对端的恶意文件名
+            if let Err(e) = validate_remote_name(&remote_file.name) {
+                warn!(
+                    file = %remote_file.name,
+                    error = %e,
+                    "Rejected remote file with invalid name (path traversal attempt?)"
+                );
+                continue; // 跳过恶意条目，不中断整个索引处理
+            }
+
             trace!(file = %remote_file.name, "Processing remote file info");
 
             match self.db.get_file(&folder.id, &remote_file.name).await? {

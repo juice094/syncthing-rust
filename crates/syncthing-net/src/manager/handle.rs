@@ -161,6 +161,16 @@ impl ConnectionManagerHandle {
         self.inner.stop().await
     }
 
+    /// 检查是否可以接受新连接（基于 max_connections 配置）
+    pub fn can_accept_connection(&self) -> bool {
+        self.inner.can_accept_connection()
+    }
+
+    /// 获取当前活跃连接总数
+    pub fn active_connection_count(&self) -> usize {
+        self.inner.active_connection_count()
+    }
+
     /// 获取统计信息
     pub fn stats(&self) -> ManagerStats {
         self.inner.stats()

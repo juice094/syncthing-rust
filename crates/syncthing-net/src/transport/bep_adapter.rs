@@ -145,7 +145,9 @@ impl DialConnector for TransportBepConnector {
         let _remote_hello = BepHandshaker::client_handshake(&mut tls_stream, device_name).await?;
 
         // 4. 创建 BEP 连接
-        let (event_tx, mut event_rx) = tokio::sync::mpsc::channel(256);
+        let (event_tx, mut event_rx) = tokio::sync::mpsc::channel(8);
+        // NOTE: 连接生命周期事件由 ConnectionManager::register_connection 上报；
+        // 此 drain task 仅防止 per-connection channel 在 burst 时阻塞发送端。
         tokio::spawn(async move { while event_rx.recv().await.is_some() {} });
         let tls_pipe = TlsPipe::new(tls_stream, local_addr, peer_addr);
         let conn =
@@ -255,7 +257,9 @@ impl BepTransportListener {
         let _remote_hello = BepHandshaker::server_handshake(&mut tls_stream, device_name).await?;
 
         // 创建 BEP 连接
-        let (event_tx, mut event_rx) = tokio::sync::mpsc::channel(256);
+        let (event_tx, mut event_rx) = tokio::sync::mpsc::channel(8);
+        // NOTE: 连接生命周期事件由 ConnectionManager::register_connection 上报；
+        // 此 drain task 仅防止 per-connection channel 在 burst 时阻塞发送端。
         tokio::spawn(async move { while event_rx.recv().await.is_some() {} });
         let tls_pipe = TlsPipe::new(tls_stream, local_addr, peer_addr);
         let conn =
