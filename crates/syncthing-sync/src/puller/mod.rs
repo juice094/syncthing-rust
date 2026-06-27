@@ -3,7 +3,12 @@
 //! 实现从远程设备下载文件的功能
 
 pub mod concurrency;
+pub(crate) mod ops;
+pub(crate) mod rename;
 pub use concurrency::{ConcurrencyPolicy, RttTracker};
+use ops::{content_hash, find_local_copy_source, recover_base_content};
+use rename::rename_with_retry;
+pub(crate) use rename::temp_path_for;
 
 use crate::block_server::validate_remote_name;
 use crate::database::LocalDatabase;
@@ -19,125 +24,6 @@ use syncthing_versioner::Versioner;
 use tokio::fs;
 use tokio::io::AsyncWriteExt;
 use tracing::{debug, error, info, trace, warn};
-
-/// 重试配置
-const RENAME_RETRY_BASE_DELAY_MS: u64 = 1000;
-const RENAME_RETRY_MAX_ATTEMPTS: u32 = 5;
-
-/// Windows-aware 原子重命名，带指数退避重试
-///
-/// 处理 Windows 上目标文件被其他进程锁定（杀毒软件、编辑器、桌面搜索等）
-/// 导致的 `ERROR_SHARING_VIOLATION` (32) 和 `ERROR_ACCESS_DENIED` (5)。
-///
-/// 策略:
-/// 1. 直接 rename
-/// 2. 失败 → remove(target) → rename
-/// 3. 仍失败 → 指数退避重试 (1s/2s/4s/8s)，最多 5 次
-/// 4. 最终失败 → 保留 .tmp，返回错误（下次 pull 周期再试）
-async fn rename_with_retry(temp_path: &Path, file_path: &Path, file_name: &str) -> Result<()> {
-    match fs::rename(temp_path, file_path).await {
-        Ok(()) => return Ok(()),
-        Err(e) => {
-            warn!(
-                file = %file_name,
-                error = %e,
-                raw_os_error = ?e.raw_os_error(),
-                "Initial rename failed, trying remove+rename fallback"
-            );
-        }
-    }
-
-    // Fallback: 先删目标再重命名
-    if file_path.exists() {
-        if let Err(e) = fs::remove_file(file_path).await {
-            warn!(
-                file = %file_name,
-                error = %e,
-                "Failed to remove target file before rename retry"
-            );
-        }
-    }
-
-    match fs::rename(temp_path, file_path).await {
-        Ok(()) => {
-            warn!(
-                file = %file_name,
-                "Rename succeeded after remove fallback"
-            );
-            return Ok(());
-        }
-        Err(e) => {
-            warn!(
-                file = %file_name,
-                error = %e,
-                raw_os_error = ?e.raw_os_error(),
-                "Rename failed after remove fallback, starting exponential backoff"
-            );
-        }
-    }
-
-    // 指数退避重试
-    let mut delay_ms = RENAME_RETRY_BASE_DELAY_MS;
-    for attempt in 1..=RENAME_RETRY_MAX_ATTEMPTS {
-        tokio::time::sleep(std::time::Duration::from_millis(delay_ms)).await;
-
-        // 每次重试前尝试删除目标（可能已解锁）
-        if file_path.exists() {
-            let _ = fs::remove_file(file_path).await;
-        }
-
-        match fs::rename(temp_path, file_path).await {
-            Ok(()) => {
-                warn!(
-                    file = %file_name,
-                    attempt = attempt,
-                    "Rename succeeded after retry"
-                );
-                return Ok(());
-            }
-            Err(e) => {
-                warn!(
-                    file = %file_name,
-                    attempt = attempt,
-                    delay_ms = delay_ms,
-                    error = %e,
-                    raw_os_error = ?e.raw_os_error(),
-                    "Rename retry failed"
-                );
-            }
-        }
-
-        delay_ms *= 2;
-    }
-
-    // 所有重试耗尽 —— 保留 .tmp，让下一次 pull 周期重试
-    error!(
-        file = %file_name,
-        temp = %temp_path.display(),
-        target = %file_path.display(),
-        "Rename exhausted all retries, preserving temp file for next pull cycle"
-    );
-
-    Err(SyncError::pull(
-        file_name.to_string(),
-        format!(
-            "Failed to rename file after {} retries (temp preserved at {})",
-            RENAME_RETRY_MAX_ATTEMPTS,
-            temp_path.display()
-        ),
-    ))
-}
-
-/// 生成与 block_server 对齐的临时文件路径
-/// 格式: `.syncthing.{filename}.tmp`
-pub(crate) fn temp_path_for(file_path: &Path) -> std::path::PathBuf {
-    let parent = file_path.parent().unwrap_or_else(|| Path::new("."));
-    let file_name = file_path
-        .file_name()
-        .and_then(|n| n.to_str())
-        .unwrap_or("unknown");
-    parent.join(format!(".syncthing.{}.tmp", file_name))
-}
 
 /// 块数据源 trait
 #[async_trait::async_trait]
@@ -399,7 +285,7 @@ impl Puller {
 
         // P1: 重命名优化——如果本地有相同块哈希的文件，直接复制
         if let Some(source_path) =
-            Self::find_local_copy_source(folder_path, file_info, db, folder_id).await?
+            find_local_copy_source(folder_path, file_info, db, folder_id).await?
         {
             info!(file = %file_info.name, source = %source_path.display(), "Copying from local file (rename optimization)");
             if let Some(parent) = file_path.parent() {
@@ -586,7 +472,7 @@ impl Puller {
                         if let Some(v) = versioner {
                             debug!("Attempting base content recovery for three-way merge");
                             if let Some(base_content) =
-                                Self::recover_base_content(&**v, &file_path, base).await
+                                recover_base_content(&**v, &file_path, base).await
                             {
                                 debug!("Base recovered, performing three-way merge");
                                 let merged = three_way_merge(
@@ -611,7 +497,7 @@ impl Puller {
                                         "Three-way merge completed"
                                     );
                                     // 更新 base_version 为合并结果
-                                    let hash = Self::content_hash(merged.content.as_bytes());
+                                    let hash = content_hash(merged.content.as_bytes());
                                     merged_info.base_version = Some(FileInfoBase {
                                         size: merged.content.len() as i64,
                                         modified_s: file_info.modified_s,
@@ -662,108 +548,6 @@ impl Puller {
 
         info!(file = %file_info.name, "File download completed");
         Ok(())
-    }
-
-    /// 从 versioner 归档中恢复 base 版本内容
-    ///
-    /// 通过 content_hash 匹配，而不是文件修改时间，因为归档文件的 mtime
-    /// 通常由 archive 时刻决定，不一定与原始 base 版本相同。
-    async fn recover_base_content(
-        versioner: &dyn Versioner,
-        file_path: &Path,
-        base: &FileInfoBase,
-    ) -> Option<String> {
-        let expected_hash = base.content_hash.as_ref()?;
-        trace!(?expected_hash, "Recovering base content from versioner");
-        let versions = versioner.get_versions(file_path).await.ok()?;
-        debug!(
-            version_count = versions.len(),
-            "Candidate versions for base recovery"
-        );
-        for version in versions {
-            trace!(
-                version_time = ?version.version_time,
-                size = version.size,
-                "Checking version candidate"
-            );
-            // 使用临时目录 restore，避免覆盖本地文件
-            let tmp_dir = std::env::temp_dir().join(format!(
-                "syncthing-base-{}-{:x}",
-                std::process::id(),
-                version
-                    .version_time
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .unwrap_or_default()
-                    .as_secs()
-            ));
-            let _ = std::fs::create_dir_all(&tmp_dir);
-            let file_name = file_path.file_name().and_then(|n| n.to_str())?;
-            let tmp_path = tmp_dir.join(file_name);
-            trace!(tmp_path = %tmp_path.display(), "Attempting restore to temp path");
-            match versioner.restore(&tmp_path, version.version_time).await {
-                Ok(()) => {
-                    if let Ok(content) = fs::read(&tmp_path).await {
-                        let hash = sha2::Sha256::digest(&content).to_vec();
-                        trace!(
-                            restored_hash = ?hash,
-                            expected_hash = ?expected_hash,
-                            "Hash comparison for base recovery"
-                        );
-                        if hash == *expected_hash {
-                            let content = String::from_utf8(content).ok();
-                            let _ = std::fs::remove_dir_all(&tmp_dir);
-                            return content;
-                        }
-                    }
-                    let _ = std::fs::remove_dir_all(&tmp_dir);
-                }
-                Err(e) => {
-                    warn!(error = %e, "Restore failed for base recovery candidate");
-                    let _ = std::fs::remove_dir_all(&tmp_dir);
-                }
-            }
-        }
-        None
-    }
-
-    /// 计算字节数组的内容哈希
-    fn content_hash(data: &[u8]) -> Vec<u8> {
-        use sha2::{Digest, Sha256};
-        Sha256::digest(data).to_vec()
-    }
-
-    /// 查找本地具有相同块哈希的文件（重命名优化）
-    async fn find_local_copy_source(
-        folder_path: &Path,
-        file_info: &FileInfo,
-        db: &dyn LocalDatabase,
-        folder_id: &str,
-    ) -> Result<Option<std::path::PathBuf>> {
-        if file_info.blocks.is_empty() || file_info.is_deleted() {
-            return Ok(None);
-        }
-
-        let db_files = db.get_folder_files(folder_id).await?;
-        for db_file in db_files {
-            if db_file.is_deleted() || db_file.name == file_info.name {
-                continue;
-            }
-            if db_file.blocks.len() != file_info.blocks.len() {
-                continue;
-            }
-            let same_blocks = db_file
-                .blocks
-                .iter()
-                .zip(file_info.blocks.iter())
-                .all(|(a, b)| a.hash == b.hash);
-            if same_blocks {
-                let source_path = folder_path.join(&db_file.name);
-                if source_path.exists() && source_path.is_file() {
-                    return Ok(Some(source_path));
-                }
-            }
-        }
-        Ok(None)
     }
 
     /// 创建目录
