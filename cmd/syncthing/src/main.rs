@@ -180,6 +180,7 @@ mod cli_relay_server;
 mod cli_status;
 mod config_validation;
 mod init_wizard;
+mod logging;
 mod logging_buffer;
 mod single_instance;
 #[cfg(all(windows, feature = "tray"))]
@@ -351,34 +352,7 @@ async fn run() -> Result<()> {
             listen,
             device_name,
         } => {
-            // H-2: 日志按小时轮转，保留 7 天（168 文件），防止单日无限膨胀
-            let logs_dir = config_dir.join("logs");
-            if let Err(e) = std::fs::create_dir_all(&logs_dir) {
-                eprintln!("Warning: cannot create logs dir: {}", e);
-            }
-            let file_appender = tracing_appender::rolling::Builder::new()
-                .rotation(tracing_appender::rolling::Rotation::HOURLY)
-                .max_log_files(168)
-                .filename_prefix("daemon")
-                .filename_suffix("log")
-                .build(&logs_dir)
-                .unwrap_or_else(|e| {
-                    eprintln!(
-                        "Warning: cannot create rolling file appender: {}. Falling back to TMP.",
-                        e
-                    );
-                    tracing_appender::rolling::hourly(std::env::temp_dir(), "syncthing-fallback")
-                });
-            let (non_blocking, _guard) = tracing_appender::non_blocking(file_appender);
-            let subscriber = tracing_subscriber::registry().with(
-                tracing_subscriber::fmt::layer()
-                    .with_writer(non_blocking)
-                    .with_filter(tracing_subscriber::filter::LevelFilter::from_level(
-                        log_level,
-                    )),
-            );
-            tracing::subscriber::set_global_default(subscriber)
-                .map_err(|e| anyhow::anyhow!("Failed to set subscriber: {}", e))?;
+            logging::init_daemon_logging(&config_dir, log_level)?;
             let (listen, device_name) =
                 resolve_daemon_config(&config_dir, listen, device_name, false)?;
             match tui::daemon_runner::start_daemon(config_dir.clone(), listen, device_name).await {
@@ -582,7 +556,7 @@ async fn run() -> Result<()> {
                 .with_context(|| format!("create config dir {}", config_dir.display()))?;
 
             // Tray mode: file-only logging (no console)
-            init_tray_logging(&config_dir);
+            logging::init_tray_logging(&config_dir);
 
             let (listen, device_name) = resolve_daemon_config(
                 &config_dir,
@@ -1043,7 +1017,8 @@ async fn run_tui_mode(
             let memory_layer = logging_buffer::MemoryLayer::new(memory_buffer.clone());
             // TUI 模式下 stdout 已被 crossterm 接管，因此把日志同时写入文件和内存缓冲区。
             // 文件日志固定 DEBUG 级别，便于诊断布局/启动问题；内存日志仍按用户选择过滤。
-            let (tui_file_writer, _tui_log_guard) = init_tui_file_writer(&config_dir_for_local);
+            let (tui_file_writer, _tui_log_guard) =
+                logging::init_tui_file_writer(&config_dir_for_local);
             let subscriber = tracing_subscriber::registry()
                 .with(
                     tracing_subscriber::fmt::layer()
@@ -1133,69 +1108,6 @@ async fn request_tray_open_tui(config_dir: &Path) -> bool {
 }
 
 /// 初始化 TUI 文件日志 appender，返回非阻塞 writer 与 guard。
-///
-/// Guard 需要被调用者持有，防止 tracing_appender 工作线程在 TUI 运行期间被 drop。
-fn init_tui_file_writer(
-    config_dir: &Path,
-) -> (
-    tracing_appender::non_blocking::NonBlocking,
-    tracing_appender::non_blocking::WorkerGuard,
-) {
-    let logs_dir = config_dir.join("logs");
-    if let Err(e) = std::fs::create_dir_all(&logs_dir) {
-        eprintln!("Cannot create TUI logs dir: {}", e);
-    }
-
-    let file_appender = tracing_appender::rolling::Builder::new()
-        .rotation(tracing_appender::rolling::Rotation::DAILY)
-        .max_log_files(7)
-        .filename_prefix("tui")
-        .filename_suffix("log")
-        .build(&logs_dir)
-        .unwrap_or_else(|e| {
-            eprintln!("Failed to create TUI log appender: {}. Using temp dir.", e);
-            tracing_appender::rolling::daily(std::env::temp_dir(), "syncthing-tui-fallback")
-        });
-
-    tracing_appender::non_blocking(file_appender)
-}
-
-#[cfg(all(windows, feature = "tray"))]
-fn init_tray_logging(config_dir: &Path) {
-    let logs_dir = config_dir.join("logs");
-    if let Err(e) = std::fs::create_dir_all(&logs_dir) {
-        eprintln!("Cannot create logs dir: {}", e);
-        return;
-    }
-
-    let file_appender = tracing_appender::rolling::Builder::new()
-        .rotation(tracing_appender::rolling::Rotation::DAILY)
-        .max_log_files(7)
-        .filename_prefix("tray")
-        .filename_suffix("log")
-        .build(&logs_dir)
-        .unwrap_or_else(|e| {
-            eprintln!("Failed to create tray log appender: {}. Using temp dir.", e);
-            tracing_appender::rolling::daily(std::env::temp_dir(), "syncthing-tray-fallback")
-        });
-
-    let (non_blocking, _guard) = tracing_appender::non_blocking(file_appender);
-    // SAFETY: std::mem::forget 防止 _guard 的 Drop 阻塞进程退出。
-    // tracing_appender::non_blocking 的 guard 在 drop 时会 flush 缓冲区，
-    // 但在托盘场景中进程退出由 Win32 消息驱动，drop 时机不可控。
-    // forget 允许 OS 直接回收内存和线程，丢失少量日志是可接受的。
-    std::mem::forget(_guard);
-
-    let subscriber = tracing_subscriber::registry().with(
-        tracing_subscriber::fmt::layer()
-            .with_writer(non_blocking)
-            .with_filter(tracing_subscriber::filter::LevelFilter::INFO),
-    );
-    if let Err(e) = tracing::subscriber::set_global_default(subscriber) {
-        eprintln!("Failed to set tray logger: {}", e);
-    }
-}
-
 #[cfg(all(windows, feature = "tray"))]
 async fn tray_status_loop(
     mut client: tray_api::DaemonClient,
