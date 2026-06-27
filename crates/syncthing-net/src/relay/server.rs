@@ -51,7 +51,7 @@ struct Client {
     /// 协议模式 TLS 连接的写入端
     writer:
         Arc<tokio::sync::Mutex<tokio::io::WriteHalf<tokio_rustls::server::TlsStream<TcpStream>>>>,
-    /// 待处理的连接请求（会话配对用，wip）
+    /// 待处理的连接请求
     pending_connect: HashMap<DeviceId, oneshot::Sender<()>>,
 }
 
