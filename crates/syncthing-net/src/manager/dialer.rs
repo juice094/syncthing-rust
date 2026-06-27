@@ -16,9 +16,28 @@ impl ConnectionManager {
         addresses: Vec<SocketAddr>,
         relay_urls: Vec<String>,
     ) -> syncthing_core::Result<()> {
+        // SAFETY: SSRF防护 — 过滤来自不可信来源（discovery/relay/config）的危险地址
+        let safe_addresses: Vec<SocketAddr> = addresses
+            .into_iter()
+            .filter(|addr| {
+                if let Err(e) = crate::tcp_transport::validate_outbound_addr(addr) {
+                    warn!(
+                        device = %device_id,
+                        address = %addr,
+                        error = %e,
+                        "Filtering out unsafe address from device address pool"
+                    );
+                    false
+                } else {
+                    true
+                }
+            })
+            .collect();
+
         // 持久化地址和 relay URL（必须在 is_connected 检查之前，
         // 否则已有直连时 relay URL 不会被存储，断开后 dial 无 relay 候选）
-        self.device_addresses.insert(device_id, addresses.clone());
+        self.device_addresses
+            .insert(device_id, safe_addresses.clone());
         if !relay_urls.is_empty() {
             self.device_relay_urls.insert(device_id, relay_urls.clone());
         }
@@ -49,7 +68,7 @@ impl ConnectionManager {
                 device_id,
                 super::PendingConnection {
                     device_id,
-                    addresses: addresses.clone(),
+                    addresses: safe_addresses.clone(),
                     relay_urls: relay_urls.clone(),
                     retry_count,
                     last_attempt: Some(std::time::Instant::now()),
@@ -75,7 +94,13 @@ impl ConnectionManager {
         };
 
         // 启动连接任务（必须在释放 pending write lock 之后，避免任务执行时死锁）
-        self.spawn_connect_task(device_id, addresses, relay_urls, cancel_rx, handshake_guard);
+        self.spawn_connect_task(
+            device_id,
+            safe_addresses,
+            relay_urls,
+            cancel_rx,
+            handshake_guard,
+        );
 
         Ok(())
     }

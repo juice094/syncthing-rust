@@ -304,14 +304,15 @@ impl BepConnection {
     }
 
     pub async fn send_index(&self, index: &syncthing_core::Index) -> Result<()> {
-        let wire: bep_protocol::messages::Index = index.clone().into();
+        // 使用 From<&Index> 避免 .clone() + .into() 双重分配
+        let wire: bep_protocol::messages::Index = index.into();
         let payload = bep_protocol::messages::encode_message(&wire)
             .map_err(|e| SyncthingError::Serialization(e.to_string()))?;
         self.send_message(MessageType::Index, payload).await
     }
 
     pub async fn send_index_update(&self, update: &syncthing_core::IndexUpdate) -> Result<()> {
-        let wire: bep_protocol::messages::IndexUpdate = update.clone().into();
+        let wire: bep_protocol::messages::IndexUpdate = update.into();
         let payload = bep_protocol::messages::encode_message(&wire)
             .map_err(|e| SyncthingError::Serialization(e.to_string()))?;
         self.send_message(MessageType::IndexUpdate, payload).await

@@ -141,6 +141,22 @@ impl SyncthingTlsConfig {
             .await
             .map_err(|e| SyncthingError::Tls(format!("failed to write key file: {}", e)))?;
 
+        // SAFETY: 加固私钥文件权限，防止多用户系统上其他用户读取
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mode_0600 = std::fs::Permissions::from_mode(0o600);
+            if let Err(e) = tokio::fs::set_permissions(&key_path, mode_0600.clone()).await {
+                warn!(
+                    path = %key_path.display(),
+                    error = %e,
+                    "Failed to set restrictive permissions on private key file"
+                );
+            }
+            // 证书文件也限制为仅所有者读写（不含公钥敏感信息，但保守处理）
+            let _ = tokio::fs::set_permissions(&cert_path, mode_0600).await;
+        }
+
         info!("New certificate saved to {:?}", cert_path);
 
         // 加载刚保存的证书
@@ -163,6 +179,15 @@ impl SyncthingTlsConfig {
             .with_custom_certificate_verifier(Arc::new(SyncthingCertVerifier))
             .with_client_auth_cert(self.cert_chain.clone(), self.private_key.clone_key())?;
         config.alpn_protocols = vec![b"bep/1.0".to_vec()];
+        Ok(config)
+    }
+
+    /// Relay Protocol 服务端配置（ALPN = `bep-relay`）
+    pub fn relay_server_config(&self) -> std::result::Result<ServerConfig, rustls::Error> {
+        let mut config = ServerConfig::builder()
+            .with_client_cert_verifier(Arc::new(SyncthingClientCertVerifier))
+            .with_single_cert(self.cert_chain.clone(), self.private_key.clone_key())?;
+        config.alpn_protocols = vec![b"bep-relay".to_vec()];
         Ok(config)
     }
 

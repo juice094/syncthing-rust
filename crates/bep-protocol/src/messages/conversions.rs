@@ -130,6 +130,24 @@ impl From<syncthing_core::types::Index> for Index {
     }
 }
 
+// 引用版本：避免 send_index() 中的 .clone() + .into() 双重分配
+impl From<&syncthing_core::types::Index> for Index {
+    fn from(idx: &syncthing_core::types::Index) -> Self {
+        let last_sequence = idx
+            .files
+            .iter()
+            .map(|f| f.sequence)
+            .max()
+            .unwrap_or(0)
+            .min(i64::MAX as u64) as i64;
+        Self {
+            folder: idx.folder.clone(),
+            files: idx.files.iter().map(|f| f.clone().into()).collect(),
+            last_sequence,
+        }
+    }
+}
+
 impl From<Index> for syncthing_core::types::Index {
     fn from(idx: Index) -> Self {
         Self {
@@ -152,6 +170,26 @@ impl From<syncthing_core::types::IndexUpdate> for IndexUpdate {
         Self {
             folder: upd.folder,
             files: upd.files.into_iter().map(Into::into).collect(),
+            last_sequence: last_sequence.min(i64::MAX as u64) as i64,
+            prev_sequence: prev_sequence.min(i64::MAX as u64) as i64,
+        }
+    }
+}
+
+// 引用版本：避免 send_index_update() 中的 .clone() + .into() 双重分配
+impl From<&syncthing_core::types::IndexUpdate> for IndexUpdate {
+    fn from(upd: &syncthing_core::types::IndexUpdate) -> Self {
+        let sequences: Vec<u64> = upd.files.iter().map(|f| f.sequence).collect();
+        let last_sequence = sequences.iter().copied().max().unwrap_or(0);
+        let prev_sequence = sequences.iter().copied().min().unwrap_or(0);
+        let prev_sequence = if prev_sequence > 0 {
+            prev_sequence - 1
+        } else {
+            0
+        };
+        Self {
+            folder: upd.folder.clone(),
+            files: upd.files.iter().map(|f| f.clone().into()).collect(),
             last_sequence: last_sequence.min(i64::MAX as u64) as i64,
             prev_sequence: prev_sequence.min(i64::MAX as u64) as i64,
         }

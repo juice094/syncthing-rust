@@ -96,7 +96,8 @@ pub async fn connect_bep_via_relay(
     debug!("Relay session mode connected to {}", session_addr);
 
     // 5. 在 session stream 上启动 BEP TLS 握手 + Hello + 创建连接
-    let (event_tx, mut event_rx) = tokio::sync::mpsc::channel(256);
+    let (event_tx, mut event_rx) = tokio::sync::mpsc::channel(8);
+    // NOTE: 连接生命周期通过 ConnectionManager 上报；drain 仅防止 channel 阻塞。
     tokio::spawn(async move { while event_rx.recv().await.is_some() {} });
 
     let conn = if invitation.server_socket {
@@ -201,20 +202,41 @@ pub fn parse_relay_url(url: &str) -> Result<(SocketAddr, DeviceId)> {
 /// 解析 session 地址
 ///
 /// 如果 invitation.address 为空，回退到 protocol mode 连接的同一 IP。
+///
+/// SAFETY: 验证 relay 提供的 session 地址，防止恶意 relay 将客户端
+/// 重定向到内网地址 (SSRF)。
 pub fn resolve_session_addr(
     protocol_addr: SocketAddr,
     invitation: &SessionInvitation,
 ) -> Result<SocketAddr> {
-    if invitation.address.is_empty() {
+    let addr = if invitation.address.is_empty() {
         let ip = protocol_addr.ip();
-        Ok(SocketAddr::new(ip, invitation.port as u16))
+        SocketAddr::new(ip, invitation.port as u16)
     } else {
         let addr_str = String::from_utf8_lossy(&invitation.address);
         let ip: std::net::IpAddr = addr_str
             .parse()
             .map_err(|e| SyncthingError::network(format!("invalid session address: {}", e)))?;
-        Ok(SocketAddr::new(ip, invitation.port as u16))
+        SocketAddr::new(ip, invitation.port as u16)
+    };
+
+    // SAFETY: SSRF防护 — 拒绝 relay 将客户端重定向到危险地址
+    if addr.ip().is_loopback() || addr.ip().is_multicast() || addr.ip().is_unspecified() {
+        return Err(SyncthingError::network(format!(
+            "SSRF prevention: relay attempted to redirect to unsafe address {}",
+            addr
+        )));
     }
+    if let std::net::IpAddr::V4(v4) = addr.ip() {
+        if v4.is_link_local() {
+            return Err(SyncthingError::network(format!(
+                "SSRF prevention: relay attempted to redirect to link-local address {}",
+                addr
+            )));
+        }
+    }
+
+    Ok(addr)
 }
 
 #[cfg(test)]

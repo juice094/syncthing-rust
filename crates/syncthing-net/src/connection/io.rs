@@ -9,7 +9,7 @@ use bytes::Bytes;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::sync::{mpsc, Mutex};
 use tokio::time::timeout;
-use tracing::{debug, warn};
+use tracing::{debug, trace, warn};
 
 use crate::connection::{BepConnection, ConnectionEvent, Message};
 use crate::protocol::MessageHeader;
@@ -31,6 +31,11 @@ impl BepConnection {
                 .await
                 .take()
                 .expect("INVARIANT: start_reader called only once per connection");
+            // 空闲超时计数器 — 当 header length read 连续超时 3 次后，
+            // 判定连接已死，避免在僵尸连接上无限自旋。
+            let mut idle_timeouts: u32 = 0;
+            const MAX_IDLE_TIMEOUTS: u32 = 3;
+
             loop {
                 // 读取 2 字节 header length
                 let mut hdr_len_buf = [0u8; 2];
@@ -40,9 +45,22 @@ impl BepConnection {
                 )
                 .await
                 {
-                    Ok(Ok(_)) => {}
+                    Ok(Ok(_)) => {
+                        idle_timeouts = 0; // 有数据到达，重置计数器
+                    }
                     Ok(Err(e)) => return Err(SyncthingError::Io(e)),
-                    Err(_) => {
+                    Err(_elapsed) => {
+                        idle_timeouts += 1;
+                        if idle_timeouts >= MAX_IDLE_TIMEOUTS {
+                            return Err(SyncthingError::timeout(
+                                "connection idle timeout — no header received after 3 intervals",
+                            ));
+                        }
+                        trace!(
+                            idle_timeouts,
+                            max = MAX_IDLE_TIMEOUTS,
+                            "Header length read timeout, continuing"
+                        );
                         continue;
                     }
                 }

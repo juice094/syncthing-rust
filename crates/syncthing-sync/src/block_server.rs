@@ -50,13 +50,19 @@ impl std::fmt::Display for BlockRequestError {
 
 impl std::error::Error for BlockRequestError {}
 
-/// 校验并规范化文件路径中的 name 段
+/// 校验文件 name 字符串（不构建 PathBuf）
 ///
-/// BEP 的 req.name 使用 '/' 作为分隔符。我们需要确保：
-/// - 不包含 '..' 段
-/// - 不以 '/' 开头（绝对路径）
-/// - 不包含空段或含空字节的段
-fn sanitize_name(name: &str) -> Result<PathBuf, BlockRequestError> {
+/// BEP 的 name 使用 '/' 作为分隔符。拒绝：
+/// - 空字符串
+/// - 以 '/' 或 '\\' 开头（绝对路径）
+/// - 包含 '\0'（空字节）
+/// - 包含 ".." 段（父目录穿越）
+/// - 包含 "." 段
+/// - 包含空段、反斜杠段
+///
+/// SAFETY: 此函数必须在所有从远程接收的 file_info.name 上调用，
+/// 以防止路径穿越攻击将文件写出同步目录之外。
+pub(crate) fn validate_remote_name(name: &str) -> Result<(), BlockRequestError> {
     if name.is_empty() {
         return Err(BlockRequestError::InvalidFileName);
     }
@@ -66,16 +72,27 @@ fn sanitize_name(name: &str) -> Result<PathBuf, BlockRequestError> {
     if name.contains('\0') {
         return Err(BlockRequestError::InvalidFileName);
     }
-
-    let mut result = PathBuf::new();
     for segment in name.split('/') {
         if segment.is_empty() || segment == "." || segment == ".." {
             return Err(BlockRequestError::InvalidFileName);
         }
-        // Windows 上也可能出现反斜杠，统一拒绝
         if segment.contains('\\') {
             return Err(BlockRequestError::InvalidFileName);
         }
+    }
+    Ok(())
+}
+
+/// 校验并规范化文件路径中的 name 段
+///
+/// BEP 的 req.name 使用 '/' 作为分隔符。我们需要确保：
+/// - 不包含 '..' 段
+/// - 不以 '/' 开头（绝对路径）
+/// - 不包含空段或含空字节的段
+fn sanitize_name(name: &str) -> Result<PathBuf, BlockRequestError> {
+    validate_remote_name(name)?;
+    let mut result = PathBuf::new();
+    for segment in name.split('/') {
         result.push(segment);
     }
     Ok(result)

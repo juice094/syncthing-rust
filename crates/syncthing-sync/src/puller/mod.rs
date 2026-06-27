@@ -5,6 +5,7 @@
 pub mod concurrency;
 pub use concurrency::{ConcurrencyPolicy, RttTracker};
 
+use crate::block_server::validate_remote_name;
 use crate::database::LocalDatabase;
 use crate::error::{Result, SyncError};
 use crate::events::{EventPublisher, ItemAction, SyncEvent};
@@ -372,6 +373,14 @@ impl Puller {
         max_concurrent_blocks: usize,
         versioner: Option<&Arc<dyn Versioner>>,
     ) -> Result<()> {
+        // SAFETY: 防御路径穿越 — 拒绝来自远程对端的恶意文件名
+        validate_remote_name(&file_info.name).map_err(|e| {
+            SyncError::pull(
+                file_info.name.clone(),
+                format!("Invalid remote file name (path traversal rejected): {}", e),
+            )
+        })?;
+
         debug!(file = %file_info.name, size = file_info.size, blocks = file_info.blocks.len(), max_concurrent = max_concurrent_blocks, "Downloading file");
 
         let file_path = folder_path.join(&file_info.name);
@@ -560,12 +569,12 @@ impl Puller {
         // 在覆盖前尝试三路合并（文本文件且本地 DB 有 base_version 时）
         let mut merged_info = file_info.clone();
         let local_info = db.get_file(folder_id, &file_info.name).await.ok().flatten();
-        eprintln!(
-            "[puller] file={} exists={} base={:?} versioner={}",
-            file_info.name,
-            file_path.exists(),
-            local_info.as_ref().and_then(|i| i.base_version.as_ref()),
-            versioner.is_some()
+        debug!(
+            file = %file_info.name,
+            exists = file_path.exists(),
+            has_base = local_info.as_ref().and_then(|i| i.base_version.as_ref()).is_some(),
+            has_versioner = versioner.is_some(),
+            "Checking merge preconditions"
         );
         if file_path.exists() {
             if let Some(base) = local_info.as_ref().and_then(|i| i.base_version.as_ref()) {
@@ -575,18 +584,23 @@ impl Puller {
                         fs::read_to_string(&temp_path).await,
                     ) {
                         if let Some(v) = versioner {
-                            eprintln!("[puller] attempting recover base");
+                            debug!("Attempting base content recovery for three-way merge");
                             if let Some(base_content) =
                                 Self::recover_base_content(&**v, &file_path, base).await
                             {
-                                eprintln!("[puller] base recovered, merging...");
+                                debug!("Base recovered, performing three-way merge");
                                 let merged = three_way_merge(
                                     &base_content,
                                     &local_content,
                                     &remote_content,
                                     &file_info.name,
                                 );
-                                eprintln!("[puller] merged content: {}", merged.content);
+                                debug!(
+                                    file = %file_info.name,
+                                    merged_len = merged.content.len(),
+                                    conflicts = merged.conflict_count,
+                                    "Three-way merge result computed"
+                                );
                                 if let Err(e) = fs::write(&temp_path, &merged.content).await {
                                     warn!(file = %file_info.name, error = %e, "Failed to write merged content");
                                 } else {
@@ -660,13 +674,17 @@ impl Puller {
         base: &FileInfoBase,
     ) -> Option<String> {
         let expected_hash = base.content_hash.as_ref()?;
-        eprintln!("[recover] expected_hash={:?}", expected_hash);
+        trace!(?expected_hash, "Recovering base content from versioner");
         let versions = versioner.get_versions(file_path).await.ok()?;
-        eprintln!("[recover] versions={}", versions.len());
+        debug!(
+            version_count = versions.len(),
+            "Candidate versions for base recovery"
+        );
         for version in versions {
-            eprintln!(
-                "[recover] version_time={:?} size={}",
-                version.version_time, version.size
+            trace!(
+                version_time = ?version.version_time,
+                size = version.size,
+                "Checking version candidate"
             );
             // 使用临时目录 restore，避免覆盖本地文件
             let tmp_dir = std::env::temp_dir().join(format!(
@@ -681,15 +699,15 @@ impl Puller {
             let _ = std::fs::create_dir_all(&tmp_dir);
             let file_name = file_path.file_name().and_then(|n| n.to_str())?;
             let tmp_path = tmp_dir.join(file_name);
-            eprintln!("[recover] trying restore to {:?}", tmp_path);
+            trace!(tmp_path = %tmp_path.display(), "Attempting restore to temp path");
             match versioner.restore(&tmp_path, version.version_time).await {
                 Ok(()) => {
                     if let Ok(content) = fs::read(&tmp_path).await {
-                        let text = String::from_utf8_lossy(&content);
                         let hash = sha2::Sha256::digest(&content).to_vec();
-                        eprintln!(
-                            "[recover] restored content={:?} hash={:?} expected={:?}",
-                            text, hash, expected_hash
+                        trace!(
+                            restored_hash = ?hash,
+                            expected_hash = ?expected_hash,
+                            "Hash comparison for base recovery"
                         );
                         if hash == *expected_hash {
                             let content = String::from_utf8(content).ok();
@@ -700,7 +718,7 @@ impl Puller {
                     let _ = std::fs::remove_dir_all(&tmp_dir);
                 }
                 Err(e) => {
-                    eprintln!("[recover] restore failed: {}", e);
+                    warn!(error = %e, "Restore failed for base recovery candidate");
                     let _ = std::fs::remove_dir_all(&tmp_dir);
                 }
             }
@@ -750,6 +768,17 @@ impl Puller {
 
     /// 创建目录
     async fn create_directory(folder_path: &Path, file_info: &FileInfo) -> Result<()> {
+        // SAFETY: 防御路径穿越
+        validate_remote_name(&file_info.name).map_err(|e| {
+            SyncError::pull(
+                file_info.name.clone(),
+                format!(
+                    "Invalid remote directory name (path traversal rejected): {}",
+                    e
+                ),
+            )
+        })?;
+
         let dir_path = folder_path.join(&file_info.name);
 
         if dir_path.exists() {
@@ -779,6 +808,17 @@ impl Puller {
         db: &dyn LocalDatabase,
         folder_id: &str,
     ) -> Result<()> {
+        // SAFETY: 防御路径穿越
+        validate_remote_name(&file_info.name).map_err(|e| {
+            SyncError::pull(
+                file_info.name.clone(),
+                format!(
+                    "Invalid remote file name for deletion (path traversal rejected): {}",
+                    e
+                ),
+            )
+        })?;
+
         debug!(file = %file_info.name, "Deleting file");
 
         let file_path = folder_path.join(&file_info.name);

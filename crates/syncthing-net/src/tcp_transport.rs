@@ -118,6 +118,15 @@ impl SyncthingTcpListener {
                         Ok((stream, peer_addr)) => {
                             debug!("Incoming TCP connection from {}", peer_addr);
 
+                            // 连接限流：达到 max_connections 上限时拒绝新连接
+                            if !self.manager.can_accept_connection() {
+                                warn!(
+                                    "Connection limit reached, rejecting incoming from {}",
+                                    peer_addr
+                                );
+                                continue;
+                            }
+
                             // 处理新连接
                             let manager = self.manager.clone();
                             let local_device_id = self.local_device_id;
@@ -199,8 +208,10 @@ impl SyncthingTcpListener {
             crate::handshaker::BepHandshaker::server_handshake(&mut tls_stream, &device_name)
                 .await?;
 
-        // 创建BEP连接（先不关联设备ID）
-        let (event_tx, mut event_rx) = tokio::sync::mpsc::channel(256);
+        // 创建BEP连接 — 连接生命周期事件通过 ConnectionManager::register_connection
+        // 上报，此 per-connection channel 用于缓冲区；消费端有意丢弃事件。
+        // 容量设为 8 以减少内存占用，同时防止发送端在 burst 时阻塞。
+        let (event_tx, mut event_rx) = tokio::sync::mpsc::channel(8);
         tokio::spawn(async move { while event_rx.recv().await.is_some() {} });
 
         let conn = BepConnection::new(
@@ -235,6 +246,49 @@ impl SyncthingTcpListener {
         );
         Ok(())
     }
+}
+
+/// 验证出站地址是否安全可拨号（SSRF防护）
+///
+/// 拒绝以下地址类别以防止 SSRF：
+/// - Multicast (224.0.0.0/4, ff00::/8)
+/// - Unspecified (0.0.0.0, ::)
+/// - Link-local (169.254.0.0/16, fe80::/10) — 仅在非 relay 路径中
+///
+/// NOTE: Loopback (127.0.0.0/8, ::1) **不**被拒绝 — 同主机上的
+/// syncthing 实例是合法使用场景。私有地址 (10.0.0.0/8, 172.16.0.0/12,
+/// 192.168.0.0/16, fc00::/7) 在政企内网场景中是合法的。
+///
+/// 此函数应在**不可信地址来源**（discovery、relay、外部配置）的入口处调用。
+pub(crate) fn validate_outbound_addr(addr: &SocketAddr) -> Result<()> {
+    let ip = addr.ip();
+    if ip.is_multicast() {
+        return Err(SyncthingError::config(format!(
+            "SSRF prevention: refusing to dial multicast address {}",
+            addr
+        )));
+    }
+    if ip.is_unspecified() {
+        return Err(SyncthingError::config(format!(
+            "SSRF prevention: refusing to dial unspecified address {}",
+            addr
+        )));
+    }
+    // 检查 link-local（IpAddr::is_link_local 尚未稳定，按地址族分派）
+    let is_link_local = match ip {
+        std::net::IpAddr::V4(v4) => v4.is_link_local(),
+        std::net::IpAddr::V6(v6) => {
+            let segments = v6.segments();
+            segments[0] & 0xffc0 == 0xfe80
+        }
+    };
+    if is_link_local {
+        return Err(SyncthingError::config(format!(
+            "SSRF prevention: refusing to dial link-local address {}",
+            addr
+        )));
+    }
+    Ok(())
 }
 
 /// 建立单个TCP连接并完成BEP握手
