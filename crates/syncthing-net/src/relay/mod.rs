@@ -28,4 +28,5 @@ pub use protocol::{
     ConnectRequest, Header, JoinRelayRequest, JoinSessionRequest, Message, MessageType, Ping, Pong,
     RelayFull, Response, SessionInvitation, MAGIC,
 };
+pub use server::RelayServer;
 pub use types::{RelayError, Result as RelayResult};
