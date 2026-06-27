@@ -10,7 +10,7 @@ This file provides quick guidance to Claude Code (claude.ai/code) when working w
 
 ## Project Identity
 
-`syncthing-rust` is a Rust reimplementation of the Syncthing BEP protocol for P2P file sync — zero runtime deps, single static binary, wire-compatible with Go Syncthing. Currently **v3.0.3** (production-grade), deployed on ROG-X (Windows 11) ↔ Gray-Cloud (Ubuntu 24.04) via Tailscale.
+`syncthing-rust` is a Rust reimplementation of the Syncthing BEP protocol for P2P file sync — zero runtime deps, single static binary, wire-compatible with Go Syncthing. Currently **v3.0.4** (security-hardened), deployed on ROG-X (Windows 11) ↔ Gray-Cloud (Ubuntu 24.04) via self-hosted relay (replacing Tailscale).
 
 ---
 
@@ -56,6 +56,9 @@ Full DAG, runtime components, and key entry points: [`docs/design/topology.md`](
 - No QUIC / MagicSocket / Web GUI / consensus / reputation / custom crypto.
 - Network-layer changes must be validated with dual `TestNode` instances.
 - New end-to-end behavior needs integration or E2E tests, not just `#[cfg(test)]` unit tests.
+- **Security**: All remote file names must pass `validate_remote_name()` (path traversal defense).
+- **Security**: Outbound addresses must pass `validate_outbound_addr()` (SSRF defense).
+- **Connection limits**: `Config.max_connections` is enforced at accept time.
 
 Full constraints: [`docs/agent/constraints.md`](docs/agent/constraints.md).
 
@@ -75,17 +78,19 @@ Details: [`docs/agent/claude_reference.md`](docs/agent/claude_reference.md).
 ## Quick CLI / TUI / API
 
 ```bash
-syncthing run                  # daemon foreground
-syncthing tui                  # TUI client
-syncthing init                 # interactive config wizard
-syncthing status [--json]      # query daemon status
+syncthing run [--log-format json]  # daemon (JSON logging for ELK/Splunk)
+syncthing tui                      # TUI client
+syncthing init                     # interactive config wizard
+syncthing status [--json]          # query daemon status
+syncthing relay-server             # self-hosted relay (replaces Tailscale)
 ```
 
-Default ports: BEP `22001`, REST API `8385` (loopback-only).
+Default ports: BEP `22000`, REST API `8385` (loopback-only), Relay Protocol `22067`, Relay Session `22068`.
 
 TUI keys: `F5` toggle daemon, `Tab`/`←→` switch tabs, `q` quit, `?` help, `a/e/d` add/edit/delete.
 
-REST highlights: `GET /rest/health`, `GET /rest/system/status`, `GET /rest/events/poll`, `POST /rest/system/shutdown`.
+REST highlights: `GET /rest/health` (deep checks), `GET /metrics` (Prometheus), `GET /rest/system/status`, `POST /rest/system/shutdown`.
+RBAC: `config.gui.api_key` (admin), `config.gui.ro_api_key` (read-only, GET/HEAD only).
 
 Full reference: [`docs/agent/claude_reference.md`](docs/agent/claude_reference.md).
 
@@ -99,4 +104,4 @@ For operational constraints and checklists, also consult [`docs/agent/`](docs/ag
 
 ---
 
-*Last updated: 2026-06-25 (trimmed to quick reference; detailed content moved to docs/agent/ OKF bundle).*
+*Last updated: 2026-06-27 (v3.0.4: security hardening, relay server, JSON logging, RBAC).*
