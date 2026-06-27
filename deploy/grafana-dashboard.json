@@ -1,0 +1,112 @@
+{
+  "dashboard": {
+    "title": "syncthing-rust",
+    "uid": "syncthing-rust",
+    "tags": ["syncthing", "p2p", "sync"],
+    "timezone": "browser",
+    "schemaVersion": 39,
+    "refresh": "30s",
+    "panels": [
+      {
+        "id": 1,
+        "title": "Uptime",
+        "type": "stat",
+        "gridPos": { "x": 0, "y": 0, "w": 6, "h": 3 },
+        "targets": [
+          { "expr": "syncthing_uptime_seconds", "legendFormat": "uptime" }
+        ],
+        "fieldConfig": {
+          "defaults": { "unit": "s", "decimals": 0 }
+        }
+      },
+      {
+        "id": 2,
+        "title": "Connected Devices",
+        "type": "stat",
+        "gridPos": { "x": 6, "y": 0, "w": 6, "h": 3 },
+        "targets": [
+          { "expr": "syncthing_connected_devices", "legendFormat": "connected" }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "thresholds": { "steps": [{ "value": 0, "color": "red" }, { "value": 1, "color": "green" }] }
+          }
+        }
+      },
+      {
+        "id": 3,
+        "title": "Configured Devices / Folders",
+        "type": "stat",
+        "gridPos": { "x": 12, "y": 0, "w": 6, "h": 3 },
+        "targets": [
+          { "expr": "syncthing_configured_devices", "legendFormat": "devices" },
+          { "expr": "syncthing_configured_folders", "legendFormat": "folders" }
+        ]
+      },
+      {
+        "id": 4,
+        "title": "DB Files Indexed",
+        "type": "stat",
+        "gridPos": { "x": 18, "y": 0, "w": 6, "h": 3 },
+        "targets": [
+          { "expr": "syncthing_db_files_total", "legendFormat": "files" }
+        ],
+        "fieldConfig": { "defaults": { "unit": "short" } }
+      },
+      {
+        "id": 5,
+        "title": "Bytes Transferred (Cumulative)",
+        "type": "graph",
+        "gridPos": { "x": 0, "y": 3, "w": 12, "h": 8 },
+        "targets": [
+          { "expr": "rate(syncthing_connection_bytes_sent_total[5m])", "legendFormat": "sent/s" },
+          { "expr": "rate(syncthing_connection_bytes_received_total[5m])", "legendFormat": "recv/s" }
+        ],
+        "fieldConfig": { "defaults": { "unit": "Bps" } }
+      },
+      {
+        "id": 6,
+        "title": "Per-Folder File Counts",
+        "type": "bargauge",
+        "gridPos": { "x": 12, "y": 3, "w": 12, "h": 8 },
+        "targets": [
+          { "expr": "syncthing_folder_files_total", "legendFormat": "{{folder}}" }
+        ]
+      },
+      {
+        "id": 7,
+        "title": "DB Size Estimate",
+        "type": "gauge",
+        "gridPos": { "x": 0, "y": 11, "w": 6, "h": 6 },
+        "targets": [
+          { "expr": "syncthing_db_size_estimate_bytes", "legendFormat": "DB" }
+        ],
+        "fieldConfig": { "defaults": { "unit": "bytes" } }
+      },
+      {
+        "id": 8,
+        "title": "API Auth Enabled",
+        "type": "stat",
+        "gridPos": { "x": 6, "y": 11, "w": 6, "h": 6 },
+        "targets": [
+          { "expr": "syncthing_api_auth_enabled", "legendFormat": "auth" }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "thresholds": { "steps": [{ "value": 0, "color": "red" }, { "value": 1, "color": "green" }] },
+            "mappings": [{ "type": "value", "value": "0", "text": "Disabled" }, { "type": "value", "value": "1", "text": "Enabled" }]
+          }
+        }
+      },
+      {
+        "id": 9,
+        "title": "Per-Device Connection Status",
+        "type": "table",
+        "gridPos": { "x": 12, "y": 11, "w": 12, "h": 6 },
+        "targets": [
+          { "expr": "syncthing_device_connected", "legendFormat": "{{device_id}}" }
+        ]
+      }
+    ]
+  }
+}
