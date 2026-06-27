@@ -37,6 +37,10 @@ struct Cli {
     #[arg(short, long, global = true, default_value = "info")]
     log_level: String,
 
+    /// 日志格式 (text, json)。json 适合 ELK/Splunk/Loki 聚合。
+    #[arg(long, global = true, default_value = "text")]
+    log_format: String,
+
     /// 子命令（不提供时自动启动 daemon + TUI）
     #[command(subcommand)]
     command: Option<Commands>,
@@ -285,6 +289,7 @@ async fn run() -> Result<()> {
         .log_level
         .parse::<Level>()
         .context("invalid log level")?;
+    let log_format = logging::LogFormat::from_str(&cli.log_format);
 
     // 确定配置目录
     let config_dir = cli
@@ -352,7 +357,7 @@ async fn run() -> Result<()> {
             listen,
             device_name,
         } => {
-            logging::init_daemon_logging(&config_dir, log_level)?;
+            logging::init_daemon_logging(&config_dir, log_level, log_format)?;
             let (listen, device_name) =
                 resolve_daemon_config(&config_dir, listen, device_name, false)?;
             match tui::daemon_runner::start_daemon(config_dir.clone(), listen, device_name).await {
@@ -556,7 +561,7 @@ async fn run() -> Result<()> {
                 .with_context(|| format!("create config dir {}", config_dir.display()))?;
 
             // Tray mode: file-only logging (no console)
-            logging::init_tray_logging(&config_dir);
+            logging::init_tray_logging(&config_dir, log_format);
 
             let (listen, device_name) = resolve_daemon_config(
                 &config_dir,

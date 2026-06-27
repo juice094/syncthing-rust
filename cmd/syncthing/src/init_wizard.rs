@@ -118,6 +118,7 @@ pub fn run_wizard(config_dir: &PathBuf) -> anyhow::Result<()> {
             enabled: true,
             address: syncthing_core::constants::DEFAULT_GUI_ADDR.to_string(),
             api_key: random_api_key(),
+            ro_api_key: String::new(),
         },
         options: syncthing_core::types::Options {
             listen_addresses: vec![],

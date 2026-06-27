@@ -110,9 +110,27 @@ pub async fn start_daemon(
             .collect();
         config.gui.api_key = api_key.clone();
         info!(
-            "Generated API key for REST API: {}... (masked)",
+            "Generated admin API key for REST API: {}... (masked)",
             &api_key[..4]
         );
+        // 同时生成只读 API key（供监控系统使用）
+        if config.gui.ro_api_key.is_empty() {
+            let ro_api_key: String = (0..32)
+                .map(|_| rand::thread_rng().gen_range(0..36))
+                .map(|i| {
+                    if i < 10 {
+                        (b'0' + i) as char
+                    } else {
+                        (b'a' + i - 10) as char
+                    }
+                })
+                .collect();
+            info!(
+                "Generated read-only API key: {}... (masked)",
+                &ro_api_key[..4]
+            );
+            config.gui.ro_api_key = ro_api_key;
+        }
         config_modified = true;
     } else {
         info!(

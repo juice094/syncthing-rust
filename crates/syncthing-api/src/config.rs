@@ -42,6 +42,7 @@ impl MemoryConfigStore {
                 enabled: true,
                 address: syncthing_core::constants::DEFAULT_GUI_ADDR.to_string(),
                 api_key: String::new(),
+                ro_api_key: String::new(),
             },
             options: syncthing_core::types::Options {
                 listen_addresses: vec!["default".to_string()],
