@@ -19,6 +19,10 @@ pub struct IndexHandler {
     conflict_resolver: ConflictResolver,
 }
 
+/// 安全阈值：对端 Index 文件数低于本地 DB 的此比例时，
+/// 拒绝将差异解释为"对端已删除"，防止 §15 级联删除。
+const MASS_DELETION_SAFETY_RATIO: f64 = 0.5;
+
 impl IndexHandler {
     /// 创建新的索引处理器
     pub fn new(db: Arc<dyn LocalDatabase>, events: EventPublisher) -> Self {
@@ -37,10 +41,11 @@ impl IndexHandler {
         device: syncthing_core::DeviceId,
         index: Index,
     ) -> Result<Vec<FileInfo>> {
+        let remote_count = index.files.len();
         info!(
             folder = %folder.id,
             device = %device.short_id(),
-            file_count = index.files.len(),
+            file_count = remote_count,
             "Received full index"
         );
 
@@ -51,8 +56,47 @@ impl IndexHandler {
             )));
         }
 
-        // 处理索引文件
-        self.process_files(folder, device, &index.files, true).await
+        // §15 安全阈值：若对端 Index 文件数远少于本地 DB，拒绝全量索引语义
+        // (防止格式化/重装对端导致本侧大量文件被误删)
+        let effective_full_index = if remote_count > 0 {
+            let local_count = self.db.get_folder_files(&folder.id).await?.len();
+            let ratio = remote_count as f64 / local_count.max(1) as f64;
+            if ratio < MASS_DELETION_SAFETY_RATIO && local_count > 10 {
+                warn!(
+                    folder = %folder.id,
+                    device = %device.short_id(),
+                    remote_files = remote_count,
+                    local_files = local_count,
+                    ratio = %format!("{:.1}%", ratio * 100.0),
+                    threshold = %format!("{:.0}%", MASS_DELETION_SAFETY_RATIO * 100.0),
+                    "SAFETY THRESHOLD: remote index has far fewer files than local DB. \
+                     Treating as partial index to prevent mass deletion. \
+                     This may indicate peer has been formatted/reinstalled."
+                );
+                false
+            } else {
+                true
+            }
+        } else {
+            // 对端发送空 Index — 危险信号
+            let local_count = self.db.get_folder_files(&folder.id).await?.len();
+            if local_count > 10 {
+                warn!(
+                    folder = %folder.id,
+                    device = %device.short_id(),
+                    local_files = local_count,
+                    "SAFETY THRESHOLD: remote sent empty index with {} local files. \
+                     Rejecting full-index interpretation to prevent mass deletion.",
+                    local_count
+                );
+                false
+            } else {
+                true
+            }
+        };
+
+        self.process_files(folder, device, &index.files, effective_full_index)
+            .await
     }
 
     /// 处理索引更新
