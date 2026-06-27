@@ -68,8 +68,10 @@ pub struct ApiState {
     pub sync_model: Option<Arc<dyn SyncModel>>,
     /// Local device ID
     pub my_id: Option<DeviceId>,
-    /// Optional API key for authentication
+    /// Optional API key for authentication (full access)
     pub api_key: Option<String>,
+    /// Optional read-only API key (GET/HEAD only)
+    pub ro_api_key: Option<String>,
     /// Server start time for uptime calculation
     pub start_time: std::time::Instant,
     /// Optional connection manager for connection enumeration
@@ -93,6 +95,7 @@ impl ApiState {
             sync_model,
             my_id: None,
             api_key: None,
+            ro_api_key: None,
             start_time: std::time::Instant::now(),
             connection_manager: None,
             db: None,
@@ -126,30 +129,53 @@ async fn api_key_middleware(
     if is_loopback {
         return Ok(next.run(req).await);
     }
-    if let Some(ref key) = state.api_key {
-        if key.is_empty() {
-            return Ok(next.run(req).await);
-        }
-        let header = req.headers().get("x-api-key").and_then(|v| v.to_str().ok());
-        let query = req.uri().query().and_then(|q| {
-            q.split('&').find_map(|pair| {
-                let (k, v) = pair.split_once('=')?;
 
-                if k.eq_ignore_ascii_case("X-API-Key") {
-                    Some(v)
-                } else {
-                    None
-                }
+    let method = req.method().clone();
+    let provided_key = req
+        .headers()
+        .get("x-api-key")
+        .and_then(|v| v.to_str().ok())
+        .or_else(|| {
+            req.uri().query().and_then(|q| {
+                q.split('&').find_map(|pair| {
+                    let (k, v) = pair.split_once('=')?;
+                    if k.eq_ignore_ascii_case("X-API-Key") {
+                        Some(v)
+                    } else {
+                        None
+                    }
+                })
             })
         });
-        if header == Some(key) || query == Some(key) {
-            Ok(next.run(req).await)
-        } else {
-            Err(axum::http::StatusCode::UNAUTHORIZED)
+
+    // Check admin key (full access)
+    if let Some(ref admin_key) = state.api_key {
+        if !admin_key.is_empty() && provided_key == Some(admin_key.as_str()) {
+            return Ok(next.run(req).await);
         }
-    } else {
-        Ok(next.run(req).await)
     }
+
+    // Check read-only key (GET/HEAD only)
+    if let Some(ref ro_key) = state.ro_api_key {
+        if !ro_key.is_empty() && provided_key == Some(ro_key.as_str()) {
+            let is_read_only = method == axum::http::Method::GET
+                || method == axum::http::Method::HEAD
+                || method == axum::http::Method::OPTIONS;
+            if is_read_only {
+                return Ok(next.run(req).await);
+            }
+            return Err(axum::http::StatusCode::FORBIDDEN);
+        }
+    }
+
+    // No key configured or key is empty → allow all
+    if state.api_key.as_deref().is_none_or(str::is_empty)
+        && state.ro_api_key.as_deref().is_none_or(str::is_empty)
+    {
+        return Ok(next.run(req).await);
+    }
+
+    Err(axum::http::StatusCode::UNAUTHORIZED)
 }
 
 /// REST API server

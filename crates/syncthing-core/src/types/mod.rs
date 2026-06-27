@@ -284,7 +284,11 @@ pub struct FolderConfig {
 pub struct GuiConfig {
     pub enabled: bool,
     pub address: String,
+    /// 管理员 API key（完全访问）
     pub api_key: String,
+    /// 只读 API key（仅允许 GET/HEAD，拒绝 POST/PUT/DELETE）
+    #[serde(default)]
+    pub ro_api_key: String,
 }
 
 impl Default for GuiConfig {
@@ -293,6 +297,7 @@ impl Default for GuiConfig {
             enabled: true,
             address: crate::constants::DEFAULT_GUI_ADDR.to_string(),
             api_key: String::new(),
+            ro_api_key: String::new(),
         }
     }
 }

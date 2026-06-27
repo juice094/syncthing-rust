@@ -65,6 +65,7 @@ impl TestNode {
             enabled: false,
             address: "127.0.0.1:0".to_string(),
             api_key: "e2e-test-key".to_string(),
+            ro_api_key: String::new(),
         };
         config.options = Options {
             relays_enabled: false,

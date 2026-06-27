@@ -66,6 +66,9 @@ pub async fn start_api_server(
     .with_shutdown_tx(shutdown_tx);
     state.my_id = Some(my_id);
     state.api_key = Some(api_key.to_string());
+    if !config.gui.ro_api_key.is_empty() {
+        state.ro_api_key = Some(config.gui.ro_api_key.clone());
+    }
     state.connection_manager = connection_handle
         .map(|h| Arc::new(h) as Arc<dyn syncthing_core::traits::ConnectionManager>);
     state.db = Some(Arc::new(DbAdapter(sync_service.db())) as Arc<dyn FolderDatabase>);
