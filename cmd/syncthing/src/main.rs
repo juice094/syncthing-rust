@@ -105,6 +105,17 @@ enum Commands {
     /// 取消开机自启动
     UninstallAutostart,
 
+    /// 启动自建 Relay Protocol 服务器（替代 Tailscale）
+    RelayServer {
+        /// 协议模式监听地址（TLS + bep-relay ALPN）
+        #[arg(long, default_value = "0.0.0.0:22067")]
+        listen: String,
+
+        /// Session 模式端口（与 listen IP 相同）
+        #[arg(long, default_value = "22068")]
+        session_port: u16,
+    },
+
     /// 自动模式：启动 daemon + TUI（无子命令时的默认行为）
     #[command(hide = true)]
     Auto,
@@ -139,16 +150,33 @@ fn load_config(path: &Path) -> anyhow::Result<Config> {
 }
 
 /// 保存配置到文件
-fn save_config(path: &PathBuf, config: &Config) -> anyhow::Result<()> {
+///
+/// SAFETY: config.json 包含 API key 和设备标识，保存后加固文件权限。
+fn save_config(path: &Path, config: &Config) -> anyhow::Result<()> {
     let content = serde_json::to_string_pretty(config).context("failed to serialize config")?;
     std::fs::write(path, content)
         .with_context(|| format!("failed to write config to {:?}", path))?;
+
+    // 加固配置文件权限（含 API key）
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        if let Err(e) = std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600)) {
+            tracing::warn!(
+                path = %path.display(),
+                error = %e,
+                "Failed to set restrictive permissions on config file"
+            );
+        }
+    }
+
     Ok(())
 }
 
 mod api_client;
 mod autostart;
 mod cli_query;
+mod cli_relay_server;
 mod cli_status;
 mod config_validation;
 mod init_wizard;
@@ -274,6 +302,7 @@ async fn run() -> Result<()> {
                 | Commands::Logs { .. }
                 | Commands::InstallAutostart
                 | Commands::UninstallAutostart
+                | Commands::RelayServer { .. }
         ),
     };
     if needs_lock {
@@ -529,6 +558,20 @@ async fn run() -> Result<()> {
             #[cfg(not(windows))]
             {
                 eprintln!("Autostart is only supported on Windows.");
+                std::process::exit(1);
+            }
+        }
+        Commands::RelayServer {
+            listen,
+            session_port,
+        } => {
+            let listen_addr: std::net::SocketAddr = listen
+                .parse()
+                .unwrap_or_else(|_| "0.0.0.0:22067".parse().unwrap());
+            if let Err(e) =
+                cli_relay_server::run_relay_server(&config_dir, listen_addr, session_port).await
+            {
+                eprintln!("Relay server failed: {}", e);
                 std::process::exit(1);
             }
         }
