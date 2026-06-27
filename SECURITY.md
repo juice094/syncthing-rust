@@ -9,7 +9,8 @@
 | Version | Supported | Notes |
 |---------|-----------|-------|
 | `main`  | ✅ | Active development. Receives all fixes. |
-| v3.0.3 | ✅ | Current production release. Receives security fixes. |
+| v3.0.4 | ✅ | Current production release. Security hardened. |
+| v3.0.3 | ✅ | Receives security fixes. |
 | < v3.0.0 | ❌ | Pre-release / alpha; no support. |
 
 ---
@@ -20,15 +21,21 @@
 
 1. **BEP protocol parsing** — malformed/oversized messages, TLV confusion, integer overflow in length fields.
 2. **TLS configuration** — certificate validation, cipher selection, downgrade attacks. (Currently rustls 0.23 + ed25519-dalek for device identity.)
-3. **Path traversal** in scanner, puller, watcher — must reject `..`, absolute paths, symlink escapes.
-4. **Resource exhaustion** — `MAX_BEP_MESSAGE_SIZE`, connection counts, scanner memory budget. See [`docs/plans/TUNING_PLAN_2026-05-11.md`](docs/plans/TUNING_PLAN_2026-05-11.md) T-D4 for parameter tightening plan.
+3. **Path traversal** in scanner, puller, watcher — ✅ v3.0.4: `validate_remote_name()` defends against `..`, `\0`, absolute paths, empty segments (see `crates/syncthing-sync/src/block_server.rs`).
+4. **Resource exhaustion** — `MAX_BEP_MESSAGE_SIZE`, connection counts (✅ v3.0.4: `max_connections` enforced), scanner memory budget.
 5. **REST API auth** — loopback bypass behavior, API key handling, CSRF on writes.
+
+**v3.0.4 additions:**
+6. **SSRF prevention** — ✅ v3.0.4: `validate_outbound_addr()` filters multicast/unspecified/link-local addresses; relay session addresses additionally filter loopback.
+7. **Information leakage** — ✅ v3.0.4: all `eprintln!` content dumps removed from production puller code.
+8. **Key file permissions** — ✅ v3.0.4: Unix `set_permissions(0o600)` on `cert.pem`, `key.pem`, `config.json`.
 
 Out of scope:
 
 - Quantum-resistant cryptography (TLS 1.3 + ed25519 is current state-of-the-art for the target scenario).
 - Side-channel attacks on the host hardware.
 - Compromised local OS (rust binary runs with user privileges and inherits trust boundary).
+- SM2/SM3/SM4 (国密) cipher support — blocked by BEP protocol mandate of SHA-256.
 
 ---
 
@@ -36,12 +43,12 @@ Out of scope:
 
 | Primitive | Implementation | Purpose |
 |-----------|----------------|---------|
-| TLS 1.3 | `rustls 0.23` | Transport encryption (BEP-over-TLS) |
+| TLS 1.3 | `rustls 0.23` | Transport encryption (BEP-over-TLS, WSS-over-TLS) |
 | ed25519 | `ed25519-dalek 2.1` | Device identity certificate signing |
 | SHA-256 | `sha2 0.10` | File block content addressing (BEP-protocol-mandated) |
-| Random | `ring 0.17` / `rand 0.8` | Key generation, API key, nonce |
+| Random | `ring 0.17` / `rand 0.8` | Key generation, API key, session key, nonce |
 
-> **No protocol-layer SHA-256 substitution is permitted** (BEP wire-format compatibility). Local-only block-cache addressing may switch to BLAKE3 in the future — see TUNING_PLAN T-B4 for the evaluation gate.
+> **No protocol-layer SHA-256 substitution is permitted** (BEP wire-format compatibility). Local-only block-cache addressing may switch to BLAKE3 in the future.
 
 ---
 
