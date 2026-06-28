@@ -382,14 +382,18 @@ pub(crate) fn parse_address(a: &String) -> syncthing_core::types::AddressType {
 
 #[cfg(test)]
 mod tests {
+    use super::api_key_middleware;
     use super::health_check;
     use super::parse_device_id;
     use super::ApiState;
     use crate::config::MemoryConfigStore;
     use crate::events::EventBus;
     use axum::extract::{Path, State};
+    use axum::routing::get;
     use axum::Json;
+    use axum::Router;
     use std::sync::Arc;
+    use tower::ServiceExt;
 
     fn create_test_state() -> ApiState {
         let config_store = Arc::new(MemoryConfigStore::new());
@@ -468,5 +472,124 @@ mod tests {
 
         assert_eq!(id1.to_string(), id2.to_string());
         assert_ne!(id1.to_string(), id3.to_string());
+    }
+
+    #[tokio::test]
+    async fn test_admin_api_key_allows_mutation() {
+        let mut state = create_test_state();
+        state.api_key = Some("admin-secret".to_string());
+
+        let app = Router::new()
+            .route("/test", get(|| async { "get" }).post(|| async { "post" }))
+            .layer(axum::middleware::from_fn_with_state(
+                state.clone(),
+                api_key_middleware,
+            ))
+            .with_state(state);
+
+        let request = axum::http::Request::builder()
+            .method("POST")
+            .uri("/test")
+            .header("x-api-key", "admin-secret")
+            .body(axum::body::Body::empty())
+            .unwrap();
+
+        let response = app.oneshot(request).await.unwrap();
+        assert_eq!(response.status(), axum::http::StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn test_read_only_api_key_allows_get() {
+        let mut state = create_test_state();
+        state.ro_api_key = Some("ro-secret".to_string());
+
+        let app = Router::new()
+            .route("/test", get(|| async { "get" }).post(|| async { "post" }))
+            .layer(axum::middleware::from_fn_with_state(
+                state.clone(),
+                api_key_middleware,
+            ))
+            .with_state(state);
+
+        let request = axum::http::Request::builder()
+            .method("GET")
+            .uri("/test")
+            .header("x-api-key", "ro-secret")
+            .body(axum::body::Body::empty())
+            .unwrap();
+
+        let response = app.oneshot(request).await.unwrap();
+        assert_eq!(response.status(), axum::http::StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn test_read_only_api_key_denies_post() {
+        let mut state = create_test_state();
+        state.ro_api_key = Some("ro-secret".to_string());
+
+        let app = Router::new()
+            .route("/test", get(|| async { "get" }).post(|| async { "post" }))
+            .layer(axum::middleware::from_fn_with_state(
+                state.clone(),
+                api_key_middleware,
+            ))
+            .with_state(state);
+
+        let request = axum::http::Request::builder()
+            .method("POST")
+            .uri("/test")
+            .header("x-api-key", "ro-secret")
+            .body(axum::body::Body::empty())
+            .unwrap();
+
+        let response = app.oneshot(request).await.unwrap();
+        assert_eq!(response.status(), axum::http::StatusCode::FORBIDDEN);
+    }
+
+    #[tokio::test]
+    async fn test_missing_api_key_returns_unauthorized() {
+        let mut state = create_test_state();
+        state.api_key = Some("admin-secret".to_string());
+        state.ro_api_key = Some("ro-secret".to_string());
+
+        let app = Router::new()
+            .route("/test", get(|| async { "get" }))
+            .layer(axum::middleware::from_fn_with_state(
+                state.clone(),
+                api_key_middleware,
+            ))
+            .with_state(state);
+
+        let request = axum::http::Request::builder()
+            .method("GET")
+            .uri("/test")
+            .body(axum::body::Body::empty())
+            .unwrap();
+
+        let response = app.oneshot(request).await.unwrap();
+        assert_eq!(response.status(), axum::http::StatusCode::UNAUTHORIZED);
+    }
+
+    #[tokio::test]
+    async fn test_health_endpoint_bypasses_auth() {
+        let mut state = create_test_state();
+        state.api_key = Some("admin-secret".to_string());
+
+        let app = Router::new()
+            .route("/rest/health", get(health_check))
+            .layer(axum::middleware::from_fn_with_state(
+                state.clone(),
+                api_key_middleware,
+            ))
+            .with_state(state);
+
+        let request = axum::http::Request::builder()
+            .method("GET")
+            .uri("/rest/health")
+            .body(axum::body::Body::empty())
+            .unwrap();
+
+        let response = app.oneshot(request).await.unwrap();
+        assert_eq!(response.status(), axum::http::StatusCode::OK);
     }
 }

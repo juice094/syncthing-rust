@@ -498,4 +498,85 @@ mod tests {
             .unwrap();
         assert!(needed.is_empty());
     }
+
+    #[tokio::test]
+    async fn test_mass_deletion_safety_threshold() {
+        let db = MemoryDatabase::new();
+        let events = EventPublisher::new(10);
+        let handler = IndexHandler::new(db.clone(), events);
+
+        let folder = Folder::new("test", "/tmp/test");
+        let device = syncthing_core::DeviceId::random();
+
+        // 本地有 20 个文件
+        for i in 0..20 {
+            let local_file = create_test_file(
+                &format!("local_{}.txt", i),
+                Vector::new().with_counter(1, 5),
+            );
+            db.update_file("test", local_file).await.unwrap();
+        }
+
+        // 对端只发送 1 个文件（< 50% 阈值），模拟格式化/重装后的对端
+        let remote_file = create_test_file("remote.txt", Vector::new().with_counter(1, 7));
+        let index = Index {
+            folder: "test".to_string(),
+            files: vec![remote_file.clone()],
+        };
+
+        let needed = handler.handle_index(&folder, device, index).await.unwrap();
+        assert_eq!(needed.len(), 1);
+        assert_eq!(needed[0].name, "remote.txt");
+
+        // 关键断言：本地独有的 20 个文件不应被标记为删除
+        for i in 0..20 {
+            let file = db
+                .get_file("test", &format!("local_{}.txt", i))
+                .await
+                .unwrap()
+                .expect("local file missing after remote index");
+            assert!(!file.is_deleted(), "local-only file was marked deleted");
+        }
+    }
+
+    #[tokio::test]
+    async fn test_empty_index_safety_threshold() {
+        let db = MemoryDatabase::new();
+        let events = EventPublisher::new(10);
+        let handler = IndexHandler::new(db.clone(), events);
+
+        let folder = Folder::new("test", "/tmp/test");
+        let device = syncthing_core::DeviceId::random();
+
+        // 本地有 15 个文件
+        for i in 0..15 {
+            let local_file = create_test_file(
+                &format!("local_{}.txt", i),
+                Vector::new().with_counter(1, 5),
+            );
+            db.update_file("test", local_file).await.unwrap();
+        }
+
+        // 对端发送空 Index
+        let index = Index {
+            folder: "test".to_string(),
+            files: vec![],
+        };
+
+        let needed = handler.handle_index(&folder, device, index).await.unwrap();
+        assert!(needed.is_empty());
+
+        // 本地文件必须全部保留
+        for i in 0..15 {
+            let file = db
+                .get_file("test", &format!("local_{}.txt", i))
+                .await
+                .unwrap()
+                .expect("local file missing after empty remote index");
+            assert!(
+                !file.is_deleted(),
+                "local file was marked deleted by empty index"
+            );
+        }
+    }
 }
