@@ -17,7 +17,7 @@ timestamp: 2026-06-25T00:00:00Z
 
 当前实测基线：
 
-- `cargo test --workspace`：**392 passed / 6 ignored / 0 failed**
+- `cargo test --workspace`：**404 passed / 6 ignored / 0 failed**
 - `cargo clippy --workspace --all-targets -- -D warnings -W clippy::await_holding_lock`：0 warnings
 - `cargo doc --no-deps --workspace`：通过
 - `cargo audit`：3 个 unmaintained 上游传递依赖已记录在 `.cargo/audit.toml` 中接受为债务

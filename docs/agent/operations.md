@@ -20,7 +20,7 @@ timestamp: 2026-06-25T00:00:00Z
 - `target/release/syncthing-monitor`：监控工具
 - `target/release/syncthing-bench`：基准测试
 - `target/release/syncthing-mcp-bridge`：MCP Bridge
-- `target/release/syncthing-tray.exe`：托盘薄 wrapper（启动同目录 `syncthing.exe`）
+- `target/release/syncthing-tray.exe`：托盘薄 wrapper（向后兼容，实际逻辑已合并进 `syncthing.exe` 的 `tray` feature）
 
 ### 1.1 常用构建命令
 
@@ -37,6 +37,12 @@ cargo run --release -- init
 # 启动 TUI
 cargo run --release -- tui --config-dir ~/.syncthing
 
+# 启动 Windows 托盘
+cargo run --release -- tray --config-dir ~/.syncthing
+
+# 启动 Relay Server v1
+cargo run --release -- relay-server --listen :22067 --tls-cert cert.pem --tls-key key.pem
+
 # CLI 查询状态
 cargo run -p syncthing-cli -- status
 ```
@@ -50,10 +56,34 @@ cargo run -p syncthing-cli -- status
 - `scripts/check-health.ps1` / `check-sync-consistency.ps1`：健康检查
 - `scripts/recover-remote.sh`：对侧格式化/重装后的灾备恢复
 - `scripts/two-node-real-network-test.ps1` / `scripts/stop-two-node-test.ps1`：真实网络双节点测试
+- `scripts/generate-sbom.sh`：生成 SBOM（CycloneDX JSON）用于发布审计
 
 ---
 
-## 3. 灾备恢复协议（对侧格式化/重装后）
+## 3. Docker 与 Relay 部署
+
+v3.0.4 起提供容器化部署模板：
+
+| 文件 | 用途 |
+|:---|:---|
+| `deploy/Dockerfile` | 多阶段构建 `syncthing` 镜像 |
+| `deploy/docker-compose.relay.yml` | 守护进程 + Relay Server + nginx 组合 |
+| `deploy/nginx-relay.conf` | nginx 反向代理 / TLS 终止配置 |
+| `deploy/grafana-dashboard.json` | Prometheus 监控仪表板 |
+
+```bash
+# 构建镜像
+docker build -f deploy/Dockerfile -t syncthing-rust:latest .
+
+# 启动守护进程 + Relay + nginx
+docker compose -f deploy/docker-compose.relay.yml up -d
+```
+
+详细灾备恢复流程见 `docs/operations/DISASTER_RECOVERY.md`。
+
+---
+
+## 4. 灾备恢复协议（对侧格式化/重装后）
 
 1. 停止双端 syncthing
 2. 删除双端 `db/` 和 `syncthing.pid`
@@ -65,7 +95,7 @@ cargo run -p syncthing-cli -- status
 
 ---
 
-## 4. CI / CD
+## 5. CI / CD
 
 - 平台：GitHub Actions（`.github/workflows/ci.yml` + `.github/workflows/release.yml`）
 - 矩阵：ubuntu-latest / windows-latest / macos-latest
@@ -75,14 +105,14 @@ cargo run -p syncthing-cli -- status
 
 ---
 
-## 5. 默认端口
+## 6. 默认端口
 
 - BEP：`22001`（避免与 Go Syncthing 默认 `22000` 冲突）
 - REST API：`8385`（避免与 Go Syncthing 默认 `8384` 冲突）
 
 ---
 
-## 6. 关键默认值
+## 7. 关键默认值
 
 - 扫描间隔：`3600` 秒
 - 块大小：`128 KiB`

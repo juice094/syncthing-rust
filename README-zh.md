@@ -10,7 +10,7 @@
 
 [![Rust](https://img.shields.io/badge/rust-1.85%2B-orange?logo=rust)](https://www.rust-lang.org)
 [![CI](https://github.com/juice094/syncthing-rust/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/juice094/syncthing-rust/actions/workflows/ci.yml)
-[![Tests](https://img.shields.io/badge/tests-392%20passed-brightgreen)](https://github.com/juice094/syncthing-rust/actions)
+[![Tests](https://img.shields.io/badge/tests-404%20passed-brightgreen)](https://github.com/juice094/syncthing-rust/actions)
 [![Version](https://img.shields.io/badge/version-v3.0.3-blue)](https://github.com/juice094/syncthing-rust/releases/tag/v3.0.3)
 [![License](https://img.shields.io/badge/license-MIT%20%2B%20Commercial-blue)](./LICENSE)
 
@@ -22,7 +22,7 @@
 
 [Syncthing](https://syncthing.net/) 协议栈的 Rust 实现，目标为**零运行时依赖**部署，与官方 Go Syncthing 守护进程线路兼容互操作。
 
-**当前阶段（v3.0.3）**：Production — 392 passed / 6 ignored / 0 failures，E2E 双向同步已实测，Windows 托盘 + TUI 稳定。
+**当前阶段（v3.0.3）**：Production — 404 passed / 6 ignored / 0 failures，E2E 双向同步已实测，Windows 托盘 + TUI 稳定。
 
 - ✅ 连接层：retry 累加、TCP keepalive
 - ✅ 协议层：prost 编解码 + LZ4 压缩、wire_compat 10 tests
@@ -52,7 +52,7 @@
 |:---|:---|
 | BEP 协议（TLS + Hello + ClusterConfig + Index + Request/Response） | ✅ prost + LZ4 |
 | 端到端文件同步（双向） | ✅ Push/Pull 双向验证 |
-| 文件同步核心（puller / scanner / folder_model / orchestrator） | ✅ 392 tests / 0 failed |
+| 文件同步核心（puller / scanner / folder_model / orchestrator） | ✅ 404 tests / 0 failed |
 | 版本控制 | ✅ Simple + Staggered |
 | 连接稳定性 | ✅ retry 累加 + TCP keepalive |
 | Rust↔Rust 双向互通 | ✅ v3.0.3 ↔ v3.0.3 E2E 验证 |
@@ -61,6 +61,11 @@
 | 预测性健康检查（失败率 / 丢事件 / 状态翻转 / 自动节流） | ✅ 事件驱动趋势评估 |
 | 自适应拉取并发（RTT 动态调整 downloads/blocks） | ✅ 根据链路质量自动换挡 |
 | watcher 增量扫描 | ✅ 脏路径子树/单文件增量扫描 |
+| BEP Relay Server v1 | ✅ 独立 relay 监听 + TLS + device-id 路由 |
+| RBAC 只读 API key | ✅ admin / read-only 双 key |
+| 结构化 JSON 日志 | ✅ `--log-format json` |
+| Prometheus 指标 | ✅ `/metrics` 端点 |
+| Docker & Compose 部署 | ✅ Dockerfile + relay compose + Grafana |
 | Symlink 同步 | 🔲 未实现（未来规划） |
 | Web GUI | ❌ 无（TUI + 托盘 + CLI + REST API，见 AGENTS.md 冻结声明） |
 
@@ -80,6 +85,12 @@ cargo run --release -- run --config-dir ~/.syncthing
 
 # 启动 TUI
 cargo run --release -- tui --config-dir ~/.syncthing
+
+# 启动 Windows 托盘
+cargo run --release -- tray --config-dir ~/.syncthing
+
+# 启动 Relay Server v1
+cargo run --release -- relay-server --listen :22067 --tls-cert cert.pem --tls-key key.pem
 ```
 
 首次运行自动生成 Ed25519 TLS 证书。默认端口：BEP `22001`，REST API `8385`。
@@ -100,6 +111,7 @@ syncthing-rust/
 │   ├── syncthing-api/      # REST API（Axum）
 │   ├── syncthing-db/       # 元数据存储
 │   └── syncthing-versioner/# 版本控制（Simple + Staggered）
+├── deploy/                 # Docker、compose、nginx、Grafana 仪表板
 ├── docs/                   # 设计文档、计划、报告
 └── scripts/                # 健康检查、cloud-deploy、压力测试
 ```

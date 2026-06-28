@@ -1,6 +1,32 @@
 # Changelog
 
-## [Unreleased] — 2026-06-16
+## [Unreleased] — 2026-06-27
+
+### Headline: v3.0.4 security hardening, Relay Server v1, structured observability, and Docker deployment.
+
+### Security
+- **RBAC read-only API key**: REST API now supports a separate read-only API key (`ro_api_key`) that only allows GET/HEAD/OPTIONS requests. Admin API key retains full access.
+- **Mass-deletion safety threshold**: `IndexHandler` refuses to interpret a remote full index as "peer deleted everything" when the remote file count drops below 50 % of the local DB count (and local has >10 files). Prevents §15-style cascade deletion after peer format/reinstall.
+
+### Network / Protocol
+- **BEP Relay Server v1**: new `relay-server` subcommand and `crates/syncthing-net/src/relay/server.rs` provide a standalone relay listener with TLS, session joining, and device-id based routing.
+- **WebSocket/WSS transport improvements** and proxy-aware dialing hardening.
+
+### Observability
+- **Structured JSON logging**: daemon, TUI, and tray support `--log-format json` for ELK/Splunk/Loki aggregation. Text format remains the default.
+- **Prometheus metrics endpoint**: `/metrics` emits build info, uptime, configured devices/folders, connected peers, bytes sent/received, and DB file count/size estimates without pulling in the `prometheus` crate.
+- **Deep health check**: `/rest/health` now reports per-subsystem status (database, connection manager, config store).
+
+### Operations
+- **Docker + Relay deployment**: added `deploy/Dockerfile`, `deploy/docker-compose.relay.yml`, `deploy/nginx-relay.conf`, and `deploy/grafana-dashboard.json`.
+- **Disaster recovery manual**: `docs/operations/DISASTER_RECOVERY.md` documents the peer-format/reinstall recovery SOP.
+- **SBOM generation**: `scripts/generate-sbom.sh` produces CycloneDX JSON for release audits.
+
+### Stats
+- **Tests**: 393 passed / 0 failed / 6 ignored
+- **Clippy**: 0 warnings
+
+## [3.0.3] — 2026-06-16
 
 ### Headline: Orchestration, observability & adaptive concurrency upgrades.
 

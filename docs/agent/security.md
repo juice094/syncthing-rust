@@ -20,6 +20,7 @@ timestamp: 2026-06-25T00:00:00Z
 - 路径遍历：`..`、绝对路径、符号链接逃逸必须被拒绝
 - 资源耗尽：连接数、扫描内存、消息大小上限
 - REST API 认证：默认 loopback 绑定，API key 鉴权
+- RBAC 只读 API key：允许配置独立的只读 key，仅授权 GET/HEAD/OPTIONS 请求
 
 ---
 
@@ -31,6 +32,7 @@ timestamp: 2026-06-25T00:00:00Z
 | `MAX_BEP_HEADER_SIZE` | 64 KiB | `bep-protocol` |
 | `max_connections` | 1000 | `daemon_runner.rs` |
 | `connection_timeout` | 120s | `daemon_runner.rs` |
+| `MASS_DELETION_SAFETY_RATIO` | 0.5 | `index_handler.rs` |
 
 ---
 
@@ -57,6 +59,8 @@ timestamp: 2026-06-25T00:00:00Z
 ## 4. 部署安全建议
 
 - REST API 默认绑定 `127.0.0.1:8385`，不要暴露到公网。
-- 将 `config.json` 视为机密（含 API key）。
+- 将 `config.json` 视为机密（含 admin API key 与只读 API key）。
 - 同步目录限制在专用目录，不要选系统根目录。
 - 监控 RSS 增长；`FileSystemDatabase` 当前使用无界内存缓存。
+- 结构化 JSON 日志输出到 `logs/` 目录，日志文件可能包含文件路径、设备 ID 等敏感信息，需按机密文件处理。
+- Relay Server 默认监听 `0.0.0.0:22067`（relay）与 `0.0.0.0:22070`（status），部署时应通过防火墙限制访问范围。

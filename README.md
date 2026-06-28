@@ -10,7 +10,7 @@ Zero runtime dependencies · Wire-compatible with Go Syncthing · Single static 
 
 [![Rust](https://img.shields.io/badge/rust-1.85%2B-orange?logo=rust)](https://www.rust-lang.org)
 [![CI](https://github.com/juice094/syncthing-rust/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/juice094/syncthing-rust/actions/workflows/ci.yml)
-[![Tests](https://img.shields.io/badge/tests-392%20passed-brightgreen)](https://github.com/juice094/syncthing-rust/actions)
+[![Tests](https://img.shields.io/badge/tests-404%20passed-brightgreen)](https://github.com/juice094/syncthing-rust/actions)
 [![Version](https://img.shields.io/badge/version-v3.0.3-blue)](https://github.com/juice094/syncthing-rust/releases/tag/v3.0.3)
 [![License](https://img.shields.io/badge/license-MIT%20%2B%20Commercial-blue)](./LICENSE)
 
@@ -58,6 +58,11 @@ A Rust implementation of the [Syncthing](https://syncthing.net/) BEP protocol �
 | 📈 **Adaptive Pull Concurrency** | Dynamic downloads/blocks concurrency based on block-request RTT |
 | 🧩 **Incremental Scanning** | Watcher dirty-path set triggers subtree/single-file incremental scans |
 | 📦 **Single Static Binary** | Release build ~13 MB, zero runtime dependencies |
+| 🔄 **BEP Relay Server v1** | Standalone relay listener with TLS and device-id routing |
+| 🔑 **RBAC API Keys** | Separate admin + read-only API keys for REST API |
+| 📜 **Structured JSON Logging** | `--log-format json` for ELK/Splunk/Loki aggregation |
+| 📊 **Prometheus Metrics** | `/metrics` endpoint with build/uptime/connection/folder stats |
+| 🐳 **Docker & Compose** | Multi-stage Dockerfile + relay compose stack + Grafana dashboard |
 
 ---
 
@@ -71,7 +76,9 @@ A Rust implementation of the [Syncthing](https://syncthing.net/) BEP protocol �
 | Networking | Tokio + rustls + ParallelDialer + Relay v1 |
 | Discovery | UDP broadcast + HTTPS mTLS + STUN + UPnP |
 | Storage | sled (metadata + block-cache abstraction) |
-| REST API | Axum (Go-layout compatible) |
+| REST API | Axum (Go-layout compatible) + RBAC API keys |
+| Metrics | Prometheus text format (`/metrics`) |
+| Logging | tracing + tracing-subscriber (text / JSON) |
 | TUI | ratatui + crossterm |
 | CLI | clap |
 
@@ -81,7 +88,7 @@ A Rust implementation of the [Syncthing](https://syncthing.net/) BEP protocol �
 
 ```
 syncthing-rust/
-├── cmd/syncthing/          # CLI entrypoint + TUI + daemon runner
+├── cmd/syncthing/          # CLI entrypoint + TUI + daemon runner + tray
 ├── crates/
 │   ├── syncthing-core/     # Core types (DeviceId, FileInfo, VersionVector)
 │   ├── bep-protocol/       # BEP codec (prost) + handshake
@@ -91,6 +98,7 @@ syncthing-rust/
 │   ├── syncthing-api/      # REST API (Axum, Go-layout compatible)
 │   ├── syncthing-db/       # Metadata and block cache
 │   └── syncthing-versioner/# File versioning (Simple + Staggered)
+├── deploy/                 # Docker, compose, nginx, Grafana dashboard
 ├── docs/                   # Design docs, plans, reports
 └── scripts/                # Health checks, cloud-deploy, stress tests
 ```
