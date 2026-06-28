@@ -244,3 +244,80 @@ pub(crate) async fn get_metrics(State(state): State<ApiState>) -> impl IntoRespo
         body,
     )
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::MemoryConfigStore;
+    use crate::events::EventBus;
+    use std::sync::Arc;
+
+    fn create_test_state() -> ApiState {
+        let config_store = Arc::new(MemoryConfigStore::new());
+        let event_bus = EventBus::new();
+        ApiState::new(config_store, event_bus, None)
+    }
+
+    #[tokio::test]
+    async fn test_metrics_contains_build_info_and_uptime() {
+        let state = create_test_state();
+        let response = get_metrics(State(state)).await;
+
+        let (parts, body) = response.into_response().into_parts();
+        assert_eq!(parts.status, axum::http::StatusCode::OK);
+
+        let content_type = parts
+            .headers
+            .get(axum::http::header::CONTENT_TYPE)
+            .expect("content-type header missing");
+        assert_eq!(content_type, PROMETHEUS_CONTENT_TYPE);
+
+        let bytes = axum::body::to_bytes(body, usize::MAX)
+            .await
+            .expect("failed to read body");
+        let text = String::from_utf8(bytes.into()).expect("invalid utf-8");
+
+        assert!(
+            text.contains("# HELP syncthing_build_info"),
+            "missing build_info help"
+        );
+        assert!(
+            text.contains("# HELP syncthing_uptime_seconds"),
+            "missing uptime help"
+        );
+        assert!(
+            text.contains("# HELP syncthing_api_auth_enabled"),
+            "missing api_auth metric"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_metrics_api_auth_disabled_when_no_key() {
+        let state = create_test_state();
+        let response = get_metrics(State(state)).await;
+
+        let (_parts, body) = response.into_response().into_parts();
+        let bytes = axum::body::to_bytes(body, usize::MAX)
+            .await
+            .expect("failed to read body");
+        let text = String::from_utf8(bytes.into()).expect("invalid utf-8");
+
+        assert!(text.contains("syncthing_api_auth_enabled 0"));
+    }
+
+    #[tokio::test]
+    async fn test_metrics_api_auth_enabled_when_key_set() {
+        let mut state = create_test_state();
+        state.api_key = Some("secret".to_string());
+
+        let response = get_metrics(State(state)).await;
+
+        let (_parts, body) = response.into_response().into_parts();
+        let bytes = axum::body::to_bytes(body, usize::MAX)
+            .await
+            .expect("failed to read body");
+        let text = String::from_utf8(bytes.into()).expect("invalid utf-8");
+
+        assert!(text.contains("syncthing_api_auth_enabled 1"));
+    }
+}

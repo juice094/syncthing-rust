@@ -150,3 +150,17 @@ pub fn init_tray_logging(config_dir: &Path, format: LogFormat) {
         eprintln!("Failed to set tray logger: {}", e);
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_log_format_from_str() {
+        assert_eq!(LogFormat::from_str("json"), LogFormat::Json);
+        assert_eq!(LogFormat::from_str("JSON"), LogFormat::Json);
+        assert_eq!(LogFormat::from_str("text"), LogFormat::Text);
+        assert_eq!(LogFormat::from_str(""), LogFormat::Text);
+        assert_eq!(LogFormat::from_str("unknown"), LogFormat::Text);
+    }
+}
