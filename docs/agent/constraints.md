@@ -56,11 +56,12 @@ timestamp: 2026-06-25T00:00:00Z
 - 必须运行 `cargo fmt` 后提交。
 - 单文件软上限 **600 行**；CI 会检查并警告。
 - 当前超过 600 行的生产文件：
-  - `cmd/syncthing/src/main.rs`（1843 行）
+  - `cmd/syncthing/src/main.rs`（1803 行）
   - `crates/syncthing-sync/src/scanner.rs`（939 行）
   - `crates/syncthing-sync/src/folder_model/mod.rs`（914 行）
-  - `crates/syncthing-sync/src/puller/mod.rs`（863 行）
-  - `cmd/syncthing/src/tui/daemon_runner.rs`（658 行）
+  - `crates/syncthing-sync/src/puller/mod.rs`（687 行）
+  - `cmd/syncthing/src/tui/daemon_runner.rs`（676 行）
+  - `crates/syncthing-net/src/relay/server.rs`（680 行）
   - `cmd/syncthing/src/tray.rs`（635 行）
 
 ### 3.2 日志级别
