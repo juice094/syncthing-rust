@@ -340,10 +340,9 @@ async fn run() -> Result<()> {
 
     let command = cli.command.unwrap_or(Commands::Auto);
 
-    // Auto mode (daemon + in-process tray) is only meaningful on Windows.
-    // On Linux/macOS we treat it as `syncthing run` so the platform-specific
-    // tray types do not need to be available.
-    #[cfg(not(windows))]
+    // Auto mode (daemon + in-process tray) is only meaningful on Windows with tray.
+    // Without tray feature or on non-Windows, treat it as `syncthing run`.
+    #[cfg(not(all(windows, feature = "tray")))]
     let command = match command {
         Commands::Auto => Commands::Run {
             listen: CLI_DEFAULT_LISTEN.to_string(),
@@ -642,44 +641,9 @@ async fn run() -> Result<()> {
 
             let _ = controller_handle.await;
         }
-        #[cfg(all(windows, not(feature = "tray")))]
+        #[cfg(not(all(windows, feature = "tray")))]
         Commands::Auto => {
-            // Windows without tray: fall back to Run behavior
-            tracing::info!("Tray feature disabled, starting daemon-only mode");
-            let (listen, device_name) = resolve_daemon_config(
-                &config_dir,
-                CLI_DEFAULT_LISTEN.to_string(),
-                syncthing_core::constants::DEFAULT_DEVICE_NAME.to_string(),
-                false,
-            )?;
-            match tui::daemon_runner::start_daemon(config_dir.clone(), listen, device_name).await {
-                Ok(startup) => {
-                    let (api_handle, _api_addr) = match api_server::start_api_server(
-                        &config_dir,
-                        startup.sync_service,
-                        startup.connection_handle,
-                        startup.shutdown_tx,
-                    )
-                    .await
-                    {
-                        Ok(h) => h,
-                        Err(e) => {
-                            tracing::error!("Failed to start API server: {}", e);
-                            return Err(anyhow::anyhow!("API server failed: {}", e));
-                        }
-                    };
-                    let _ = startup.future.await;
-                    let _ = api_handle.await;
-                }
-                Err(e) => {
-                    tracing::error!("Daemon failed: {}", e);
-                    return Err(anyhow::anyhow!("Daemon failed: {}", e));
-                }
-            }
-        }
-        #[cfg(not(windows))]
-        Commands::Auto => {
-            unreachable!("Auto mode on non-Windows is converted to Run before matching")
+            unreachable!("Auto mode should have been converted to Run before matching")
         }
     }
 
