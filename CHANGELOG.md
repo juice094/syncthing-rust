@@ -5,8 +5,13 @@
 ### Headline: v3.0.4 security hardening, Relay Server v1, structured observability, and Docker deployment.
 
 ### Security
+- **Path traversal defense**: `validate_remote_name()` rejects `..`, `\0`, absolute paths, empty segments, and backslashes in remote file names at puller/index-handler entry points (was only on block-server side).
+- **SSRF protection**: `validate_outbound_addr()` filters multicast, unspecified, and link-local addresses from discovery/relay address pools; relay session addresses additionally filter loopback.
+- **Connection flood defense**: `max_connections` (default 1000) now enforced at TCP accept time via `can_accept_connection()`.
+- **Key file permissions**: Unix `set_permissions(0o600)` on `cert.pem`, `key.pem`, and `config.json`.
+- **Content leakage fix**: 10 `eprintln!` calls in production puller replaced with `tracing` macros; file contents no longer written to stderr.
 - **RBAC read-only API key**: REST API now supports a separate read-only API key (`ro_api_key`) that only allows GET/HEAD/OPTIONS requests. Admin API key retains full access.
-- **Mass-deletion safety threshold**: `IndexHandler` refuses to interpret a remote full index as "peer deleted everything" when the remote file count drops below 50 % of the local DB count (and local has >10 files). Prevents §15-style cascade deletion after peer format/reinstall.
+- **Mass-deletion safety threshold**: `IndexHandler` refuses to interpret a remote full index as "peer deleted everything" when the remote file count drops below 50% of the local DB count (and local has >10 files). Prevents §15-style cascade deletion after peer format/reinstall.
 
 ### Network / Protocol
 - **BEP Relay Server v1**: new `relay-server` subcommand and `crates/syncthing-net/src/relay/server.rs` provide a standalone relay listener with TLS, session joining, and device-id based routing.
@@ -23,7 +28,7 @@
 - **SBOM generation**: `scripts/generate-sbom.sh` produces CycloneDX JSON for release audits.
 
 ### Stats
-- **Tests**: 393 passed / 0 failed / 6 ignored
+- **Tests**: 392 passed / 0 failed / 3 ignored
 - **Clippy**: 0 warnings
 
 ## [3.0.3] — 2026-06-16
