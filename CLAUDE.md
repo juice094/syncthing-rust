@@ -19,7 +19,7 @@ This file provides quick guidance to Claude Code (claude.ai/code) when working w
 ```bash
 cargo fmt --all
 cargo clippy --workspace --all-targets -- -D warnings
-cargo test --workspace          # 392 passed / 6 ignored / 0 failed
+cargo test --workspace          # 413 passed / 3 ignored / 0 failed
 cargo audit
 ```
 

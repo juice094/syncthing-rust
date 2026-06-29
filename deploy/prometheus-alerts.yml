@@ -1,0 +1,82 @@
+# syncthing-rust Prometheus alerting rules
+# 用法: 复制到 Prometheus 配置目录的 rules/ 下
+# 告警通过 AlertManager 路由到 Slack/PagerDuty/Webhook
+
+groups:
+  - name: syncthing
+    rules:
+      # ── 连接告警 ──
+      - alert: SyncthingNoConnectedPeers
+        expr: syncthing_connected_devices == 0
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "syncthing-rust: no connected peers"
+          description: "{{ $labels.instance }} has zero connected peers for >10 minutes. Check network or peer availability."
+
+      - alert: SyncthingPeerDisconnected
+        expr: syncthing_device_connected == 0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "syncthing-rust: peer {{ $labels.device_id }} disconnected"
+          description: "Peer {{ $labels.device_id }} has been disconnected from {{ $labels.instance }} for >5 minutes."
+
+      # ── 同步停滞告警 ──
+      - alert: SyncthingBytesStalled
+        expr: rate(syncthing_connection_bytes_sent_total[15m]) == 0 and syncthing_connected_devices > 0
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: "syncthing-rust: sync stalled"
+          description: "{{ $labels.instance }} has connected peers but zero bytes sent in 15 minutes. Sync may be stuck."
+
+      # ── 数据库告警 ──
+      - alert: SyncthingDBLarge
+        expr: syncthing_db_size_estimate_bytes > 1e9
+        for: 1h
+        labels:
+          severity: info
+        annotations:
+          summary: "syncthing-rust: database >1GB"
+          description: "{{ $labels.instance }} database exceeds 1GB ({{ $value | humanize }}B). Consider periodic DB rebuild."
+
+      - alert: SyncthingDBGrowth
+        expr: rate(syncthing_db_files_total[1h]) > 100
+        for: 1h
+        labels:
+          severity: warning
+        annotations:
+          summary: "syncthing-rust: rapid DB growth"
+          description: "{{ $labels.instance }} is indexing >100 new files/hour. Verify this is expected."
+
+      # ── 认证告警 ──
+      - alert: SyncthingAPIAuthDisabled
+        expr: syncthing_api_auth_enabled == 0
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "syncthing-rust: API authentication disabled"
+          description: "{{ $labels.instance }} REST API has no API key configured. Exposed on network."
+
+      # ── 进程告警 ──
+      - alert: SyncthingDown
+        expr: up{job="syncthing"} == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "syncthing-rust: instance down"
+          description: "{{ $labels.instance }} metrics endpoint unreachable for >2 minutes."
+
+      - alert: SyncthingRestarted
+        expr: changes(syncthing_uptime_seconds[10m]) > 0
+        labels:
+          severity: info
+        annotations:
+          summary: "syncthing-rust: process restarted"
+          description: "{{ $labels.instance }} uptime reset in the last 10 minutes (restart or crash)."
