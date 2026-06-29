@@ -6,8 +6,8 @@
 
 | Metric | Status |
 |:---|:---|
-| Version | v3.0.3 |
-| Tests | 392 passed / 6 ignored / 0 failed |
+| Version | v3.0.4 |
+| Tests | 413 passed / 3 ignored / 0 failed |
 | Clippy | 0 warnings |
 | License | MIT (dual: commercial available) |
 | Rust | 1.85+ |
