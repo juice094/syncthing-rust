@@ -5,13 +5,32 @@ project: syncthing-rust
 tags: [plan, roadmap, post-v3.0.3]
 ---
 
-# Post-v3.0.3 后续计划书
+# Post-v3.0.4 后续计划书
 
-> **制定日期**：2026-06-15
+> **制定日期**：2026-06-15 · **更新**：2026-06-29 (v3.0.4 已发布)
 > **维护者**：juice094
 > **制定原则**：风险驱动 + 单人维护约束 + 已冻结项不反复讨论
 >
-> 本计划承接 [`POST_V0_2_0_ROADMAP.md`](./POST_V0_2_0_ROADMAP.md) 与 [`CHANGELOG.md`](../../CHANGELOG.md)，聚焦 v3.0.3 发布后的剩余缺口与长期维护方向。
+> 本计划承接 [`POST_V0_2_0_ROADMAP.md`](./POST_V0_2_0_ROADMAP.md) 与 [`CHANGELOG.md`](../../CHANGELOG.md)，聚焦 v3.0.4 发布后的剩余缺口与长期维护方向。
+
+---
+
+## 〇、v3.0.4 已完成的原计划项
+
+v3.0.4 (2026-06-27) 系统性安全审计驱动的版本，超出原 v3.0.x 路线图范围：
+
+| 完成项 | 原计划 | 实际 |
+|:---|:---|:---|
+| 安全审计 (8 CRITICAL/HIGH 修复) | 未计划 | ✅ 路径穿越/SSRF/连接限流/密钥权限/内容泄露/quinn-proto/级联删除阈值 |
+| RBAC 只读 API key | P2 监控增强 | ✅ admin + ro_key |
+| Prometheus 指标 + Grafana | P2 监控增强 | ✅ 7 指标 + 9-panel + 7 告警规则 |
+| JSON 结构化日志 | 未计划 | ✅ --log-format json (ELK/Splunk/Loki) |
+| Relay Server v1 | 部分已有 (client only) | ✅ 完整 Server (Protocol + Session + 转发) |
+| WSS 传输 | 未计划 | ✅ TLS-over-WebSocket |
+| Docker/K8s 部署 | 未计划 | ✅ Docker + compose + Helm |
+| 灾备手册 | 未计划 | ✅ DR runbook |
+| SBOM | 未计划 | ✅ CycloneDX 脚本 |
+| 测试基线 | 392 → 413 | ✅ +21 tests |
 
 ---
 
@@ -19,11 +38,13 @@ tags: [plan, roadmap, post-v3.0.3]
 
 | 维度 | 状态 |
 |:---|:---|
-| 核心功能 | Production：BEP/TLS、块级同步、发现、Relay v1、REST API、TUI、Windows 托盘均稳定 |
-| 测试基线 | 392 passed / 6 ignored / 0 failed |
-| CI | 19/19 jobs passing |
-| 真实部署 | ROG-X ↔ Gray-Cloud 双端生产同步运行中 |
-| 当前最新 Release | [v3.0.3](https://github.com/juice094/syncthing-rust/releases/tag/v3.0.3) |
+| 核心功能 | Production：BEP/TLS、块级同步、发现、**Relay Server v1**、WSS、REST API (RBAC)、TUI、Windows 托盘均稳定 |
+| 安全基线 | **v3.0.4**: 路径穿越/SSRF/连接限流/密钥权限/内容泄露全部修复 |
+| 测试基线 | **413 passed / 3 ignored / 0 failed** |
+| 性能基线 | Puller 6.7GiB/s, Scanner 803µs/MB, BEP 198ns/Hello |
+| CI | fmt + clippy (3 OS) + test (3 OS) + audit + deny + e2e + bench + release (3 OS) |
+| 真实部署 | ROG-X ↔ Gray-Cloud 双端生产同步 (自建 relay 替代 Tailscale) |
+| 当前最新 Release | [v3.0.4](https://github.com/juice094/syncthing-rust/releases/tag/v3.0.4) |
 
 ---
 
@@ -48,7 +69,7 @@ tags: [plan, roadmap, post-v3.0.3]
 | **72h stress test** | 🔴 高（稳定性未知） | 大 | 🔴 高（生产可信度） | **P0** | v3.1.0 阻塞 |
 | **高延迟网络传输优化** | 🟡 中（场景特定） | 中 | 🟡 中（校园网/VPS 用户） | **P1** | v3.1.0~v3.2.0 |
 | **Symlink 同步** | 🟡 中（安全/平台差异） | 中 | 🟡 中（dotfiles/开发工作流） | **P2** | v3.2.0 |
-| **监控/可观测性增强** | 🟢 低 | 小 | 🟡 中（运维友好） | **P2** | v3.2.0 |
+| **监控/可观测性增强** | 🟢 低 | ✅ 已交付 | 🟡 中（运维友好） | **✅ v3.0.4** | Prometheus + Grafana + 告警 |
 | **Web GUI** | — | 大 | 🟡 中 | **冻结** | 不计划 |
 | **QUIC / MagicSocket** | — | 大 | 🟡 中 | **冻结** | 不计划 |
 
