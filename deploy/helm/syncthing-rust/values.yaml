@@ -1,0 +1,68 @@
+# syncthing-rust Helm Chart values
+
+# Relay server configuration
+relay:
+  enabled: true
+  replicaCount: 1
+  image:
+    repository: syncthing-rust
+    tag: latest
+    pullPolicy: IfNotPresent
+  service:
+    type: LoadBalancer
+    protocolPort: 22067
+    sessionPort: 22068
+    # For port 443 with nginx sidecar, set protocolPort to 443
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 256Mi
+  persistence:
+    enabled: true
+    size: 1Gi
+    # TLS certs stored here
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+
+# Daemon configuration (optional, usually runs on bare metal/VMs)
+daemon:
+  enabled: false
+  replicaCount: 1
+  image:
+    repository: syncthing-rust
+    tag: latest
+    pullPolicy: IfNotPresent
+  config:
+    listenAddr: "0.0.0.0:22000"
+    guiAddress: "127.0.0.1:8385"
+  service:
+    type: ClusterIP
+    bepPort: 22000
+    apiPort: 8385
+  persistence:
+    config:
+      size: 1Gi
+    sync:
+      size: 100Gi
+  resources:
+    requests:
+      cpu: 200m
+      memory: 256Mi
+    limits:
+      cpu: 1000m
+      memory: 512Mi
+
+# Prometheus ServiceMonitor (requires prometheus-operator)
+serviceMonitor:
+  enabled: false
+  interval: 30s
+
+# Pod Security Context
+securityContext:
+  runAsNonRoot: true
+  runAsUser: 1000
+  fsGroup: 1000
