@@ -10,9 +10,9 @@
 
 `syncthing-rust` 是 [Syncthing](https://syncthing.net/) BEP（Block Exchange Protocol）协议的 Rust 实现，目标是成为 Go 版 Syncthing 的替代实现。
 
-- **当前版本**：`CHANGELOG.md` 声明为 `3.0.3`（2026-06-13），最新 Git 标签为 `v3.0.3`，工作区内所有 crate 的 `Cargo.toml` 版本统一为 `3.0.0`。
-- **当前阶段**：Production（谨慎生产）。核心 P2P 文件同步、Windows 托盘、TUI、REST API 已稳定运行；72h 耐久测试为 `v3.1.0` 准入线（尚未完成）。
-- **主要特性**：BEP over TLS、块级 Pull/Push 双向同步、三路文本合并冲突解决、Simple/Staggered 版本控制、多路径发现、实时 TUI、Windows 托盘、REST API、与 Go Syncthing 线路兼容。
+- **当前版本**：`CHANGELOG.md` 声明为 `3.0.4`（2026-06-27），工作区内所有 crate 的 `Cargo.toml` 版本统一为 `3.0.0`。
+- **当前阶段**：Production（安全加固）。核心 P2P 文件同步、自建 Relay Server、Windows 托盘、TUI、REST API 已稳定；72h 耐久测试为 `v3.1.0` 准入线（尚未完成）。
+- **主要特性**：BEP over TLS、块级 Pull/Push 双向同步、三路文本合并、Simple/Staggered 版本控制、多路径发现、Relay Server v1、WSS、RBAC API keys、JSON 结构化日志、Prometheus 指标、实时 TUI、Windows 托盘、Docker/K8s 部署。
 
 ---
 
