@@ -4,7 +4,6 @@
 
 mod rename;
 pub(crate) use rename::detect_and_reorder_renames;
-use rename::has_same_blocks;
 
 use crate::database::LocalDatabase;
 use crate::error::{Result, SyncError};
