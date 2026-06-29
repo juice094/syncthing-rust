@@ -34,7 +34,7 @@ jobs:
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
 
       - name: Build release
-        run: cargo build --release -p syncthing --target x86_64-unknown-linux-gnu
+        run: cargo build --release -p syncthing --no-default-features --target x86_64-unknown-linux-gnu
 
       - name: Prepare artifact
         run: |
@@ -52,6 +52,47 @@ jobs:
           body: "Auto-built from ${{ github.ref_name }}"
           prerelease: ${{ contains(github.ref_name, 'alpha') || contains(github.ref_name, 'beta') || contains(github.ref_name, 'rc') }}
           files: dist/syncthing-x86_64-linux
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  build-macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-apple-darwin
+
+      - name: Cache cargo
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Build release
+        run: cargo build --release -p syncthing --no-default-features --target x86_64-apple-darwin
+
+      - name: Prepare artifact
+        run: |
+          mkdir -p dist
+          cp target/x86_64-apple-darwin/release/syncthing dist/syncthing-x86_64-darwin
+          strip dist/syncthing-x86_64-darwin || true
+          file dist/syncthing-x86_64-darwin
+          ls -lh dist/syncthing-x86_64-darwin
+
+      - name: Upload to Release
+        uses: softprops/action-gh-release@v3
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: "Release ${{ github.ref_name }}"
+          body: "Auto-built from ${{ github.ref_name }}"
+          prerelease: ${{ contains(github.ref_name, 'alpha') || contains(github.ref_name, 'beta') || contains(github.ref_name, 'rc') }}
+          files: dist/syncthing-x86_64-darwin
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
