@@ -577,7 +577,7 @@ impl FolderModel {
         }
 
         // 3. 重命名检测与 blocks 清理
-        changed_files = Scanner::detect_and_reorder_renames(changed_files);
+        changed_files = crate::scanner::detect_and_reorder_renames(changed_files);
         for file in &mut changed_files {
             if file.is_deleted() {
                 file.blocks.clear();

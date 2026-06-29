@@ -2,6 +2,10 @@
 //!
 //! 实现定期扫描本地文件夹变更的功能
 
+mod rename;
+pub(crate) use rename::detect_and_reorder_renames;
+use rename::has_same_blocks;
+
 use crate::database::LocalDatabase;
 use crate::error::{Result, SyncError};
 use crate::events::{EventPublisher, SyncEvent};
@@ -177,7 +181,7 @@ impl Scanner {
 
                 // P1: 重命名检测——新文件与最近删除的文件块哈希相同
                 if sub.is_none() {
-                    changed_files = Self::detect_and_reorder_renames(changed_files);
+                    changed_files = detect_and_reorder_renames(changed_files);
                 }
 
                 // 清空已删除文件的 blocks（BEP 协议要求）
@@ -546,69 +550,6 @@ impl Scanner {
     }
 
     /// 检查两个文件的块哈希列表是否完全相同（用于重命名检测）
-    fn has_same_blocks(a: &FileInfo, b: &FileInfo) -> bool {
-        if a.blocks.len() != b.blocks.len() || a.blocks.is_empty() {
-            return false;
-        }
-        a.blocks
-            .iter()
-            .zip(b.blocks.iter())
-            .all(|(a_blk, b_blk)| a_blk.hash == b_blk.hash)
-    }
-
-    /// 检测重命名操作并重新排序 changed_files
-    ///
-    /// 当新文件的块哈希与某个已删除文件完全匹配时，识别为重命名。
-    /// 将新文件移到列表前面，确保接收端先创建新文件（可从旧文件复制内容），
-    /// 再删除旧文件。
-    pub fn detect_and_reorder_renames(changed_files: Vec<FileInfo>) -> Vec<FileInfo> {
-        let mut rename_targets: Vec<usize> = Vec::new();
-
-        for (idx, file) in changed_files.iter().enumerate() {
-            if file.is_deleted() || file.blocks.is_empty() {
-                continue;
-            }
-            // 查找相同块哈希的已删除文件
-            for (del_idx, del_file) in changed_files.iter().enumerate() {
-                if del_idx == idx {
-                    continue;
-                }
-                if del_file.is_deleted() && Self::has_same_blocks(del_file, file) {
-                    rename_targets.push(idx);
-                    info!(
-                        old_name = %del_file.name,
-                        new_name = %file.name,
-                        blocks = file.blocks.len(),
-                        "Detected rename: same block hashes"
-                    );
-                    break;
-                }
-            }
-        }
-
-        if rename_targets.is_empty() {
-            return changed_files;
-        }
-
-        // 重新排序：重命名的新文件在前，其余保持原顺序
-        let mut reordered = Vec::with_capacity(changed_files.len());
-        let mut added = vec![false; changed_files.len()];
-
-        for &idx in &rename_targets {
-            if !added[idx] {
-                reordered.push(changed_files[idx].clone());
-                added[idx] = true;
-            }
-        }
-        for (idx, file) in changed_files.into_iter().enumerate() {
-            if !added[idx] {
-                reordered.push(file);
-            }
-        }
-
-        reordered
-    }
-
     /// 扫描单个相对路径（用于增量扫描）。
     /// 返回变更的 FileInfo；如果文件未变更或不存在，返回 None。
     pub async fn scan_changed_file(
@@ -872,7 +813,7 @@ mod tests {
         };
 
         let input = vec![old_file, unchanged, new_file];
-        let result = Scanner::detect_and_reorder_renames(input);
+        let result = detect_and_reorder_renames(input);
 
         // 新文件应排在最前面
         assert_eq!(result[0].name, "new_name.txt");
@@ -930,7 +871,7 @@ mod tests {
         };
 
         let input = vec![old_file, new_file];
-        let result = Scanner::detect_and_reorder_renames(input);
+        let result = detect_and_reorder_renames(input);
 
         // 顺序不变
         assert_eq!(result[0].name, "old.txt");
