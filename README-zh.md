@@ -10,8 +10,8 @@
 
 [![Rust](https://img.shields.io/badge/rust-1.85%2B-orange?logo=rust)](https://www.rust-lang.org)
 [![CI](https://github.com/juice094/syncthing-rust/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/juice094/syncthing-rust/actions/workflows/ci.yml)
-[![Tests](https://img.shields.io/badge/tests-404%20passed-brightgreen)](https://github.com/juice094/syncthing-rust/actions)
-[![Version](https://img.shields.io/badge/version-v3.0.3-blue)](https://github.com/juice094/syncthing-rust/releases/tag/v3.0.3)
+[![Tests](https://img.shields.io/badge/tests-413%20passed-brightgreen)](https://github.com/juice094/syncthing-rust/actions)
+[![Version](https://img.shields.io/badge/version-v3.0.4-blue)](https://github.com/juice094/syncthing-rust)
 [![License](https://img.shields.io/badge/license-MIT%20%2B%20Commercial-blue)](./LICENSE)
 
 </div>
@@ -22,13 +22,13 @@
 
 [Syncthing](https://syncthing.net/) 协议栈的 Rust 实现，目标为**零运行时依赖**部署，与官方 Go Syncthing 守护进程线路兼容互操作。
 
-**当前阶段（v3.0.3）**：Production — 404 passed / 6 ignored / 0 failures，E2E 双向同步已实测，Windows 托盘 + TUI 稳定。
+**当前阶段（v3.0.4）**：Production — 413 passed / 3 ignored / 0 failures，安全加固 + Relay Server v1 + RBAC + JSON 日志。
 
 - ✅ 连接层：retry 累加、TCP keepalive
 - ✅ 协议层：prost 编解码 + LZ4 压缩、wire_compat 10 tests
 - ✅ 同步链路：Pull/Push 双向、~1 秒检测到变更
 - ✅ 版本控制：Simple + Staggered、`.stversions/` 归档
-- ✅ Go 互操作：v3.0.3 ↔ Go Syncthing v2.1.0 已验证
+- ✅ Go 互操作：v3.0.4 ↔ Go Syncthing v2.1.0 已验证
 
 完整路线图见 [`docs/plans/INDEX.md`](docs/plans/INDEX.md)。
 
@@ -52,11 +52,11 @@
 |:---|:---|
 | BEP 协议（TLS + Hello + ClusterConfig + Index + Request/Response） | ✅ prost + LZ4 |
 | 端到端文件同步（双向） | ✅ Push/Pull 双向验证 |
-| 文件同步核心（puller / scanner / folder_model / orchestrator） | ✅ 404 tests / 0 failed |
+| 文件同步核心（puller / scanner / folder_model / orchestrator） | ✅ 413 tests / 0 failed |
 | 版本控制 | ✅ Simple + Staggered |
 | 连接稳定性 | ✅ retry 累加 + TCP keepalive |
-| Rust↔Rust 双向互通 | ✅ v3.0.3 ↔ v3.0.3 E2E 验证 |
-| Go Syncthing 互操作 | ✅ v3.0.3 ↔ Go v2.1.0 已验证 |
+| Rust↔Rust 双向互通 | ✅ v3.0.4 ↔ v3.0.3 E2E 验证 |
+| Go Syncthing 互操作 | ✅ v3.0.4 ↔ Go v2.1.0 已验证 |
 | Folder Orchestrator（统一调度 / 并发限制 / 抖动 / 优先级） | ✅ 多 folder 扫描/拉取协调 |
 | 预测性健康检查（失败率 / 丢事件 / 状态翻转 / 自动节流） | ✅ 事件驱动趋势评估 |
 | 自适应拉取并发（RTT 动态调整 downloads/blocks） | ✅ 根据链路质量自动换挡 |
