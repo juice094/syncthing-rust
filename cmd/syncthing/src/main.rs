@@ -642,6 +642,41 @@ async fn run() -> Result<()> {
 
             let _ = controller_handle.await;
         }
+        #[cfg(all(windows, not(feature = "tray")))]
+        Commands::Auto => {
+            // Windows without tray: fall back to Run behavior
+            tracing::info!("Tray feature disabled, starting daemon-only mode");
+            let (listen, device_name) = resolve_daemon_config(
+                &config_dir,
+                CLI_DEFAULT_LISTEN.to_string(),
+                syncthing_core::constants::DEFAULT_DEVICE_NAME.to_string(),
+                false,
+            )?;
+            match tui::daemon_runner::start_daemon(config_dir.clone(), listen, device_name).await {
+                Ok(startup) => {
+                    let (api_handle, _api_addr) = match api_server::start_api_server(
+                        &config_dir,
+                        startup.sync_service,
+                        startup.connection_handle,
+                        startup.shutdown_tx,
+                    )
+                    .await
+                    {
+                        Ok(h) => h,
+                        Err(e) => {
+                            tracing::error!("Failed to start API server: {}", e);
+                            return Err(anyhow::anyhow!("API server failed: {}", e));
+                        }
+                    };
+                    let _ = startup.future.await;
+                    let _ = api_handle.await;
+                }
+                Err(e) => {
+                    tracing::error!("Daemon failed: {}", e);
+                    return Err(anyhow::anyhow!("Daemon failed: {}", e));
+                }
+            }
+        }
         #[cfg(not(windows))]
         Commands::Auto => {
             unreachable!("Auto mode on non-Windows is converted to Run before matching")
