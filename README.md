@@ -10,8 +10,8 @@ Zero runtime dependencies · Wire-compatible with Go Syncthing · Single static 
 
 [![Rust](https://img.shields.io/badge/rust-1.85%2B-orange?logo=rust)](https://www.rust-lang.org)
 [![CI](https://github.com/juice094/syncthing-rust/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/juice094/syncthing-rust/actions/workflows/ci.yml)
-[![Tests](https://img.shields.io/badge/tests-404%20passed-brightgreen)](https://github.com/juice094/syncthing-rust/actions)
-[![Version](https://img.shields.io/badge/version-v3.0.3-blue)](https://github.com/juice094/syncthing-rust/releases/tag/v3.0.3)
+[![Tests](https://img.shields.io/badge/tests-392%20passed-brightgreen)](https://github.com/juice094/syncthing-rust/actions)
+[![Version](https://img.shields.io/badge/version-v3.0.4-blue)](https://github.com/juice094/syncthing-rust)
 [![License](https://img.shields.io/badge/license-MIT%20%2B%20Commercial-blue)](./LICENSE)
 
 </div>
@@ -24,7 +24,7 @@ A Rust implementation of the [Syncthing](https://syncthing.net/) BEP protocol �
 
 **Current phase**: Production. Core protocol, end-to-end sync, Windows system tray, and TUI are stable.
 
-> [Latest release: v3.0.3](https://github.com/juice094/syncthing-rust/releases/tag/v3.0.3)
+> [Latest release: v3.0.4](https://github.com/juice094/syncthing-rust)
 
 ---
 

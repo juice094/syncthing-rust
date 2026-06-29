@@ -637,4 +637,36 @@ mod tests {
         assert_eq!(received_hello.device_name, "test-device");
         assert_eq!(received_hello.client_name, "syncthing");
     }
+
+    // ── validate_outbound_addr 测试 (v3.0.4 SSRF 防护) ──
+
+    #[test]
+    fn test_validate_outbound_addr_allows_normal() {
+        assert!(validate_outbound_addr(&"192.168.1.1:22000".parse().unwrap()).is_ok());
+        assert!(validate_outbound_addr(&"10.0.0.1:22000".parse().unwrap()).is_ok());
+        assert!(validate_outbound_addr(&"8.8.8.8:22000".parse().unwrap()).is_ok());
+        assert!(validate_outbound_addr(&"172.16.0.1:22000".parse().unwrap()).is_ok());
+        // Loopback is allowed (legitimate for same-host syncthing instances)
+        assert!(validate_outbound_addr(&"127.0.0.1:22000".parse().unwrap()).is_ok());
+        assert!(validate_outbound_addr(&"[::1]:22000".parse().unwrap()).is_ok());
+    }
+
+    #[test]
+    fn test_validate_outbound_addr_rejects_multicast() {
+        assert!(validate_outbound_addr(&"224.0.0.1:22000".parse().unwrap()).is_err());
+        assert!(validate_outbound_addr(&"239.255.255.255:22000".parse().unwrap()).is_err());
+        assert!(validate_outbound_addr(&"[ff02::1]:22000".parse().unwrap()).is_err());
+    }
+
+    #[test]
+    fn test_validate_outbound_addr_rejects_unspecified() {
+        assert!(validate_outbound_addr(&"0.0.0.0:22000".parse().unwrap()).is_err());
+        assert!(validate_outbound_addr(&"[::]:22000".parse().unwrap()).is_err());
+    }
+
+    #[test]
+    fn test_validate_outbound_addr_rejects_link_local() {
+        assert!(validate_outbound_addr(&"169.254.1.1:22000".parse().unwrap()).is_err());
+        assert!(validate_outbound_addr(&"[fe80::1]:22000".parse().unwrap()).is_err());
+    }
 }
