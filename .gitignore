@@ -76,3 +76,4 @@ releases/**/stress_test-*
 
 # Runtime data directory (local state, not source)
 data/
+sbom/
