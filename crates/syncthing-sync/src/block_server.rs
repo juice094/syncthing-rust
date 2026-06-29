@@ -211,4 +211,46 @@ mod tests {
         assert!(sanitize_name("").is_err());
         assert!(sanitize_name("foo\0bar").is_err());
     }
+
+    // ── validate_remote_name 测试 (v3.0.4 路径穿越防护) ──
+
+    #[test]
+    fn test_validate_remote_name_valid() {
+        assert!(validate_remote_name("foo/bar.txt").is_ok());
+        assert!(validate_remote_name("bar.txt").is_ok());
+        assert!(validate_remote_name("deep/nested/path/file.rs").is_ok());
+        assert!(validate_remote_name("a").is_ok());
+        assert!(validate_remote_name("dir/file-name_v1.0.tar.gz").is_ok());
+    }
+
+    #[test]
+    fn test_validate_remote_name_rejects_traversal() {
+        assert!(validate_remote_name("../etc/passwd").is_err());
+        assert!(validate_remote_name("foo/../../bar").is_err());
+        assert!(validate_remote_name("./config").is_err());
+        assert!(validate_remote_name(".").is_err());
+        assert!(validate_remote_name("..").is_err());
+        assert!(validate_remote_name("foo/..").is_err());
+    }
+
+    #[test]
+    fn test_validate_remote_name_rejects_absolute() {
+        assert!(validate_remote_name("/etc/passwd").is_err());
+        assert!(validate_remote_name("\\windows\\system32").is_err());
+        assert!(validate_remote_name("C:\\foo").is_err());
+    }
+
+    #[test]
+    fn test_validate_remote_name_rejects_special() {
+        assert!(validate_remote_name("").is_err());
+        assert!(validate_remote_name("foo\0bar").is_err());
+        assert!(validate_remote_name("foo//bar").is_err());
+        assert!(validate_remote_name("foo\\bar").is_err());
+    }
+
+    #[test]
+    fn test_validate_remote_name_rejects_backslash_in_component() {
+        // 单个组件中包含反斜杠
+        assert!(validate_remote_name("foo\\bar/baz").is_err());
+    }
 }
