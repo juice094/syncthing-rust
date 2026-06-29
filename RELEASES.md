@@ -1,5 +1,40 @@
 # Releases
 
+## v3.0.4 — Security Hardening & Relay Server (2026-06-27)
+
+### Headline
+Production security audit with 8 CRITICAL/HIGH fixes, self-hosted BEP Relay Server v1, enterprise RBAC, structured JSON logging, and full Docker/K8s deployment.
+
+### Security
+- Path traversal defense: `validate_remote_name()` on all remote file entries
+- SSRF protection: `validate_outbound_addr()` filters unsafe address types
+- Connection flood defense: `max_connections` enforced at TCP accept
+- Key file permissions: Unix `set_permissions(0o600)` on cert/key/config
+- Content leakage: all `eprintln!` in production replaced with tracing
+- Mass-deletion safety: IndexHandler 50% threshold against cascade delete
+- quinn-proto RUSTSEC-2026-0185 (CVSS 7.5) fixed
+
+### New Features
+- **Relay Server v1**: Protocol mode (TLS + bep-relay ALPN) + Session mode with bidirectional forwarding. CLI: `syncthing relay-server`
+- **WSS transport**: TLS-over-WebSocket reusing device certificates
+- **RBAC**: admin + read-only API keys, ro_key returns 403 on writes
+- **JSON logging**: `--log-format json` for ELK/Splunk/Loki aggregation
+- **Prometheus metrics**: 7 metrics + deep `/rest/health` checks
+- **Grafana dashboard**: 9-panel monitoring dashboard
+- **7 Prometheus alert rules**: connectivity, sync, DB, auth, uptime
+
+### Deploy
+- Docker multi-stage build + compose for relay server
+- nginx reverse proxy config for port 443 sharing
+- K8s Helm chart with ServiceMonitor
+- Disaster recovery runbook
+- CycloneDX SBOM generation script
+
+### Stats
+- 413 tests / 0 failures / 3 ignored
+- 3 benchmark suites: Puller 6.7 GiB/s, Scanner 803µs/MB, BEP 198ns/Hello
+- 14MB release binary (Linux/macOS/Windows)
+
 ## v3.0.3 — TUI Stability & Modern Tray Icons (2026-06-13)
 
 ### Headline

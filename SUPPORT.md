@@ -14,7 +14,7 @@ For production deployments, priority bug fixes, custom feature development, or i
 
 | Version | Status |
 |:---|:---|
-| v3.0.3 | Current (production) |
+| v3.0.4 | Current (production) |
 | v3.0.x | Supported — security fixes backported on request |
 | < v3.0.0 | Unsupported (pre-release / alpha) |
 
