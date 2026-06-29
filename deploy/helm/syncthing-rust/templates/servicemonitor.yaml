@@ -1,0 +1,16 @@
+{{- if .Values.serviceMonitor.enabled }}
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: {{ .Release.Name }}
+  labels:
+    app.kubernetes.io/name: syncthing-rust
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: syncthing-rust
+  endpoints:
+    - port: api
+      interval: {{ .Values.serviceMonitor.interval }}
+      path: /metrics
+{{- end }}

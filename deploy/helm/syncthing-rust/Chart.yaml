@@ -1,0 +1,13 @@
+apiVersion: v2
+name: syncthing-rust
+description: Helm chart for syncthing-rust relay server and daemon
+type: application
+version: 3.0.4
+appVersion: "3.0.4"
+keywords:
+  - syncthing
+  - p2p
+  - file-sync
+  - relay
+maintainers:
+  - name: juice094
