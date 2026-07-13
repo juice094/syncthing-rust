@@ -61,7 +61,7 @@ socket2 = "0.5"
 walkdir = "2"
 
 # 可选传输层
-tokio-tungstenite = "0.24"
+tokio-tungstenite = "0.30"
 
 # 日志切片（T-F3）
 tracing-appender = "0.2"
