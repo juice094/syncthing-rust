@@ -51,6 +51,9 @@ pub fn handle_tab_key(app: &mut App, key: KeyEvent) -> bool {
                     );
                 app.resize_form();
                 app.form = Some(form);
+                // 重置共享设备选择，避免残留上一次 EditFolder 的勾选
+                app.folder_device_selected = 0;
+                app.folder_device_selection = vec![false; app.config.devices.len()];
                 app.popup = Popup::AddFolder;
             }
             _ => {}
@@ -220,5 +223,54 @@ pub fn save_and_log(app: &mut App) {
             }
         }
         Err(e) => app.push_log(format!("Failed to save config: {}", e)),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crossterm::event::KeyModifiers;
+    use std::str::FromStr;
+    use syncthing_core::types::{AddressType, Config, Device};
+    use syncthing_core::DeviceId;
+
+    const VALID_ID: &str = "YTKWHNG-OT27ZGH-6VVBRIJ-OHOUNWT-DYLJ2NR-TCXUXHI-QDUQR2U-OPLCBQG";
+
+    /// 回归：打开 AddFolder 时共享设备勾选必须重置，
+    /// 避免残留上一次 EditFolder 的选择导致新文件夹被意外共享
+    #[test]
+    fn test_open_add_folder_resets_device_selection() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let id = DeviceId::from_str(VALID_ID).expect("device id");
+        let mut config = Config::default();
+        config.devices.push(Device {
+            id,
+            name: None,
+            addresses: vec![AddressType::Dynamic],
+            paused: false,
+            introducer: false,
+        });
+        let mut app = App::new(
+            dir.path().to_path_buf(),
+            "tcp://0.0.0.0:22001".to_string(),
+            "test-node".to_string(),
+            config,
+        );
+        app.tab = Tab::Folders;
+        // 模拟上一次 EditFolder 残留的勾选状态
+        app.folder_device_selection = vec![true];
+        app.folder_device_selected = 0;
+
+        handle_tab_key(
+            &mut app,
+            KeyEvent::new(KeyCode::Char('a'), KeyModifiers::NONE),
+        );
+
+        assert_eq!(app.popup, Popup::AddFolder);
+        assert_eq!(
+            app.folder_device_selection,
+            vec![false],
+            "AddFolder 打开时勾选状态必须重置"
+        );
     }
 }

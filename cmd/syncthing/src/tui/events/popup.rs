@@ -200,6 +200,7 @@ fn submit_add_folder(app: &mut App) {
             }
         }
     }
+    app.config.folders.push(folder);
     form.clear_error();
     app.form = None;
     app.popup = Popup::None;
@@ -235,5 +236,296 @@ fn submit_edit_folder(app: &mut App) {
         app.form = None;
         app.popup = Popup::None;
         save_and_log(app);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::tui::app::Tab;
+    use crate::tui::forms::FormState;
+    use crossterm::event::{KeyEvent, KeyModifiers};
+    use syncthing_core::types::Config;
+
+    fn test_app() -> (tempfile::TempDir, App) {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let app = App::new(
+            dir.path().to_path_buf(),
+            "tcp://0.0.0.0:22001".to_string(),
+            "test-node".to_string(),
+            Config::default(),
+        );
+        (dir, app)
+    }
+
+    /// 回归：AddFolder 提交后新文件夹必须真正写入 config（曾缺失 push 导致静默丢弃）
+    #[test]
+    fn test_submit_add_folder_persists_folder() {
+        let (_dir, mut app) = test_app();
+        app.tab = Tab::Folders;
+        let form = FormState::new("Add Folder", 60, 16)
+            .add_field(
+                "folder_id",
+                "Folder ID",
+                "test-folder".to_string(),
+                true,
+                None,
+            )
+            .add_field("path", "Path", "C:\\sync\\test".to_string(), true, None);
+        app.form = Some(form);
+        app.popup = Popup::AddFolder;
+
+        let key = KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE);
+        handle_popup_key(&mut app, key);
+
+        assert_eq!(app.popup, Popup::None, "提交成功后弹窗应关闭");
+        assert_eq!(app.config.folders.len(), 1, "新文件夹必须写入 config");
+        assert_eq!(app.config.folders[0].id, "test-folder");
+        assert_eq!(app.config.folders[0].path, "C:\\sync\\test");
+        assert!(
+            _dir.path().join("config.json").exists(),
+            "配置应落盘到 config.json"
+        );
+    }
+
+    /// 回归：非法 folder ID 应停留在表单并显示错误，不得写入 config
+    #[test]
+    fn test_submit_add_folder_invalid_id_rejected() {
+        let (_dir, mut app) = test_app();
+        app.tab = Tab::Folders;
+        let form = FormState::new("Add Folder", 60, 16)
+            .add_field("folder_id", "Folder ID", "bad id!".to_string(), true, None)
+            .add_field("path", "Path", "C:\\sync\\test".to_string(), true, None);
+        app.form = Some(form);
+        app.popup = Popup::AddFolder;
+
+        let key = KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE);
+        handle_popup_key(&mut app, key);
+
+        assert!(app.config.folders.is_empty(), "非法输入不得写入 config");
+        assert_eq!(app.popup, Popup::AddFolder, "校验失败应停留在表单");
+    }
+
+    use std::str::FromStr;
+    use std::sync::{Arc, Mutex};
+    use syncthing_core::types::Device;
+
+    fn valid_device_id() -> String {
+        "YTKWHNG-OT27ZGH-6VVBRIJ-OHOUNWT-DYLJ2NR-TCXUXHI-QDUQR2U-OPLCBQG".to_string()
+    }
+
+    fn make_device(id: DeviceId) -> Device {
+        Device {
+            id,
+            name: None,
+            addresses: vec![AddressType::Dynamic],
+            paused: false,
+            introducer: false,
+        }
+    }
+
+    fn device_form(title: &'static str, id: &str, name: &str, addr: &str) -> FormState {
+        FormState::new(title, 72, 14)
+            .add_field("device_id", "Device ID", id.to_string(), true, None)
+            .add_field("device_name", "Name", name.to_string(), true, None)
+            .add_field("address", "Address", addr.to_string(), true, None)
+    }
+
+    fn enter() -> KeyEvent {
+        KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE)
+    }
+
+    #[test]
+    fn test_submit_add_device_persists_device() {
+        let (_dir, mut app) = test_app();
+        app.tab = Tab::Devices;
+        app.form = Some(device_form("Add Device", &valid_device_id(), "peer", ""));
+        app.popup = Popup::AddDevice;
+
+        handle_popup_key(&mut app, enter());
+
+        assert_eq!(app.popup, Popup::None);
+        assert_eq!(app.config.devices.len(), 1, "新设备必须写入 config");
+        assert_eq!(app.config.devices[0].name.as_deref(), Some("peer"));
+        assert!(matches!(
+            app.config.devices[0].addresses[0],
+            AddressType::Dynamic
+        ));
+        assert!(_dir.path().join("config.json").exists(), "配置应落盘");
+    }
+
+    #[test]
+    fn test_submit_add_device_invalid_id_rejected() {
+        let (_dir, mut app) = test_app();
+        app.tab = Tab::Devices;
+        app.form = Some(device_form("Add Device", "not-a-device-id", "peer", ""));
+        app.popup = Popup::AddDevice;
+
+        handle_popup_key(&mut app, enter());
+
+        assert!(app.config.devices.is_empty(), "非法输入不得写入 config");
+        assert_eq!(app.popup, Popup::AddDevice, "校验失败应停留在表单");
+    }
+
+    #[test]
+    fn test_submit_edit_device_updates_fields() {
+        let (_dir, mut app) = test_app();
+        let id = DeviceId::from_str(&valid_device_id()).expect("device id");
+        app.config.devices.push(make_device(id));
+        app.tab = Tab::Devices;
+        app.device_selected = 0;
+        app.form = Some(device_form(
+            "Edit Device",
+            &valid_device_id(),
+            "renamed",
+            "tcp://1.2.3.4:22001",
+        ));
+        app.popup = Popup::EditDevice;
+
+        handle_popup_key(&mut app, enter());
+
+        assert_eq!(app.popup, Popup::None);
+        assert_eq!(app.config.devices[0].name.as_deref(), Some("renamed"));
+        assert!(
+            matches!(&app.config.devices[0].addresses[0], AddressType::Tcp(a) if a == "tcp://1.2.3.4:22001")
+        );
+    }
+
+    #[test]
+    fn test_submit_edit_folder_updates_path_and_shares() {
+        let (_dir, mut app) = test_app();
+        let id = DeviceId::from_str(&valid_device_id()).expect("device id");
+        app.config.devices.push(make_device(id));
+        let mut folder = Folder::new("f1", "C:\\old");
+        folder.devices.push(id);
+        app.config.folders.push(folder);
+        app.tab = Tab::Folders;
+        app.folder_selected = 0;
+        app.folder_device_selection = vec![true];
+        let form = FormState::new("Edit Folder", 60, 16)
+            .add_field("folder_id", "Folder ID", "f1".to_string(), false, None)
+            .add_field("path", "Path", "C:\\new".to_string(), true, None);
+        app.form = Some(form);
+        app.popup = Popup::EditFolder;
+
+        handle_popup_key(&mut app, enter());
+
+        assert_eq!(app.popup, Popup::None);
+        assert_eq!(app.config.folders[0].path, "C:\\new");
+        assert!(
+            app.config.folders[0].devices.contains(&id),
+            "勾选设备应保留在共享列表"
+        );
+    }
+
+    /// 记录 update_config 调用的 mock，验证 TUI 配置变更会热更新到运行中的同步服务
+    struct MockSyncManager {
+        publisher: syncthing_sync::EventPublisher,
+        updated: Arc<Mutex<Vec<Config>>>,
+    }
+
+    impl MockSyncManager {
+        fn new(updated: Arc<Mutex<Vec<Config>>>) -> Self {
+            Self {
+                publisher: syncthing_sync::EventPublisher::default(),
+                updated,
+            }
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl syncthing_sync::SyncManager for MockSyncManager {
+        async fn get_config(&self) -> syncthing_sync::Result<Config> {
+            Ok(Config::default())
+        }
+        async fn update_config(&self, config: Config) -> syncthing_sync::Result<()> {
+            self.updated.lock().expect("lock").push(config);
+            Ok(())
+        }
+        async fn add_device(&self, _device: Device) -> syncthing_sync::Result<()> {
+            Ok(())
+        }
+        async fn remove_device(&self, _device_id: &DeviceId) -> syncthing_sync::Result<()> {
+            Ok(())
+        }
+        async fn add_folder(&self, _folder: Folder) -> syncthing_sync::Result<()> {
+            Ok(())
+        }
+        async fn remove_folder(&self, _folder_id: &str) -> syncthing_sync::Result<()> {
+            Ok(())
+        }
+        async fn get_folder_state(
+            &self,
+            folder_id: &str,
+        ) -> syncthing_sync::Result<syncthing_sync::FolderState> {
+            Ok(syncthing_sync::FolderState::new(folder_id))
+        }
+        async fn start(&self) -> syncthing_sync::Result<()> {
+            Ok(())
+        }
+        async fn stop(&self) -> syncthing_sync::Result<()> {
+            Ok(())
+        }
+        async fn scan_folder(&self, _folder_id: &str) -> syncthing_sync::Result<()> {
+            Ok(())
+        }
+        async fn scan_folder_sub(
+            &self,
+            _folder_id: &str,
+            _sub: &str,
+        ) -> syncthing_sync::Result<()> {
+            Ok(())
+        }
+        async fn pull_folder(&self, _folder_id: &str) -> syncthing_sync::Result<()> {
+            Ok(())
+        }
+        async fn get_connected_devices(&self) -> syncthing_sync::Result<Vec<DeviceId>> {
+            Ok(Vec::new())
+        }
+        async fn connect_device(&self, _device_id: DeviceId) -> syncthing_sync::Result<()> {
+            Ok(())
+        }
+        async fn disconnect_device(&self, _device_id: DeviceId) -> syncthing_sync::Result<()> {
+            Ok(())
+        }
+        fn subscribe_events(&self) -> syncthing_sync::EventSubscriber {
+            self.publisher.subscribe()
+        }
+        async fn get_stats(&self) -> syncthing_sync::Result<syncthing_sync::model::SyncStats> {
+            Ok(syncthing_sync::model::SyncStats::default())
+        }
+    }
+
+    #[tokio::test]
+    async fn test_submit_add_folder_notifies_sync_service() {
+        let (_dir, mut app) = test_app();
+        let updated = Arc::new(Mutex::new(Vec::new()));
+        app.sync_service = Some(Arc::new(MockSyncManager::new(Arc::clone(&updated))));
+        app.tab = Tab::Folders;
+        let form = FormState::new("Add Folder", 60, 16)
+            .add_field(
+                "folder_id",
+                "Folder ID",
+                "hot-folder".to_string(),
+                true,
+                None,
+            )
+            .add_field("path", "Path", "C:\\sync\\hot".to_string(), true, None);
+        app.form = Some(form);
+        app.popup = Popup::AddFolder;
+
+        handle_popup_key(&mut app, enter());
+
+        // save_and_log 中的 update_config 是 fire-and-forget spawn，轮询等待其完成
+        for _ in 0..100 {
+            if !updated.lock().expect("lock").is_empty() {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+        let calls = updated.lock().expect("lock");
+        assert_eq!(calls.len(), 1, "配置变更必须通知运行中的 sync service");
+        assert_eq!(calls[0].folders.len(), 1);
+        assert_eq!(calls[0].folders[0].id, "hot-folder");
     }
 }
