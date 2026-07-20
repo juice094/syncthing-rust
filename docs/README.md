@@ -13,8 +13,8 @@ timestamp: 2026-06-25T00:00:00Z
 
 本目录包含 `syncthing-rust` 项目的设计文档、验证报告、计划、运维指南与历史归档。
 
-> ✅ **当前阶段（2026-06-25 v3.0.3）**：Production — 392 passed / 6 ignored / 0 failed，E2E 双向同步已实测，Windows 托盘 + TUI 稳定。  
-> **快速入口**: [plans/POST_V0_2_0_ROADMAP.md](plans/POST_V0_2_0_ROADMAP.md) — 当前权威路线图；[plans/NEXT_STEPS_2026-05-15.md](plans/NEXT_STEPS_2026-05-15.md) — 最近活跃行动计划  
+> ✅ **当前阶段（2026-07-20 v3.0.4）**：Production — 414 passed / 6 ignored / 0 failed，E2E 双向同步已实测，Windows 托盘 + TUI 稳定。  
+> **快速入口**: [plans/POST_V3_0_3_ROADMAP.md](plans/POST_V3_0_3_ROADMAP.md) — 当前权威路线图（v3.0.4 后更新）  
 > **历史缺陷追溯**: [`KNOWN_ISSUES.md`](KNOWN_ISSUES.md) §15 含 stale-index 误删 RCA；§7 含运行时安全审查（INC-20260514-001）
 
 ---
@@ -79,7 +79,7 @@ docs/
 |------|------|------|
 | [POST_V3_0_3_ROADMAP.md](plans/POST_V3_0_3_ROADMAP.md) | v3.0.3 发布后后续计划（72h stress test、Symlink、网络优化）| ✅ 最新 |
 | [TUNING_PLAN_2026-05-11.md](plans/TUNING_PLAN_2026-05-11.md) | 横向调优计划（T-A~T-G） | 🟢 活跃 |
-| [POST_V0_2_0_ROADMAP.md](plans/POST_V0_2_0_ROADMAP.md) | v0.2.0-beta 后历史路线图 | 🗃️ 归档 |
+| [POST_V0_2_0_ROADMAP.md](archive/plans/POST_V0_2_0_ROADMAP.md) | v0.2.0-beta 后历史路线图 | 🗃️ 归档 |
 | [PHASE3_PLAN.md](plans/PHASE3_PLAN.md) | Phase 3 目标：Push/Pull E2E、BEP 协议兼容 | ✅ 已完成 |
 | [PHASE4_PLAN.md](archive/plans/PHASE4_PLAN.md) | Phase 4 目标（已被后续路线图覆盖）| 🗃️ 归档 |
 | [WAVE3_PLAN.md](archive/plans/WAVE3_PLAN.md) | Wave 3 详细任务分解 | ✅ 已完成 |
@@ -132,7 +132,7 @@ docs/
 
 - **新协作者**: 先看 [`design/topology.md`](design/topology.md) 了解架构拓扑，再看根目录 `README.md` 编译运行。
 - **架构决策**: [`design/ARCHITECTURE_DECISIONS.md`](design/ARCHITECTURE_DECISIONS.md) 是所有粗粒度架构决策的统一入口。
-- **当前开发重点**: [`plans/POST_V0_2_0_ROADMAP.md`](plans/POST_V0_2_0_ROADMAP.md) 是当前权威路线图；[`plans/NEXT_STEPS_2026-05-15.md`](plans/NEXT_STEPS_2026-05-15.md) 是最近活跃行动计划。
+- **当前开发重点**: [`plans/POST_V3_0_3_ROADMAP.md`](plans/POST_V3_0_3_ROADMAP.md) 是当前权威路线图（v3.0.4 后更新）。
 - **部署使用**: 跨网络同步看 [`operations/TAILSCALE_GUIDE.md`](operations/TAILSCALE_GUIDE.md)；代理转发看 [`operations/PROXY_GUIDE.md`](operations/PROXY_GUIDE.md)；Gray-Cloud 运维看 [`GRAY_CLOUD_OPS_MANUAL.md`](GRAY_CLOUD_OPS_MANUAL.md)。
 - **稳定性证据**: [`reports/CRUD_REPAIR_E2E_2026-05-22.md`](reports/CRUD_REPAIR_E2E_2026-05-22.md) 含 5/5 E2E CRUD 验证；[`reports/STRESS_TEST_REPORT_2026-05-13.md`](reports/STRESS_TEST_REPORT_2026-05-13.md) 含 9h+ 压测分析。
 - **历史追溯**: 需要了解某个决策的背景时，查阅 `archive/` 中的工作日报。

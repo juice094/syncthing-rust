@@ -51,7 +51,7 @@ export SOCKS5_PROXY=127.0.0.1:26561
 
 格式：`host:port` 或 `socks5://host:port` 或 `http://host:port`
 
-> ⚠️ 当前不支持 SOCKS5 用户名/密码认证。如需，在 [`POST_V0_2_0_ROADMAP.md`](../plans/POST_V0_2_0_ROADMAP.md) P3 列入。
+> ⚠️ 当前不支持 SOCKS5 用户名/密码认证。如需，在 [`POST_V0_2_0_ROADMAP.md`](../archive/plans/POST_V0_2_0_ROADMAP.md) P3 列入。
 
 ---
 
@@ -197,7 +197,7 @@ let proxy = ProxyConfig {
 
 - [`TAILSCALE_GUIDE.md`](./TAILSCALE_GUIDE.md) — Tailscale 零配置 NAT 穿透
 - [`../../crates/syncthing-net/src/transport/proxy.rs`](../../crates/syncthing-net/src/transport/proxy.rs) — 代理实现源码
-- [`../plans/POST_V0_2_0_ROADMAP.md`](../plans/POST_V0_2_0_ROADMAP.md) — 代理增强路线图
+- [`../archive/plans/POST_V0_2_0_ROADMAP.md`](../archive/plans/POST_V0_2_0_ROADMAP.md) — 代理增强路线图
 
 ---
 

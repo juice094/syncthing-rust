@@ -223,7 +223,7 @@ syncthing-cli derp-server --listen 0.0.0.0:3478
 ## 8. 关联文档
 
 - [`PROXY_GUIDE.md`](./PROXY_GUIDE.md) — 通过 HTTP/SOCKS5 代理（如 Watt Toolkit / clash）转发出站连接
-- [`../plans/POST_V0_2_0_ROADMAP.md`](../plans/POST_V0_2_0_ROADMAP.md) — NAT 穿透模块路线图
+- [`../archive/plans/POST_V0_2_0_ROADMAP.md`](../archive/plans/POST_V0_2_0_ROADMAP.md) — NAT 穿透模块路线图（已归档）
 - [`../reports/STRESS_TEST_REPORT_2026-05-13.md`](../reports/STRESS_TEST_REPORT_2026-05-13.md) — 9h+ 压测连接层稳定性证据
 
 ---

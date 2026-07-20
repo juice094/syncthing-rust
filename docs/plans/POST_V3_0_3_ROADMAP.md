@@ -11,7 +11,7 @@ tags: [plan, roadmap, post-v3.0.3]
 > **维护者**：juice094
 > **制定原则**：风险驱动 + 单人维护约束 + 已冻结项不反复讨论
 >
-> 本计划承接 [`POST_V0_2_0_ROADMAP.md`](./POST_V0_2_0_ROADMAP.md) 与 [`CHANGELOG.md`](../../CHANGELOG.md)，聚焦 v3.0.4 发布后的剩余缺口与长期维护方向。
+> 本计划承接 [`POST_V0_2_0_ROADMAP.md`](../archive/plans/POST_V0_2_0_ROADMAP.md)（已归档）与 [`CHANGELOG.md`](../../CHANGELOG.md)，聚焦 v3.0.4 发布后的剩余缺口与长期维护方向。
 
 ---
 
@@ -30,7 +30,7 @@ v3.0.4 (2026-06-27) 系统性安全审计驱动的版本，超出原 v3.0.x 路�
 | Docker/K8s 部署 | 未计划 | ✅ Docker + compose + Helm |
 | 灾备手册 | 未计划 | ✅ DR runbook |
 | SBOM | 未计划 | ✅ CycloneDX 脚本 |
-| 测试基线 | 392 → 413 | ✅ +21 tests |
+| 测试基线 | 392 → 414 | ✅ +22 tests |
 
 ---
 
@@ -40,7 +40,7 @@ v3.0.4 (2026-06-27) 系统性安全审计驱动的版本，超出原 v3.0.x 路�
 |:---|:---|
 | 核心功能 | Production：BEP/TLS、块级同步、发现、**Relay Server v1**、WSS、REST API (RBAC)、TUI、Windows 托盘均稳定 |
 | 安全基线 | **v3.0.4**: 路径穿越/SSRF/连接限流/密钥权限/内容泄露全部修复 |
-| 测试基线 | **413 passed / 3 ignored / 0 failed** |
+| 测试基线 | **414 passed / 6 ignored / 0 failed**（2026-07-20 实测） |
 | 性能基线 | Puller 6.7GiB/s, Scanner 803µs/MB, BEP 198ns/Hello |
 | CI | fmt + clippy (3 OS) + test (3 OS) + audit + deny + e2e + bench + release (3 OS) |
 | 真实部署 | ROG-X ↔ Gray-Cloud 双端生产同步 (自建 relay 替代 Tailscale) |
@@ -187,8 +187,8 @@ v3.0.4 (2026-06-27) 系统性安全审计驱动的版本，超出原 v3.0.x 路�
 
 | 指标 | 当前值 | v3.1.0 目标 | v3.2.0 目标 |
 |:---|---:|---:|---:|
-| 测试通过数 | 364 | ≥ 370 | ≥ 380 |
-| CI jobs 全绿 | 19/19 | 保持 | 保持 |
+| 测试通过数 | 414 | ≥ 420 | ≥ 430 |
+| CI jobs 全绿 | 20/20 | 保持 | 保持 |
 | 72h stress test | 未跑 | ✅ 通过 | 保持通过 |
 | Symlink 同步 | 不支持 | 不支持 | ✅ 支持（可配置关闭） |
 | `/metrics` 覆盖 | 基础 | 基础 | 完整 |
@@ -203,4 +203,4 @@ v3.0.4 (2026-06-27) 系统性安全审计驱动的版本，超出原 v3.0.x 路�
 
 ---
 
-*最后更新：2026-06-15 — v3.0.3 发布后制定*
+*最后更新：2026-07-20 — v3.0.4 发布后更新（测试基线 414/6、CI 20 jobs、归档链接修正）*

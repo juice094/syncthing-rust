@@ -8,7 +8,7 @@ tags: [plan, roadmap]
 
 # 调优计划 · syncthing-rust（2026-05-11）
 
-> **定位**：在 [`POST_V0_2_0_ROADMAP.md`](./POST_V0_2_0_ROADMAP.md) 之外的 **横向调优补充**。本计划聚焦"功能已完成的代码如何变快、变稳、变干净"，不引入新功能。
+> **定位**：在 [`POST_V0_2_0_ROADMAP.md`](../archive/plans/POST_V0_2_0_ROADMAP.md) 之外的 **横向调优补充**。本计划聚焦"功能已完成的代码如何变快、变稳、变干净"，不引入新功能。
 > **制定原则**：先测量再优化（measure-first）；不破坏 BEP 协议兼容性；遵守 AGENTS.md §代码健康与架构约束硬性红线。
 > **制定日期**：2026-05-11
 > **维护者**：juice094
@@ -289,7 +289,7 @@ Week 2（按需）
 
 | 文档 | 关系 |
 |------|------|
-| [`POST_V0_2_0_ROADMAP.md`](./POST_V0_2_0_ROADMAP.md) | 本计划是其**横向补充**；T-F 共享 P0 72h 压测；不冲突 |
+| [`POST_V0_2_0_ROADMAP.md`](../archive/plans/POST_V0_2_0_ROADMAP.md) | 本计划是其**横向补充**；T-F 共享 P0 72h 压测；不冲突 |
 | [`PHASE3_PLAN.md`](./PHASE3_PLAN.md) | PHASE3.4 = T-F1，本计划提供测量基建辅助 |
 | [`../../AGENTS.md`](../../AGENTS.md) §代码健康 | 本计划 T-E 直接落实 §2 文件 600 行红线 |
 

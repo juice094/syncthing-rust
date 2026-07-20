@@ -279,7 +279,7 @@ File download completed file=hello.txt
 - 使用 **Tailscale**（官方控制平面）或 **Headscale**（自建控制平面）建立虚拟内网，将 device address 改为 Tailscale IP:22001；
 - 或手动配置 **WireGuard** 隧道，两端通过 `wg0` 接口通信。
 
-**追踪**：`docs/plans/NEXT_STEPS_2026-05-15.md` §T-Net-1 / §T-Net-2
+**追踪**：`docs/archive/plans/NEXT_STEPS_2026-05-15.md` §T-Net-1 / §T-Net-2
 
 ---
 

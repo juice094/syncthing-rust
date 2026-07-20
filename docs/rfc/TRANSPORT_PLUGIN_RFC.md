@@ -584,4 +584,4 @@ async fn test_unsupported_scheme_fails_cleanly() {
 - `crates/syncthing-core/src/traits/transport.rs` — Transport trait definition
 - `crates/syncthing-net/src/transport/mod.rs` — TransportRegistry
 - `crates/syncthing-net/src/dialer/mod.rs` — ParallelDialer (current)
-- `docs/plans/NEXT_STEPS_2026-05-15.md` §T-Net-2 — Original transport plugin tracking
+- `docs/archive/plans/NEXT_STEPS_2026-05-15.md` §T-Net-2 — Original transport plugin tracking
