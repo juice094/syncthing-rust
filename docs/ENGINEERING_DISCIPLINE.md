@@ -221,7 +221,7 @@ Error: Another syncthing-rust instance is already running (PID 1234).
 
 - `docs/KNOWN_ISSUES.md` — 缺陷登记
 - `docs/reports/DUAL_NODE_TEST_2026-05-15.md` — 本规范制定的直接原因
-- `docs/plans/NEXT_STEPS_2026-05-15.md` — 修复计划与路线图
+- `docs/archive/plans/NEXT_STEPS_2026-05-15.md` — 修复计划与路线图（已归档）
 
 ---
 

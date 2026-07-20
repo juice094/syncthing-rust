@@ -65,4 +65,4 @@ Tailscale 部署、代理配置。
 
 - **当前版本**: v3.0.3
 - **最后更新**: 2026-06-13
-- **活跃路线图**: [[plans/POST_V0_2_0_ROADMAP]] / [[plans/NEXT_STEPS_2026-05-15]]
+- **活跃路线图**: [[plans/POST_V3_0_3_ROADMAP]]

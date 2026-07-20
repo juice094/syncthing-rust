@@ -119,6 +119,6 @@ If you run `syncthing-rust` in untrusted environments:
 ## References
 
 - [`docs/design/ARCHITECTURE_DECISIONS.md`](docs/design/ARCHITECTURE_DECISIONS.md) — ADR-002 sled retention rationale.
-- [`docs/plans/POST_V0_2_0_ROADMAP.md`](docs/plans/POST_V0_2_0_ROADMAP.md) — Phase A security-debt acceptance.
+- [`docs/archive/plans/POST_V0_2_0_ROADMAP.md`](docs/archive/plans/POST_V0_2_0_ROADMAP.md) — Phase A security-debt acceptance.
 - [`docs/plans/TUNING_PLAN_2026-05-11.md`](docs/plans/TUNING_PLAN_2026-05-11.md) — T-D / T-F tightening plan.
 - [`.cargo/audit.toml`](.cargo/audit.toml) — enforced ignore list.

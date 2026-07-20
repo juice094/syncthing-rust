@@ -7,33 +7,25 @@ tags: [moc, plan, roadmap]
 
 # 计划与路线图 MOC
 
-> 当前活跃计划、已归档计划与审计报告。
+> 当前活跃计划、已归档计划与审计报告。权威索引见 [[plans/INDEX]]。
 
 ---
 
 ## 活跃
 
-- [[plans/GRAY_SIDE_OPS]]
-- [[plans/INDEX]]
-- [[plans/NEXT_STEPS_2026-05-17]] (2026-05-17)
-- [[plans/POST_V0_2_0_ROADMAP]]
-- [[plans/TUNING_PLAN_2026-05-11]] (2026-05-11)
+- [[plans/POST_V3_0_3_ROADMAP]] — 当前权威后续计划（v3.0.4 后更新）
+- [[plans/TUNING_PLAN_2026-05-11]] — 横向调优（T-A~T-G）
+- [[plans/PHASE3_PLAN]] — BepSession 硬化（3.4 72h 压测待完成）
+- [[plans/INDEX]] — 计划索引
 
-## 已完成
+## 审计
 
-- [[plans/CONFIG_SERIALIZATION_ANALYSIS_2026-04-27]] (2026-04-27)
-- [[plans/OFFLINE_HANDOVER_2026-04-27]] (2026-04-27)
-- [[plans/PHASE3_PLAN]]
-- [[plans/PLAN_AUDIT_2026-04-27]] (2026-04-27)
+- [[plans/PLAN_AUDIT_2026-04-27]]
 
-## 已归档
+## 已归档（`docs/archive/plans/`）
 
-- [[plans/NEXT_STEPS_2026-05-11]] (2026-05-11)
-- [[plans/NEXT_STEPS_2026-05-12]] (2026-05-12)
-- [[plans/NEXT_STEPS_2026-05-13]] (2026-05-13)
-- [[plans/NEXT_STEPS_2026-05-14]] (2026-05-14)
-- [[plans/NEXT_STEPS_2026-05-15]] (2026-05-15)
-
----
-
-← 返回 [[_Home]]
+- NEXT_STEPS_2026-05-15 / NEXT_STEPS_2026-05-17
+- POST_V0_2_0_ROADMAP
+- MVP_RECOVERY_PLAN / PHASE4_PLAN / WAVE3_PLAN / improvement-plan
+- CONFIG_SERIALIZATION_ANALYSIS_2026-04-27 / OFFLINE_HANDOVER_2026-04-27
+- SITUATION_2026-06-03 / GRAY_SIDE_OPS
