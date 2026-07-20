@@ -31,8 +31,7 @@ timestamp: 2026-06-25T00:00:00Z
 |:---|:---|:---|
 | 单元测试 | `src/*.rs` / `src/*/tests.rs` | 各 crate 内部模块测试 |
 | 集成测试 | `crates/*/tests/*.rs` | 如 `bep-protocol/tests/wire_compat.rs` |
-| E2E 测试 | `cmd/syncthing/tests/e2e_sync.rs` | 双节点真实同步链路 |
-| 验收测试 | `acceptance-tests/` | 独立 Cargo 包 |
+| E2E 测试 | `cmd/syncthing/tests/e2e_*.rs` | 双节点真实同步链路 |
 | Benchmark | `crates/*/benches/*.rs` | criterion：`device_id`、`encode_decode`、`scanner`、`hash_parallel`、`puller` |
 | 压力测试 | `cmd/syncthing/src/bin/stress_test.rs` + `cmd/syncthing/src/bin/monitor.rs` | 72h 耐久测试基础设施 |
 

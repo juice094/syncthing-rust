@@ -18,15 +18,19 @@ members = [
     "cmd/syncthing-tray",
 ]
 
+[workspace.package]
+version = "3.0.4"
+edition = "2021"
+
 [workspace.dependencies]
 # 异步运行时
 tokio = { version = "1.35", features = ["full"] }
-tokio-rustls = "0.26"
+tokio-rustls = { version = "0.26", default-features = false, features = ["ring"] }
 async-trait = "0.1"
 futures = "0.3"
 
 # TLS / 安全
-rustls = "0.23"
+rustls = { version = "0.23", default-features = false, features = ["ring"] }
 rustls-pemfile = "2.0"
 ring = "0.17"
 ed25519-dalek = "2.1"

@@ -1,6 +1,6 @@
 [package]
 name = "syncthing-mcp-bridge"
-version = "3.0.0"
+version.workspace = true
 edition = "2021"
 authors = ["juice094"]
 description = "MCP Bridge for syncthing-rust — translates MCP stdio to REST API calls"

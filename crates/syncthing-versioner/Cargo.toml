@@ -1,6 +1,6 @@
 [package]
 name = "syncthing-versioner"
-version = "3.0.0"
+version.workspace = true
 edition = "2021"
 description = "File versioning strategies for syncthing-rust"
 

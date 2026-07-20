@@ -1,6 +1,8 @@
 # Changelog
 
-## [Unreleased] — 2026-06-27
+## [Unreleased]
+
+## [3.0.4] — 2026-06-27
 
 ### Headline: v3.0.4 security hardening, Relay Server v1, structured observability, and Docker deployment.
 
