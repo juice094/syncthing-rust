@@ -10,7 +10,7 @@
 
 `syncthing-rust` 是 [Syncthing](https://syncthing.net/) BEP（Block Exchange Protocol）协议的 Rust 实现，目标是成为 Go 版 Syncthing 的替代实现。
 
-- **当前版本**：`CHANGELOG.md` 声明为 `3.0.4`（2026-06-27），工作区内所有 crate 的 `Cargo.toml` 版本统一为 `3.0.0`。
+- **当前版本**：`3.0.4`（2026-06-27）。版本号唯一真源为根 `Cargo.toml` 的 `[workspace.package] version`，工作区内所有 crate 通过 `version.workspace = true` 继承。
 - **当前阶段**：Production（安全加固）。核心 P2P 文件同步、自建 Relay Server、Windows 托盘、TUI、REST API 已稳定；72h 耐久测试为 `v3.1.0` 准入线（尚未完成）。
 - **主要特性**：BEP over TLS、块级 Pull/Push 双向同步、三路文本合并、Simple/Staggered 版本控制、多路径发现、Relay Server v1、WSS、RBAC API keys、JSON 结构化日志、Prometheus 指标、实时 TUI、Windows 托盘、Docker/K8s 部署。
 
@@ -255,8 +255,7 @@ perf:     性能
 |:---|:---|:---|
 | 单元测试 | `src/*.rs` / `src/*/tests.rs` | 各 crate 内部模块测试 |
 | 集成测试 | `crates/*/tests/*.rs` | 如 `bep-protocol/tests/wire_compat.rs` |
-| E2E 测试 | `cmd/syncthing/tests/e2e_sync.rs` | 双节点真实同步链路 |
-| 验收测试 | `acceptance-tests/` | 独立 Cargo 包 |
+| E2E 测试 | `cmd/syncthing/tests/e2e_*.rs` | 双节点真实同步链路 |
 | Benchmark | `crates/*/benches/*.rs` | criterion：`device_id`、`encode_decode`、`scanner`、`hash_parallel`、`puller` |
 | 压力测试 | `cmd/syncthing/src/bin/stress_test.rs` + `cmd/syncthing/src/bin/monitor.rs` | 72h 耐久测试基础设施 |
 
@@ -346,7 +345,7 @@ cargo doc --no-deps --workspace
 - 平台：GitHub Actions（`.github/workflows/ci.yml` + `.github/workflows/release.yml`）
 - 矩阵：ubuntu-latest / windows-latest / macos-latest
 - CI job（`.github/workflows/ci.yml`）：fmt、clippy（×3 OS）、test（×3 OS）、audit、cargo-deny、all-features、bench-smoke、release-check（×3 OS）、doc-check、e2e-test、file-size（600 行软限制检查）—— 11 个 job 定义，矩阵展开后 17 个运行实例
-- Release job（`.github/workflows/release.yml`）：build-linux、build-windows —— 2 个运行实例
+- Release job（`.github/workflows/release.yml`）：build-linux、build-macos、build-windows —— 3 个运行实例
 - **注意**：`README.md` / `CHANGELOG.md` 声称 19/19 jobs passing（17 CI + 2 release）；本地 `cargo deny check all` 也已通过，CI 状态需以最新 GitHub Actions 运行结果为准。
 
 ### 9.4 关键默认值
@@ -399,4 +398,4 @@ cargo doc --no-deps --workspace
 
 ---
 
-*最后更新：2026-06-28（基于仓库实测内容重写，整合 docs/agent/ OKF bundle 与 CI、Cargo.toml、README 实际信息）*
+*最后更新：2026-07-20（版本号统一至 `[workspace.package]`，修正 release workflow job 数量描述）*

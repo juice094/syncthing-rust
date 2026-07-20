@@ -1,6 +1,6 @@
 [package]
 name = "syncthing-tray"
-version = "3.0.0"
+version.workspace = true
 edition = "2021"
 license = "MIT"
 publish = false

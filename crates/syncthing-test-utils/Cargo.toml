@@ -1,6 +1,6 @@
 [package]
 name = "syncthing-test-utils"
-version = "3.0.0"
+version.workspace = true
 edition = "2021"
 
 publish = false
