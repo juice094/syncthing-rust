@@ -27,7 +27,7 @@ async fn test_folder_model_creation() {
     let events = EventPublisher::new(10);
     let folder = Folder::new("test", "/tmp/test");
 
-    let model = FolderModel::new(folder, db, events, None);
+    let model = FolderModel::new(folder, db, events, None, 1);
     assert_eq!(model.id(), "test");
 }
 
@@ -80,6 +80,7 @@ async fn test_pull_notify_wakeup() {
         db.clone(),
         events,
         Some(mock_source),
+        1,
     ));
 
     // 启动 pull loop
@@ -128,7 +129,7 @@ async fn test_scan_incremental_new_file() {
     let folder = Folder::new("test-folder", folder_path.to_str().unwrap());
 
     // 先全量扫描建立 baseline
-    let model = FolderModel::new(folder.clone(), db.clone(), events.clone(), None);
+    let model = FolderModel::new(folder.clone(), db.clone(), events.clone(), None, 1);
     model.scan().await.unwrap();
 
     // 新增一个文件
@@ -162,7 +163,7 @@ async fn test_scan_incremental_delete() {
     // 预置文件并全量扫描
     let existing = folder_path.join("old.txt");
     tokio::fs::write(&existing, "content").await.unwrap();
-    let model = FolderModel::new(folder.clone(), db.clone(), events.clone(), None);
+    let model = FolderModel::new(folder.clone(), db.clone(), events.clone(), None, 1);
     model.scan().await.unwrap();
     assert!(db.get_file(&folder.id, "old.txt").await.unwrap().is_some());
 
@@ -192,7 +193,7 @@ async fn test_dirty_set_fallback_to_full() {
     let folder_path = temp_dir.path().to_path_buf();
     let folder = Folder::new("test-folder", folder_path.to_str().unwrap());
 
-    let model = FolderModel::new(folder.clone(), db.clone(), events.clone(), None);
+    let model = FolderModel::new(folder.clone(), db.clone(), events.clone(), None, 1);
 
     // 直接写入大量脏路径，超过默认阈值（max(100, local_files/10) = 100）
     for i in 0..150usize {

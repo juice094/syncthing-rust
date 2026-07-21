@@ -579,4 +579,86 @@ mod tests {
             );
         }
     }
+
+    /// 回归（§20 后续）：远端删除 vs 本地离线并发修改（不同设备计数器 ID）
+    /// 必须判定为并发冲突并保留本地内容（sync-conflict），不得静默覆盖。
+    /// 此前本地计数器硬编码为 1 时会被误判为线性历史，删除方直接支配。
+    #[tokio::test]
+    async fn test_concurrent_remote_delete_vs_local_modify_preserved() {
+        let dir = tempfile::tempdir().unwrap();
+        let folder_path = dir.path().to_path_buf();
+        // 本地文件真实存在于磁盘（conflict 重命名需要）
+        std::fs::write(folder_path.join("x.bin"), b"local offline edit").unwrap();
+
+        let db = MemoryDatabase::new();
+        let events = EventPublisher::new(10);
+        let handler = IndexHandler::new(db.clone(), events);
+
+        let folder = Folder::new("test", folder_path.to_string_lossy().to_string());
+        let device = syncthing_core::DeviceId::random();
+
+        // 本地离线修改：版本挂本地设备计数器（ID 2）
+        let local_file = create_test_file("x.bin", Vector::new().with_counter(2, 6));
+        db.update_file("test", local_file).await.unwrap();
+
+        // 远端删除：版本挂远端设备计数器（ID 1），计数更高
+        let mut remote_file = create_test_file("x.bin", Vector::new().with_counter(1, 10));
+        remote_file.deleted = Some(true);
+        remote_file.size = 0;
+
+        let update = IndexUpdate {
+            folder: "test".to_string(),
+            files: vec![remote_file],
+        };
+        let needed = handler
+            .handle_index_update(&folder, device, update)
+            .await
+            .unwrap();
+
+        // 并发冲突：不得产生下载需求
+        assert!(needed.is_empty());
+        // 本地内容必须以 sync-conflict 形式保留，而非被静默删除
+        let preserved = std::fs::read_dir(&folder_path)
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .any(|e| e.file_name().to_string_lossy().contains("sync-conflict"));
+        assert!(
+            preserved,
+            "concurrent local modification must be preserved as sync-conflict file"
+        );
+    }
+
+    /// 对照：线性历史（同一设备计数器，远端更新）的删除必须正常生效
+    #[tokio::test]
+    async fn test_sequential_remote_delete_applies() {
+        let db = MemoryDatabase::new();
+        let events = EventPublisher::new(10);
+        let handler = IndexHandler::new(db.clone(), events);
+
+        let folder = Folder::new("test", "/tmp/test");
+        let device = syncthing_core::DeviceId::random();
+
+        // 同一计数器 ID：远端 {1:10} 支配本地 {1:6}，属于正常删除传播
+        let local_file = create_test_file("x.bin", Vector::new().with_counter(1, 6));
+        db.update_file("test", local_file).await.unwrap();
+
+        let mut remote_file = create_test_file("x.bin", Vector::new().with_counter(1, 10));
+        remote_file.deleted = Some(true);
+        remote_file.size = 0;
+
+        let update = IndexUpdate {
+            folder: "test".to_string(),
+            files: vec![remote_file],
+        };
+        handler
+            .handle_index_update(&folder, device, update)
+            .await
+            .unwrap();
+
+        let stored = db.get_file("test", "x.bin").await.unwrap().expect("file");
+        assert!(
+            stored.is_deleted(),
+            "sequential delete must propagate to DB"
+        );
+    }
 }

@@ -48,6 +48,15 @@ impl DeviceId {
         hex::encode(&self.0[..8])
     }
 
+    /// 版本向量计数器 ID（前 8 字节大端 u64）。
+    ///
+    /// 每个设备在版本向量中必须使用唯一 ID，否则两端各自的修改会被误判为
+    /// 线性历史而非并发，导致删除方"支配"并静默覆盖对端的离线修改。
+    /// 与 Go Syncthing 的 ShortID 语义一致。
+    pub fn counter_id(&self) -> u64 {
+        u64::from_be_bytes(self.0[..8].try_into().expect("first 8 bytes of 32"))
+    }
+
     /// 转换为字符串表示（旧版hex格式，保留用于兼容）
     pub fn to_string_formatted(&self) -> String {
         self.to_string()

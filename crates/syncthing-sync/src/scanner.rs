@@ -40,12 +40,19 @@ const DEFAULT_IGNORED_SUFFIXES: &[&str] = &[".syncthing.tmp", "~syncthing~"];
 pub struct Scanner {
     db: Arc<dyn LocalDatabase>,
     events: EventPublisher,
+    /// 本地设备的版本向量计数器 ID（来自真实设备 ID，禁止硬编码为 1，
+    /// 否则双端离线并发修改会被误判为线性历史，删除方静默覆盖对端修改）
+    local_counter_id: u64,
 }
 
 impl Scanner {
     /// 创建新的扫描器
-    pub fn new(db: Arc<dyn LocalDatabase>, events: EventPublisher) -> Self {
-        Self { db, events }
+    pub fn new(db: Arc<dyn LocalDatabase>, events: EventPublisher, local_counter_id: u64) -> Self {
+        Self {
+            db,
+            events,
+            local_counter_id,
+        }
     }
 
     /// 扫描单个文件夹
@@ -65,7 +72,7 @@ impl Scanner {
         // 否则归档文件会被索引并同步，形成归档↔同步反馈循环。
         if let Some(s) = sub {
             if s.split(['/', '\\'])
-                .any(|c| DEFAULT_IGNORED_NAMES.iter().any(|&ignored| c == ignored))
+                .any(|c| DEFAULT_IGNORED_NAMES.contains(&c))
             {
                 debug!(folder_id = %folder.id, sub = %s, "Sub-scan root is default-ignored metadata, skipping");
                 return Ok(Vec::new());
@@ -147,7 +154,7 @@ impl Scanner {
                             // NOTE: 暂时保留 blocks 用于重命名检测，检测后再清空
                             deleted_info.size = 0;
                             deleted_info.sequence = self.db.increment_sequence(&folder.id).await?;
-                            deleted_info.version.increment(1); // 使用设备ID 1作为本地设备
+                            deleted_info.version.increment(self.local_counter_id);
                             changed_files.push(deleted_info);
                         }
                     }
@@ -166,7 +173,7 @@ impl Scanner {
                                 let mut new_info = file_info;
                                 new_info.sequence = self.db.increment_sequence(&folder.id).await?;
                                 new_info.version = existing.version.clone();
-                                new_info.version.increment(1);
+                                new_info.version.increment(self.local_counter_id);
                                 // 保留上一次全局一致的 base 版本
                                 new_info.base_version = existing.base_version.clone();
                                 changed_files.push(new_info);
@@ -592,7 +599,7 @@ impl Scanner {
                 let mut new_info = file_info;
                 new_info.sequence = self.db.increment_sequence(&folder.id).await?;
                 new_info.version = existing.version.clone();
-                new_info.version.increment(1);
+                new_info.version.increment(self.local_counter_id);
                 new_info.base_version = existing.base_version.clone();
                 Ok(Some(new_info))
             }
@@ -618,7 +625,7 @@ impl Scanner {
                 deleted_info.size = 0;
                 deleted_info.blocks.clear();
                 deleted_info.sequence = self.db.increment_sequence(&folder.id).await?;
-                deleted_info.version.increment(1);
+                deleted_info.version.increment(self.local_counter_id);
                 Ok(Some(deleted_info))
             }
             _ => Ok(None),
@@ -648,7 +655,7 @@ impl Scanner {
                 deleted_info.size = 0;
                 deleted_info.blocks.clear();
                 deleted_info.sequence = self.db.increment_sequence(&folder.id).await?;
-                deleted_info.version.increment(1);
+                deleted_info.version.increment(self.local_counter_id);
                 deleted.push(deleted_info);
             }
         }
@@ -717,7 +724,7 @@ mod tests {
     async fn test_scan_empty_folder() {
         let db = MemoryDatabase::new();
         let events = EventPublisher::new(10);
-        let scanner = Scanner::new(db, events);
+        let scanner = Scanner::new(db, events, 1);
 
         // 创建临时目录
         let temp_dir = tempfile::tempdir().unwrap();
@@ -734,7 +741,7 @@ mod tests {
 
         let db = MemoryDatabase::new();
         let events = EventPublisher::new(10);
-        let scanner = Scanner::new(db, events);
+        let scanner = Scanner::new(db, events, 1);
 
         let temp_dir = tempfile::tempdir().unwrap();
         let empty_path = temp_dir.path().join("empty.txt");
@@ -757,7 +764,7 @@ mod tests {
     async fn test_sub_scan_of_default_ignored_dir_returns_empty() {
         let db = MemoryDatabase::new();
         let events = EventPublisher::new(10);
-        let scanner = Scanner::new(db, events);
+        let scanner = Scanner::new(db, events, 1);
 
         let temp_dir = tempfile::tempdir().unwrap();
         let stversions = temp_dir.path().join(".stversions");

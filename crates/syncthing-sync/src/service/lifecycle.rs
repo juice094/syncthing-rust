@@ -185,10 +185,32 @@ impl SyncService {
         let block_source = self.block_source.read().await.clone();
         let concurrency_policy = self.concurrency_policy.read().await.clone();
         let orchestrator = self.orchestrator.read().await.clone();
+        // 版本向量的本地计数器 ID 必须来自真实设备 ID（硬编码 1 会导致
+        // 双端离线并发修改被误判为线性历史，删除方静默覆盖对端修改）
+        let local_counter_id = self
+            .config
+            .read()
+            .await
+            .local_device_id
+            .map(|id| id.counter_id())
+            .unwrap_or_else(|| {
+                warn!(
+                    folder_id = %folder_id,
+                    "config.local_device_id missing: version vector counter id falls back to 0; \
+                     concurrent-modification detection will not work across nodes with the same fallback"
+                );
+                0
+            });
         let folder_model = Arc::new(
-            FolderModel::new(folder, self.db.clone(), self.events.clone(), block_source)
-                .with_concurrency_policy(concurrency_policy)
-                .with_orchestrator(orchestrator),
+            FolderModel::new(
+                folder,
+                self.db.clone(),
+                self.events.clone(),
+                block_source,
+                local_counter_id,
+            )
+            .with_concurrency_policy(concurrency_policy)
+            .with_orchestrator(orchestrator),
         );
 
         self.folders.insert(folder_id.clone(), folder_model);

@@ -61,6 +61,9 @@ impl TestNode {
         let mut config = Config::new();
         config.device_name = name.to_string();
         config.listen_addr = "127.0.0.1:0".to_string();
+        // 版本向量计数器 ID 来自 local_device_id；缺失会导致所有测试节点
+        // 退化为 counter id 0，并发冲突检测失效（与 daemon_runner 对齐）
+        config.local_device_id = Some(device_id);
         config.gui = GuiConfig {
             enabled: false,
             address: "127.0.0.1:0".to_string(),
