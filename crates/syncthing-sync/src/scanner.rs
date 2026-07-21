@@ -548,6 +548,22 @@ impl Scanner {
 
     /// 检查文件是否变更
     fn has_file_changed(old: &FileInfo, new: &FileInfo) -> bool {
+        // 内容哈希优先：块列表一致即视为未变更，不再比较 mtime/权限。
+        // 跨平台同步时 mtime 精度（ns vs FILETIME 100ns）和权限位（0o660 vs
+        // OS 默认）必然有噪声，先比元数据会造成"扫描→版本递增→对端回拉→
+        // 再扫描"的无限版本乒乓（两边内容相同却互相覆盖，还会吞掉真实编辑）。
+        // ponytail: mtime/权限的纯元数据变更暂不传播；升级路径是按 Go
+        // Syncthing 的平台规则显式处理 metadata-only 更新。
+        if old.blocks.len() == new.blocks.len()
+            && old
+                .blocks
+                .iter()
+                .zip(new.blocks.iter())
+                .all(|(o, n)| o.hash == n.hash)
+        {
+            return false;
+        }
+
         // 检查大小
         if old.size != new.size {
             return true;
@@ -563,17 +579,7 @@ impl Scanner {
             return true;
         }
 
-        // 检查块哈希（如果数量相同）
-        if old.blocks.len() == new.blocks.len() {
-            for (old_block, new_block) in old.blocks.iter().zip(new.blocks.iter()) {
-                if old_block.hash != new_block.hash {
-                    return true;
-                }
-            }
-            false
-        } else {
-            true
-        }
+        true
     }
 
     /// 检查两个文件的块哈希列表是否完全相同（用于重命名检测）
