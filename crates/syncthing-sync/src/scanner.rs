@@ -25,6 +25,7 @@ const DEFAULT_BLOCK_SIZE: i32 = syncthing_core::constants::DEFAULT_BLOCK_SIZE;
 const DEFAULT_IGNORED_NAMES: &[&str] = &[
     ".stfolder",
     ".stversions",
+    ".sttrash",
     ".stignore",
     "config.json",
     "cert.pem",

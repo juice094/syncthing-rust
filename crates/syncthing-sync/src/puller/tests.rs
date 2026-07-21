@@ -471,3 +471,106 @@ async fn test_puller_three_way_merge_on_conflict() {
     let db_file = db.get_file(&folder.id, file_name).await.unwrap().unwrap();
     assert!(db_file.base_version.is_some());
 }
+
+/// 构造测试用 FileInfo（删除标记可控）
+fn quota_test_file(name: &str, deleted: bool) -> FileInfo {
+    FileInfo {
+        name: name.to_string(),
+        file_type: syncthing_core::types::FileType::File,
+        size: 1,
+        permissions: 0o644,
+        modified_s: 0,
+        modified_ns: 0,
+        version: syncthing_core::types::Vector::new(),
+        sequence: 0,
+        block_size: 1,
+        blocks: vec![],
+        symlink_target: None,
+        deleted: if deleted { Some(true) } else { None },
+        modified_by: None,
+        blocks_hash: None,
+        no_permissions: None,
+        base_version: None,
+    }
+}
+
+/// P0-1 回归：单次 pull 删除数超过配额时，整个删除批次必须被拒绝
+///（2026-07-20 事故：114 文件经增量批次被静默删除）
+#[tokio::test]
+async fn test_delete_batch_quota_refuses_mass_deletion() {
+    let temp_dir = tempfile::tempdir().unwrap();
+    let folder_path = temp_dir.path().to_path_buf();
+    let db = MemoryDatabase::new();
+    let events = EventPublisher::new(10);
+    let puller = Puller::new(db.clone(), events);
+    let folder = Folder::new("test", folder_path.to_string_lossy().to_string());
+
+    // 本地 DB：40 个正常文件 → 配额 = max(20, 40*0.25) = 20
+    for i in 0..40 {
+        db.update_file("test", quota_test_file(&format!("keep_{}.txt", i), false))
+            .await
+            .unwrap();
+    }
+    // 磁盘上 30 个待删文件
+    for i in 0..30 {
+        std::fs::write(folder_path.join(format!("victim_{}.txt", i)), b"x").unwrap();
+    }
+    let needed: Vec<FileInfo> = (0..30)
+        .map(|i| quota_test_file(&format!("victim_{}.txt", i), true))
+        .collect();
+
+    puller.pull_folder(&folder, needed).await.unwrap();
+
+    // 30 > 20 → 删除批次被拒绝，磁盘文件全部保留
+    for i in 0..30 {
+        assert!(
+            folder_path.join(format!("victim_{}.txt", i)).exists(),
+            "victim_{} must survive the refused deletion batch",
+            i
+        );
+    }
+}
+
+/// P0-1 对照：配额内的删除正常生效
+#[tokio::test]
+async fn test_delete_batch_within_quota_applies() {
+    let temp_dir = tempfile::tempdir().unwrap();
+    let folder_path = temp_dir.path().to_path_buf();
+    let db = MemoryDatabase::new();
+    let events = EventPublisher::new(10);
+    let puller = Puller::new(db.clone(), events);
+    let folder = Folder::new("test", folder_path.to_string_lossy().to_string());
+
+    for i in 0..40 {
+        db.update_file("test", quota_test_file(&format!("keep_{}.txt", i), false))
+            .await
+            .unwrap();
+    }
+    for i in 0..5 {
+        std::fs::write(folder_path.join(format!("old_{}.txt", i)), b"x").unwrap();
+    }
+    let needed: Vec<FileInfo> = (0..5)
+        .map(|i| quota_test_file(&format!("old_{}.txt", i), true))
+        .collect();
+
+    puller.pull_folder(&folder, needed).await.unwrap();
+
+    let today = chrono::Utc::now().format("%Y%m%d").to_string();
+    for i in 0..5 {
+        assert!(
+            !folder_path.join(format!("old_{}.txt", i)).exists(),
+            "old_{} should be deleted within quota",
+            i
+        );
+        // P0-2：删除必须软隔离到 .sttrash，而非硬删
+        assert!(
+            folder_path
+                .join(".sttrash")
+                .join(&today)
+                .join(format!("old_{}.txt", i))
+                .exists(),
+            "old_{} must be quarantined to .sttrash",
+            i
+        );
+    }
+}
