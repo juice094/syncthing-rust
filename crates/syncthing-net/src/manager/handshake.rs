@@ -7,7 +7,7 @@
 use std::sync::Weak;
 use std::time::{Duration, Instant};
 
-use tracing::debug;
+use tracing::{debug, info};
 
 use syncthing_core::{ConnectionType, DeviceId, SyncthingError};
 
@@ -56,12 +56,28 @@ impl ConnectionManager {
         device_id: DeviceId,
         conn_type: ConnectionType,
     ) -> syncthing_core::Result<HandshakeGuard> {
-        // 已有存活连接时直接拒绝新的握手尝试。
+        // 已有连接时不直接拒绝：新握手到达通常意味着对端重启、旧连接是尚未被
+        // 清理的僵尸（socket 已死但注册表还在），拒绝会让双方永远无法重连。
+        // 与 Go Syncthing 一致，新连接顶替旧连接。
+        // ponytail: 新连接无条件获胜的简化；升级路径是按 Go 的连接优先级
+        // （传输类型、device ID 比较）仲裁保留哪条。
         if self.is_connected(&device_id) {
-            return Err(SyncthingError::connection(format!(
-                "device {} already connected",
+            info!(
+                "device {} already connected, replacing stale connection with new handshake",
                 device_id
-            )));
+            );
+            if let Some((_, nested)) = self.connections.remove(&device_id) {
+                for entry in nested {
+                    let (conn_id, e) = entry;
+                    self.conn_id_index.remove(&conn_id);
+                    tokio::spawn(async move {
+                        e.conn.close().await.ok();
+                    });
+                }
+            }
+            if let Some(callback) = self.on_disconnected.read().as_ref() {
+                callback(device_id, "replaced by new connection".to_string());
+            }
         }
 
         let local_smaller = self.local_device_id.0 < device_id.0;
