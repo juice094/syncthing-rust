@@ -243,7 +243,7 @@ perf:     性能
 
 当前实测基线：
 
-- `cargo test --workspace`：**428 passed / 6 ignored / 0 failed**（2026-07-20 实测）
+- `cargo test --workspace`：**431 passed / 6 ignored / 0 failed**（2026-07-21 实测）
 - `cargo clippy --workspace --all-targets -- -D warnings -W clippy::await_holding_lock`：0 warnings
 - `cargo doc --no-deps --workspace`：通过
 - `cargo audit`：3 个 unmaintained 上游传递依赖已记录在 `.cargo/audit.toml` 中接受为债务

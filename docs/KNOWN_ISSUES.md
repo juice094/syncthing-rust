@@ -12,7 +12,7 @@ timestamp: 2026-07-20T00:00:00Z
 # Known Issues
 
 > **维护原则**：发现的缺陷必须显式登记，避免误判项目成熟度。  
-> **最后更新**：2026-07-20（§20 下游 bridge 上报四缺陷全部修复：Ping 风暴 / block_source 时机 / 配置重协商 / TUI AddFolder）
+> **最后更新**：2026-07-21（§21 版本向量计数器 ID 修复；§20 下游 bridge 上报四缺陷全部修复）
 
 本文档列举当前已知未修复的功能性 / 行为性问题。  
 **这些问题决定了项目目前的"事实可用性"边界**。
@@ -24,10 +24,10 @@ timestamp: 2026-07-20T00:00:00Z
 | 维度 | 状态 |
 |------|------|
 | 代码完成度 | ~94%（+Relay Server v1 + WSS + 安全加固） |
-| 单元测试覆盖 | 428/428 通过（2026-07-20 实测；含 TUI 事件层 11 测试与 §20 修复回归测试） |
+| 单元测试覆盖 | 431/431 通过（2026-07-21 实测；含 §20/§21 修复回归测试） |
 | 连接层稳定性 | ✅ retry_count 累加 + TCP keepalive + 有界 channel + 连接限流(max_connections) + SSRF防护 |
 | **端到端同步** | ✅ Push/Pull 双向 574 文件验证 |
-| 跨版本互通 | ✅ Rust v0.2.10-rc3 ↔ v0.2.10-rc3 E2E 验证 |
+| 跨版本互通 | ✅ Rust v0.2.10-rc3 ↔ v0.2.10-rc3 E2E；✅ ↔ 官方 Go Syncthing v2.1.1 loopback 双向同步（2026-07-21 实测） |
 | 版本控制 | ✅ Simple (keep=N) + Staggered (4 时间窗口) |
 | 托盘/TUI | ✅ 单二进制（feature=tray）、多终端 TUI 启动、编辑弹窗、日志过滤 |
 | 运行时安全 | ✅ §7.1~§7.6 + §19 全部修复（路径穿越 + 内容泄露 + 连接限流 + SSRF + 密钥权限 + WSS） |
@@ -759,3 +759,19 @@ v0.2.8 完成首次双节点真实网络环境下的完整文件同步验证。
 **根因**：`submit_add_folder` 构造了 `Folder` 却未 push 进 `app.config.folders`（同族 AddDevice/EditFolder 均正确，属单点遗漏）。
 
 **修复**：补上 push；同时重置 AddFolder 打开时的共享设备勾选残留。配套补齐 TUI 事件层 11 个 handler 级集成测试（表单提交/校验拒绝/删除确认/热更新通知）。
+
+
+---
+
+## §21. 版本向量本地计数器 ID 硬编码为 1（严重 — 数据安全，**已修复 ✅** commit `8225c0f`）
+
+**症状**（下游 bridge 生产上报）：一端删除文件后，另一端离线期间的本地修改被静默覆盖；已删除文件在对端重连后复活。rust ↔ rust 复现，与官方实现无关。
+
+**根因**：`Scanner`/`FolderModel` 递增版本向量时使用硬编码计数器 ID `1`（`scanner.rs` 注释"使用设备ID 1作为本地设备"）。两个不同设备的修改因此挂在同一个计数器 key 下，并发关系被误判为线性历史——删除方的更高计数器"支配"对端修改，冲突检测（`is_conflict` / sync-conflict 保留）被完全旁路。版本向量机制本身（`Vector::compare`/`dominates`、IndexHandler 四分支决策、ConflictResolver）是完整的，断的只是计数器 ID 的来源。
+
+**修复**：
+- `DeviceId::counter_id()`（前 8 字节大端 u64，Go ShortID 语义）经 `SyncService` → `FolderModel` → `Scanner` 构造链注入，5 处递增点全部替换。
+- `TestNode` 补写 `config.local_device_id`（此前所有测试节点会退化为 counter id 0，同类碰撞）；缺失时降级为 0 并输出 warning。
+- 回归测试：并发"删 vs 离线改"必须保留 `.sync-conflict-*`；同 ID 线性删除正常传播。
+
+**遗留**：下游 `peer_node.rs` 需自行设置 `config.local_device_id`（已在仓库工作区补上该示例行，文件属未跟踪 WIP 由下游维护）。

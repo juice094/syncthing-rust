@@ -3,6 +3,7 @@
 ## [Unreleased]
 
 ### Fixed
+- **Version vector used hardcoded counter id 1**: all local modifications bumped the vector under a constant device id, so concurrent offline edits on two nodes looked like linear history — a remote delete silently dominated and overwrote the peer's local changes (downstream Obsidian bridge report: deletions resurrecting / modifications lost). Local counter id is now derived from the real device ID (`DeviceId::counter_id()`, first 8 bytes big-endian, Go ShortID semantics) and plumbed through `SyncService` → `FolderModel` → `Scanner`. Concurrent delete-vs-modify is now detected and preserved as `.sync-conflict-*`. `TestNode` populates `config.local_device_id`; a missing id falls back to 0 with a loud warning.
 - **BEP Ping storm**: `BepSession` no longer replies to received Ping messages. BEP Ping is unidirectional keepalive (no Pong exists); two syncthing-rust nodes previously ping-ponged at wire speed (thousands of Pings/sec, ~16MB debug logs in 16 minutes). Ping is now only sent by the 30s heartbeat timer. Reported via Obsidian bridge Android deployment (battery/log impact).
 - **TUI Add Folder silently dropped**: `submit_add_folder` built the `Folder` but never pushed it into the config. Folder additions via TUI (`a`/`Ins` on Folders tab) now persist and hot-reload into the running daemon. Stale share selections from a previous Edit Folder no longer leak into new folders.
 - **`set_block_source` after `add_folder` had no effect**: `FolderModel` captured `block_source` only at creation, so pulls failed with "No block source configured". `Puller` now holds the source behind a lock and `SyncService::set_block_source` propagates to all existing folder models.
@@ -17,8 +18,9 @@
 - Archived 7 completed/superseded files from `docs/plans/` to `docs/archive/plans/`; `docs/plans/` now holds only 3 active plans + the audit report, with a rewritten `INDEX.md`.
 
 ### Stats
-- **Tests**: 428 passed / 6 ignored / 0 failed (+36 vs v3.0.4 baseline 392; includes 11 TUI event-layer tests, ping no-reply, block_source propagation, renegotiation hook)
+- **Tests**: 431 passed / 6 ignored / 0 failed (+39 vs v3.0.4 baseline 392; includes 11 TUI event-layer tests, ping no-reply, block_source propagation, renegotiation hook, vector-clock concurrency)
 - **Clippy**: 0 warnings
+- **Interop**: syncthing-rust ↔ official Go Syncthing v2.1.1 verified on loopback (2026-07-21): handshake, bidirectional file sync, 1 MiB multi-block transfer with identical SHA-256
 
 ## [3.0.4] — 2026-06-27
 
