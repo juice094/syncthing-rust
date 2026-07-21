@@ -13,7 +13,7 @@ timestamp: 2026-06-25T00:00:00Z
 
 本目录包含 `syncthing-rust` 项目的设计文档、验证报告、计划、运维指南与历史归档。
 
-> ✅ **当前阶段（2026-07-20 v3.0.4）**：Production — 414 passed / 6 ignored / 0 failed，E2E 双向同步已实测，Windows 托盘 + TUI 稳定。  
+> ✅ **当前阶段（2026-07-20 v3.0.4）**：Production — 428 passed / 6 ignored / 0 failed，E2E 双向同步已实测，Windows 托盘 + TUI 稳定。  
 > **快速入口**: [plans/POST_V3_0_3_ROADMAP.md](plans/POST_V3_0_3_ROADMAP.md) — 当前权威路线图（v3.0.4 后更新）  
 > **历史缺陷追溯**: [`KNOWN_ISSUES.md`](KNOWN_ISSUES.md) §15 含 stale-index 误删 RCA；§7 含运行时安全审查（INC-20260514-001）
 

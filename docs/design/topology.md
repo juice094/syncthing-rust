@@ -141,7 +141,7 @@ net            ← {sync, test-utils, cli}
 | 版本控制 | ✅ | `syncthing-versioner/` Simple + Staggered |
 | 单静态二进制 ~13MB | ✅ | `cargo build --release` |
 | 与 Go Syncthing v2.1.0 线路兼容 | ✅ | 跨版本互操作验证 |
-| 测试基线 | ✅ | `cargo test --workspace` → 392 passed / 6 ignored / 0 failed |
+| 测试基线 | ✅ | `cargo test --workspace` → 428 passed / 6 ignored / 0 failed |
 | 双许可证 MIT + 商业 | ✅ | `LICENSE` + `LICENSE-COMMERCIAL.md` |
 
 ---

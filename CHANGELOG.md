@@ -2,6 +2,24 @@
 
 ## [Unreleased]
 
+### Fixed
+- **BEP Ping storm**: `BepSession` no longer replies to received Ping messages. BEP Ping is unidirectional keepalive (no Pong exists); two syncthing-rust nodes previously ping-ponged at wire speed (thousands of Pings/sec, ~16MB debug logs in 16 minutes). Ping is now only sent by the 30s heartbeat timer. Reported via Obsidian bridge Android deployment (battery/log impact).
+- **TUI Add Folder silently dropped**: `submit_add_folder` built the `Folder` but never pushed it into the config. Folder additions via TUI (`a`/`Ins` on Folders tab) now persist and hot-reload into the running daemon. Stale share selections from a previous Edit Folder no longer leak into new folders.
+- **`set_block_source` after `add_folder` had no effect**: `FolderModel` captured `block_source` only at creation, so pulls failed with "No block source configured". `Puller` now holds the source behind a lock and `SyncService::set_block_source` propagates to all existing folder models.
+- **Config changes now trigger session renegotiation**: `update_config`/`add_device`/`remove_device`/`add_folder`/`remove_folder` fire a renegotiation hook with the connected device list; the daemon reconnects those devices so ClusterConfig is re-exchanged (matching Go Syncthing behavior). `syncthing-sync` stays network-free via the injected hook.
+
+### Changed
+- **Single source of truth for versions**: root `Cargo.toml` `[workspace.package] version = "3.0.4"`; all 14 member crates inherit via `version.workspace = true`.
+- **Removed stale `acceptance-tests/` package**: referenced long-removed APIs (e.g. `IrohDiscovery`); coverage superseded by `cmd/syncthing/tests/e2e_*` and `syncthing-net` discovery unit tests.
+- **Removed stray git tags `main` and `latest`** (broke `git push origin main` refspec resolution).
+
+### Docs
+- Archived 7 completed/superseded files from `docs/plans/` to `docs/archive/plans/`; `docs/plans/` now holds only 3 active plans + the audit report, with a rewritten `INDEX.md`.
+
+### Stats
+- **Tests**: 428 passed / 6 ignored / 0 failed (+36 vs v3.0.4 baseline 392; includes 11 TUI event-layer tests, ping no-reply, block_source propagation, renegotiation hook)
+- **Clippy**: 0 warnings
+
 ## [3.0.4] — 2026-06-27
 
 ### Headline: v3.0.4 security hardening, Relay Server v1, structured observability, and Docker deployment.
