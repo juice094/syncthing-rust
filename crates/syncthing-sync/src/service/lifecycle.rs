@@ -17,6 +17,7 @@ use crate::service::{FolderTaskHandles, SyncService};
 use dashmap::DashMap;
 use std::sync::Arc;
 use syncthing_core::types::{Config, Folder};
+use syncthing_core::DeviceId;
 use tokio::sync::RwLock;
 use tracing::{info, warn};
 
@@ -39,6 +40,7 @@ impl SyncService {
             block_source: RwLock::new(None),
             concurrency_policy: RwLock::new(None),
             orchestrator: RwLock::new(None),
+            renegotiation_hook: RwLock::new(None),
             folder_tasks: DashMap::new(),
             peer_sync_states: DashMap::new(),
         }
@@ -58,7 +60,31 @@ impl SyncService {
 
     /// 设置块数据源
     pub async fn set_block_source(&self, source: Arc<dyn BlockSource>) {
-        *self.block_source.write().await = Some(source);
+        *self.block_source.write().await = Some(source.clone());
+        // 传播到已存在的 FolderModel（此前仅创建时读取，add_folder 后设置不生效）
+        for entry in self.folders.iter() {
+            entry.value().set_block_source(Some(source.clone()));
+        }
+    }
+
+    /// 注册配置变更重协商钩子。
+    ///
+    /// BEP 只在连接建立时交换 ClusterConfig；配置变更后必须断开重连
+    /// 才会重新交换（Go Syncthing 行为）。sync crate 不触碰网络，
+    /// 由 daemon 注册本钩子执行实际的 reconnect。
+    pub async fn set_renegotiation_hook(&self, hook: crate::service::RenegotiationHook) {
+        *self.renegotiation_hook.write().await = Some(hook);
+    }
+
+    /// 配置变更后调用：以当前已连接设备列表触发重协商钩子
+    pub(super) async fn fire_renegotiation_hook(&self) {
+        let hook = self.renegotiation_hook.read().await.clone();
+        if let Some(hook) = hook {
+            let devices: Vec<DeviceId> = self.connected_devices.iter().map(|e| *e.key()).collect();
+            if !devices.is_empty() {
+                hook(devices);
+            }
+        }
     }
 
     /// 设置共享并发策略（构建器模式）

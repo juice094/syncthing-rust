@@ -128,9 +128,27 @@ async fn test_session_ping_pong() {
     // Send a Ping
     conn_b.send_ping().await.unwrap();
 
-    // Should receive Ping back
-    let (msg_type, _) = conn_b.recv_message().await.unwrap();
-    assert_eq!(msg_type, MessageType::Ping);
+    // BEP Ping 是单向 keepalive：不应触发回复。
+    // 会话自身心跳定时器的首次 tick 立即触发，窗口内可能恰好有 1 条 Ping；
+    // 若是旧的"收 Ping 回 Ping"互答行为，窗口内会收到大量 Ping（风暴）。
+    let mut ping_count = 0u32;
+    let deadline = tokio::time::Instant::now() + Duration::from_millis(500);
+    loop {
+        let now = tokio::time::Instant::now();
+        if now >= deadline {
+            break;
+        }
+        match tokio::time::timeout(deadline - now, conn_b.recv_message()).await {
+            Ok(Ok((MessageType::Ping, _))) => ping_count += 1,
+            Ok(Ok(_)) => {}
+            _ => break,
+        }
+    }
+    assert!(
+        ping_count <= 1,
+        "expected at most 1 heartbeat Ping, got {} (ping storm?)",
+        ping_count
+    );
 
     // Clean shutdown
     conn_b.close().await.ok();

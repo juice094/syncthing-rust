@@ -32,6 +32,9 @@ mod network_bridge;
 mod sync_manager;
 mod sync_model;
 
+/// 配置变更重协商钩子类型（daemon 注册，接收当前已连接设备列表）
+pub type RenegotiationHook = Arc<dyn Fn(Vec<DeviceId>) + Send + Sync>;
+
 /// 同步服务
 pub struct SyncService {
     pub(super) config: RwLock<Config>,
@@ -45,6 +48,8 @@ pub struct SyncService {
     pub(super) block_source: RwLock<Option<Arc<dyn BlockSource>>>,
     pub(super) concurrency_policy: RwLock<Option<Arc<ConcurrencyPolicy>>>,
     pub(super) orchestrator: RwLock<Option<Arc<FolderOrchestrator>>>,
+    /// 配置变更重协商钩子（daemon 注册，用于触发 BEP 会话重连以重新交换 ClusterConfig）
+    pub(super) renegotiation_hook: RwLock<Option<RenegotiationHook>>,
     /// Per-(device, folder) needed file count for completion tracking.
     pub(super) peer_sync_states: DashMap<(DeviceId, String), usize>,
     /// Per-folder task handles for individual start/stop control.

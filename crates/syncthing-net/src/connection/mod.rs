@@ -284,12 +284,12 @@ impl BepConnection {
         Ok(())
     }
 
-    /// 发送Ping（BEP 没有独立的 Pong，收到 Ping 后通常回一个 Ping）
+    /// 发送Ping（BEP keepalive，单向消息，无 Pong；收到 Ping 不应回复）
     pub async fn send_ping(&self) -> Result<()> {
         self.send_message(MessageType::Ping, Bytes::new()).await
     }
 
-    /// 发送Pong（兼容旧调用，实际发送 Ping）
+    /// 发送Pong（兼容旧调用，实际发送 Ping；注意 BEP 无 Pong，不要用于回复 Ping）
     pub async fn send_pong(&self) -> Result<()> {
         self.send_message(MessageType::Ping, Bytes::new()).await
     }

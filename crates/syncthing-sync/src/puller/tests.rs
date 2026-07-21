@@ -27,7 +27,7 @@ async fn test_puller_creation() {
     let events = EventPublisher::new(10);
     let puller = Puller::new(db, events);
     // 基本创建测试
-    assert!(puller.block_source.is_none());
+    assert!(puller.block_source.read().expect("lock").is_none());
 }
 
 #[tokio::test]
