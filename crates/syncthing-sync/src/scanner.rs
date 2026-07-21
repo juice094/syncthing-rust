@@ -59,6 +59,19 @@ impl Scanner {
     }
 
     async fn scan_folder_at(&self, folder: &Folder, sub: Option<&str>) -> Result<Vec<FileInfo>> {
+        // watcher 增量路径会把变动所在子目录作为扫描根传入；若扫描根本身落在
+        // 默认排除的元数据目录内（典型：versioner 写 .stversions 触发 watcher），
+        // 逐条目按文件名过滤无法拦截（归档文件名不含被排除名），必须在入口拒绝，
+        // 否则归档文件会被索引并同步，形成归档↔同步反馈循环。
+        if let Some(s) = sub {
+            if s.split(['/', '\\'])
+                .any(|c| DEFAULT_IGNORED_NAMES.iter().any(|&ignored| c == ignored))
+            {
+                debug!(folder_id = %folder.id, sub = %s, "Sub-scan root is default-ignored metadata, skipping");
+                return Ok(Vec::new());
+            }
+        }
+
         let path = Path::new(&folder.path);
         let scan_root = match sub {
             Some(s) => path.join(s),
@@ -738,6 +751,30 @@ mod tests {
         assert_eq!(file.blocks[0].size, 0);
         assert_eq!(file.blocks[0].offset, 0);
         assert_eq!(file.blocks[0].hash, Sha256::new().finalize().to_vec());
+    }
+
+    #[tokio::test]
+    async fn test_sub_scan_of_default_ignored_dir_returns_empty() {
+        let db = MemoryDatabase::new();
+        let events = EventPublisher::new(10);
+        let scanner = Scanner::new(db, events);
+
+        let temp_dir = tempfile::tempdir().unwrap();
+        let stversions = temp_dir.path().join(".stversions");
+        tokio::fs::create_dir(&stversions).await.unwrap();
+        tokio::fs::write(stversions.join("note.md~20260721-010000"), b"old")
+            .await
+            .unwrap();
+
+        let folder = Folder::new("test", temp_dir.path().to_str().unwrap());
+        // 全量扫描本就不应包含 .stversions
+        assert!(scanner.scan_folder(&folder).await.unwrap().is_empty());
+        // watcher 增量路径：子扫描根就是 .stversions，也不应索引任何内容
+        let files = scanner
+            .scan_folder_sub(&folder, ".stversions")
+            .await
+            .unwrap();
+        assert!(files.is_empty());
     }
 
     #[test]
