@@ -6,25 +6,25 @@ resource: ./KNOWN_ISSUES.md
 tags: [issues, bugs, tracker, syncthing-rust, okf]
 status: active
 project: syncthing-rust
-timestamp: 2026-06-27T00:00:00Z
+timestamp: 2026-07-20T00:00:00Z
 ---
 
 # Known Issues
 
 > **维护原则**：发现的缺陷必须显式登记，避免误判项目成熟度。  
-> **最后更新**：2026-06-27（v3.0.4 — 安全加固 + Relay Server + WSS + 性能优化）
+> **最后更新**：2026-07-20（§20 下游 bridge 上报四缺陷全部修复：Ping 风暴 / block_source 时机 / 配置重协商 / TUI AddFolder）
 
 本文档列举当前已知未修复的功能性 / 行为性问题。  
 **这些问题决定了项目目前的"事实可用性"边界**。
 
 ---
 
-## ⚠️ 项目阶段定位（2026-06-27 v3.0.4）
+## ⚠️ 项目阶段定位（2026-07-20 v3.0.4 + §20 修复）
 
 | 维度 | 状态 |
 |------|------|
 | 代码完成度 | ~94%（+Relay Server v1 + WSS + 安全加固） |
-| 单元测试覆盖 | 392/392 通过（93 syncthing-net + 76 syncthing-sync + 66 syncthing-fs + 36 syncthing-db + 24 syncthing-core + 23 syncthing-api + 18 bep-protocol + 8 syncthing-versioner + 23 syncthing + 6 e2e + 1 test-utils） |
+| 单元测试覆盖 | 428/428 通过（2026-07-20 实测；含 TUI 事件层 11 测试与 §20 修复回归测试） |
 | 连接层稳定性 | ✅ retry_count 累加 + TCP keepalive + 有界 channel + 连接限流(max_connections) + SSRF防护 |
 | **端到端同步** | ✅ Push/Pull 双向 574 文件验证 |
 | 跨版本互通 | ✅ Rust v0.2.10-rc3 ↔ v0.2.10-rc3 E2E 验证 |
@@ -722,3 +722,40 @@ v0.2.8 完成首次双节点真实网络环境下的完整文件同步验证。
 4. 对 DERP 路径启用更短心跳或 TCP keepalive。
 
 **阻塞**：需先完成官方 Relay Protocol 客户端；当前 `derp/` 模块无法与 Go 节点互通。
+
+
+---
+
+## §20. 下游（Obsidian bridge）实测上报缺陷组（2026-07，**全部修复 ✅** commit `378b03a`）
+
+下游 bridge 项目在 Android/双 rust 节点实测中上报，全部复现于 syncthing-rust ↔ syncthing-rust，与官方实现无关。
+
+### §20.1 BEP Ping 风暴（严重 — 协议行为，**已修复 ✅**）
+
+**症状**：BEP 会话建立后每秒数千条 Ping（debug 日志 16 分钟 16MB）；Android 端电量与日志灾难。
+
+**根因**：`session/state.rs` 握手前与稳态两个分支均在收到 Ping 后立即回一个 Ping。BEP 的 Ping 是单向 keepalive（协议无 Pong），双端互答形成线速 ping-pong。`connection/mod.rs` 的注释"收到 Ping 后通常回一个 Ping"是该错误行为的来源。
+
+**修复**：两个分支收到 Ping 仅记录活性（`last_recv` 由接收循环维护），Ping 只由 30s 心跳定时器发送；原测试 `test_session_ping_pong` 曾把 bug 固化为预期，已改为断言窗口内 ≤1 条 Ping。
+
+### §20.2 `set_block_source` 在 `add_folder` 之后不生效（中等 — 内部 API 设计，**已修复 ✅**）
+
+**症状**：先 `add_folder` 再 `set_block_source` 时 pull 报 "No block source configured"（下游 `peer_node` 踩坑）。
+
+**根因**：`FolderModel` 仅在创建时读取一次 `block_source`，`Puller` 按值持有，后续设置不传播。
+
+**修复**：`Puller.block_source` 改为 `RwLock` 持有并新增 `set_block_source`；`SyncService::set_block_source` 传播到所有已存在 `FolderModel`。
+
+### §20.3 配置变更不触发会话重协商（中等 — 守护进程行为缺失，**已修复 ✅**）
+
+**症状**：`update_config`/`add_device` 后已建立的 BEP 会话不会重新交换 ClusterConfig（BEP 只在连接建立时交换）；Go Syncthing 配置变更时会自动断开重连设备，syncthing-rust 不会，下游曾用 `reconnect_device` 手动绕过。
+
+**修复**：`SyncService` 新增 `set_renegotiation_hook`（sync crate 保持零网络依赖），五个配置变更点均携带当前已连接设备触发钩子；daemon（`daemon_runner.rs`）注册为 `reconnect_device_by_id`。
+
+### §20.4 TUI 添加文件夹静默丢失（中等 — TUI，**已修复 ✅** commit `30337a4`）
+
+**症状**：TUI Folders 页 `a`/`Ins` 添加文件夹，表单正常关闭但文件夹从未写入 config。
+
+**根因**：`submit_add_folder` 构造了 `Folder` 却未 push 进 `app.config.folders`（同族 AddDevice/EditFolder 均正确，属单点遗漏）。
+
+**修复**：补上 push；同时重置 AddFolder 打开时的共享设备勾选残留。配套补齐 TUI 事件层 11 个 handler 级集成测试（表单提交/校验拒绝/删除确认/热更新通知）。

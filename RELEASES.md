@@ -92,7 +92,7 @@ BEP Relay v1 activated, sequence race fixed, CI fully green; project transitions
 
 ### Quality
 - **CI**: 19/19 jobs passing (clippy, test, deny, fmt, doc, e2e, bench-smoke, release-check, file-size).
-- **Tests**: 341 passed / 4 ignored / 0 failed at release; current workspace 392 passed / 6 ignored / 0 failed.
+- **Tests**: 341 passed / 4 ignored / 0 failed at release; current workspace 428 passed / 6 ignored / 0 failed (2026-07-20).
 - **Clippy**: 0 warnings.
 
 ### Known Limitations
