@@ -40,7 +40,7 @@ v3.0.4 (2026-06-27) 系统性安全审计驱动的版本，超出原 v3.0.x 路�
 |:---|:---|
 | 核心功能 | Production：BEP/TLS、块级同步、发现、**Relay Server v1**、WSS、REST API (RBAC)、TUI、Windows 托盘均稳定 |
 | 安全基线 | **v3.0.4**: 路径穿越/SSRF/连接限流/密钥权限/内容泄露全部修复 |
-| 测试基线 | **428 passed / 6 ignored / 0 failed**（2026-07-20 实测） |
+| 测试基线 | **431 passed / 6 ignored / 0 failed**（2026-07-21 实测） |
 | 性能基线 | Puller 6.7GiB/s, Scanner 803µs/MB, BEP 198ns/Hello |
 | CI | fmt + clippy (3 OS) + test (3 OS) + audit + deny + e2e + bench + release (3 OS) |
 | 真实部署 | ROG-X ↔ Gray-Cloud 双端生产同步 (自建 relay 替代 Tailscale) |
@@ -187,7 +187,7 @@ v3.0.4 (2026-06-27) 系统性安全审计驱动的版本，超出原 v3.0.x 路�
 
 | 指标 | 当前值 | v3.1.0 目标 | v3.2.0 目标 |
 |:---|---:|---:|---:|
-| 测试通过数 | 428 | ≥ 435 | ≥ 445 |
+| 测试通过数 | 431 | ≥ 435 | ≥ 445 |
 | CI jobs 全绿 | 20/20 | 保持 | 保持 |
 | 72h stress test | 未跑 | ✅ 通过 | 保持通过 |
 | Symlink 同步 | 不支持 | 不支持 | ✅ 支持（可配置关闭） |
