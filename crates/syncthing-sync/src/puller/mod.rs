@@ -44,7 +44,7 @@ pub struct Puller {
     max_concurrent_downloads: usize,
     max_concurrent_blocks: usize,
     concurrency_policy: RwLock<Option<Arc<ConcurrencyPolicy>>>,
-    block_source: Option<Arc<dyn BlockSource>>,
+    block_source: RwLock<Option<Arc<dyn BlockSource>>>,
     versioner: Option<Arc<dyn Versioner>>,
 }
 
@@ -57,7 +57,7 @@ impl Puller {
             max_concurrent_downloads: 2, // 保守默认 — 高延迟链路友好
             max_concurrent_blocks: 4,    // 减少并发避免 HEAD-of-line blocking
             concurrency_policy: RwLock::new(None),
-            block_source: None,
+            block_source: RwLock::new(None),
             versioner: None,
         }
     }
@@ -89,8 +89,24 @@ impl Puller {
 
     /// 设置块数据源
     pub fn with_block_source(mut self, source: Option<Arc<dyn BlockSource>>) -> Self {
-        self.block_source = source;
+        self.block_source = RwLock::new(source);
         self
+    }
+
+    /// 动态更新块数据源（允许 add_folder 之后补配，修复此前仅创建时读取的缺陷）
+    pub fn set_block_source(&self, source: Option<Arc<dyn BlockSource>>) {
+        if let Ok(mut guard) = self.block_source.write() {
+            *guard = source;
+        }
+    }
+
+    /// 测试辅助：是否已配置块数据源
+    #[cfg(test)]
+    pub(crate) fn block_source_present(&self) -> bool {
+        self.block_source
+            .read()
+            .map(|g| g.is_some())
+            .unwrap_or(false)
     }
 
     /// 设置版本管理器
@@ -139,7 +155,7 @@ impl Puller {
             let events = self.events.clone();
             let folder_id = folder.id.clone();
             let folder_path = base_path.to_path_buf();
-            let block_source = self.block_source.clone();
+            let block_source = self.block_source.read().ok().and_then(|g| g.clone());
             let max_concurrent_blocks = policy
                 .as_ref()
                 .map(|p| p.blocks())

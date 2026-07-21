@@ -9,7 +9,7 @@ use std::time::{Duration, Instant};
 /// BEP 单条消息处理超时。防止消息处理中的同步 I/O 阻塞整个会话心跳。
 const MESSAGE_HANDLING_TIMEOUT: Duration = Duration::from_secs(30);
 
-use tracing::{debug, info, warn};
+use tracing::{debug, info, trace, warn};
 
 use syncthing_core::{ConnectionState, Result, SyncthingError};
 
@@ -70,9 +70,9 @@ impl BepSession {
                             }
                         }
                         MessageType::Ping => {
-                            if let Err(e) = self.conn.send_ping().await {
-                                warn!("Failed to send ping reply to {}: {}", self.device_id, e);
-                            }
+                            // BEP 的 Ping 是单向 keepalive，没有 Pong；回复会导致
+                            // 双方互答形成 ping 风暴。静默接收即可。
+                            trace!("Ping received from {} (no reply per BEP)", self.device_id);
                         }
                         _ => {
                             debug!(
@@ -240,8 +240,10 @@ impl BepSession {
     async fn handle_message(&self, msg_type: MessageType, payload: bytes::Bytes) -> Result<()> {
         match msg_type {
             MessageType::Ping => {
-                self.conn.send_ping().await?;
-                self.metrics.messages_sent.fetch_add(1, Ordering::Relaxed);
+                // BEP 的 Ping 是单向 keepalive，没有 Pong；回复会导致双方互答
+                // 形成 ping 风暴（实测每秒数千条）。收到即证明对端存活，
+                // last_recv 已在接收循环更新，无需任何回复。
+                trace!("Ping received from {} (no reply per BEP)", self.device_id);
             }
             MessageType::Index => {
                 match bep_protocol::messages::decode_message::<bep_protocol::messages::Index>(

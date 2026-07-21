@@ -223,6 +223,28 @@ pub async fn start_daemon(
         .set_block_source(Arc::clone(&block_source) as Arc<dyn syncthing_sync::BlockSource>)
         .await;
 
+    // 配置变更重协商：BEP 只在连接建立时交换 ClusterConfig，
+    // 配置变更（update_config/add_device/...）后断开重连已连接设备，
+    // 与 Go Syncthing 行为对齐。
+    {
+        let handle = handle.clone();
+        sync_service
+            .set_renegotiation_hook(Arc::new(move |devices: Vec<syncthing_core::DeviceId>| {
+                for device_id in devices {
+                    let h = handle.clone();
+                    tokio::spawn(async move {
+                        if let Err(e) = h.reconnect_device_by_id(device_id).await {
+                            warn!(
+                                device = %device_id.short_id(),
+                                "Renegotiation reconnect failed: {}", e
+                            );
+                        }
+                    });
+                }
+            }))
+            .await;
+    }
+
     // Phase C: 自适应并发策略 — 根据 RTT 动态调整 Puller 并发度
     let concurrency_policy = Arc::new(ConcurrencyPolicy::new());
     sync_service

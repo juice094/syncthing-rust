@@ -113,6 +113,17 @@ impl FolderModel {
         self.puller.set_concurrency_policy(Some(policy));
     }
 
+    /// 动态更新块数据源（允许文件夹创建后补配）
+    pub fn set_block_source(&self, source: Option<Arc<dyn BlockSource>>) {
+        self.puller.set_block_source(source);
+    }
+
+    /// 测试辅助：puller 是否已配置块数据源
+    #[cfg(test)]
+    pub(crate) fn puller_block_source_present(&self) -> bool {
+        self.puller.block_source_present()
+    }
+
     /// 设置文件夹编排器（构建器模式）
     pub fn with_orchestrator(mut self, orchestrator: Option<Arc<FolderOrchestrator>>) -> Self {
         self.orchestrator = SyncRwLock::new(orchestrator);

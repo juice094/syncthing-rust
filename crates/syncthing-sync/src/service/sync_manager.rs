@@ -20,6 +20,7 @@ impl SyncManager for SyncService {
 
     async fn update_config(&self, config: Config) -> Result<()> {
         *self.config.write().await = config;
+        self.fire_renegotiation_hook().await;
         Ok(())
     }
 
@@ -28,6 +29,7 @@ impl SyncManager for SyncService {
             let mut config = self.config.write().await;
             config.devices.push(device);
         }
+        self.fire_renegotiation_hook().await;
         Ok(())
     }
 
@@ -37,6 +39,7 @@ impl SyncManager for SyncService {
             config.devices.retain(|d| d.id != *device_id);
         }
         self.connected_devices.remove(device_id);
+        self.fire_renegotiation_hook().await;
         Ok(())
     }
 
@@ -61,6 +64,9 @@ impl SyncManager for SyncService {
         // running), so this is safe to call unconditionally.
         self.start_folder_internal(&folder_id).await?;
 
+        // 文件夹共享关系变化会影响 ClusterConfig 内容，需重协商
+        self.fire_renegotiation_hook().await;
+
         Ok(())
     }
 
@@ -75,6 +81,8 @@ impl SyncManager for SyncService {
         if self.folders.remove(folder_id).is_some() {
             info!(folder_id = %folder_id, "Folder removed");
         }
+
+        self.fire_renegotiation_hook().await;
 
         Ok(())
     }
