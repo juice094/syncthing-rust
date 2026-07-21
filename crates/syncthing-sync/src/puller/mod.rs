@@ -134,6 +134,40 @@ impl Puller {
             )
         })?;
 
+        // 批量删除速率防护：单次 pull 的远程删除数超过配额时拒绝整个删除批次
+        //（下载/修改不受影响）。防止陈旧/损坏的对端索引静默清空本地——
+        // 2026-07-20 事故中 114 个文件经增量批次被删，全量索引阈值无法覆盖。
+        let local_count = self
+            .db
+            .get_folder_files(&folder.id)
+            .await?
+            .iter()
+            .filter(|f| !f.is_deleted())
+            .count();
+        let quota = syncthing_core::constants::PULL_DELETE_QUOTA_MIN.max(
+            (local_count as f64 * syncthing_core::constants::PULL_DELETE_QUOTA_RATIO) as usize,
+        );
+        let delete_count = needed_files.iter().filter(|f| f.is_deleted()).count();
+        let needed_files = if delete_count > quota {
+            error!(
+                folder_id = %folder.id,
+                delete_count,
+                quota,
+                local_files = local_count,
+                "SAFETY QUOTA: refusing remote deletion batch; peer index may be stale/corrupt. \
+                 Investigate the peer before allowing these deletions."
+            );
+            needed_files
+                .into_iter()
+                .filter(|f| !f.is_deleted())
+                .collect::<Vec<_>>()
+        } else {
+            needed_files
+        };
+
+        // 顺带清理过期回收站（每次 pull 一次，代价极低）
+        Self::cleanup_sttrash(base_path).await;
+
         // 使用信号量限制并发：优先读取共享并发策略，否则使用固定默认值
         let policy = self.concurrency_policy.read().ok().and_then(|g| g.clone());
         let max_concurrent_downloads = policy
@@ -237,12 +271,18 @@ impl Puller {
         }
 
         // 等待所有任务完成
+        let mut stale_index_errors = 0usize;
         for handle in handles {
             match handle.await {
                 Ok(Ok(_)) => {
                     stats.files_succeeded += 1;
                 }
                 Ok(Err(e)) => {
+                    // ponytail: BEP error code 2 (NO_SUCH_FILE) 经桥接层格式化为字符串，
+                    // 此处以子串统计；结构化错误码需改桥接层签名，收益不成比例。
+                    if e.to_string().contains("error code 2") {
+                        stale_index_errors += 1;
+                    }
                     error!(error = %e, "File pull failed");
                     stats.files_failed += 1;
                 }
@@ -251,6 +291,15 @@ impl Puller {
                     stats.files_failed += 1;
                 }
             }
+        }
+
+        if stale_index_errors > syncthing_core::constants::STALE_INDEX_WARN_THRESHOLD {
+            warn!(
+                folder_id = %folder.id,
+                count = stale_index_errors,
+                "Many NO_SUCH_FILE (error code 2) responses: peer index may be stale/corrupt. \
+                 Recommend a full rescan on the peer before further sync."
+            );
         }
 
         info!(
@@ -624,22 +673,23 @@ impl Puller {
         let file_path = folder_path.join(&file_info.name);
 
         if file_path.exists() {
-            if file_path.is_dir() {
-                fs::remove_dir_all(&file_path).await.map_err(|e| {
-                    SyncError::pull(
+            // 软删除：远程驱动的删除先隔离到 .sttrash，避免对端索引损坏时
+            // 本地数据不可恢复（2026-07-20 事故 versioning: null 零兜底）。
+            match Self::move_to_trash(&file_path, folder_path, &file_info.name).await {
+                Ok(trash_path) => {
+                    info!(
+                        file = %file_info.name,
+                        trash = %trash_path.display(),
+                        "File moved to .sttrash (remote deletion applied)"
+                    );
+                }
+                Err(e) => {
+                    return Err(SyncError::pull(
                         file_info.name.clone(),
-                        format!("Failed to remove directory: {}", e),
-                    )
-                })?;
-            } else {
-                fs::remove_file(&file_path).await.map_err(|e| {
-                    SyncError::pull(
-                        file_info.name.clone(),
-                        format!("Failed to remove file: {}", e),
-                    )
-                })?;
+                        format!("Failed to quarantine file to .sttrash: {}", e),
+                    ));
+                }
             }
-            info!(file = %file_info.name, "File deleted");
         } else {
             warn!(file = %file_info.name, "File to delete not found");
         }
@@ -648,6 +698,70 @@ impl Puller {
         db.update_file(folder_id, file_info.clone()).await?;
 
         Ok(())
+    }
+
+    /// 将目标移入 `<folder>/.sttrash/<YYYYMMDD>/<相对路径>`，重名时追加时间戳。
+    /// 返回回收站中的最终路径。
+    async fn move_to_trash(
+        file_path: &Path,
+        folder_path: &Path,
+        rel_name: &str,
+    ) -> Result<std::path::PathBuf> {
+        let date = chrono::Utc::now().format("%Y%m%d").to_string();
+        let trash_dir = folder_path.join(".sttrash").join(&date);
+        let mut dest = trash_dir.join(rel_name);
+        if let Some(parent) = dest.parent() {
+            fs::create_dir_all(parent).await.map_err(|e| {
+                SyncError::pull(
+                    rel_name.to_string(),
+                    format!("Failed to create .sttrash dir: {}", e),
+                )
+            })?;
+        }
+        if dest.exists() {
+            let ts = chrono::Utc::now().format("%H%M%S").to_string();
+            let file_name = dest
+                .file_name()
+                .map(|n| n.to_string_lossy().to_string())
+                .unwrap_or_default();
+            dest.set_file_name(format!("{}.{}", file_name, ts));
+        }
+        fs::rename(file_path, &dest).await.map_err(|e| {
+            SyncError::pull(
+                rel_name.to_string(),
+                format!("Failed to move to .sttrash: {}", e),
+            )
+        })?;
+        Ok(dest)
+    }
+
+    /// 清理 .sttrash 中超过保留期（7 天）的日期目录。
+    /// ponytail: 按目录名日期判断，不递归检查内容；清理失败仅告警。
+    async fn cleanup_sttrash(folder_path: &Path) {
+        let trash_root = folder_path.join(".sttrash");
+        let mut entries = match fs::read_dir(&trash_root).await {
+            Ok(e) => e,
+            Err(_) => return, // 无回收站，正常路径
+        };
+        let cutoff = chrono::Utc::now() - chrono::Duration::days(7);
+        while let Ok(Some(entry)) = entries.next_entry().await {
+            let name = entry.file_name();
+            let name = name.to_string_lossy();
+            let Ok(date) = chrono::NaiveDate::parse_from_str(&name, "%Y%m%d") else {
+                continue;
+            };
+            let Some(datetime) = date.and_hms_opt(0, 0, 0) else {
+                continue;
+            };
+            if chrono::DateTime::<chrono::Utc>::from_naive_utc_and_offset(datetime, chrono::Utc)
+                < cutoff
+            {
+                info!(dir = %entry.path().display(), "Removing expired .sttrash directory");
+                if let Err(e) = fs::remove_dir_all(entry.path()).await {
+                    warn!(dir = %entry.path().display(), "Failed to remove expired .sttrash: {}", e);
+                }
+            }
+        }
     }
 
     /// 检查文件是否需要下载

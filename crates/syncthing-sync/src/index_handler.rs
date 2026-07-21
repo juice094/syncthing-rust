@@ -139,7 +139,7 @@ impl IndexHandler {
     async fn process_files(
         &self,
         folder: &Folder,
-        _device: syncthing_core::DeviceId,
+        device: syncthing_core::DeviceId,
         files: &[FileInfo],
         is_full_index: bool,
     ) -> Result<Vec<FileInfo>> {
@@ -185,6 +185,16 @@ impl IndexHandler {
                                 }
                             } else {
                                 // 无冲突，直接更新
+                                if remote_file.is_deleted() {
+                                    // 删除审计：远程删除被接受时必须可溯源（2026-07-20 事故教训）
+                                    info!(
+                                        file = %remote_file.name,
+                                        device = %device.short_id(),
+                                        local_version = %format_vector(&local_file.version),
+                                        remote_version = %format_vector(&remote_file.version),
+                                        "Remote deletion accepted"
+                                    );
+                                }
                                 self.db.update_file(&folder.id, remote_file.clone()).await?;
 
                                 // 检查是否需要下载
@@ -395,6 +405,17 @@ pub struct IndexDiff {
     pub to_download: Vec<FileInfo>,
     pub to_upload: Vec<FileInfo>,
     pub conflicts: Vec<(FileInfo, FileInfo)>,
+}
+
+/// 版本向量摘要格式化（删除审计日志用）：`{1:10,2:6}` 形式
+fn format_vector(v: &syncthing_core::types::Vector) -> String {
+    let mut pairs: Vec<String> = v
+        .counters
+        .iter()
+        .map(|(id, c)| format!("{}:{}", id, c))
+        .collect();
+    pairs.sort();
+    format!("{{{}}}", pairs.join(","))
 }
 
 #[cfg(test)]
