@@ -43,6 +43,8 @@ pub struct FolderModel {
     watcher_dropped: Arc<AtomicU64>,
     /// 上一次已报告的丢弃数，用于计算差值
     last_reported_dropped: AtomicU64,
+    /// 本地设备的版本向量计数器 ID（override 等本地递增路径使用）
+    local_counter_id: u64,
 }
 
 impl FolderModel {
@@ -52,8 +54,17 @@ impl FolderModel {
         db: Arc<dyn LocalDatabase>,
         events: EventPublisher,
         block_source: Option<Arc<dyn BlockSource>>,
+        local_counter_id: u64,
     ) -> Self {
-        Self::new_with_policy_and_orchestrator(folder, db, events, block_source, None, None)
+        Self::new_with_policy_and_orchestrator(
+            folder,
+            db,
+            events,
+            block_source,
+            None,
+            None,
+            local_counter_id,
+        )
     }
 
     /// 创建文件夹模型并指定共享并发策略与编排器
@@ -64,8 +75,9 @@ impl FolderModel {
         block_source: Option<Arc<dyn BlockSource>>,
         concurrency_policy: Option<Arc<ConcurrencyPolicy>>,
         orchestrator: Option<Arc<FolderOrchestrator>>,
+        local_counter_id: u64,
     ) -> Self {
-        let scanner = Scanner::new(db.clone(), events.clone());
+        let scanner = Scanner::new(db.clone(), events.clone(), local_counter_id);
         let versioner: Option<Arc<dyn syncthing_versioner::Versioner>> = folder
             .versioning
             .as_ref()
@@ -95,6 +107,7 @@ impl FolderModel {
             watcher_events_received: Arc::new(AtomicU64::new(0)),
             watcher_dropped: Arc::new(AtomicU64::new(0)),
             last_reported_dropped: AtomicU64::new(0),
+            local_counter_id,
         }
     }
 
@@ -853,7 +866,7 @@ impl FolderModel {
         let count = changed.len();
         let mut updated = Vec::with_capacity(count);
         for mut file in changed {
-            file.version.increment(1);
+            file.version.increment(self.local_counter_id);
             updated.push(file);
         }
 

@@ -180,7 +180,7 @@ async fn test_e2e_sync_single_file_via_block_server() {
 
     let db_a = MemoryDatabase::new();
     let events_a = EventPublisher::new(10);
-    let scanner_a = Scanner::new(db_a.clone(), events_a.clone());
+    let scanner_a = Scanner::new(db_a.clone(), events_a.clone(), 1);
     let folder_a = Folder::new("test", temp_a.path().to_str().unwrap());
     let changed = scanner_a.scan_folder(&folder_a).await.unwrap();
     assert_eq!(changed.len(), 1, "Should detect 1 changed file");
@@ -365,7 +365,7 @@ async fn test_puller_three_way_merge_on_conflict() {
     // Step 1: 创建 base 版本并扫描，生成 base_version
     let base_content = "line1\nline2\n";
     tokio::fs::write(&file_path, base_content).await.unwrap();
-    let scanner = Scanner::new(db.clone(), events.clone());
+    let scanner = Scanner::new(db.clone(), events.clone(), 1);
     let mut changed = scanner.scan_folder(&folder).await.unwrap();
     assert_eq!(changed.len(), 1);
     let mut local_info = changed.pop().unwrap();
