@@ -588,6 +588,13 @@ impl FolderModel {
 
         // 2. 处理显式删除事件（文件或子树）
         for relative in deletes {
+            // watcher 对截断覆写（如 shell `>`、编辑器保存）会上报 remove+create，
+            // 同一路径同时出现在 changes 与 deletes；文件仍存在说明删除事件
+            // 是陈旧的，跳过——否则删除记录会盖掉刚扫到的新版本并广播（幻影删除）。
+            if base_path.join(&relative).exists() {
+                trace!(folder_id = %folder_id, path = %relative, "Stale delete event for existing file, skipping");
+                continue;
+            }
             match self
                 .scanner
                 .mark_deleted_subtree(&self.folder, &relative)

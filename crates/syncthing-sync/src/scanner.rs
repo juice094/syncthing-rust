@@ -37,6 +37,15 @@ const DEFAULT_IGNORED_NAMES: &[&str] = &[
 /// Scanner 默认排除的文件后缀模式
 const DEFAULT_IGNORED_SUFFIXES: &[&str] = &[".syncthing.tmp", "~syncthing~"];
 
+/// 相对路径的任一组成部分是否为默认排除的元数据名（.stversions/.sttrash 等）。
+/// watcher 增量路径（scan_changed_file / mark_deleted_subtree / sub-scan 根）
+/// 都必须过这道拦截，否则元数据会进入索引并同步，形成归档↔同步反馈循环。
+fn is_default_ignored_path(relative_path: &str) -> bool {
+    relative_path
+        .split(['/', '\\'])
+        .any(|c| DEFAULT_IGNORED_NAMES.iter().any(|&ignored| c == ignored))
+}
+
 /// 文件夹扫描器
 pub struct Scanner {
     db: Arc<dyn LocalDatabase>,
@@ -72,9 +81,7 @@ impl Scanner {
         // 逐条目按文件名过滤无法拦截（归档文件名不含被排除名），必须在入口拒绝，
         // 否则归档文件会被索引并同步，形成归档↔同步反馈循环。
         if let Some(s) = sub {
-            if s.split(['/', '\\'])
-                .any(|c| DEFAULT_IGNORED_NAMES.contains(&c))
-            {
+            if is_default_ignored_path(s) {
                 debug!(folder_id = %folder.id, sub = %s, "Sub-scan root is default-ignored metadata, skipping");
                 return Ok(Vec::new());
             }
@@ -577,6 +584,12 @@ impl Scanner {
         folder: &Folder,
         relative_path: &str,
     ) -> Result<Option<FileInfo>> {
+        // 元数据目录（.stversions/.sttrash 等）内的变更不进入索引
+        if is_default_ignored_path(relative_path) {
+            trace!(path = %relative_path, "Skipping default-ignored metadata path");
+            return Ok(None);
+        }
+
         let base_path = Path::new(&folder.path);
         let full_path = base_path.join(relative_path);
 
@@ -639,6 +652,11 @@ impl Scanner {
         folder: &Folder,
         relative_prefix: &str,
     ) -> Result<Vec<FileInfo>> {
+        // 元数据目录下的"删除"不广播（从未被索引，且传播会让对端跟着删 .sttrash）
+        if is_default_ignored_path(relative_prefix) {
+            return Ok(Vec::new());
+        }
+
         let prefix_with_slash = if relative_prefix.ends_with('/') {
             relative_prefix.to_string()
         } else {
@@ -783,6 +801,34 @@ mod tests {
             .await
             .unwrap();
         assert!(files.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_changed_file_and_delete_marking_skip_metadata_paths() {
+        let db = MemoryDatabase::new();
+        let events = EventPublisher::new(10);
+        let scanner = Scanner::new(db, events, 1);
+
+        let temp_dir = tempfile::tempdir().unwrap();
+        let trash = temp_dir.path().join(".sttrash").join("20260721");
+        tokio::fs::create_dir_all(&trash).await.unwrap();
+        tokio::fs::write(trash.join("note.md"), b"old")
+            .await
+            .unwrap();
+
+        let folder = Folder::new("test", temp_dir.path().to_str().unwrap());
+        // 单文件增量扫描：.sttrash 内文件不进入索引
+        assert!(scanner
+            .scan_changed_file(&folder, ".sttrash/20260721/note.md")
+            .await
+            .unwrap()
+            .is_none());
+        // 删除标记：元数据路径不广播删除
+        assert!(scanner
+            .mark_deleted_subtree(&folder, ".sttrash/20260721/note.md")
+            .await
+            .unwrap()
+            .is_empty());
     }
 
     #[test]

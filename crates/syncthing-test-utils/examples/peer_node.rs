@@ -64,6 +64,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut config = Config::new();
     config.device_name = "desktop-peer".to_string();
     config.listen_addr = listen_addr.to_string();
+    // 版本向量计数器 ID 来源；缺失会导致所有节点退化为 counter id 0，
+    // 并发冲突检测失效（与 daemon_runner / TestNode 对齐）
+    config.local_device_id = Some(device_id);
     config.gui = GuiConfig {
         enabled: false,
         address: "127.0.0.1:0".to_string(),
@@ -118,9 +121,25 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // 否则 pull 报 "No block source configured"。
     let mut folder = Folder::new(&folder_id, folder_path.to_str().unwrap_or(""));
     folder.devices = peer_ids.clone();
+    // 可选：PEER_VERSIONING=simple 时启用 SimpleVersioner（复现/验证版本归档行为）
+    if std::env::var("PEER_VERSIONING").as_deref() == Ok("simple") {
+        folder.versioning = Some(syncthing_core::types::VersioningConfig::Simple {
+            params: std::collections::HashMap::from([("keep".to_string(), "5".to_string())]),
+        });
+        println!("versioning=simple(keep=5)");
+    }
     sync_service.add_folder(folder).await?;
 
     let actual_addr = manager.start().await?;
+
+    // 可选：PEER_CONNECT=127.0.0.1:PORT 时主动向首个 peer 拨号（桌面双节点复现用）
+    if let Ok(connect_addr) = std::env::var("PEER_CONNECT") {
+        if let Some(first) = peer_ids.first() {
+            let addr = connect_addr.parse()?;
+            connection_handle.connect_to(*first, vec![addr]).await?;
+            println!("dialed={connect_addr}");
+        }
+    }
     println!("device_id={}", device_id);
     println!("listen_addr={}", actual_addr);
     println!("folder_id={}", folder_id);
