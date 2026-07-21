@@ -59,7 +59,7 @@ cargo run -p syncthing-cli -- status
 
 Before submitting a PR:
 
-- [ ] `cargo test --workspace` — 431 passed / 6 ignored / 0 failed
+- [ ] `cargo test --workspace` — 433 passed / 6 ignored / 0 failed
 - [ ] `cargo clippy --workspace --all-targets -- -D warnings -W clippy::await_holding_lock` — 0 warnings
 - [ ] `cargo fmt --check` — pass (or run `cargo fmt --all`)
 - [ ] New public API has doc comment

@@ -212,7 +212,7 @@ Handler 模式：`Result<Json<T>, (StatusCode, String)>`。所有 handler 接收
 
 ## 10. 测试状态
 
-431 passed / 6 ignored / 0 failed（workspace total，含 unit + integration + doc-tests）。
+433 passed / 6 ignored / 0 failed（workspace total，含 unit + integration + doc-tests）。
 
 Ignored：
 - `test_two_node_single_file_sync`（并行测试负载下 ClusterConfig race 偶发超时）
