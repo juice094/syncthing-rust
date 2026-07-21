@@ -115,6 +115,11 @@ impl BepConnection {
                 stats.messages_received += 1;
                 drop(stats);
 
+                // 任何收到的消息都是对端存活证据：心跳检查器（spawn_heartbeat_task）
+                // 依据 last_pong 判活，此前该字段初始化后从未更新，导致连接固定
+                // 在 3×heartbeat_interval（默认 90s）后被误杀。
+                *inner.last_pong.write() = std::time::Instant::now();
+
                 // 解码 BEP Header
                 let bep_header = match <bep_protocol::messages::Header as prost::Message>::decode(
                     &hdr_buf[..],
