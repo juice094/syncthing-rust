@@ -48,6 +48,9 @@ impl SyncService {
 
     /// 使用配置创建服务
     pub async fn with_config(self, config: Config) -> Self {
+        if let Some(id) = config.local_device_id {
+            self.index_handler.set_local_device_id(id);
+        }
         *self.config.write().await = config;
         self
     }

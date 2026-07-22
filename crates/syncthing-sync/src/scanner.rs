@@ -43,7 +43,7 @@ const DEFAULT_IGNORED_SUFFIXES: &[&str] = &[".syncthing.tmp", "~syncthing~"];
 fn is_default_ignored_path(relative_path: &str) -> bool {
     relative_path
         .split(['/', '\\'])
-        .any(|c| DEFAULT_IGNORED_NAMES.iter().any(|&ignored| c == ignored))
+        .any(|c| DEFAULT_IGNORED_NAMES.contains(&c))
 }
 
 /// 文件夹扫描器
