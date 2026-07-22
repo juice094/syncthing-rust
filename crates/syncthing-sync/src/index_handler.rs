@@ -34,6 +34,11 @@ impl IndexHandler {
         }
     }
 
+    /// 注入本地设备 ID（冲突文件命名的来源标识）
+    pub fn set_local_device_id(&self, id: syncthing_core::DeviceId) {
+        self.conflict_resolver.set_local_device_id(id);
+    }
+
     /// 处理完整索引
     pub async fn handle_index(
         &self,

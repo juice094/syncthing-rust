@@ -126,6 +126,46 @@ pub enum VersionComparison {
     Conflict,
 }
 
+/// 并发方向（冲突决胜 tiebreak 用，对齐 Go `Vector.Compare` 的
+/// ConcurrentGreater / ConcurrentLesser 语义：并发时首个分歧计数器的方向）
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ConcurrentOrder {
+    /// 首个分歧点本侧计数更大（Go ConcurrentGreater）
+    SelfGreater,
+    /// 首个分歧点对侧计数更大（Go ConcurrentLesser）
+    OtherGreater,
+}
+
+impl Vector {
+    /// 带方向的并发判定（对齐 Go lib/protocol/vector.go `Compare`）。
+    ///
+    /// 仅当两向量真正并发（双方各有更高的计数器）时返回 `Some(方向)`，
+    /// 方向为**首个分歧计数器**的大小关系；支配或相等关系返回 `None`。
+    /// 该方向是确定性的，双端独立计算结果一致，用于冲突决胜 tiebreak。
+    pub fn concurrent_order(&self, other: &Vector) -> Option<ConcurrentOrder> {
+        let mut ids: std::collections::BTreeSet<u64> = self.counters.keys().copied().collect();
+        ids.extend(other.counters.keys().copied());
+        let mut first: Option<ConcurrentOrder> = None;
+        for id in ids {
+            let a = self.get(id);
+            let b = other.get(id);
+            let dir = if a > b {
+                ConcurrentOrder::SelfGreater
+            } else if a < b {
+                ConcurrentOrder::OtherGreater
+            } else {
+                continue;
+            };
+            match first {
+                None => first = Some(dir),
+                Some(d) if d != dir => return first, // 方向翻转 → 并发
+                _ => {}
+            }
+        }
+        None // 无翻转 → 支配或相等，非并发
+    }
+}
+
 /// 索引ID（8字节随机值）
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
 pub struct IndexID(pub [u8; 8]);

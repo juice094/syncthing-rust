@@ -19,6 +19,9 @@ impl SyncManager for SyncService {
     }
 
     async fn update_config(&self, config: Config) -> Result<()> {
+        if let Some(id) = config.local_device_id {
+            self.index_handler.set_local_device_id(id);
+        }
         *self.config.write().await = config;
         self.fire_renegotiation_hook().await;
         Ok(())

@@ -74,3 +74,18 @@ fn test_folder_summary_sync_percent_zero_bytes() {
     let summary = FolderSummary::default();
     assert_eq!(summary.sync_percent(), 100.0);
 }
+
+#[test]
+fn test_concurrent_order() {
+    // 并发方向：首个分歧计数器决定方向（Go ConcurrentGreater/Lesser）
+    let a = Vector::new().with_counter(1, 6);
+    let b = Vector::new().with_counter(2, 5);
+    assert_eq!(a.concurrent_order(&b), Some(ConcurrentOrder::SelfGreater));
+    assert_eq!(b.concurrent_order(&a), Some(ConcurrentOrder::OtherGreater));
+
+    // 支配关系 → 非并发 → None
+    let c = Vector::new().with_counter(1, 6).with_counter(2, 5);
+    assert_eq!(c.concurrent_order(&b), None);
+    // 相等 → None
+    assert_eq!(b.concurrent_order(&b), None);
+}
