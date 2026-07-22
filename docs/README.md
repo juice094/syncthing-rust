@@ -92,6 +92,7 @@ docs/
 
 | 文档 | 内容 | 日期 |
 |------|------|------|
+| [SESSION_REPORT_2026-07-21.md](reports/SESSION_REPORT_2026-07-21.md) | 工作交付报告：向量根因修复、数据事故加固、冲突 Go 对齐、e2e 归因、backlog | 2026-07-21 |
 | [CRUD_REPAIR_E2E_2026-05-22.md](reports/CRUD_REPAIR_E2E_2026-05-22.md) | E2E CRUD 5/5 修复验证报告 | 2026-05-22 |
 | [DUAL_NODE_TEST_2026-05-15.md](reports/DUAL_NODE_TEST_2026-05-15.md) | Windows ↔ Ubuntu 真实网络双节点测试 | 2026-05-15 |
 | [CODE_HEALTH_AUDIT_2026-05-15.md](reports/CODE_HEALTH_AUDIT_2026-05-15.md) | 代码健康度审计 | 2026-05-15 |
