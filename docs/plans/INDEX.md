@@ -17,10 +17,11 @@ timestamp: 2026-07-20T00:00:00Z
 
 ---
 
-## 当前有效计划（3 份）
+## 当前有效计划（4 份）
 
 | 文件 | 状态 | 说明 |
 |------|------|------|
+| [`CONFLICT_RESOLUTION_ALIGNMENT_2026-07-21.md`](./CONFLICT_RESOLUTION_ALIGNMENT_2026-07-21.md) | ✅ **待执行** | 冲突死循环根因分析（对照 Go 官方 WinsConflict/InConflictWith/Vector.Compare）与三阶段修复计划：确定性胜者仲裁 → 内容级冲突精化 → 收敛回归测试。 |
 | [`POST_V3_0_3_ROADMAP.md`](./POST_V3_0_3_ROADMAP.md) | ✅ **最新后续计划** | v3.0.3 发布后制定、v3.0.4 发布后更新。覆盖 72h stress test（v3.1.0 准入线）、Symlink 同步、高延迟网络优化、Web GUI/QUIC 冻结说明、P0~P2 优先级矩阵与 ADR。 |
 | [`TUNING_PLAN_2026-05-11.md`](./TUNING_PLAN_2026-05-11.md) | ✅ 活跃 | 横向调优。T-A~T-G 七大任务组。v0.2.4 周期完成 T-F1/F2/A1/B1/E1/G2，待执行 T-C/D3/F3。 |
 | [`PHASE3_PLAN.md`](./PHASE3_PLAN.md) | ⚠️ 保留+勘误 | BepSession 硬化计划。3.1~3.3 已完成，3.4（72h stress test）⏳ 已调整为双节点真实网络 72h（v3.1.0 准入线）。 |
