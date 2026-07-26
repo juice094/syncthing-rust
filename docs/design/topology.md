@@ -34,7 +34,8 @@ syncthing-rust/
 │   ├── syncthing-db/       # 元数据与块缓存（sled-backed）
 │   ├── syncthing-api/      # REST API（Axum）+ 事件总线
 │   ├── syncthing-versioner/# Simple / Staggered 版本控制
-│   └── syncthing-test-utils/# MemoryPipe、TestNode 等测试辅助
+│   ├── syncthing-test-utils/# MemoryPipe、TestNode 等测试辅助
+│   └── obsidian-vault-crypto-adapter/# Obsidian Vault 加密测试辅助（仅 dev）
 ├── docs/                   # 设计文档、计划、报告（OKF bundle）
 ├── scripts/                # 健康检查、cloud-deploy、压力测试
 ├── Cargo.toml              # Workspace 定义
@@ -55,7 +56,8 @@ cmd/syncthing
   ├─ syncthing-core
   ├─ syncthing-versioner
   ├─ bep-protocol
-  └─ syncthing-test-utils   # 仅测试/开发工具
+  ├─ syncthing-test-utils   # 仅测试/开发工具
+  └─ obsidian-vault-crypto-adapter   # 仅 e2e 加密 vault 测试用 dev-dependency
 
 syncthing-core ← {protocol, net, sync, fs, db, api, versioner}
 bep-protocol   ← {net, sync, test-utils}
