@@ -1,0 +1,21 @@
+[package]
+name = "obsidian_vault_crypto_adapter"
+version.workspace = true
+edition.workspace = true
+
+publish = false
+
+[dependencies]
+aes-gcm = "0.10"
+aes-siv = "0.7"
+argon2 = "0.5"
+base32 = "0.5"
+clap = { version = "4.5", features = ["derive"] }
+hkdf = "0.12"
+sha2 = { workspace = true }
+thiserror = { workspace = true }
+walkdir = { workspace = true }
+zeroize = { version = "1.8", features = ["derive"] }
+
+[dev-dependencies]
+tempfile = { workspace = true }
