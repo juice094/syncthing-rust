@@ -26,6 +26,7 @@ timestamp: 2026-06-25T00:00:00Z
 | `syncthing-api` | REST + 事件总线 + 配置 | 禁止直接持有 `ConnectionManagerHandle` / `LocalDatabase` 具体类型；必须走 trait |
 | `syncthing-versioner` | 文件版本归档策略 | 禁止 FS I/O |
 | `syncthing-test-utils` | 测试辅助（`MemoryPipe`、`TestNode`） | 仅用于测试 / 开发工具 |
+| `obsidian-vault-crypto-adapter` | Obsidian Vault 加密适配（E2E 测试用） | 禁止进入生产二进制；仅作 dev-dependency |
 
 ### 1.1 分层耦合红线
 
@@ -45,7 +46,7 @@ timestamp: 2026-06-25T00:00:00Z
 - 生产代码使用 `unwrap()` / `expect()`（测试代码除外）。
 - 为消除 cargo audit 警告而引入 breaking change 的依赖升级。
 - 在 `syncthing-db` 暴露 sled 特有 API。
-- 实现当前冻结项：共识算法、信誉系统、自定义加密、QUIC / MagicSocket、Web GUI。
+- 实现当前冻结项：共识算法、信誉系统、QUIC / MagicSocket、Web GUI。自定义加密仅允许作为外部工具适配或测试辅助使用（如 `obsidian-vault-crypto-adapter`），禁止替代 BEP over TLS、禁止进入生产同步路径。
 
 ---
 

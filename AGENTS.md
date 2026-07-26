@@ -56,7 +56,8 @@ syncthing-rust/
 │   ├── syncthing-db/            # 元数据与块缓存（sled-backed）
 │   ├── syncthing-api/           # REST API（Axum）+ 事件总线 + 配置
 │   ├── syncthing-versioner/     # Simple / Staggered 版本控制
-│   └── syncthing-test-utils/    # MemoryPipe、TestNode 等测试辅助
+│   ├── syncthing-test-utils/    # MemoryPipe、TestNode 等测试辅助
+│   └── obsidian-vault-crypto-adapter/  # Obsidian Vault 加密测试辅助（仅 dev）
 ├── docs/                         # 设计文档、Agent 指引、计划、报告
 ├── scripts/                      # 健康检查、cloud-deploy、压力测试
 ├── Cargo.toml                    # Workspace 定义
@@ -78,7 +79,8 @@ cmd/syncthing
   ├─ syncthing-core
   ├─ syncthing-versioner
   ├─ bep-protocol
-  └─ syncthing-test-utils   # 仅测试 / 开发工具
+  ├─ syncthing-test-utils   # 仅测试 / 开发工具
+  └─ obsidian-vault-crypto-adapter   # 仅 e2e 加密 vault 测试用 dev-dependency
 
 syncthing-core ← {protocol, net, sync, fs, db, api, versioner}
 bep-protocol   ← {net, sync, test-utils}
@@ -103,13 +105,14 @@ net            ← {sync, test-utils, cli}
 | `syncthing-api` | REST + 事件总线 + 配置 | 禁止直接持有 `ConnectionManagerHandle` / `LocalDatabase` 具体类型；必须走 trait |
 | `syncthing-versioner` | 文件版本归档策略 | 禁止 FS I/O |
 | `syncthing-test-utils` | 测试辅助（`MemoryPipe`、`TestNode`） | 仅用于测试 / 开发工具 |
+| `obsidian-vault-crypto-adapter` | Obsidian Vault 加密适配（E2E 测试用） | 禁止进入生产二进制；仅作 dev-dependency |
 
 ### 4.2 绝对禁止
 
 - 生产代码使用 `unwrap()` / `expect()`（测试代码除外）。
 - 为消除 cargo audit 警告而引入 breaking change 的依赖升级。
 - 在 `syncthing-db` 暴露 sled 特有 API。
-- 实现当前冻结项：共识算法、信誉系统、自定义加密、QUIC / MagicSocket、Web GUI。
+- 实现当前冻结项：共识算法、信誉系统、QUIC / MagicSocket、Web GUI。自定义加密仅允许作为外部工具适配或测试辅助使用（如 `obsidian-vault-crypto-adapter`），禁止替代 BEP over TLS、禁止进入生产同步路径。
 
 ### 4.3 文档同步义务
 
