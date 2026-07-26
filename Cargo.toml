@@ -11,6 +11,7 @@ members = [
     "crates/syncthing-test-utils",
     "crates/syncthing-versioner",
     "crates/bep-protocol",
+    "crates/obsidian-vault-crypto-adapter",
     "cmd/syncthing",
     "cmd/syncthing-mcp-bridge",
     "cmd/syncthing-bench",
