@@ -131,13 +131,20 @@ impl Scanner {
             "Loaded ignore patterns"
         );
 
-        // 递归扫描目录
+        // 递归扫描目录。
+        // watcher 增量扫描时 sub 为变动子目录，scan_root = folder.path/sub，但索引名必须
+        // 以 folder 根为基准；因此 relative_prefix 要传入 sub，否则子目录下文件会被记录成
+        // 根级文件名（如 subdir/hello.md → hello.md），导致对端按错误路径请求块而报 InvalidFile。
+        let relative_prefix = match sub {
+            Some(s) => Path::new(s),
+            None => Path::new(""),
+        };
         match self
             .scan_directory(
                 &folder.id,
                 path,
                 &scan_root,
-                Path::new(""),
+                relative_prefix,
                 &mut visited_paths,
                 &matcher,
             )
@@ -652,7 +659,7 @@ impl Scanner {
         }
     }
 
-    /// 将某个子树下的所有 DB 文件标记为已删除（用于增量扫描发现子树内删除）。
+    /// 将某个子树内已不存在的 DB 文件标记为已删除（用于增量扫描发现子树内删除）。
     pub async fn mark_deleted_subtree(
         &self,
         folder: &Folder,
@@ -668,6 +675,7 @@ impl Scanner {
         } else {
             format!("{}/", relative_prefix)
         };
+        let base_path = Path::new(&folder.path);
         let db_files = self.db.get_folder_files(&folder.id).await?;
         let mut deleted = Vec::new();
         for db_file in db_files {
@@ -675,6 +683,12 @@ impl Scanner {
                 continue;
             }
             if db_file.name == relative_prefix || db_file.name.starts_with(&prefix_with_slash) {
+                // 只标记磁盘上确实已消失的文件；盲目删除会把子树内所有文件都标删除，
+                // 导致同步后文件被移入 .sttrash（W16 根因之二）。
+                let full_path = base_path.join(&db_file.name);
+                if full_path.exists() {
+                    continue;
+                }
                 let mut deleted_info = db_file.clone();
                 deleted_info.deleted = Some(true);
                 deleted_info.size = 0;
@@ -972,5 +986,80 @@ mod tests {
         // 顺序不变
         assert_eq!(result[0].name, "old.txt");
         assert_eq!(result[1].name, "new.txt");
+    }
+
+    #[tokio::test]
+    async fn test_sub_scan_preserves_relative_path() {
+        let db = MemoryDatabase::new();
+        let events = EventPublisher::new(10);
+        let scanner = Scanner::new(db, events, 1);
+
+        let temp_dir = tempfile::tempdir().unwrap();
+        let subdir = temp_dir.path().join("subdir");
+        tokio::fs::create_dir(&subdir).await.unwrap();
+        tokio::fs::write(subdir.join("hello.md"), b"hello")
+            .await
+            .unwrap();
+
+        let folder = Folder::new("test", temp_dir.path().to_str().unwrap());
+        let files = scanner.scan_folder_sub(&folder, "subdir").await.unwrap();
+
+        // W16 回归：子扫描返回的文件名必须以 folder 根为基准，不能截断成 basename。
+        let names: Vec<&str> = files.iter().map(|f| f.name.as_str()).collect();
+        assert!(
+            names.contains(&"subdir/hello.md"),
+            "expected subdir/hello.md, got {:?}",
+            names
+        );
+        assert!(
+            !names.contains(&"hello.md"),
+            "sub-scan must not produce root-level hello.md"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_mark_deleted_subtree_only_deletes_missing_files() {
+        use syncthing_core::types::Vector;
+
+        let db = MemoryDatabase::new();
+        let events = EventPublisher::new(10);
+        let scanner = Scanner::new(db.clone(), events, 1);
+
+        let temp_dir = tempfile::tempdir().unwrap();
+        let subdir = temp_dir.path().join("subdir");
+        tokio::fs::create_dir(&subdir).await.unwrap();
+        tokio::fs::write(subdir.join("keep.md"), b"keep")
+            .await
+            .unwrap();
+        // gone.md 只进 DB，磁盘上不存在
+        let gone = FileInfo {
+            name: "subdir/gone.md".to_string(),
+            file_type: syncthing_core::types::FileType::File,
+            size: 4,
+            permissions: 0o644,
+            modified_s: 1,
+            modified_ns: 0,
+            version: Vector::new().with_counter(1, 1),
+            sequence: 1,
+            block_size: 0,
+            blocks: vec![],
+            symlink_target: None,
+            deleted: None,
+            modified_by: None,
+            blocks_hash: None,
+            no_permissions: None,
+            base_version: None,
+        };
+        db.update_files("test", vec![gone]).await.unwrap();
+
+        let folder = Folder::new("test", temp_dir.path().to_str().unwrap());
+        let deleted = scanner
+            .mark_deleted_subtree(&folder, "subdir")
+            .await
+            .unwrap();
+
+        // W16 回归：子树删除检查必须跳过仍存在的文件，否则会把子树内所有文件标删除。
+        let deleted_names: Vec<&str> = deleted.iter().map(|f| f.name.as_str()).collect();
+        assert_eq!(deleted_names, vec!["subdir/gone.md"]);
     }
 }
