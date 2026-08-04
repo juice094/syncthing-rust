@@ -216,7 +216,9 @@ impl SyncService {
             .with_orchestrator(orchestrator),
         );
 
-        self.folders.insert(folder_id.clone(), folder_model);
+        self.folders.insert(folder_id.clone(), folder_model.clone());
+        // 从持久化数据库恢复文件夹状态计数，使重启后索引统计立即可见。
+        folder_model.init_state_from_db().await;
         info!(folder_id = %folder_id, "Folder added");
 
         Ok(())

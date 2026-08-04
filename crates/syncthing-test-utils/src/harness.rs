@@ -12,7 +12,10 @@ use syncthing_core::DeviceId;
 use syncthing_net::{
     identity::TlsIdentity, ConnectionManager, ConnectionManagerConfig, SyncthingTlsConfig,
 };
-use syncthing_sync::{database::MemoryDatabase, SyncManager, SyncService};
+use syncthing_sync::{
+    database::{FileSystemDatabase, LocalDatabase, MemoryDatabase},
+    SyncManager, SyncService,
+};
 
 use crate::bep_bridge::{install_bep_bridge, PendingResponses, TestBlockSource};
 
@@ -42,7 +45,30 @@ impl TestNode {
     }
 
     /// Create and start a node with a specific config directory.
+    /// Uses an in-memory database; config is still persisted to config.json.
     pub async fn new_with_dir(name: &str, config_dir: PathBuf) -> Result<Self> {
+        Self::new_with_dir_and_db(name, config_dir, MemoryDatabase::new()).await
+    }
+
+    /// Create and start a node with a specific config directory and a
+    /// persistent file-system database. Used by the Android bridge so that
+    /// index/version vectors survive service restarts.
+    pub async fn new_with_dir_persistent(
+        name: &str,
+        config_dir: PathBuf,
+        db_dir: PathBuf,
+    ) -> Result<Self> {
+        tokio::fs::create_dir_all(&db_dir)
+            .await
+            .context("create db dir")?;
+        Self::new_with_dir_and_db(name, config_dir, FileSystemDatabase::new(&db_dir)).await
+    }
+
+    async fn new_with_dir_and_db(
+        name: &str,
+        config_dir: PathBuf,
+        db: Arc<dyn LocalDatabase>,
+    ) -> Result<Self> {
         tokio::fs::create_dir_all(&config_dir)
             .await
             .context("create config dir")?;
@@ -53,9 +79,6 @@ impl TestNode {
             .context("load_or_generate cert")?;
         let device_id = tls_config.device_id();
         let tls_config_arc = Arc::new(tls_config);
-
-        // In-memory database (sufficient for E2E single-process tests)
-        let db = MemoryDatabase::new();
 
         // Load existing config if present (e.g., across service restarts),
         // otherwise build a fresh one. 证书已持久化，local_device_id 必须保持
@@ -140,6 +163,17 @@ impl TestNode {
         })
     }
 
+    /// Persist current in-memory config to config_dir/config.json.
+    pub async fn persist_config(&self) -> Result<()> {
+        let config = self.sync_service.get_config().await?;
+        let path = self.config_dir.join("config.json");
+        let json = serde_json::to_string_pretty(&config).context("serialize config")?;
+        tokio::fs::write(&path, json)
+            .await
+            .with_context(|| format!("write config {}", path.display()))?;
+        Ok(())
+    }
+
     /// Add a folder (create local path and start sync).
     pub async fn add_folder(&self, folder: Folder) -> Result<()> {
         tokio::fs::create_dir_all(&folder.path)
@@ -150,6 +184,7 @@ impl TestNode {
             .add_folder(folder)
             .await
             .context("sync_service add_folder")?;
+        self.persist_config().await?;
         Ok(())
     }
 
@@ -161,6 +196,7 @@ impl TestNode {
             .update_config(config)
             .await
             .context("sync_service update_config")?;
+        self.persist_config().await?;
         Ok(())
     }
 
@@ -253,5 +289,68 @@ impl TestNode {
         let _ = self.connection_handle.stop().await;
         let _ = self.sync_service.stop().await;
         let _ = tokio::fs::remove_dir_all(&self.config_dir).await;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use syncthing_core::types::Folder;
+
+    #[tokio::test]
+    async fn test_persistent_db_survives_restart() {
+        let tmp = std::env::temp_dir().join(format!(
+            "syncthing-persistent-db-test-{:x}",
+            rand::random::<u64>()
+        ));
+        let config_dir = tmp.join("config");
+        let db_dir = tmp.join("db");
+        let folder_path = tmp.join("sync");
+        tokio::fs::create_dir_all(&folder_path).await.unwrap();
+
+        let folder_id = "obsidian-sync";
+
+        // First run: scan a file into the persistent database.
+        let node = TestNode::new_with_dir_persistent("persist", config_dir.clone(), db_dir.clone())
+            .await
+            .unwrap();
+        let mut folder = Folder::new(folder_id, folder_path.to_str().unwrap());
+        folder.rescan_interval_secs = 3600;
+        node.add_folder(folder).await.unwrap();
+
+        tokio::fs::write(folder_path.join("note.md"), b"hello")
+            .await
+            .unwrap();
+        node.sync_service.scan_folder(folder_id).await.unwrap();
+        node.wait_for_idle(folder_id, Duration::from_secs(10))
+            .await
+            .unwrap();
+
+        let state = node.sync_service.get_folder_state(folder_id).await.unwrap();
+        assert_eq!(state.local_files, 1, "first run should index one file");
+
+        // Stop without cleanup so config/db persist.
+        let _ = node.connection_handle.stop().await;
+        let _ = node.sync_service.stop().await;
+        drop(node);
+
+        // Second run with the same directories: index must still be present.
+        let node2 = TestNode::new_with_dir_persistent("persist", config_dir, db_dir)
+            .await
+            .unwrap();
+        let state2 = node2
+            .sync_service
+            .get_folder_state(folder_id)
+            .await
+            .unwrap();
+        assert_eq!(
+            state2.local_files, 1,
+            "persistent DB should retain index across restart"
+        );
+
+        // Clean up.
+        let _ = node2.connection_handle.stop().await;
+        let _ = node2.sync_service.stop().await;
+        let _ = tokio::fs::remove_dir_all(&tmp).await;
     }
 }

@@ -853,6 +853,23 @@ impl FolderModel {
         info!(folder_id = %self.folder.id, "Folder resumed");
     }
 
+    /// Initialize folder state counters from the persisted database.
+    /// Called when a folder is loaded at startup so that indices survive restarts
+    /// without requiring an immediate full rescan.
+    pub async fn init_state_from_db(&self) {
+        match self.db.get_folder_files(&self.folder.id).await {
+            Ok(files) => {
+                let count = files.iter().filter(|f| !f.is_deleted()).count();
+                let mut state = self.state.write().await;
+                state.local_files = count;
+                info!(folder_id = %self.folder.id, local_files = count, "Initialized folder state from database");
+            }
+            Err(e) => {
+                warn!(folder_id = %self.folder.id, error = %e, "Failed to initialize folder state from database");
+            }
+        }
+    }
+
     /// Override local changes for a ReceiveOnly folder.
     /// Scans local files, increments version vectors, and updates the database
     /// so local changes are treated as authoritative and broadcast to peers.
