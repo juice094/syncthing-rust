@@ -57,26 +57,38 @@ impl TestNode {
         // In-memory database (sufficient for E2E single-process tests)
         let db = MemoryDatabase::new();
 
-        // Build config
-        let mut config = Config::new();
-        config.device_name = name.to_string();
-        config.listen_addr = "127.0.0.1:0".to_string();
-        // 版本向量计数器 ID 来自 local_device_id；缺失会导致所有测试节点
-        // 退化为 counter id 0，并发冲突检测失效（与 daemon_runner 对齐）
-        config.local_device_id = Some(device_id);
-        config.gui = GuiConfig {
-            enabled: false,
-            address: "127.0.0.1:0".to_string(),
-            api_key: "e2e-test-key".to_string(),
-            ro_api_key: String::new(),
-        };
-        config.options = Options {
-            relays_enabled: false,
-            ..Default::default()
+        // Load existing config if present (e.g., across service restarts),
+        // otherwise build a fresh one. 证书已持久化，local_device_id 必须保持
+        // 与证书一致，否则 device ID 会随重启变化。
+        let config_path = config_dir.join("config.json");
+        let config = if config_path.exists() {
+            let bytes = tokio::fs::read(&config_path).await.context("read config")?;
+            let mut cfg: Config = serde_json::from_slice(&bytes).context("parse config")?;
+            // 证书是权威来源：用当前 device_id 覆盖 config 中可能存在的旧值/空值，
+            // 保证 local_device_id 与证书一致。
+            cfg.local_device_id = Some(device_id);
+            cfg
+        } else {
+            let mut cfg = Config::new();
+            cfg.device_name = name.to_string();
+            cfg.listen_addr = "127.0.0.1:0".to_string();
+            // 版本向量计数器 ID 来自 local_device_id；缺失会导致所有测试节点
+            // 退化为 counter id 0，并发冲突检测失效（与 daemon_runner 对齐）
+            cfg.local_device_id = Some(device_id);
+            cfg.gui = GuiConfig {
+                enabled: false,
+                address: "127.0.0.1:0".to_string(),
+                api_key: "e2e-test-key".to_string(),
+                ro_api_key: String::new(),
+            };
+            cfg.options = Options {
+                relays_enabled: false,
+                ..Default::default()
+            };
+            cfg
         };
 
         // Persist config (for any downstream consumers that read it)
-        let config_path = config_dir.join("config.json");
         let config_json = serde_json::to_string_pretty(&config)?;
         tokio::fs::write(&config_path, config_json)
             .await
