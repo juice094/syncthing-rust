@@ -351,9 +351,15 @@ pub fn install_bep_bridge(
     let handle_e = handle;
     tokio::spawn(async move {
         let mut subscriber = sync_service_e.events().subscribe();
+        info!("[test-harness] IndexUpdate forwarding task started");
         loop {
             match subscriber.recv().await {
                 Some(syncthing_sync::SyncEvent::LocalIndexUpdated { folder, mut files }) => {
+                    info!(
+                        "[test-harness] LocalIndexUpdated event: folder={} files={}",
+                        folder,
+                        files.len()
+                    );
                     // BEP convention: deleted files must have empty blocks
                     for file in &mut files {
                         if file.is_deleted() {
@@ -362,11 +368,20 @@ pub fn install_bep_bridge(
                     }
                     let update = syncthing_core::types::IndexUpdate { folder, files };
                     let config = sync_service_e.get_config().await.unwrap_or_default();
-                    for device_id in handle_e.connected_devices() {
+                    let connected = handle_e.connected_devices();
+                    info!(
+                        "[test-harness] connected_devices count={} for IndexUpdate",
+                        connected.len()
+                    );
+                    for device_id in connected {
                         let shares_folder = config
                             .folders
                             .iter()
                             .any(|f| f.id == update.folder && f.devices.contains(&device_id));
+                        info!(
+                            "[test-harness] device={} shares_folder={} folder={}",
+                            device_id, shares_folder, update.folder
+                        );
                         if !shares_folder {
                             continue;
                         }
@@ -377,11 +392,16 @@ pub fn install_bep_bridge(
                                     device_id, e
                                 );
                             } else {
-                                debug!(
-                                    "[test-harness] Sent IndexUpdate to {} for folder {}",
-                                    device_id, update.folder
+                                info!(
+                                    "[test-harness] Sent IndexUpdate to {} for folder {} ({} files)",
+                                    device_id, update.folder, update.files.len()
                                 );
                             }
+                        } else {
+                            warn!(
+                                "[test-harness] No connection for device {} to send IndexUpdate",
+                                device_id
+                            );
                         }
                     }
                 }

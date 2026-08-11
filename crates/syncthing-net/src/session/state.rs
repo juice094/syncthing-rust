@@ -284,6 +284,22 @@ impl BepSession {
                             .fetch_add(1, Ordering::Relaxed);
                         let file_count = wire_update.files.len();
                         let folder = wire_update.folder.clone();
+                        let first_seq = wire_update
+                            .files
+                            .iter()
+                            .map(|f| f.sequence)
+                            .min()
+                            .unwrap_or(0);
+                        let last_seq = wire_update
+                            .files
+                            .iter()
+                            .map(|f| f.sequence)
+                            .max()
+                            .unwrap_or(0);
+                        info!(
+                            "Received IndexUpdate from {} folder={} files={} seq={}-{}",
+                            self.device_id, folder, file_count, first_seq, last_seq
+                        );
                         let update: syncthing_core::types::IndexUpdate = wire_update.into();
                         self.emit(BepSessionEvent::IndexUpdateReceived {
                             device_id: self.device_id,
