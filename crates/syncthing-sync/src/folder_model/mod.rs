@@ -395,6 +395,11 @@ impl FolderModel {
 
                 // 如果有变更，发布索引更新事件
                 if !files.is_empty() {
+                    info!(
+                        folder_id = %self.folder.id,
+                        files = files.len(),
+                        "Publishing LocalIndexUpdated event"
+                    );
                     self.events.publish(SyncEvent::LocalIndexUpdated {
                         folder: self.folder.id.clone(),
                         files: files.clone(),
