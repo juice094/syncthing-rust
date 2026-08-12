@@ -121,6 +121,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // 否则 pull 报 "No block source configured"。
     let mut folder = Folder::new(&folder_id, folder_path.to_str().unwrap_or(""));
     folder.devices = peer_ids.clone();
+    // 测试用：允许通过环境变量调短扫描间隔，否则默认 5s，确保 peer_node 能及时发现本侧新增文件。
+    folder.rescan_interval_secs = std::env::var("PEER_RESCAN_SECS")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(5);
+    println!("rescan_interval_secs={}", folder.rescan_interval_secs);
     // 可选：PEER_VERSIONING=simple 时启用 SimpleVersioner（复现/验证版本归档行为）
     if std::env::var("PEER_VERSIONING").as_deref() == Ok("simple") {
         folder.versioning = Some(syncthing_core::types::VersioningConfig::Simple {
