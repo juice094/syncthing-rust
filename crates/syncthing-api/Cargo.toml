@@ -18,7 +18,7 @@ async-trait = { workspace = true }
 
 # Web
 axum = { version = "0.7", features = ["ws"] }
-tower-http = { version = "0.5", features = ["cors", "trace"] }
+tower-http = { version = "0.7", features = ["cors", "trace"] }
 
 # 序列化
 serde = { workspace = true }
