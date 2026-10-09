@@ -6,7 +6,7 @@ edition.workspace = true
 publish = false
 
 [dependencies]
-aes-gcm = "0.10"
+aes-gcm = "0.11"
 aes-siv = "0.7"
 argon2 = "0.5"
 base32 = "0.5"
