@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::time::{Duration, SystemTime};
 
-use sysinfo::{ProcessRefreshKind, System};
+use sysinfo::{ProcessRefreshKind, ProcessesToUpdate, System};
 
 use crate::args::ProcId;
 
@@ -65,10 +65,18 @@ pub(crate) async fn sample_processes(
     proc_ids: &[ProcId],
     cpu_settle: Duration,
 ) -> Vec<ProcSample> {
-    sys.refresh_processes_specifics(ProcessRefreshKind::new().with_memory().with_cpu());
+    sys.refresh_processes_specifics(
+        ProcessesToUpdate::All,
+        true,
+        ProcessRefreshKind::nothing().with_memory().with_cpu(),
+    );
     // sysinfo needs a short delay between refreshes for accurate CPU %.
     tokio::time::sleep(cpu_settle).await;
-    sys.refresh_processes_specifics(ProcessRefreshKind::new().with_memory().with_cpu());
+    sys.refresh_processes_specifics(
+        ProcessesToUpdate::All,
+        true,
+        ProcessRefreshKind::nothing().with_memory().with_cpu(),
+    );
 
     proc_ids
         .iter()

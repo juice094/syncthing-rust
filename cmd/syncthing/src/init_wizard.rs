@@ -152,13 +152,13 @@ pub fn run_wizard(config_dir: &PathBuf) -> anyhow::Result<()> {
 }
 
 fn random_api_key() -> String {
-    use rand::Rng;
+    use rand::RngExt;
     let chars: Vec<char> = (b'a'..=b'z')
         .chain(b'0'..=b'9')
         .map(|c| c as char)
         .collect();
-    let mut rng = rand::thread_rng();
+    let mut rng = rand::rng();
     (0..32)
-        .map(|_| chars[rng.gen_range(0..chars.len())])
+        .map(|_| chars[rng.random_range(0..chars.len())])
         .collect()
 }

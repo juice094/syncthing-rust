@@ -67,7 +67,7 @@ async fn main() -> anyhow::Result<()> {
     });
 
     let mut sys =
-        System::new_with_specifics(RefreshKind::new().with_processes(ProcessRefreshKind::new()));
+        System::new_with_specifics(RefreshKind::nothing().with_processes(ProcessRefreshKind::nothing()));
 
     // Only write CSV header if the output file is missing or empty.
     if is_empty_or_missing(&args.output).await {

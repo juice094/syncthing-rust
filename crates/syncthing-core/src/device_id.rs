@@ -32,9 +32,9 @@ impl DeviceId {
 
     /// 生成随机设备ID（用于测试）
     pub fn random() -> Self {
-        use rand::Rng;
+        use rand::RngExt;
         let mut bytes = [0u8; 32];
-        rand::thread_rng().fill(&mut bytes);
+        rand::rng().fill(&mut bytes);
         Self(bytes)
     }
 

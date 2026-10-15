@@ -97,9 +97,9 @@ pub async fn start_daemon(
 
     // 自动生成 API key（若为空）— 持久化操作
     if config.gui.api_key.is_empty() {
-        use rand::Rng;
+        use rand::RngExt;
         let api_key: String = (0..32)
-            .map(|_| rand::thread_rng().gen_range(0..36))
+            .map(|_| rand::rng().random_range(0..36))
             .map(|i| {
                 if i < 10 {
                     (b'0' + i) as char
@@ -116,7 +116,7 @@ pub async fn start_daemon(
         // 同时生成只读 API key（供监控系统使用）
         if config.gui.ro_api_key.is_empty() {
             let ro_api_key: String = (0..32)
-                .map(|_| rand::thread_rng().gen_range(0..36))
+                .map(|_| rand::rng().random_range(0..36))
                 .map(|i| {
                     if i < 10 {
                         (b'0' + i) as char

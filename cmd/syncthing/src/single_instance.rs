@@ -21,7 +21,7 @@ pub fn acquire(config_dir: &Path) -> Result<(), String> {
         let pid_str = std::fs::read_to_string(&pid_file).unwrap_or_default();
         if let Ok(pid) = pid_str.trim().parse::<u32>() {
             let s = System::new_with_specifics(
-                RefreshKind::new().with_processes(ProcessRefreshKind::everything()),
+                RefreshKind::nothing().with_processes(ProcessRefreshKind::everything()),
             );
             if s.process(sysinfo::Pid::from(pid as usize)).is_some() {
                 return Err(format!(
@@ -77,7 +77,7 @@ pub fn is_process_alive(pid: u32) -> bool {
         return false;
     }
     let s = System::new_with_specifics(
-        RefreshKind::new().with_processes(ProcessRefreshKind::everything()),
+        RefreshKind::nothing().with_processes(ProcessRefreshKind::everything()),
     );
     s.process(sysinfo::Pid::from(pid as usize)).is_some()
 }

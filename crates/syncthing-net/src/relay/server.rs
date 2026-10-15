@@ -12,7 +12,7 @@ use std::time::Duration;
 
 use bytes::{Buf, Bytes};
 use parking_lot::RwLock;
-use rand::RngCore;
+use rand::Rng;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::{broadcast, oneshot};
@@ -428,7 +428,7 @@ impl RelayServer {
 
         // 生成会话密钥
         let mut key = vec![0u8; SESSION_KEY_LEN];
-        rand::thread_rng().fill_bytes(&mut key);
+        rand::rng().fill_bytes(&mut key);
 
         // 注册 pending session（first_arrived 在第一个 session 连接到达时填充）
         {

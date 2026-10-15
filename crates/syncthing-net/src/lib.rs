@@ -58,7 +58,7 @@ pub mod tls_constants {
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 #[cfg(test)]
-#[ctor::ctor]
+#[ctor::ctor(unsafe)]
 fn init_crypto_provider() {
     let _ = rustls::crypto::ring::default_provider().install_default();
 }
