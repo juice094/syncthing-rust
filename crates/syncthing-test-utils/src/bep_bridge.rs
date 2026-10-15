@@ -354,6 +354,10 @@ pub fn install_bep_bridge(
                     sync_service: Arc::clone(&sync_service),
                 };
                 if let Some(conn) = handle.get_connection(&device_id) {
+                    // 只断开「本会话对应的这一条连接」。按 device_id 断开会在
+                    // race resolution 换连接时连带杀掉对端刚建立的获胜连接，
+                    // 双方随之反复重拨，块请求找不到服务方而超时（§23 实测链路）。
+                    let conn_id = conn.id();
                     let session = BepSession::with_events(
                         Arc::new(DeviceIdentity::new(device_id)),
                         conn,
@@ -364,10 +368,12 @@ pub fn install_bep_bridge(
                     if let Err(e) = session.run().await {
                         warn!("[test-harness] BepSession for {} ended: {}", device_id, e);
                     }
+                    let _ = handle
+                        .disconnect_connection(&conn_id, "test session ended")
+                        .await;
                 } else {
                     warn!("[test-harness] No connection for {}", device_id);
                 }
-                let _ = handle.disconnect(&device_id, "test session ended").await;
             });
             sessions.insert(device_id, handle2);
         });

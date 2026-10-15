@@ -10,6 +10,23 @@ use syncthing_core::types::Folder;
 use syncthing_sync::SyncManager;
 use syncthing_test_utils::harness::TestNode;
 
+/// 初始化测试日志（进程内仅一次）。
+///
+/// 默认 `warn`；排查链路时用 `RUST_LOG` 打开详细日志，例如
+/// `RUST_LOG=syncthing_test_utils=info,syncthing_sync=info,syncthing_net=info`
+/// 并配合 `--nocapture`。此前 harness 的 `info!` 全被丢弃，导致只能盲猜。
+fn init_tracing() {
+    static INIT: std::sync::Once = std::sync::Once::new();
+    INIT.call_once(|| {
+        let filter = tracing_subscriber::EnvFilter::try_from_default_env()
+            .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("warn"));
+        let _ = tracing_subscriber::fmt()
+            .with_env_filter(filter)
+            .with_test_writer()
+            .try_init();
+    });
+}
+
 /// 单次检查：文件存在且内容与期望一致。
 async fn file_content_is(base: &std::path::Path, name: &str, expected: &[u8]) -> bool {
     match tokio::fs::read(base.join(name)).await {
@@ -99,6 +116,7 @@ where
 async fn setup_two_node(
     folder_id: &str,
 ) -> (TestNode, TestNode, std::path::PathBuf, std::path::PathBuf) {
+    init_tracing();
     let node_a = TestNode::new("crud-a").await.expect("create node a");
     let node_b = TestNode::new("crud-b").await.expect("create node b");
 
