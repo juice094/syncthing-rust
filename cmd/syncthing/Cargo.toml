@@ -74,7 +74,9 @@ tray = []
 websocket = ["syncthing-net/websocket"]
 
 [build-dependencies]
-resvg = "0.45"
+# ICO 生成仅需 SVG 栅格化；关闭 text/system-fonts，避免引入 unmaintained 的
+# ttf-parser / rustybuzz（RUSTSEC-2026-0192 / RUSTSEC-2026-0206）
+resvg = { version = "0.45", default-features = false }
 tiny-skia = "0.11"
 
 [dev-dependencies]

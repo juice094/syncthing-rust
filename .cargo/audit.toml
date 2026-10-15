@@ -1,13 +1,22 @@
 # cargo audit 配置
-# 审计日期: 2026-04-27
+# 审计日期: 2026-10-15
 # 维护者: juice094
 #
-# 以下 3 个 unmaintained 警告均为上游传递依赖，无法从本项目通过 semver 升级消除。
-# 所有直接依赖（ratatui 0.30.0, netdev 0.42.0, sled 0.34.7）均已是最新稳定版。
-# 参见 docs/plans/PLAN_AUDIT_2026-04-27.md 完整评估。
+# 以下 unmaintained / 漏洞告警均为上游传递依赖，无法从本项目通过 semver 升级消除。
+#
+# 本轮变化（2026-10-15）:
+# - 移除 RUSTSEC-2024-0436（paste）：netdev 0.42 → 0.46 升级后 netlink-packet-core 不再依赖 paste。
+# - ttf-parser / rustybuzz（RUSTSEC-2026-0192 / RUSTSEC-2026-0206）经由 resvg 字体特性引入，
+#   已通过 `resvg = { default-features = false }`（cmd/syncthing build-dependencies）从根上消除。
 
 [advisories]
 ignore = [
+    # RUSTSEC-2026-0258: h2 0.3.27 unbounded empty DATA frames (DoS)
+    # 路径: igd 0.12.1 → hyper 0.14.32 (http1+http2) → h2 0.3.27
+    # 风险: 有限。h2 仅用于与本地网关的 UPnP SOAP 交互，利用需控制/伪造网关响应。
+    # 行动: igd 0.12.1 已是上游最新版，无升级路径；待 igd 迁移 hyper 1.x 后移除。
+    "RUSTSEC-2026-0258",
+
     # RUSTSEC-2024-0384: instant 0.1.13 unmaintained
     # 路径: sled 0.34.7 → parking_lot 0.11.2 → parking_lot_core 0.8.6 → instant
     # 风险: 可忽略。native 目标上 instant 是 std::time::Instant 的薄包装。
@@ -19,10 +28,4 @@ ignore = [
     # 风险: 可忽略。fxhash 仅用于 sled 内部 hash table，无外部输入直接到达。
     # 行动: 与 RUSTSEC-2024-0384 合并决策；sled 升级时同步解决。
     "RUSTSEC-2025-0057",
-
-    # RUSTSEC-2024-0436: paste 1.0.15 unmaintained
-    # 路径: netdev 0.42.0 → netlink-packet-core 0.8.1 → paste
-    # 风险: 可忽略。paste 是编译期过程宏 crate，运行时暴露为零。
-    # 行动: 监控 netlink-packet-core 新版本，但 netdev 0.42.0 已是最新稳定版。
-    "RUSTSEC-2024-0436",
 ]

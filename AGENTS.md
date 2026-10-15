@@ -309,7 +309,11 @@ cargo doc --no-deps --workspace
 |:---|:---|:---|:---|
 | RUSTSEC-2024-0384 | `instant` | `sled → parking_lot → instant` | native 上是 `std::time::Instant` 薄包装 |
 | RUSTSEC-2025-0057 | `fxhash` | `sled` 内部 hash table | 无外部输入直接到达 |
-| RUSTSEC-2024-0436 | `paste` | `netdev → netlink-packet-core → paste` | 编译期过程宏，运行时暴露为零 |
+| RUSTSEC-2026-0258 | `h2` 0.3.27 | `igd → hyper 0.14 (http2) → h2` | 仅用于本地网关 UPnP SOAP 交互；igd 0.12.1 已是上游最新版，无升级路径 |
+
+> 2026-10-15 清理：`RUSTSEC-2024-0436`（`paste`）在 netdev 0.42 → 0.46 升级后已消失；
+> `RUSTSEC-2026-0192`/`RUSTSEC-2026-0206`（`ttf-parser`/`rustybuzz`）经由 resvg 字体特性引入，
+> 已通过 `resvg = { default-features = false }` 从根上消除（图标渲染不需要文本）。
 
 **禁止**为消除这些警告而引入 breaking change 的依赖升级。
 
