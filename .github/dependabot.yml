@@ -25,6 +25,11 @@ updates:
         update-types: ["version-update:semver-major"]
       - dependency-name: "ed25519-dalek"
         update-types: ["version-update:semver-major"]
+      # aead 0.6 (aes-gcm 0.11 / hkdf 0.13) is incompatible with aes-siv 0.7 (aead 0.5)
+      - dependency-name: "aes-gcm"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "hkdf"
+        update-types: ["version-update:semver-major"]
 
   # GitHub Actions
   - package-ecosystem: "github-actions"
