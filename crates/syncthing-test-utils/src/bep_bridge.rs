@@ -264,6 +264,56 @@ impl BlockSource for TestBlockSource {
     }
 }
 
+/// 发送一条 IndexUpdate，连接未就绪或发送失败时按 500ms 退避重试（约 30s）。
+///
+/// BEP 会话就绪与 `LocalIndexUpdated` 事件之间存在竞态：旧实现遇到「无连接」
+/// 只打一行 warn 就丢弃，导致索引更新永久丢失、测试表现为「连接正常但文件
+/// 永不同步」（见 `docs/KNOWN_ISSUES.md` §23）。
+fn send_index_update_with_retry(
+    handle: ConnectionManagerHandle,
+    device_id: DeviceId,
+    update: syncthing_core::IndexUpdate,
+) {
+    const RETRY_INTERVAL: Duration = Duration::from_millis(500);
+    const MAX_ATTEMPTS: u32 = 60;
+
+    tokio::spawn(async move {
+        for attempt in 0..MAX_ATTEMPTS {
+            if let Some(conn) = handle.get_connection(&device_id) {
+                match conn.send_index_update(&update).await {
+                    Ok(()) => {
+                        if attempt == 0 {
+                            info!(
+                                "[test-harness] Sent IndexUpdate to {} for folder {} ({} files)",
+                                device_id,
+                                update.folder,
+                                update.files.len()
+                            );
+                        } else {
+                            info!(
+                                "[test-harness] IndexUpdate to {} for folder {} delivered after {} retries",
+                                device_id, update.folder, attempt
+                            );
+                        }
+                        return;
+                    }
+                    Err(e) => debug!(
+                        "[test-harness] IndexUpdate to {} failed (attempt {}): {}",
+                        device_id, attempt, e
+                    ),
+                }
+            }
+            tokio::time::sleep(RETRY_INTERVAL).await;
+        }
+        warn!(
+            "[test-harness] IndexUpdate to {} for folder {} undelivered after {:?}",
+            device_id,
+            update.folder,
+            RETRY_INTERVAL * MAX_ATTEMPTS
+        );
+    });
+}
+
 /// Install the BEP session bridge on a `ConnectionManager`.
 ///
 /// Returns the `PendingResponses` map so callers can wire a matching
@@ -367,42 +417,25 @@ pub fn install_bep_bridge(
                         }
                     }
                     let update = syncthing_core::types::IndexUpdate { folder, files };
+                    // 按「配置中共享该 folder 的设备」派发，而非当前已连接设备：
+                    // 会话就绪与事件之间存在竞态，连接暂时缺失时若直接跳过，
+                    // 该索引更新会被静默丢弃且永不重发（§23 根因）。
                     let config = sync_service_e.get_config().await.unwrap_or_default();
-                    let connected = handle_e.connected_devices();
-                    info!(
-                        "[test-harness] connected_devices count={} for IndexUpdate",
-                        connected.len()
-                    );
-                    for device_id in connected {
-                        let shares_folder = config
-                            .folders
-                            .iter()
-                            .any(|f| f.id == update.folder && f.devices.contains(&device_id));
-                        info!(
-                            "[test-harness] device={} shares_folder={} folder={}",
-                            device_id, shares_folder, update.folder
+                    let targets: Vec<DeviceId> = config
+                        .folders
+                        .iter()
+                        .find(|f| f.id == update.folder)
+                        .map(|f| f.devices.clone())
+                        .unwrap_or_default();
+                    if targets.is_empty() {
+                        warn!(
+                            "[test-harness] no configured peer shares folder {}, index update dropped",
+                            update.folder
                         );
-                        if !shares_folder {
-                            continue;
-                        }
-                        if let Some(conn) = handle_e.get_connection(&device_id) {
-                            if let Err(e) = conn.send_index_update(&update).await {
-                                warn!(
-                                    "[test-harness] Failed to send IndexUpdate to {}: {}",
-                                    device_id, e
-                                );
-                            } else {
-                                info!(
-                                    "[test-harness] Sent IndexUpdate to {} for folder {} ({} files)",
-                                    device_id, update.folder, update.files.len()
-                                );
-                            }
-                        } else {
-                            warn!(
-                                "[test-harness] No connection for device {} to send IndexUpdate",
-                                device_id
-                            );
-                        }
+                        continue;
+                    }
+                    for device_id in targets {
+                        send_index_update_with_retry(handle_e.clone(), device_id, update.clone());
                     }
                 }
                 Some(_) => {}

@@ -12,7 +12,7 @@ timestamp: 2026-07-20T00:00:00Z
 # Known Issues
 
 > **维护原则**：发现的缺陷必须显式登记，避免误判项目成熟度。  
-> **最后更新**：2026-07-21（§22 数据安全事故三层防御落地；§21 版本向量计数器 ID 修复）
+> **最后更新**：2026-10-15（§23 e2e_crud 双节点测试脆弱性加固 + 基线对照结论）
 
 本文档列举当前已知未修复的功能性 / 行为性问题。  
 **这些问题决定了项目目前的"事实可用性"边界**。
@@ -798,3 +798,28 @@ v0.2.8 完成首次双节点真实网络环境下的完整文件同步验证。
 **恢复路径**：手机（HONOR）事故期间离线，未接收删除，为最佳恢复源；云端实体文件可能仍在。
 
 **残留事项**：回收站无自动恢复 UI（人工/SOP 恢复）；建议重要文件夹启用 versioning。
+
+---
+
+## §23. `e2e_crud` 双节点测试在负载下随机失败（中等 — 测试基础设施，**已加固 ✅** 2026-10-15）
+
+**症状**：`cargo test --workspace` 或单独跑 `cargo test -p syncthing --test e2e_crud` 时，5 个用例中随机 1–2 个失败（每次失败的用例不同），断言卡在 30s 文件同步等待上；单独跑某个用例常在 1s 内通过。
+
+**基线对照（已验证）**：在 dependabot 依赖升级之前的提交 `e8a47c9` 上独立运行该二进制 3 次，**3/3 失败**（`test_e2e_rename_file` ×2、`test_e2e_stignore_directory_exclusion` ×1）→ 属原生脆弱性，与依赖升级（rand 0.8→0.10、tokio 1.52→1.53 等）无关。
+
+**根因（推断，依据代码路径）**：
+1. `TestNode::wait_for_connection` 只等待连接句柄出现，不等待对端 ClusterConfig / 文件夹协商完成；
+2. 测试随后立即 `scan_folder` → `SyncEvent::LocalIndexUpdated` → `bep_bridge` 转发时若 `get_connection()` 尚未就绪，该 IndexUpdate 被**静默丢弃且不重发**（`bep_bridge.rs` 仅 warn，无退避重试）；
+3. 于是一次索引在负载抖动下会永久丢失，只能等超时失败。
+
+与 §1 记录的 ClusterConfig 竞态同源：`e2e_sync` 早已用「30s 后断连重拨一次」规避，`e2e_crud` 没有。
+
+**本次加固**（仅测试侧，不改产品语义）：
+- `e2e_crud` 等待逻辑统一为 `wait_synced()`：停滞 25s 后按既有 workaround 断连重拨一次，超时上限放宽到 60s；
+- 超时时打印双方 `connected_devices()`，便于区分「根本没送出」与「送出未被消费」；
+- 与生产代码的 `reconnect_device` 规避同一竞态，因此不掩盖真实缺陷。
+
+**残留事项（下一轮迭代输入）**：
+- `bep_bridge` 对「无连接」的 IndexUpdate 无重发/退避，丢包只能靠外部重连兜底 —— 建议改为带重试的发送队列；
+- `test_e2e_stignore_directory_exclusion` 的负向断言（`ignored/` 不应出现）在基线中失败过一次，疑似 `.stignore` 规则加载与首次 scan 存在竞态（属产品侧，需单独复现）；
+- 根治方向：在 `wait_for_connection` 之上增加「对端文件夹就绪 / ClusterConfig 已完成」的等待原语。
