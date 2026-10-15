@@ -12,7 +12,7 @@ use std::time::{Duration, Instant, SystemTime};
 use chrono::{DateTime, Utc};
 use clap::Parser;
 use sha2::{Digest, Sha256};
-use sysinfo::{ProcessRefreshKind, RefreshKind, System};
+use sysinfo::{ProcessRefreshKind, ProcessesToUpdate, RefreshKind, System};
 use tokio::io::AsyncWriteExt;
 use tokio::time::{interval, interval_at};
 use tracing::{info, warn};
@@ -319,9 +319,13 @@ async fn main() -> anyhow::Result<()> {
         // T-F1: memory sampling via spawn_blocking to avoid freezing tokio worker on Windows
         let sysinfo_task = move || {
             let mut sys = System::new_with_specifics(
-                RefreshKind::new().with_processes(ProcessRefreshKind::new()),
+                RefreshKind::nothing().with_processes(ProcessRefreshKind::nothing().with_memory()),
             );
-            sys.refresh_processes_specifics(ProcessRefreshKind::new());
+            sys.refresh_processes_specifics(
+                ProcessesToUpdate::All,
+                true,
+                ProcessRefreshKind::nothing().with_memory(),
+            );
             // T-F1 FIX: 二进制名是 stress_test（非 syncthing），之前 rss_mb 永远为 0
             sys.processes_by_exact_name("stress_test".as_ref())
                 .map(|p| p.memory() / 1024 / 1024)

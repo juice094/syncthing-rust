@@ -4,6 +4,7 @@
 
 use anyhow::{Context, Result};
 use clap::Parser;
+use rand::Rng;
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -80,7 +81,7 @@ impl Scenario {
 fn write_random_file(dir: &Path, name: &str, size: usize) -> Result<FileManifest> {
     let path = dir.join(name);
     let mut data = vec![0u8; size];
-    rand::RngCore::fill_bytes(&mut rand::thread_rng(), &mut data);
+    rand::rng().fill_bytes(&mut data);
     std::fs::write(&path, &data).with_context(|| format!("write {:?}", path))?;
     let hash = hex::encode(Sha256::digest(&data));
     Ok(FileManifest {

@@ -342,7 +342,7 @@ impl WebSocketPipe {
                         Ok(0) => break,
                         Ok(n) => {
                             if ws_tx
-                                .send(Message::Binary(buf[..n].to_vec()))
+                                .send(Message::Binary(buf[..n].to_vec().into()))
                                 .await
                                 .is_err()
                             {
