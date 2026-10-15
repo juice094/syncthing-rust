@@ -803,23 +803,22 @@ v0.2.8 完成首次双节点真实网络环境下的完整文件同步验证。
 
 ## §23. `e2e_crud` 双节点测试在负载下随机失败（中等 — 测试基础设施，**已加固 ✅** 2026-10-15）
 
-**症状**：`cargo test --workspace` 或单独跑 `cargo test -p syncthing --test e2e_crud` 时，5 个用例中随机 1–2 个失败（每次失败的用例不同），断言卡在 30s 文件同步等待上；单独跑某个用例常在 1s 内通过。
+**症状**：`cargo test --workspace` 或单独跑 `cargo test -p syncthing --test e2e_crud` 时，5 个用例中随机 1–3 个失败（每次失败的用例不同），断言卡在同步等待上；单独跑某个用例常在 1s 内通过。
 
 **基线对照（已验证）**：在 dependabot 依赖升级之前的提交 `e8a47c9` 上独立运行该二进制 3 次，**3/3 失败**（`test_e2e_rename_file` ×2、`test_e2e_stignore_directory_exclusion` ×1）→ 属原生脆弱性，与依赖升级（rand 0.8→0.10、tokio 1.52→1.53 等）无关。
 
-**根因（推断，依据代码路径）**：
-1. `TestNode::wait_for_connection` 只等待连接句柄出现，不等待对端 ClusterConfig / 文件夹协商完成；
-2. 测试随后立即 `scan_folder` → `SyncEvent::LocalIndexUpdated` → `bep_bridge` 转发时若 `get_connection()` 尚未就绪，该 IndexUpdate 被**静默丢弃且不重发**（`bep_bridge.rs` 仅 warn，无退避重试）；
-3. 于是一次索引在负载抖动下会永久丢失，只能等超时失败。
+**根因（2026-10-15 日志实测，非推断）**：以 `RUST_LOG=syncthing_test_utils=info,syncthing_sync=info,syncthing_net=info` + `--nocapture` 复现，链路断点为：
+1. 索引**已经送达**接收端（`Received IndexUpdate ... seq=2-2`）——所以并非「事件被静默丢弃」；
+2. 真正失败在**块传输**：`Block download failed file=mutate.txt error=Pull error for 'mutate.txt': response timeout`；
+3. 上游是**会话死亡级联**：`Timeout waiting for ClusterConfig` 使某个 BepSession 结束，而测试桥在会话结束时执行 `handle.disconnect(&device_id, …)`——按**设备粒度**断开，连带杀掉对端刚建立的获胜连接；随后双方反复重拨（`replaced by new connection`），块请求找不到服务方 → 拉取超时。
+失效点与 §1 记录的 ClusterConfig 竞态同源，但与既有认知不同（此前误判为「索引丢包」）。
 
-与 §1 记录的 ClusterConfig 竞态同源：`e2e_sync` 早已用「30s 后断连重拨一次」规避，`e2e_crud` 没有。
-
-**本次加固**（仅测试侧，不改产品语义）：
-- `e2e_crud` 等待逻辑统一为 `wait_synced()`：停滞 25s 后按既有 workaround 断连重拨一次，超时上限放宽到 60s；
-- 超时时打印双方 `connected_devices()`，便于区分「根本没送出」与「送出未被消费」；
-- 与生产代码的 `reconnect_device` 规避同一竞态，因此不掩盖真实缺陷。
+**已实施修复**（测试基础设施层，不改产品语义）：
+- `bep_bridge` 会话结束改为按**连接粒度** `disconnect_connection(&conn_id, …)`，不再误杀对端获胜连接；
+- `bep_bridge` 的 IndexUpdate 改为按「配置中共享该 folder 的设备」派发，并带 500ms × 60 退避重试，不再因连接暂时缺失而静默丢弃；
+- `e2e_crud` 等待统一为 `wait_synced()`（25s 断连重拨兜底、60s 上限、超时打印双方 `connected_devices()`）；
+- 测试 setup 安装 `tracing_subscriber`，可用 `RUST_LOG` + `--nocapture` 直接观测链路（此前 harness 的 `info!` 全被丢弃，只能盲猜）。
 
 **残留事项（下一轮迭代输入）**：
-- `bep_bridge` 对「无连接」的 IndexUpdate 无重发/退避，丢包只能靠外部重连兜底 —— 建议改为带重试的发送队列；
-- `test_e2e_stignore_directory_exclusion` 的负向断言（`ignored/` 不应出现）在基线中失败过一次，疑似 `.stignore` 规则加载与首次 scan 存在竞态（属产品侧，需单独复现）；
-- 根治方向：在 `wait_for_connection` 之上增加「对端文件夹就绪 / ClusterConfig 已完成」的等待原语。
+- 会话启动阶段的 ClusterConfig 超时（§1 竞态）仍会偶发；根治方向：在 `wait_for_connection` 之上补「对端 ClusterConfig 完成」的等待原语，或让 BepSession 超时后自行重试而非直接结束；
+- `test_e2e_stignore_directory_exclusion` 的负向断言（`ignored/` 不应出现）曾在基线中失败，疑似 `.stignore` 规则加载与首次 scan 存在竞态（属产品侧，需单独复现）。
