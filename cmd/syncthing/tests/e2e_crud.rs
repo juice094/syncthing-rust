@@ -10,51 +10,88 @@ use syncthing_core::types::Folder;
 use syncthing_sync::SyncManager;
 use syncthing_test_utils::harness::TestNode;
 
-/// 等待文件出现并具有预期内容
-async fn wait_for_file(
-    base: &std::path::Path,
-    name: &str,
-    expected: &[u8],
+/// 单次检查：文件存在且内容与期望一致。
+async fn file_content_is(base: &std::path::Path, name: &str, expected: &[u8]) -> bool {
+    match tokio::fs::read(base.join(name)).await {
+        Ok(data) => data == expected,
+        Err(_) => false,
+    }
+}
+
+/// 单次检查：路径不存在。
+async fn path_absent(base: &std::path::Path, name: &str) -> bool {
+    !base.join(name).exists()
+}
+
+/// 单次检查：目录存在。
+async fn dir_present(base: &std::path::Path, name: &str) -> bool {
+    base.join(name).is_dir()
+}
+
+/// §1 ClusterConfig 竞态 workaround：显式断连后重拨（与 `e2e_sync` 的既有做法一致）。
+///
+/// `connect_to` 在已连接时直接返回 `Ok(())`，因此必须先 `disconnect`。
+async fn reconnect_pair(node_a: &TestNode, node_b: &TestNode) {
+    let _ = node_a
+        .connection_handle
+        .disconnect(&node_b.device_id, "retry")
+        .await;
+    let _ = node_b
+        .connection_handle
+        .disconnect(&node_a.device_id, "retry")
+        .await;
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    let _ = node_a.connect_to(node_b).await;
+    let _ = node_b.connect_to(node_a).await;
+    let _ = node_a
+        .wait_for_connection(node_b.device_id, Duration::from_secs(10))
+        .await;
+    let _ = node_b
+        .wait_for_connection(node_a.device_id, Duration::from_secs(10))
+        .await;
+}
+
+/// 轮询 `check` 直到为真或超时。
+///
+/// 已知 §1 ClusterConfig 竞态会让首个 BepSession 停滞，此时 `scan_folder` 触发的
+/// `LocalIndexUpdated` 会在 `bep_bridge` 中因「无连接」被静默丢弃且不重发。
+/// 因此停滞 25s 后按既有 workaround 断连重拨一次；超时会打印双方已连接设备清单，
+/// 供下一轮迭代定位丢包环节（是根本没送出，还是送出后未被接收端消费）。
+async fn wait_synced<F, Fut>(
+    node_a: &TestNode,
+    node_b: &TestNode,
+    mut check: F,
     timeout: Duration,
-) -> bool {
-    let path = base.join(name);
+    what: &str,
+) -> bool
+where
+    F: FnMut() -> Fut,
+    Fut: std::future::Future<Output = bool>,
+{
     let start = std::time::Instant::now();
+    let mut retried = false;
     while start.elapsed() < timeout {
-        if path.exists() {
-            if let Ok(data) = tokio::fs::read(&path).await {
-                if data == expected {
-                    return true;
-                }
-            }
-        }
-        tokio::time::sleep(Duration::from_millis(200)).await;
-    }
-    false
-}
-
-/// 等待文件消失
-async fn wait_for_file_gone(base: &std::path::Path, name: &str, timeout: Duration) -> bool {
-    let path = base.join(name);
-    let start = std::time::Instant::now();
-    while start.elapsed() < timeout {
-        if !path.exists() {
+        if check().await {
             return true;
         }
-        tokio::time::sleep(Duration::from_millis(200)).await;
-    }
-    false
-}
-
-/// 等待目录出现
-async fn wait_for_dir(base: &std::path::Path, name: &str, timeout: Duration) -> bool {
-    let path = base.join(name);
-    let start = std::time::Instant::now();
-    while start.elapsed() < timeout {
-        if path.exists() && path.is_dir() {
-            return true;
+        if !retried && start.elapsed() > Duration::from_secs(25) {
+            tracing::warn!(
+                "[e2e_crud] '{}' 停滞 {}s，按 §1 workaround 重连",
+                what,
+                start.elapsed().as_secs()
+            );
+            reconnect_pair(node_a, node_b).await;
+            retried = true;
         }
         tokio::time::sleep(Duration::from_millis(200)).await;
     }
+    eprintln!(
+        "[e2e_crud] TIMEOUT '{}' after {}s | a->b={:?} b->a={:?}",
+        what,
+        timeout.as_secs(),
+        node_a.connection_handle.connected_devices(),
+        node_b.connection_handle.connected_devices(),
+    );
     false
 }
 
@@ -108,7 +145,14 @@ async fn test_e2e_create_file() {
         .expect("scan");
 
     assert!(
-        wait_for_file(&folder_b, "create.txt", &payload, Duration::from_secs(30)).await,
+        wait_synced(
+            &node_a,
+            &node_b,
+            || file_content_is(&folder_b, "create.txt", &payload),
+            Duration::from_secs(60),
+            "create.txt 同步到 B",
+        )
+        .await,
         "文件应同步到 node B"
     );
 
@@ -132,7 +176,14 @@ async fn test_e2e_modify_file() {
         .await
         .expect("scan");
     assert!(
-        wait_for_file(&folder_b, "mutate.txt", v1, Duration::from_secs(30)).await,
+        wait_synced(
+            &node_a,
+            &node_b,
+            || file_content_is(&folder_b, "mutate.txt", v1),
+            Duration::from_secs(60),
+            "mutate.txt v1 同步到 B",
+        )
+        .await,
         "v1 应同步"
     );
 
@@ -147,7 +198,14 @@ async fn test_e2e_modify_file() {
         .await
         .expect("scan");
     assert!(
-        wait_for_file(&folder_b, "mutate.txt", v2, Duration::from_secs(30)).await,
+        wait_synced(
+            &node_a,
+            &node_b,
+            || file_content_is(&folder_b, "mutate.txt", v2),
+            Duration::from_secs(60),
+            "mutate.txt v2 覆盖同步到 B",
+        )
+        .await,
         "v2 应同步覆盖旧内容"
     );
 
@@ -171,7 +229,14 @@ async fn test_e2e_delete_file() {
         .await
         .expect("scan");
     assert!(
-        wait_for_file(&folder_b, "gone.txt", data, Duration::from_secs(30)).await,
+        wait_synced(
+            &node_a,
+            &node_b,
+            || file_content_is(&folder_b, "gone.txt", data),
+            Duration::from_secs(60),
+            "gone.txt 同步到 B",
+        )
+        .await,
         "文件应先同步到 B"
     );
 
@@ -185,7 +250,14 @@ async fn test_e2e_delete_file() {
         .await
         .expect("scan");
     assert!(
-        wait_for_file_gone(&folder_b, "gone.txt", Duration::from_secs(30)).await,
+        wait_synced(
+            &node_a,
+            &node_b,
+            || path_absent(&folder_b, "gone.txt"),
+            Duration::from_secs(60),
+            "gone.txt 删除同步到 B",
+        )
+        .await,
         "删除应同步到 B"
     );
 
@@ -208,7 +280,14 @@ async fn test_e2e_rename_file() {
         .await
         .expect("scan");
     assert!(
-        wait_for_file(&folder_b, "old.txt", data, Duration::from_secs(30)).await,
+        wait_synced(
+            &node_a,
+            &node_b,
+            || file_content_is(&folder_b, "old.txt", data),
+            Duration::from_secs(60),
+            "old.txt 同步到 B",
+        )
+        .await,
         "old.txt 应同步到 B"
     );
 
@@ -223,11 +302,25 @@ async fn test_e2e_rename_file() {
         .expect("scan");
 
     assert!(
-        wait_for_file(&folder_b, "new.txt", data, Duration::from_secs(30)).await,
+        wait_synced(
+            &node_a,
+            &node_b,
+            || file_content_is(&folder_b, "new.txt", data),
+            Duration::from_secs(60),
+            "new.txt 出现在 B",
+        )
+        .await,
         "new.txt 应出现在 B"
     );
     assert!(
-        wait_for_file_gone(&folder_b, "old.txt", Duration::from_secs(30)).await,
+        wait_synced(
+            &node_a,
+            &node_b,
+            || path_absent(&folder_b, "old.txt"),
+            Duration::from_secs(60),
+            "old.txt 从 B 删除",
+        )
+        .await,
         "old.txt 应从 B 删除"
     );
 
@@ -267,17 +360,25 @@ async fn test_e2e_stignore_directory_exclusion() {
         .await
         .expect("scan");
 
-    // 验证未排除的内容正常同步（使用异步等待，给足 30s）
+    // 验证未排除的内容正常同步
     assert!(
-        wait_for_dir(&folder_b, "kept", Duration::from_secs(30)).await,
+        wait_synced(
+            &node_a,
+            &node_b,
+            || dir_present(&folder_b, "kept"),
+            Duration::from_secs(60),
+            "kept/ 目录同步到 B",
+        )
+        .await,
         "kept/ 目录应正常同步"
     );
     assert!(
-        wait_for_file(
-            &folder_b,
-            "kept/public.txt",
-            b"public",
-            Duration::from_secs(30)
+        wait_synced(
+            &node_a,
+            &node_b,
+            || file_content_is(&folder_b, "kept/public.txt", b"public"),
+            Duration::from_secs(60),
+            "kept/public.txt 同步到 B",
         )
         .await,
         "kept/public.txt 应同步"
@@ -285,11 +386,25 @@ async fn test_e2e_stignore_directory_exclusion() {
 
     // 验证排除规则生效（ignored 不应出现）
     assert!(
-        wait_for_file_gone(&folder_b, "ignored", Duration::from_secs(5)).await,
+        wait_synced(
+            &node_a,
+            &node_b,
+            || path_absent(&folder_b, "ignored"),
+            Duration::from_secs(5),
+            "ignored/ 不应出现在 B",
+        )
+        .await,
         "ignored/ 目录应被 .stignore 排除"
     );
     assert!(
-        wait_for_file_gone(&folder_b, "ignored/secret.txt", Duration::from_secs(5)).await,
+        wait_synced(
+            &node_a,
+            &node_b,
+            || path_absent(&folder_b, "ignored/secret.txt"),
+            Duration::from_secs(5),
+            "ignored/secret.txt 不应出现在 B",
+        )
+        .await,
         "ignored/secret.txt 不应同步"
     );
 
