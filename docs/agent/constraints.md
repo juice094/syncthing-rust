@@ -55,15 +55,18 @@ timestamp: 2026-06-25T00:00:00Z
 ### 3.1 格式化
 
 - 必须运行 `cargo fmt` 后提交。
-- 单文件软上限 **600 行**；CI 会检查并警告。
-- 当前超过 600 行的生产文件：
-  - `cmd/syncthing/src/main.rs`（1803 行）
-  - `crates/syncthing-sync/src/scanner.rs`（939 行）
-  - `crates/syncthing-sync/src/folder_model/mod.rs`（914 行）
-  - `crates/syncthing-sync/src/puller/mod.rs`（687 行）
-  - `cmd/syncthing/src/tui/daemon_runner.rs`（676 行）
-  - `crates/syncthing-net/src/relay/server.rs`（680 行）
-  - `cmd/syncthing/src/tray.rs`（635 行）
+- 单文件软上限 **600 行**；CI 的 `file-size` job 会检查并输出 `::warning::`（不阻断）。
+- 当前超过 600 行的生产文件（用 `pwsh scripts/agent-facts.ps1` 可重新导出，2026-10-16 实测）：
+
+| 行数 | 文件 |
+|---:|:---|
+| 1631 | `cmd/syncthing/src/main.rs` |
+| 1057 | `crates/syncthing-sync/src/scanner.rs` |
+| 901 | `crates/syncthing-sync/src/folder_model/mod.rs` |
+| 740 | `crates/syncthing-sync/src/puller/mod.rs` |
+| 641 | `cmd/syncthing/src/tui/daemon_runner.rs` |
+| 616 | `crates/syncthing-net/src/relay/server.rs` |
+| 612 | `crates/syncthing-sync/src/index_handler.rs` |
 
 ### 3.2 日志级别
 
