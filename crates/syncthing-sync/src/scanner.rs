@@ -46,6 +46,36 @@ fn is_default_ignored_path(relative_path: &str) -> bool {
         .any(|c| DEFAULT_IGNORED_NAMES.contains(&c))
 }
 
+/// 判断相对路径自身或其任一祖先目录是否命中 ignore 规则。
+///
+/// `IgnoreMatcher::matches` 对目录规则（`dir/`）仅在 `is_dir=true` 时生效，而
+/// watcher 增量路径传入的往往是**文件**路径；只判断文件本身会让被忽略目录内新增/
+/// 修改的文件仍被索引并同步给对端（历史缺陷，见 docs/KNOWN_ISSUES.md §23）。
+/// 因此 `is_dir` 由调用方按语义传入（文件变更传 `false`，子扫描根传 `true`），
+/// 祖先目录一律按目录判断。
+fn is_ignored_with_ancestors(matcher: &IgnoreMatcher, relative_path: &str, is_dir: bool) -> bool {
+    let normalized = relative_path.replace('\\', "/");
+    if matcher.matches(&normalized, is_dir) {
+        return true;
+    }
+
+    let mut prefix = String::new();
+    let mut segments = normalized.split('/').peekable();
+    while let Some(segment) = segments.next() {
+        if segments.peek().is_none() {
+            break; // 最后一段是路径自身，已在上方判断
+        }
+        if !prefix.is_empty() {
+            prefix.push('/');
+        }
+        prefix.push_str(segment);
+        if matcher.matches(&prefix, true) {
+            return true;
+        }
+    }
+    false
+}
+
 /// 文件夹扫描器
 pub struct Scanner {
     db: Arc<dyn LocalDatabase>,
@@ -130,6 +160,19 @@ impl Scanner {
             total_rules = matcher.len(),
             "Loaded ignore patterns"
         );
+
+        // sub-scan 根（watcher 传入的变动子目录）也要过 ignore 规则：否则被忽略
+        // 目录内的一次变更会触发整棵子树的扫描并被索引出去（§23）。
+        if let Some(s) = sub {
+            if is_ignored_with_ancestors(&matcher, s, true) {
+                debug!(
+                    folder_id = %folder.id,
+                    sub = %s,
+                    "Sub-scan root is matched by stignore, skipping"
+                );
+                return Ok(Vec::new());
+            }
+        }
 
         // 递归扫描目录。
         // watcher 增量扫描时 sub 为变动子目录，scan_root = folder.path/sub，但索引名必须
@@ -603,6 +646,18 @@ impl Scanner {
             return Ok(None);
         }
 
+        // `.stignore` 与配置 ignore 规则必须同样作用于 watcher 增量路径，
+        // 否则被忽略目录内新增/修改的文件会被索引并同步出去（§23）。
+        let ignore_path = Path::new(&folder.path).join(".stignore");
+        let mut matcher = IgnoreMatcher::load(&ignore_path);
+        for pattern in &folder.ignore_patterns {
+            matcher.add_line(pattern);
+        }
+        if is_ignored_with_ancestors(&matcher, relative_path, false) {
+            trace!(path = %relative_path, "Skipping stignore-matched path (incremental)");
+            return Ok(None);
+        }
+
         let base_path = Path::new(&folder.path);
         let full_path = base_path.join(relative_path);
 
@@ -821,6 +876,58 @@ mod tests {
             .await
             .unwrap();
         assert!(files.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_stignore_dir_rule_applies_to_watcher_paths() {
+        let db = MemoryDatabase::new();
+        let events = EventPublisher::new(10);
+        let scanner = Scanner::new(db, events, 1);
+
+        let temp_dir = tempfile::tempdir().unwrap();
+        tokio::fs::write(temp_dir.path().join(".stignore"), "ignored/\n")
+            .await
+            .unwrap();
+        let ignored = temp_dir.path().join("ignored");
+        tokio::fs::create_dir(&ignored).await.unwrap();
+        tokio::fs::write(ignored.join("secret.txt"), b"secret")
+            .await
+            .unwrap();
+        let kept = temp_dir.path().join("kept");
+        tokio::fs::create_dir(&kept).await.unwrap();
+        tokio::fs::write(kept.join("public.txt"), b"public")
+            .await
+            .unwrap();
+
+        let folder = Folder::new("test", temp_dir.path().to_str().unwrap());
+
+        // 全量扫描：kept/public.txt 必须在，被忽略目录下的任何条目都不得出现
+        let files = scanner.scan_folder(&folder).await.unwrap();
+        let names: Vec<&str> = files.iter().map(|f| f.name.as_str()).collect();
+        assert!(
+            names.contains(&"kept/public.txt"),
+            "kept/public.txt 应被索引: {:?}",
+            names
+        );
+        assert!(
+            !names.iter().any(|n| n.starts_with("ignored")),
+            "被忽略目录不应出现在索引中: {:?}",
+            names
+        );
+
+        // watcher 增量路径同样要遵守 `.stignore`（回归 §23）：
+        // 目录规则只在 is_dir=true 时命中，因此必须逐级检查祖先目录
+        assert!(scanner
+            .scan_changed_file(&folder, "ignored/secret.txt")
+            .await
+            .unwrap()
+            .is_none());
+        // 子扫描根落在被忽略目录时返回空
+        assert!(scanner
+            .scan_folder_sub(&folder, "ignored")
+            .await
+            .unwrap()
+            .is_empty());
     }
 
     #[tokio::test]
