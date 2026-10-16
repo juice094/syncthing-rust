@@ -156,8 +156,14 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           shared-key: "e2e-test"
-      - run: cargo test --release -p syncthing --test e2e_sync
-        timeout-minutes: 5
+      # 两个套件都带真实同步断言：e2e_sync（握手→ClusterConfig→索引→块传输→落盘）
+      # 与 e2e_crud（CRUD / .stignore 目录排除 / 重命名）。此前本 job 只跑 e2e_sync，
+      # 而它唯一的用例被 #[ignore]，实际执行 0 条断言（见 docs/KNOWN_ISSUES.md §24）。
+      # 单独串行执行，避免与 test job 的其它测试二进制争用 CPU。
+      - run: |
+          cargo test --release -p syncthing --test e2e_sync
+          cargo test --release -p syncthing --test e2e_crud
+        timeout-minutes: 15
 
   file-size:
     name: File Size Check (Production Code Only)
