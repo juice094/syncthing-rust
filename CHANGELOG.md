@@ -32,6 +32,7 @@
 - Archived 7 completed/superseded files from `docs/plans/` to `docs/archive/plans/`; `docs/plans/` now holds only 3 active plans + the audit report, with a rewritten `INDEX.md`.
 - Registered [`KNOWN_ISSUES.md §24`](docs/KNOWN_ISSUES.md) (the CI `e2e-test` job runs zero assertions because its only case is `#[ignore]`d) and refreshed §23 with the 2026-10-16 evidence and this round's mitigations.
 - Rewrote `.agents/skills/bep-protocol/SKILL.md` (it still described v0.2.8 Alpha): it now points at the authoritative docs instead of restating drifting numbers.
+- Consolidated the documentation tree: the Obsidian `[[wikilink]]` navigation layer (`docs/_Home.md` + 9 `_MOC.md`) moved to `docs/archive/obsidian-nav/`, leaving `docs/README.md` as the single OKF entry; `docs/README.md` rewritten with a role-based entry table (developer / user / agent) and an accurate tree; `ENGINEERING_DISCIPLINE.md` and `GRAY_CLOUD_OPS_MANUAL.md` relocated under `docs/operations/`; 16 broken internal links repaired and the 4 orphan docs indexed.
 
 ### Stats
 - **Tests**: 454 passed / 5 ignored / 0 failed (+62 vs v3.0.4 baseline 392; 2026-10-16 实测, `cargo test --workspace`)

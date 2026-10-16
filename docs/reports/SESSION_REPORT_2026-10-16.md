@@ -1,7 +1,7 @@
 ---
 type: report
 title: 2026-10-16 工作交付报告
-description: CI 自长期红恢复全绿；三处产品缺陷修复（.stignore watcher 路径 / 在途拉取误判删除 / 拉取失败不重试）；§1 会话竞态根治并关闭 §24 CI 覆盖缺口；MCP 工具集 11→19；顶层文档生产化重构与 skill/DSH 集成面评估。
+description: CI 自长期红恢复全绿；三处产品缺陷修复（.stignore watcher 路径 / 在途拉取误判删除 / 拉取失败不重试）；§1 会话竞态根治并关闭 §24 CI 覆盖缺口；MCP 工具集 11→19；顶层文档生产化重构与 skill/DSH 集成面评估；文档整理与清理（归档 Obsidian 导航层、修复断链、重写 docs 索引）。
 tags: [report, handoff, ci, e2e, cluster-config, mcp, docs, okf]
 status: active
 project: syncthing-rust
@@ -123,6 +123,24 @@ Cargo Deny（`taiki-e/install-action`）与 Security Audit（`checks: write`）�
    提交需 `$env:LEFTHOOK='0'`（`commit-msg` 的 Conventional Commits 校验仍每次执行）。
 5. **v3.1.0 准入线**：72h 耐久测试仍未跑（此前受 §3 环境限制：Windows 桌面休眠会回收 nohup 子进程）。
 6. **DSH 插件落地**（Gray-Harness 仓工作面）：`packages/gray-syncthing`（host 半边优先、只读能力先行 → 进门禁与名册 → 挂载层变更需先备份 `~/.dsh`）。
+
+---
+
+## 七、文档整理与清理（同日第二轮工作面）
+
+**背景**：v3.0.4 文档生产化重构后，`docs/` 仍残留一套与 OKF/GitHub 渲染冲突的 Obsidian wikilink 导航层，并存在过期索引与断链。
+
+**盘点基线**（脚本实测，非估算）：`docs/` 下 130 个 `.md`、全仓 491 处 Markdown / wikilink 引用；断链 18 处、孤儿文档 4 份。
+
+| Commit | 内容 |
+|:---|:---|
+| `ac3c42c` | 归档 Obsidian 导航层：`docs/_Home.md` + 9 个 `_MOC.md` → `docs/archive/obsidian-nav/`（保留原子目录层级以维持 Obsidian wikilink 解析）；此后 `docs/README.md` 是唯一 OKF 入口 |
+| `b6bd817` | `docs/README.md` 重写为**按角色进入**（开发者 / 使用者 / Agent）＋准确目录树＋各目录表；`ENGINEERING_DISCIPLINE.md` / `GRAY_CLOUD_OPS_MANUAL.md` 移入 `docs/operations/` 并修正全部引用方；修复 16 处真实断链；补 `DISASTER_RECOVERY.md` frontmatter |
+| `10ddf7c` | `RELEASES.md` 顶部标注 Stats 为发布时快照并指向 `docs/agent/testing.md` 事实源；移除唯一的 "current workspace" 表述 |
+
+**验证**：断链 18 → 2（余 2 处为正文里的字面示例 `[[WikiLink]]` / `[[wikilink]]`，非真实链接）；孤儿文档 4 → 0；`cargo fmt --all -- --check` 通过；CI（run 38849513049）全绿。
+
+**刻意未做**：未全量补齐 `docs/` 下 100+ 处 frontmatter 的 `title` / `description`（多集中在 `archive/`，且 GitHub 会把 frontmatter 渲染成表格、反而增噪）。
 
 ---
 
