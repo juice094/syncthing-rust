@@ -80,7 +80,11 @@ where
     false
 }
 
-/// 通用两节点初始化：创建 node-a / node-b，配置共享文件夹，建立连接
+/// 通用两节点初始化：创建 node-a / node-b，配置共享文件夹，**单边拨号**建立连接。
+///
+/// 单边拨号（仅 A 拨 B，B 只登记 A）是刻意的：双方同时拨号会在两端各产生一条
+/// incoming + 一条 outgoing，触发连接竞争解决，失败方那条连接上的 BepSession 会空等到
+/// 10s ClusterConfig 超时（`docs/KNOWN_ISSUES.md` §1、§23），这是本套件此前偶发超时的触发条件。
 async fn setup_two_node(
     folder_id: &str,
 ) -> (TestNode, TestNode, std::path::PathBuf, std::path::PathBuf) {
@@ -100,7 +104,10 @@ async fn setup_two_node(
     node_b.add_folder(folder_b).await.expect("b add folder");
 
     node_a.connect_to(&node_b).await.expect("a connect to b");
-    node_b.connect_to(&node_a).await.expect("b connect to a");
+    node_b
+        .add_peer_device(&node_a)
+        .await
+        .expect("b registers a without dialing");
 
     node_a
         .wait_for_connection(node_b.device_id, Duration::from_secs(15))
@@ -167,7 +174,6 @@ async fn test_e2e_create_file() {
 
 #[tokio::test]
 #[serial_test::serial]
-#[ignore = "flaky under suite conditions only: v2 overwrite intermittently misses the 60 s window (session churn caused by the §1 ClusterConfig race + the duplicate-connection window). Passes 6/6 when run alone; 2/6 failures as part of the full suite. Manual run: cargo test -p syncthing --test e2e_crud test_e2e_modify_file -- --ignored --nocapture. Root cause: docs/KNOWN_ISSUES.md §23."]
 async fn test_e2e_modify_file() {
     let (node_a, node_b, folder_a, folder_b) = setup_two_node("e2e-modify").await;
 

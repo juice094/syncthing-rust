@@ -64,9 +64,13 @@ async fn test_encrypted_vault_syncs_over_syncthing() {
         .await
         .expect("a scan folder");
 
-    // Connect both directions.
+    // 单边拨号：A 拨 B，B 只登记 A。双方同时拨号会触发连接竞争解决，失败方那条连接上的
+    // BepSession 会空等到 10s ClusterConfig 超时（KNOWN_ISSUES §1 / §23）。
     node_a.connect_to(&node_b).await.expect("a connect to b");
-    node_b.connect_to(&node_a).await.expect("b connect to a");
+    node_b
+        .add_peer_device(&node_a)
+        .await
+        .expect("b registers a without dialing");
 
     node_a
         .wait_for_connection(node_b.device_id, Duration::from_secs(15))

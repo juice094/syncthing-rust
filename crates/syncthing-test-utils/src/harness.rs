@@ -203,9 +203,9 @@ impl TestNode {
         Ok(())
     }
 
-    /// Configure connection to a peer node (add device + initiate connection).
-    pub async fn connect_to(&self, peer: &TestNode) -> Result<()> {
-        let device = Device {
+    /// 构造对端 `Device`（名称取对端配置目录名，地址取对端实际 BEP 监听地址）。
+    fn peer_device(&self, peer: &TestNode) -> Device {
+        Device {
             id: peer.device_id,
             name: Some(
                 peer.config_dir
@@ -220,8 +220,22 @@ impl TestNode {
             ))],
             paused: false,
             introducer: false,
-        };
-        self.add_device(device).await?;
+        }
+    }
+
+    /// 只把对端登记进本节点设备表，**不发起拨号**。
+    ///
+    /// 供单边拨号测试使用：本节点作为监听方，靠对端拨入触发 `on_connected`。
+    /// 双方同时拨号会在两端各产生一条 incoming + 一条 outgoing，触发连接竞争解决，
+    /// 使失败方的 BepSession 阻塞到 10s ClusterConfig 超时（见 `docs/KNOWN_ISSUES.md` §1、§23）。
+    pub async fn add_peer_device(&self, peer: &TestNode) -> Result<()> {
+        let device = self.peer_device(peer);
+        self.add_device(device).await
+    }
+
+    /// Configure connection to a peer node (add device + initiate connection).
+    pub async fn connect_to(&self, peer: &TestNode) -> Result<()> {
+        self.add_peer_device(peer).await?;
         self.connection_handle
             .connect_to(peer.device_id, vec![peer.bep_addr])
             .await
@@ -234,23 +248,7 @@ impl TestNode {
     /// 与 `connect_to` 不同，此方法在已连接时也会执行完整的重连流程，
     /// 确保 `on_connected` 被重新触发。
     pub async fn reconnect_to(&self, peer: &TestNode) -> Result<()> {
-        let device = Device {
-            id: peer.device_id,
-            name: Some(
-                peer.config_dir
-                    .file_name()
-                    .unwrap_or_default()
-                    .to_string_lossy()
-                    .to_string(),
-            ),
-            addresses: vec![syncthing_core::types::AddressType::Tcp(format!(
-                "tcp://{}",
-                peer.bep_addr
-            ))],
-            paused: false,
-            introducer: false,
-        };
-        self.add_device(device).await?;
+        self.add_peer_device(peer).await?;
         self.connection_handle
             .reconnect_device(peer.device_id, vec![peer.bep_addr], vec![])
             .await

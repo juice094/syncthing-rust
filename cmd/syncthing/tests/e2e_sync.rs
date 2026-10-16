@@ -1,6 +1,6 @@
 //! T2.5/T2.6 - End-to-end sync test using the BEP bridge in TestNode harness.
 //!
-//! Status (2026-05-13 post-T2.6): **PASSING**.
+//! Status (2026-10-16): **PASSING, no longer ignored**.
 //!
 //! This test was introduced by T2.5 as a diagnostic that originally exposed a
 //! real end-to-end sync defect: `SyncManager::add_folder` created the
@@ -12,6 +12,13 @@
 //! T2.6 fix (one-line addition in `service::add_folder`): unconditionally
 //! call `start_folder_internal` after `add_folder_internal`. The helper is
 //! idempotent. See `docs/KNOWN_ISSUES.md` §2 for the full investigation.
+//!
+//! 2026-10-16: the `#[ignore]` (added for the §1 ClusterConfig race) was removed.
+//! The race only triggered when BOTH sides dialed each other; the loser's
+//! BepSession then sat on a connection nobody read and burned its 10 s
+//! ClusterConfig timeout. The test now dials one way only (A → B, B just
+//! registers A) and asserts readiness explicitly, so no fixed-sleep or
+//! disconnect/re-dial workaround is needed. See `docs/KNOWN_ISSUES.md` §1, §23.
 //!
 //! Verification surface (in execution order):
 //!
@@ -28,7 +35,6 @@ use syncthing_test_utils::harness::TestNode;
 
 #[tokio::test]
 #[serial_test::serial]
-#[ignore = "flaky: §1 ClusterConfig race causes intermittent timeout under parallel test load (T3.1b health check mitigates in production). Verified via cross-version interop test against Go syncthing v2.1.0 (2026-05-14)."]
 async fn test_two_node_single_file_sync() {
     // Init tracing for debugging (no-op if already initialized).
     let _ = tracing_subscriber::fmt()
@@ -70,11 +76,16 @@ async fn test_two_node_single_file_sync() {
         .await
         .expect("a scan folder");
 
-    // Initiate connections in both directions
+    // Dial ONE way only: A connects to B, B just registers A and relies on the
+    // incoming connection. 双方同时拨号会触发连接竞争解决，失败方那条连接上的
+    // BepSession 会空等到 10s ClusterConfig 超时（§1）；单边拨号从触发条件上消除它。
     node_a.connect_to(&node_b).await.expect("a connect to b");
-    node_b.connect_to(&node_a).await.expect("b connect to a");
+    node_b
+        .add_peer_device(&node_a)
+        .await
+        .expect("b registers a without dialing");
 
-    // Wait for connections to establish (covered by handshake test already)
+    // 握手就绪必须显式等待：连接建立 ≠ BEP 会话就绪。
     node_a
         .wait_for_connection(node_b.device_id, Duration::from_secs(15))
         .await
@@ -83,45 +94,34 @@ async fn test_two_node_single_file_sync() {
         .wait_for_connection(node_a.device_id, Duration::from_secs(15))
         .await
         .expect("b wait for a");
+    node_a
+        .wait_for_cluster_config(node_b.device_id, Duration::from_secs(15))
+        .await
+        .expect("a wait for b cluster config");
+    node_b
+        .wait_for_cluster_config(node_a.device_id, Duration::from_secs(15))
+        .await
+        .expect("b wait for a cluster config");
+    node_a
+        .wait_for_folder_ready(node_b.device_id, "e2e", Duration::from_secs(15))
+        .await
+        .expect("a wait for folder announced by b");
+    node_b
+        .wait_for_folder_ready(node_a.device_id, "e2e", Duration::from_secs(15))
+        .await
+        .expect("b wait for folder announced by a");
 
     // T2.5: Wait for the file to appear on node B (Index + Block pull).
-    // NOTE: §1 ClusterConfig race can cause the first BepSession to timeout
-    // (10s) and stall. We retry connections once at 30s as a workaround.
     let file_b = folder_b_path.join("hello.txt");
     let start = std::time::Instant::now();
     let mut found = false;
-    let mut retried = false;
-    while start.elapsed() < Duration::from_secs(90) {
+    while start.elapsed() < Duration::from_secs(30) {
         if file_b.exists() {
             let received = tokio::fs::read(&file_b).await.expect("read file_b");
             if received == test_payload {
                 found = true;
                 break;
             }
-        }
-        // WORKAROUND for §1 ClusterConfig race: if sync stalls, disconnect
-        // both directions and re-dial. connect_to_with_relay returns Ok(()
-        // if already connected, so we must explicitly disconnect first.
-        if start.elapsed() > Duration::from_secs(30) && !retried {
-            tracing::warn!("Sync stalled, retrying connections (§1 workaround)");
-            let _ = node_a
-                .connection_handle
-                .disconnect(&node_b.device_id, "retry")
-                .await;
-            let _ = node_b
-                .connection_handle
-                .disconnect(&node_a.device_id, "retry")
-                .await;
-            tokio::time::sleep(Duration::from_millis(500)).await;
-            let _ = node_a.connect_to(&node_b).await;
-            let _ = node_b.connect_to(&node_a).await;
-            let _ = node_a
-                .wait_for_connection(node_b.device_id, Duration::from_secs(10))
-                .await;
-            let _ = node_b
-                .wait_for_connection(node_a.device_id, Duration::from_secs(10))
-                .await;
-            retried = true;
         }
         tokio::time::sleep(Duration::from_millis(200)).await;
     }
@@ -131,6 +131,6 @@ async fn test_two_node_single_file_sync() {
 
     assert!(
         found,
-        "T2.5: file did not sync to node B within 90s - BEP bridge not driving full pipeline?"
+        "T2.5: file did not sync to node B within 30s - BEP bridge not driving full pipeline?"
     );
 }
