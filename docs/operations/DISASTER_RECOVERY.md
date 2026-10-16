@@ -1,3 +1,14 @@
+---
+type: Runbook
+title: Disaster Recovery Runbook
+description: syncthing-rust 灾备恢复流程：备份策略、RPO/RTO 目标、单节点恢复与完整灾备重建。
+resource: ./DISASTER_RECOVERY.md
+tags: [ops, disaster-recovery, backup, runbook, okf]
+status: active
+project: syncthing-rust
+timestamp: 2026-10-16T00:00:00Z
+---
+
 # Disaster Recovery Runbook
 
 > **适用于**: syncthing-rust v3.0.4+  

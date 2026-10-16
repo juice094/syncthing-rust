@@ -25,7 +25,7 @@ This creates the following production blockers:
 
 | ID | Blocker | Impact |
 |----|---------|--------|
-| B-1 | Campus/enterprise firewalls block TCP 22001 outbound | Personal users in universities and corporate networks cannot sync with external nodes ([KNOWN_ISSUES.md §8](../../KNOWN_ISSUES.md)) |
+| B-1 | Campus/enterprise firewalls block TCP 22001 outbound | Personal users in universities and corporate networks cannot sync with external nodes ([KNOWN_ISSUES.md §8](../KNOWN_ISSUES.md)) |
 | B-2 | Government extranets only allow ports 80/443/22/UDP 443 | TCP 22001 is effectively impossible to approve; syncthing-rust is **not deployable** in Chinese government/enterprise contexts without overlay network workarounds |
 | B-3 | No config-driven transport selection | Adding a new transport (e.g., Tailscale, WireGuard, WebSocket) requires modifying `daemon_runner.rs` and recompiling |
 | B-4 | Port 22001 hardcoded in 6+ locations | Inconsistent defaults; port collisions with Go Syncthing (22000) were "solved" by picking a different magic number instead of making it configurable |
@@ -579,8 +579,8 @@ async fn test_unsupported_scheme_fails_cleanly() {
 
 ### 9.2 Related Documents
 
-- [KNOWN_ISSUES.md §8](../../KNOWN_ISSUES.md) — Firewall blocking analysis
-- [KNOWN_ISSUES.md §12](../../KNOWN_ISSUES.md) — Dual-node real-network test (baseline for regression)
+- [KNOWN_ISSUES.md §8](../KNOWN_ISSUES.md) — Firewall blocking analysis
+- [KNOWN_ISSUES.md §12](../KNOWN_ISSUES.md) — Dual-node real-network test (baseline for regression)
 - `crates/syncthing-core/src/traits/transport.rs` — Transport trait definition
 - `crates/syncthing-net/src/transport/mod.rs` — TransportRegistry
 - `crates/syncthing-net/src/dialer/mod.rs` — ParallelDialer (current)

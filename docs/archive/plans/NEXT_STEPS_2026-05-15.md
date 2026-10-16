@@ -8,7 +8,7 @@ tags: [plan, roadmap]
 
 # 后续任务清单 — 2026-05-15
 
-> 承接 [NEXT_STEPS_2026-05-14.md](./NEXT_STEPS_2026-05-14.md)（已归档）
+> 承接 NEXT_STEPS_2026-05-14.md（已归档，文件未保留）
 > 本文档基于 v0.2.6 发布后首次真实网络双节点测试 + Error-Budget 架构审计生成。
 > **状态快照（2026-05-15 23:59）**：v0.2.6 单机空载 12h 稳定；本侧 WSL2 / 对侧 Gray-Cloud 双节点部署完成；校园网防火墙阻断 TCP 22001 出网；Tailscale/Headscale 被确认为最务实穿透方案；Error-Budget 架构审计完成，识别 5 子系统风险敞口。
 
@@ -168,11 +168,11 @@ v0.4.0 不追求功能增加，追求**政企生产准入**。这是一个独立
 ## 7. 跨文件跳转速查
 
 - **当前权威路线图**：本文件
-- **昨日计划**：[NEXT_STEPS_2026-05-14.md](./NEXT_STEPS_2026-05-14.md)
-- **已知缺陷登记**：[../KNOWN_ISSUES.md](../KNOWN_ISSUES.md)
-- **调优母计划**：[TUNING_PLAN_2026-05-11.md](./TUNING_PLAN_2026-05-11.md)
+- **昨日计划**：NEXT_STEPS_2026-05-14.md（已归档，文件未保留）
+- **已知缺陷登记**：[KNOWN_ISSUES.md](../../KNOWN_ISSUES.md)
+- **调优母计划**：[TUNING_PLAN_2026-05-11.md](../../plans/TUNING_PLAN_2026-05-11.md)
 - **架构路线图**：[POST_V0_2_0_ROADMAP.md](./POST_V0_2_0_ROADMAP.md)
-- **架构审计**：[../audit/ARCHITECTURE_AUDIT_2026-05-15.md](../audit/ARCHITECTURE_AUDIT_2026-05-15.md)（待生成）
+- **架构审计**：`docs/audit/ARCHITECTURE_AUDIT_2026-05-15.md`（当时标记"待生成"，未落地）
 
 ---
 

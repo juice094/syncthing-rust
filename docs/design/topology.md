@@ -155,4 +155,4 @@ net            ← {sync, test-utils, cli}
 - [功能对比矩阵](FEATURE_COMPARISON.md)
 - [计划索引](../plans/INDEX.md)
 - [已知问题](../KNOWN_ISSUES.md)
-- [工程纪律](../ENGINEERING_DISCIPLINE.md)
+- [工程纪律](../operations/ENGINEERING_DISCIPLINE.md)

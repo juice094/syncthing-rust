@@ -45,4 +45,4 @@ timestamp: 2026-10-16T00:00:00Z
 - [项目拓扑与架构](../design/topology.md)
 - [架构决策记录](../design/ARCHITECTURE_DECISIONS.md)
 - [已知问题](../KNOWN_ISSUES.md)
-- [工程纪律](../ENGINEERING_DISCIPLINE.md)
+- [工程纪律](../operations/ENGINEERING_DISCIPLINE.md)

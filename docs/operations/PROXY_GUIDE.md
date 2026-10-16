@@ -1,5 +1,7 @@
 ---
 type: guide
+title: Outbound Proxy Guide (SOCKS5 / HTTP)
+description: 通过本地代理（SOCKS5 / HTTP）转发 syncthing-rust 出站连接，用于加速 discovery/relay 与合规审计。
 status: active
 project: syncthing-rust
 tags: [ops, deployment, proxy, network]

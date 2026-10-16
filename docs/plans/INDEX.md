@@ -60,7 +60,7 @@ timestamp: 2026-07-20T00:00:00Z
 | [`CONFIG_SERIALIZATION_ANALYSIS_2026-04-27.md`](../archive/plans/CONFIG_SERIALIZATION_ANALYSIS_2026-04-27.md) | 配置序列化严格化分析，frontmatter 标记 completed，结论已落入代码。 |
 | [`OFFLINE_HANDOVER_2026-04-27.md`](../archive/plans/OFFLINE_HANDOVER_2026-04-27.md) | 特定日期离线交接文档（含当时设备 ID/内网 IP），场景已过。 |
 | [`SITUATION_2026-06-03.md`](../archive/plans/SITUATION_2026-06-03.md) | v0.2.10-rc2 阶段情况说明，frontmatter 标记 archived，内容为历史快照。 |
-| [`GRAY_SIDE_OPS.md`](../archive/plans/GRAY_SIDE_OPS.md) | 针对旧测试环境（40GB VM）的互通验证指南，frontmatter 标记 archived，由 `docs/GRAY_CLOUD_OPS_MANUAL.md` 接管。 |
+| [`GRAY_SIDE_OPS.md`](../archive/plans/GRAY_SIDE_OPS.md) | 针对旧测试环境（40GB VM）的互通验证指南，frontmatter 标记 archived，由 `docs/operations/GRAY_CLOUD_OPS_MANUAL.md` 接管。 |
 
 ## 计划演进关系
 
@@ -93,4 +93,4 @@ MVP_RECOVERY (Phase 1~3) ──→ PHASE3 (3.1~3.3 完成, 3.4 ⏳ 72h 压测)
 - **历史计划为什么被归档？** → [`PLAN_AUDIT_2026-04-27.md`](./PLAN_AUDIT_2026-04-27.md) §一、逐份判定
 - **安全审计 / 接受债务 / 漏洞报告？** → [`../../SECURITY.md`](../../SECURITY.md)
 - **v0.2.4 周期单日归档？** → [`../reports/SESSION_SUMMARY_2026-05-12.md`](../reports/SESSION_SUMMARY_2026-05-12.md)
-- **双节点部署任务书？** → [`../GRAY_CLOUD_OPS_MANUAL.md`](../GRAY_CLOUD_OPS_MANUAL.md)
+- **双节点部署任务书？** → [`../operations/GRAY_CLOUD_OPS_MANUAL.md`](../operations/GRAY_CLOUD_OPS_MANUAL.md)
