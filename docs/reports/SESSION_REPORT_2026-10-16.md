@@ -115,7 +115,8 @@ Cargo Deny（`taiki-e/install-action`）与 Security Audit（`checks: write`）�
 ## 六、残留与 Backlog
 
 1. **回收站仍存 `sr-base` 目录**：按「删除优先回收站」规则未硬删，磁盘需清空回收站后才真正释放。
-2. **3 处带日期的历史记录仍含旧测试数值**：`CHANGELOG` v3.0.3 条目、`RELEASES.md`、`docs/reports/SESSION_REPORT_2026-07-21.md`（发布史/报告快照，有意保留）。
+2. **历史记录中的测试数值**：`CHANGELOG` v3.0.3 条目、`docs/reports/SESSION_REPORT_2026-07-21.md` 为发布史/报告快照，有意保留；
+   `RELEASES.md` 已加顶部说明并移除唯一的「current workspace」表述，统一指向 [`docs/agent/testing.md`](../agent/testing.md) 事实源。
 3. **后置的两条产品侧方向（§23 已登记）**：`BepSession` 在 ClusterConfig 超时后自行退避重试；
    `ManagerBlockSource` 选连接时不校验该连接上是否有活跃会话。测试基建修复后二者已无直接危害。
 4. **本仓无 lefthook 配置**：全局 `core.hooksPath=~/.git-hooks` 的 lefthook 会因缺配置直接失败，
@@ -125,4 +126,4 @@ Cargo Deny（`taiki-e/install-action`）与 Security Audit（`checks: write`）�
 
 ---
 
-← 返回 [[_MOC]]
+← 返回 [docs/README.md](../README.md)
