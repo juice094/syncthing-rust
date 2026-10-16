@@ -58,6 +58,13 @@ race resolution 替换连接时，旧连接的 `close()` 触发 `Disconnected` �
 - `connect_to_with_relay` 在已有连接时直接返回 `Ok(())`，不重新触发 `on_connected`。
   已通过 `reconnect_device` API 规避；生产代码中如需强制重连应使用 `reconnect_device`。
 
+**2026-10-16 更新（测试侧已根治）**：该竞态在测试中的可观测形态是「双方同时拨号」——
+两端各产生一条 incoming + outgoing，连接竞争解决会关掉其中一条，而失败方那条连接上的
+BepSession 仍会空等到 10s ClusterConfig 超时（`WARN ... Timeout waiting for ClusterConfig`，
+每轮必现）。测试基建改为**单边拨号**（A `connect_to` B、B 只 `add_peer_device`）并对
+BepSession 的槽位/连接改为同步认领 + 中止路径也按 `conn_id` 断开后，该告警降为 **0 条**，
+`e2e_sync` / `e2e_crud` 均稳定通过（详见 §23、§24）。生产侧 `reconnect_device` 逻辑不变。
+
 **追踪**：`docs/plans/NEXT_STEPS_2026-05-14.md` §T3.1
 
 ---
@@ -826,42 +833,55 @@ v0.2.8 完成首次双节点真实网络环境下的完整文件同步验证。
 
 **残留事项（2026-10-16 第二轮迭代后更新）**：
 
-- **会话启动阶段的 ClusterConfig 超时（§1 竞态）仍未根治**。新证据（已验证，2026-10-16）：单独运行 `e2e_crud` 3 次，**每次**都出现
+- **会话启动阶段的 ClusterConfig 超时（§1 竞态）— 已根治 ✅**。证据（已验证，2026-10-16）：单独运行 `e2e_crud` 3 次，**每次都**出现
   `WARN syncthing_net::session::state: Timeout waiting for ClusterConfig from <peer>` 与
-  `BepSession for <peer> ended: Timeout: remote ClusterConfig not received`（双方同时拨号时的失败方会话，10s 超时）。
-  它不再直接导致断言失败，但会把同步推迟 10–30s：三次单独运行的耗时分别为 38.80s / 26.63s / 通过。在 CPU 争用更高时
-  （`cargo test --workspace` 并发跑多个测试二进制）该延迟会与块请求 10s×3 超时叠加，突破 60s 窗口才表现为失败。
-  根治方向：①在 `TestNode` 之上提供确定性单会话策略（避免双方同时拨号）；②让 `BepSession` 在 ClusterConfig 超时后自行重试而非结束会话。
-- **已落地（本轮）**：
+  `BepSession for <peer> ended: Timeout: remote ClusterConfig not received`（双方同时拨号时的失败方会话，10s 超时），
+  它把同步推迟 10–30s（三次耗时 38.80s / 26.63s / …），在 CPU 争用更高时与块请求超时叠加才突破 60s 断言窗口。
+  根治方向 ①「确定性单会话策略（避免双方同时拨号）」**已落地**（见下方第三轮结论），方向 ②「`BepSession` 超时后自行重试」按 YAGNI 后置。
+- **本轮已落地（第二轮）**：
   - `TestNode::wait_for_cluster_config()` / `wait_for_folder_ready()` 就绪等待原语（`crates/syncthing-test-utils/src/bep_bridge.rs` 的 `SessionReadiness` 事件泵 + `harness.rs`），
     `e2e_crud::setup_two_node` 已在 `wait_for_connection` 之后显式等待这两个信号；
   - 产品侧失败退避重试：`FolderModel::start_pull_loop` 在 `files_failed > 0` 时按 `PULL_RETRY_BACKOFF_INIT_MS`（500ms）起逐次翻倍、封顶 `PULL_RETRY_BACKOFF_MAX_MS`（= 原 10s 周期）提前重试，
     成功即归零；失败文件本身不登记，正确性仍由 `check_needed_files()` 依据 DB/FS 差异重新推导（`crates/syncthing-core/src/constants.rs` + `crates/syncthing-sync/src/folder_model/mod.rs`）。
-- **`#[ignore]` 判定结论**见下方「2026-10-16 第二轮结论」。
+- **`#[ignore]` 判定结论**见下方「2026-10-16 第三轮结论」（结论是全部解除）。
 
-**2026-10-16 第二轮结论（已落地）**：
+**2026-10-16 第三轮结论（根治，已落地）**：
 
-- **`test_e2e_modify_file` 已按兜底方案加 `#[ignore]`**（原因写在该用例的属性里）。依据：单独运行 6/6 通过；作为完整 `e2e_crud` 套件的一部分运行时，修复前后合计 **4/9 次失败**（其余 8 次全部通过），失败均在第二个阶段（v2 覆盖同步）而非建连阶段。
-  判定为"套件条件下的顽固用例"（隔离运行永不失败，套件内稳定偶发），故按已批准的兜底方案处理，避免 `cargo test --workspace` 长期红色；需要验证时用
-  `cargo test -p syncthing --test e2e_crud test_e2e_modify_file -- --ignored --nocapture`。
-- **`test_e2e_stignore_directory_exclusion` 的偶发已被本轮修复消除**（修复后 6 次套件运行 0 次失败，修复前 2 次失败），原因是 §24 记录的那条"在途拉取被子树扫描误判删除"链路。
-- 其余四个用例（create / delete / rename / stignore）在修复后的 6 次套件运行中全绿。
+- **真凶是「双方同时拨号」，不是连接竞争解决本身**。[`registry.rs`](../../crates/syncthing-net/src/manager/registry.rs)
+  的 keep-new 判定在双方是对称且正确的（四种注册顺序组合都收敛到同一条物理连接），未改动。
+  真正的问题是：竞争解决关掉的那条连接上，BepSession 仍坐在一条「本端 open、对端无人读」的链路上，
+  直到 10s ClusterConfig 超时才退出——于是每个用例都要多花 10s，并与块请求的 3×超时叠加冲破 60s 断言窗口。
+- **修复（测试基建，两层）**：
+  1. **单边拨号**：`e2e_crud::setup_two_node` 与 `e2e_sync` 改为 A `connect_to(B)`、B 只
+     `add_peer_device(&A)`（新增 `TestNode::add_peer_device()`，`connect_to`/`reconnect_to` 内部复用
+     `peer_device()`）。从触发条件上消除双拨竞态。
+  2. **BepSession 生命周期加固**（`crates/syncthing-test-utils/src/bep_bridge.rs`）：槽位与连接在
+     `on_connected` 回调用**同步（无 await）认领**（杜绝并发 spawn 互相覆盖 / 绑到已被换掉的旧连接）；
+     会话任务改由看护任务 await，**被 `abort()` 时也按 `conn_id` 断开自己那条连接**（会话槽位改存 `AbortHandle`）。
+- **验收证据**（已验证）：ClusterConfig 超时告警 **0 条**（此前每轮必现）；`e2e_crud` 连续 **6/6** 全绿、
+  每次 **2.2–3.1s**（修复前 26–85s）；`e2e_sync` 连续 **3/3** 通过、每次 **0.14–0.36s**。
+- **`#[ignore]` 已全部解除**：`test_e2e_modify_file`（第二轮按兜底方案加的）与
+  `test_two_node_single_file_sync`（§1 遗留）均已恢复为默认执行，旧的断连重拨 workaround 已删除。
+- **仍存的产品侧方向（未做，独立立项）**：`BepSession` 在 ClusterConfig 超时后仍直接结束会话而非
+  退避重试；`ManagerBlockSource` 仍按「首个已连接设备」选连接，不校验该连接上是否有活跃会话。
+  两者都在测试基建修复后失去了直接危害，故按 YAGNI 后置。
 
 ---
 
-## §24. CI 的 `e2e-test` job 实际执行 0 个用例（中等 — CI 覆盖缺口，2026-10-16 登记）
+## §24. CI 的 `e2e-test` job 实际执行 0 个用例（**已修复 ✅** 2026-10-16）
 
 **症状**：`.github/workflows/ci.yml` 的 `e2e-test` job 名为 "End-to-End Sync Test"，但命令是
 `cargo test --release -p syncthing --test e2e_sync`；而 `cmd/syncthing/tests/e2e_sync.rs` 中唯一的用例
 `test_two_node_single_file_sync` 带 `#[ignore]`（§1 竞态）。该 job 因此在 release profile 下**只证明端到端代码可编译并链接**，
 不执行任何同步断言——"CI 全绿"不能据此外推为"端到端链路被验证"。
 
-**影响**：`e2e_crud`（5 个 CRUD/`.stignore`/重命名用例）与 `e2e_handshake`、`e2e_fs_db_sync`、`e2e_encrypted_vault_sync`
-只在 `test` job 的 `cargo test --workspace` 中随其他二进制并发执行（`#[serial]` 仅在单个二进制内生效），
-因此它们的结果受 CPU 争用影响，这也是 §23 偶发失败的观测条件。
+**修复**（依赖 §23 的根治）：
+- 解除 `test_two_node_single_file_sync` 的 `#[ignore]`（该用例同时改为单边拨号 + 显式就绪等待，不再需要 30s 断连重拨 workaround）；
+- `e2e-test` job 改为**串行执行两个带真实断言的套件**：`e2e_sync` 与 `e2e_crud`，`timeout-minutes` 由 5 提到 15；
+- 判据：本 job 现在会实际跑断言，失败会真实拦红。
 
-**待办（需先解决 §23 的会话竞态再动手）**：把 `e2e_crud` 纳入 `e2e-test` job 并单独执行（不与其他测试二进制并发），
-同时评估该 job 的 `timeout-minutes: 5` 是否足够覆盖 release 构建 + 5 个用例。
+**其余 e2e 套件（`e2e_handshake` / `e2e_fs_db_sync` / `e2e_encrypted_vault_sync`）**仍在 `test` job 的
+`cargo test --workspace` 中执行（与其它测试二进制并发）。
 
 ---
 

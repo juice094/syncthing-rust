@@ -68,7 +68,8 @@ cargo deny check all
 
 ## 4. 常见陷阱
 
-- **连接建立 ≠ BEP 会话就绪**：ClusterConfig 未交换前索引/块传输无人收发。测试中用 `TestNode::wait_for_cluster_config()` / `wait_for_folder_ready()`，不要靠"睡够时间"。
+- **测试里不要双方同时拨号**：两端各拨一次会产生 incoming + outgoing 两条连接并触发连接竞争解决，失败方那条连接上的 BepSession 会空等到 10s ClusterConfig 超时（§1）。用 `TestNode::connect_to()` 单边拨号、对端只 `add_peer_device()`。
+- **连接建立 ≠ BEP 会话就绪**：ClusterConfig 未交换前索引/块传输无人收发。用 `TestNode::wait_for_cluster_config()` / `wait_for_folder_ready()` 显式确认就绪，不要靠"睡够时间"。
 - **拉取失败不做就地重试**：`Puller::pull_folder` 只统计失败数；失败文件由 `FolderModel` 的拉取循环按退避重试，正确性依赖 `check_needed_files()` 重新推导。
 - **`.stignore` 目录规则**：增量（watcher）路径必须走 `is_ignored_with_ancestors()`，只匹配文件路径会漏掉目录规则。
 - **索引/删除推断与在途拉取有竞态**：不要在没有确认拉取状态时按"DB 有记录但磁盘无文件"推断删除。

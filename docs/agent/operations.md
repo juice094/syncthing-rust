@@ -102,6 +102,8 @@ docker compose -f deploy/docker-compose.relay.yml up -d
 - CI job（`.github/workflows/ci.yml`）：fmt、clippy（×3 OS）、test（×3 OS）、audit、cargo-deny、all-features、bench-smoke、release-check（×3 OS）、doc-check、e2e-test、file-size（600 行软限制检查）—— **11 个 job 定义**，矩阵展开后 **18 个运行实例**
 - Release job（`.github/workflows/release.yml`）：build-linux、build-macos、build-windows —— 3 个 job 定义 / 3 个运行实例
 - `file-size` job 对超限文件只输出 `::warning::`（不失败），用于提醒而非阻断
+- `e2e-test` job 自 2026-10-16 起**串行执行两个带真实断言的套件**（`e2e_sync` + `e2e_crud`，`timeout-minutes: 15`）；
+  此前它只跑 `e2e_sync`，而该套件唯一用例被 `#[ignore]`，实际执行 0 条断言（见 [`KNOWN_ISSUES.md §24`](../KNOWN_ISSUES.md)）
 - Cargo Deny job 改为用 `taiki-e/install-action` 安装 cargo-deny 后在 runner 上直接执行；不再使用 `EmbarkStudios/cargo-deny-action@v2` 的 Docker 镜像（其容器内 rustup 无法解析 `rust-toolchain.toml` 的 `stable` channel，曾使该 job 持续失败）
 - Security Audit job 需要 `checks: write` 权限（`rustsec/audit-check` 需创建 check run）
 - **注意**：CI 曾自 2026-06-29 起长期失败（dependabot 的大版本依赖升级未经 CI 验证即合入 `main`，导致 `rand`/`sysinfo`/`ctor` 等编译中断）。Cargo 大版本升级必须先通过 CI 再合并；`aes-gcm`/`hkdf` 的 major 升级已在 `dependabot.yml` 中显式 ignore（与 `aes-siv` 的 aead 版本冲突）。

@@ -17,7 +17,7 @@ timestamp: 2026-06-25T00:00:00Z
 
 当前实测基线（2026-10-16，`cargo test --workspace`）：
 
-- `cargo test --workspace`：**452 passed / 7 ignored / 0 failed**（38 个测试二进制，含 doc-test）
+- `cargo test --workspace`：**454 passed / 5 ignored / 0 failed**（38 个测试二进制，含 doc-test）
 - `cargo clippy --workspace --all-targets -- -D warnings -W clippy::await_holding_lock`：0 warnings
 - `cargo fmt --all -- --check`：通过
 - `cargo doc --no-deps --workspace`：通过
@@ -43,20 +43,20 @@ timestamp: 2026-06-25T00:00:00Z
 
 - 网络层改动必须通过 `TestNode` 双实例验证；单实例测试视为无效。
 - 新增端到端行为必须配套集成测试，禁止仅用 `#[cfg(test)]` 单元测试覆盖。
+- **单边拨号是默认写法**：`node_a.connect_to(&node_b)` + `node_b.add_peer_device(&node_a)`。
+  两端同时拨号会产生 incoming + outgoing 两条连接并触发连接竞争解决，失败方那条连接上的
+  BepSession 会空等到 10s ClusterConfig 超时（§1 / §23，2026-10-16 已由此根治）。
 - **握手就绪必须显式等待**，不要用固定 sleep：连接建立 ≠ BEP 会话就绪。用
   `TestNode::wait_for_cluster_config(peer_id, timeout)`（对端 ClusterConfig 已收到）与
   `TestNode::wait_for_folder_ready(peer_id, folder_id, timeout)`（对端已通告共享该 folder）。
   这两个原语由 `crates/syncthing-test-utils/src/bep_bridge.rs` 的 `SessionReadiness` 事件泵驱动
   （生产侧同源实现见 `cmd/syncthing/src/tui/session_logger.rs`）。
-- `test_two_node_single_file_sync` 因 §1 ClusterConfig 竞态在负载下偶发超时，被 `#[ignore]`；
-  单独运行时可用 `-- --ignored` 手动验证。
 - `e2e_crud.rs` 的断言统一走 `wait_synced()`（**不做断连重拨**：重拨会制造无连接窗口打断在途块请求，
   块请求自身已在 `bep_bridge` 中带 3×5s 重试）；超时会打印双方 `connected_devices()`。
-  该测试集属**负载相关偶发**；`test_e2e_modify_file` 在套件条件下顽固失败（单独运行 6/6 通过），已按兜底方案加 `#[ignore]`，
-  原因写在用例属性里。手动验证：`cargo test -p syncthing --test e2e_crud test_e2e_modify_file -- --ignored --nocapture`
-  （见 [`KNOWN_ISSUES.md §23`](../KNOWN_ISSUES.md)、[§24](../KNOWN_ISSUES.md)）。
 - 跨进程契约（如 MCP Bridge ↔ REST）用**真实二进制**做集成测试：`cmd/syncthing-mcp-bridge/tests/mcp_bridge.rs`
   启动进程内 stub HTTP 服务端，断言 stdio JSON-RPC 的请求落点与头部转发，不引入 HTTP 框架依赖。
+- **验证判据看告警而非只看测试绿**：曾长期存在的 `WARN ... Timeout waiting for ClusterConfig`
+  应按「零条」验收（2026-10-16 起为 0）。
 
 ---
 
