@@ -51,3 +51,14 @@ pub const PULL_DELETE_QUOTA_RATIO: f64 = 0.25;
 /// 陈旧索引告警阈值：单次 pull 中 BEP error code 2（NO_SUCH_FILE）响应数超过此值时，
 /// 判定对端索引可能陈旧/损坏并输出健康告警（2026-07-20 事故前兆）。
 pub const STALE_INDEX_WARN_THRESHOLD: usize = 10;
+
+/// 文件夹拉取循环周期（秒）：在没有远程索引通知时的兜底触发间隔。
+pub const PULL_INTERVAL_SECS: u64 = 10;
+
+/// 拉取失败后的首次重试退避（毫秒）。块请求超时等瞬时失败通常可在亚秒级恢复，
+/// 无需等到下一个周期 tick（见 `docs/KNOWN_ISSUES.md` §23 残留事项）。
+pub const PULL_RETRY_BACKOFF_INIT_MS: u64 = 500;
+
+/// 拉取失败重试退避上限（毫秒）。与周期 tick 对齐，保证稳态重试节奏不高于
+/// 引入退避之前的行为（即最差仍是每 `PULL_INTERVAL_SECS` 秒一次）。
+pub const PULL_RETRY_BACKOFF_MAX_MS: u64 = PULL_INTERVAL_SECS * 1000;
