@@ -6,9 +6,9 @@
 
 | Metric | Status |
 |:---|:---|
-| Version | v3.0.4 |
-| Tests | 413 passed / 3 ignored / 0 failed |
-| Clippy | 0 warnings |
+| Version | `v3.0.4` — authoritative source: `[workspace.package] version` in the root `Cargo.toml` |
+| Tests | See [`docs/agent/testing.md`](docs/agent/testing.md) (single source of truth; also [`CI`](https://github.com/juice094/syncthing-rust/actions)) |
+| Clippy | 0 warnings (`-D warnings`, incl. `clippy::await_holding_lock`) |
 | License | MIT (dual: commercial available) |
 | Rust | 1.85+ |
 
@@ -25,7 +25,7 @@
 git clone https://github.com/juice094/syncthing-rust.git
 cd syncthing-rust
 cargo build --release
-cargo test --all
+cargo test --workspace
 ```
 
 ### First Experience
@@ -59,12 +59,15 @@ cargo run -p syncthing-cli -- status
 
 Before submitting a PR:
 
-- [ ] `cargo test --workspace` — 433 passed / 6 ignored / 0 failed
+- [ ] `cargo test --workspace` — all green (baseline numbers: [`docs/agent/testing.md`](docs/agent/testing.md))
 - [ ] `cargo clippy --workspace --all-targets -- -D warnings -W clippy::await_holding_lock` — 0 warnings
-- [ ] `cargo fmt --check` — pass (or run `cargo fmt --all`)
+- [ ] `cargo fmt --all -- --check` — pass (or run `cargo fmt --all`)
+- [ ] `cargo doc --no-deps --workspace` — pass
+- [ ] `cargo deny check all` — pass
 - [ ] New public API has doc comment
 - [ ] New error paths are logged (not silent)
-- [ ] No production `unwrap()` (test code only)
+- [ ] No production `unwrap()` / `expect()` (test code only)
+- [ ] Network-layer changes validated with dual `TestNode` instances
 
 ### Commit Convention (Conventional Commits)
 
@@ -114,6 +117,11 @@ when the target is opened by editors/AV/desktop search.
 | `syncthing-api` | REST API + event bus + config store | Hold concrete `ConnectionManagerHandle` / `LocalDatabase` |
 | `syncthing-versioner` | File versioning strategies | FS I/O |
 | `syncthing-test-utils` | Test harnesses (`MemoryPipe`, `TestNode`) | Used only in tests / dev tools |
+| `obsidian-vault-crypto-adapter` | Obsidian vault crypto adapter (E2E tests only) | Never linked into production binaries; dev-dependency only |
+
+> The `cmd/` binaries (`syncthing`, `syncthing-cli`, `syncthing-bench`, `syncthing-mcp-bridge`, `syncthing-tray`)
+> consume these crates; `cmd/syncthing` does **not** depend on `syncthing-db` / `syncthing-fs` directly
+> (it reaches them through `syncthing-sync`).
 
 ---
 
@@ -121,9 +129,11 @@ when the target is opened by editors/AV/desktop search.
 
 | Document | Content |
 |:---|:---|
-| [`AGENTS.md`](AGENTS.md) | Quick agent fact-checklist and entry points |
-| [`docs/agent/index.md`](docs/agent/index.md) | Full agent constraints, testing, security, operations bundle |
+| [`AGENTS.md`](AGENTS.md) | Entry page for AI agents: red lines + navigation (detailed rules live in `docs/agent/`) |
+| [`docs/agent/index.md`](docs/agent/index.md) | Agent guidance bundle: constraints, testing, security, operations |
+| [`docs/agent/testing.md`](docs/agent/testing.md) | Test baseline, E2E requirements, pre-submit checklist |
 | [`docs/design/topology.md`](docs/design/topology.md) | Project topology, crate DAG, runtime architecture |
+| [`docs/design/AGENT_INTEGRATION.md`](docs/design/AGENT_INTEGRATION.md) | Agent integration surfaces: Skill / MCP Bridge / DSH plugin evaluation |
 | [`docs/KNOWN_ISSUES.md`](docs/KNOWN_ISSUES.md) | Authoritative defect register and verification facts |
 | [`docs/plans/`](docs/plans/) | Implementation plans and situation reports |
 | [`scripts/cloud-deploy.sh`](scripts/cloud-deploy.sh) | Automated cloud deployment |

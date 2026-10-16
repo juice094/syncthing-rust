@@ -9,18 +9,32 @@
 - **TUI Add Folder silently dropped**: `submit_add_folder` built the `Folder` but never pushed it into the config. Folder additions via TUI (`a`/`Ins` on Folders tab) now persist and hot-reload into the running daemon. Stale share selections from a previous Edit Folder no longer leak into new folders.
 - **`set_block_source` after `add_folder` had no effect**: `FolderModel` captured `block_source` only at creation, so pulls failed with "No block source configured". `Puller` now holds the source behind a lock and `SyncService::set_block_source` propagates to all existing folder models.
 - **Config changes now trigger session renegotiation**: `update_config`/`add_device`/`remove_device`/`add_folder`/`remove_folder` fire a renegotiation hook with the connected device list; the daemon reconnects those devices so ClusterConfig is re-exchanged (matching Go Syncthing behavior). `syncthing-sync` stays network-free via the injected hook.
+- **Spurious remote deletion of in-flight files** (found 2026-10-16, data-loss adjacent): a peer's watcher-triggered subtree scan could infer a deletion for a file whose blocks were still being pulled — `mark_deleted_subtree()` saw a DB record (written by the remote index) with no file on disk, marked it deleted with a *fresh* version vector, and broadcast it. The peer holding the higher version then moved its only copy into `.sttrash`, and the file never synced. `FolderModel::scan_incremental()` now disables subtree delete inference while a pull is in flight (`pending_pulls` non-empty or status `Pulling`); watcher-reported explicit delete events and idle-folder scans still infer deletions. Regression test: `folder_model::tests::test_incremental_scan_skips_delete_inference_while_pulling` (with an idle positive control).
+- **`.stignore` directory rules did not apply to watcher incremental paths**: `IgnoreMatcher::matches` only honoured `dir/` rules when `is_dir=true`, so edits inside ignored directories were still indexed and synced (a privacy leak). Added `is_ignored_with_ancestors()` (walks ancestor directories) and used it for `scan_changed_file` and sub-scan roots; full scans keep directory pruning.
+- **Failed pulls were not retried until the next index event**: `FolderModel::start_pull_loop` now retries early with a bounded exponential backoff (`PULL_RETRY_BACKOFF_INIT_MS` 500 ms, doubling up to `PULL_RETRY_BACKOFF_MAX_MS` = the 10 s period, reset on success) when a pull round reports `files_failed > 0`; correctness stays with `check_needed_files()` re-deriving the needed set from DB/FS.
+
+### Added
+- **MCP Bridge toolset 11 → 19**: `get_health`, `get_metrics`, `get_db_status`, `browse_folder`, `get_file`, `pause_folder`, `resume_folder`, `poll_events`. Optional `SYNCTHING_API_KEY` is forwarded as `X-API-Key`; folder/file values are percent-encoded. The tool catalog moved to `src/tools.rs` to respect the 600-line soft cap, and `tests/mcp_bridge.rs` drives the real binary against an in-process stub HTTP server (no HTTP framework dependency).
+- **`TestNode` readiness primitives**: `wait_for_cluster_config()` / `wait_for_folder_ready()`, backed by a `SessionReadiness` event pump over `BepSessionEvent::ClusterConfigComplete` — replaces fixed sleeps in E2E setup (connection established ≠ BEP session ready).
+- **`scripts/agent-facts.ps1`**: read-only export of drift-prone facts (version, ports, MCP tool count, CI job list, production files over 600 lines) straight from their single sources of truth.
+- **`docs/design/AGENT_INTEGRATION.md`**: the Skill / MCP / DSH integration surfaces, including the DSH plugin feasibility conclusion.
 
 ### Changed
+- **Top-level docs restructured for production use**: `AGENTS.md` and `CLAUDE.md` are now short entry pages holding only red lines and navigation; detailed rules live in `docs/agent/`. Baseline numbers (test counts, CI job counts) are no longer duplicated across files — `docs/agent/testing.md` is the single source of truth and the hardcoded test-count README badge was dropped.
+- **E2E block-request retry timeout shortened** in the test harness (`TestBlockSource`: 10 s → 5 s per attempt) so retries re-acquire a live connection faster under session churn.
 - **Single source of truth for versions**: root `Cargo.toml` `[workspace.package] version = "3.0.4"`; all 14 member crates inherit via `version.workspace = true`.
 - **Removed stale `acceptance-tests/` package**: referenced long-removed APIs (e.g. `IrohDiscovery`); coverage superseded by `cmd/syncthing/tests/e2e_*` and `syncthing-net` discovery unit tests.
 - **Removed stray git tags `main` and `latest`** (broke `git push origin main` refspec resolution).
 
 ### Docs
 - Archived 7 completed/superseded files from `docs/plans/` to `docs/archive/plans/`; `docs/plans/` now holds only 3 active plans + the audit report, with a rewritten `INDEX.md`.
+- Registered [`KNOWN_ISSUES.md §24`](docs/KNOWN_ISSUES.md) (the CI `e2e-test` job runs zero assertions because its only case is `#[ignore]`d) and refreshed §23 with the 2026-10-16 evidence and this round's mitigations.
+- Rewrote `.agents/skills/bep-protocol/SKILL.md` (it still described v0.2.8 Alpha): it now points at the authoritative docs instead of restating drifting numbers.
 
 ### Stats
-- **Tests**: 433 passed / 6 ignored / 0 failed (+41 vs v3.0.4 baseline 392)
+- **Tests**: 452 passed / 7 ignored / 0 failed (+60 vs v3.0.4 baseline 392; 2026-10-16 实测, `cargo test --workspace`)
 - **Clippy**: 0 warnings
+- **cargo deny / cargo audit**: 通过（3 项上游 unmaintained 传递依赖按 `.cargo/audit.toml` 显式接受）
 - **Interop**: syncthing-rust ↔ official Go Syncthing v2.1.1 verified on loopback (2026-07-21): handshake, bidirectional file sync, 1 MiB multi-block transfer with identical SHA-256
 
 ## [3.0.4] — 2026-06-27

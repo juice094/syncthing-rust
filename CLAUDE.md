@@ -1,107 +1,40 @@
 # CLAUDE.md
 
-This file provides quick guidance to Claude Code (claude.ai/code) when working with code in this repository.
-
-> **Detailed reference** (build commands, feature flags, daemon lifecycle, CLI commands, TUI bindings, REST APIs) lives in [`docs/agent/claude_reference.md`](docs/agent/claude_reference.md).  
-> **Canonical Agent constraints** (crate boundaries, forbidden items, testing requirements, security, operations) live in [`docs/agent/`](docs/agent/index.md).  
-> **Project topology and architecture** live in [`docs/design/topology.md`](docs/design/topology.md).
+> Claude Code 专用入口。**完整约束以 [`AGENTS.md`](AGENTS.md) 与 [`docs/agent/`](docs/agent/index.md) 为准**，
+> 本文件只做 Claude 侧的使用提示与导航。
 
 ---
 
-## Project Identity
+## 项目一句话
 
-`syncthing-rust` is a Rust reimplementation of the Syncthing BEP protocol for P2P file sync — zero runtime deps, single static binary, wire-compatible with Go Syncthing. Currently **v3.0.4** (security-hardened), deployed on ROG-X (Windows 11) ↔ Gray-Cloud (Ubuntu 24.04) via self-hosted relay (replacing Tailscale).
+`syncthing-rust` 是 Syncthing BEP 协议的 Rust 实现（v3.0.4，Production 阶段，安全加固）：零运行时依赖、单静态二进制、与 Go 版 Syncthing 线格式互通。日常部署在 ROG-X（Windows 11）↔ Gray-Cloud（Ubuntu 24.04），以自建 Relay 替代 Tailscale。
 
 ---
 
-## Build & Test (Pre-Submit)
+## 动手前
+
+1. 读 [`AGENTS.md`](AGENTS.md) 的「硬红线」与「常见陷阱」两节。
+2. 改网络层 / 协议层前读 [`docs/agent/constraints.md`](docs/agent/constraints.md)；改安全相关路径前读 [`docs/agent/security.md`](docs/agent/security.md)。
+3. 任何"已修复 / 已知问题"的判断以 [`docs/KNOWN_ISSUES.md`](docs/KNOWN_ISSUES.md) 为准（它是权威台账；新缺陷必须登记）。
+
+## 提交前
 
 ```bash
-cargo fmt --all
-cargo clippy --workspace --all-targets -- -D warnings
-cargo test --workspace          # 413 passed / 3 ignored / 0 failed
-cargo audit
+cargo fmt --all -- --check
+cargo clippy --workspace --all-targets -- -D warnings -W clippy::await_holding_lock
+cargo test --workspace
+cargo doc --no-deps --workspace
+cargo deny check all
 ```
 
-Release builds:
-- Windows desktop (tray): `cargo build --release --bin syncthing --features tray`
-- Headless/server: `cargo build --release --bin syncthing --no-default-features`
+基线数值、E2E 双实例要求与偶发用例说明见 [`docs/agent/testing.md`](docs/agent/testing.md)。
 
-See [`docs/agent/claude_reference.md`](docs/agent/claude_reference.md) for full build matrix, feature flags, and cross-compilation.
+## 导航
 
----
-
-## Architecture at a Glance
-
-```
-cmd/syncthing
-  ├─ syncthing-api
-  ├─ syncthing-net
-  ├─ syncthing-sync (consumes syncthing-db, syncthing-fs internally)
-  ├─ syncthing-core   # types & traits only — no internal deps
-  ├─ syncthing-versioner
-  ├─ bep-protocol
-  └─ syncthing-test-utils
-```
-
-Full DAG, runtime components, and key entry points: [`docs/design/topology.md`](docs/design/topology.md).
-
----
-
-## Hard Rules
-
-- No `unwrap()` / `expect()` in production paths.
-- No breaking-change dependency upgrades just to silence cargo audit.
-- No sled-specific APIs exposed from `syncthing-db`.
-- No QUIC / MagicSocket / Web GUI / consensus / reputation / custom crypto.
-- Network-layer changes must be validated with dual `TestNode` instances.
-- New end-to-end behavior needs integration or E2E tests, not just `#[cfg(test)]` unit tests.
-- **Security**: All remote file names must pass `validate_remote_name()` (path traversal defense).
-- **Security**: Outbound addresses must pass `validate_outbound_addr()` (SSRF defense).
-- **Connection limits**: `Config.max_connections` is enforced at accept time.
-
-Full constraints: [`docs/agent/constraints.md`](docs/agent/constraints.md).
-
----
-
-## Daemon Lifecycle
-
-1. `tui::daemon_runner::start_daemon()` — TLS, ConnectionManager, SyncService, discovery
-2. `api_server::start_api_server()` — binds REST API from `config.gui.address` (default `127.0.0.1:8385`)
-3. `startup.future.await` — main event loop
-4. Shutdown via `watch::Sender<bool>` (Ctrl+C, ConsoleCtrlEvent, `POST /rest/system/shutdown`)
-
-Details: [`docs/agent/claude_reference.md`](docs/agent/claude_reference.md).
-
----
-
-## Quick CLI / TUI / API
-
-```bash
-syncthing run [--log-format json]  # daemon (JSON logging for ELK/Splunk)
-syncthing tui                      # TUI client
-syncthing init                     # interactive config wizard
-syncthing status [--json]          # query daemon status
-syncthing relay-server             # self-hosted relay (replaces Tailscale)
-```
-
-Default ports: BEP `22000`, REST API `8385` (loopback-only), Relay Protocol `22067`, Relay Session `22068`.
-
-TUI keys: `F5` toggle daemon, `Tab`/`←→` switch tabs, `q` quit, `?` help, `a/e/d` add/edit/delete.
-
-REST highlights: `GET /rest/health` (deep checks), `GET /metrics` (Prometheus), `GET /rest/system/status`, `POST /rest/system/shutdown`.
-RBAC: `config.gui.api_key` (admin), `config.gui.ro_api_key` (read-only, GET/HEAD only).
-
-Full reference: [`docs/agent/claude_reference.md`](docs/agent/claude_reference.md).
-
----
-
-## Facts Register
-
-`docs/KNOWN_ISSUES.md` is the authoritative project-wide bug tracker. It takes precedence over handoffs and NEXT_STEPS documents when verifying claims. New defects must be registered there.
-
-For operational constraints and checklists, also consult [`docs/agent/`](docs/agent/index.md).
-
----
-
-*Last updated: 2026-06-27 (v3.0.4: security hardening, relay server, JSON logging, RBAC).*
+| 需求 | 入口 |
+|:---|:---|
+| 构建矩阵、feature flag、跨平台编译 | [`docs/agent/claude_reference.md`](docs/agent/claude_reference.md) |
+| daemon 生命周期、进程内组件接线 | [`docs/design/topology.md`](docs/design/topology.md) |
+| CLI 命令 / TUI 按键 / REST 路由全表 | [`docs/agent/claude_reference.md`](docs/agent/claude_reference.md) |
+| 构建产物、部署与灾备恢复、CI/CD | [`docs/agent/operations.md`](docs/agent/operations.md) |
+| BEP 协议 Agent 技能（命令速查、消息表、MCP Bridge） | [`.agents/skills/bep-protocol/SKILL.md`](.agents/skills/bep-protocol/SKILL.md) |
