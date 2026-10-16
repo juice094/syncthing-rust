@@ -10,7 +10,6 @@
 
 [![Rust](https://img.shields.io/badge/rust-1.85%2B-orange?logo=rust)](https://www.rust-lang.org)
 [![CI](https://github.com/juice094/syncthing-rust/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/juice094/syncthing-rust/actions/workflows/ci.yml)
-[![Tests](https://img.shields.io/badge/tests-413%20passed-brightgreen)](https://github.com/juice094/syncthing-rust/actions)
 [![Version](https://img.shields.io/badge/version-v3.0.4-blue)](https://github.com/juice094/syncthing-rust)
 [![License](https://img.shields.io/badge/license-MIT%20%2B%20Commercial-blue)](./LICENSE)
 
@@ -22,7 +21,7 @@
 
 [Syncthing](https://syncthing.net/) 协议栈的 Rust 实现，目标为**零运行时依赖**部署，与官方 Go Syncthing 守护进程线路兼容互操作。
 
-**当前阶段（v3.0.4）**：Production — 413 passed / 3 ignored / 0 failures，安全加固 + Relay Server v1 + RBAC + JSON 日志。
+**当前阶段（v3.0.4）**：Production — 安全加固 + Relay Server v1 + RBAC + JSON 日志。测试基线数值不在此手抄，见 [`docs/agent/testing.md`](docs/agent/testing.md)（唯一事实源）与 [CI 状态](https://github.com/juice094/syncthing-rust/actions)。
 
 - ✅ 连接层：retry 累加、TCP keepalive
 - ✅ 协议层：prost 编解码 + LZ4 压缩、wire_compat 10 tests
@@ -52,7 +51,7 @@
 |:---|:---|
 | BEP 协议（TLS + Hello + ClusterConfig + Index + Request/Response） | ✅ prost + LZ4 |
 | 端到端文件同步（双向） | ✅ Push/Pull 双向验证 |
-| 文件同步核心（puller / scanner / folder_model / orchestrator） | ✅ 413 tests / 0 failed |
+| 文件同步核心（puller / scanner / folder_model / orchestrator） | ✅ 见 [测试基线](docs/agent/testing.md) |
 | 版本控制 | ✅ Simple + Staggered |
 | 连接稳定性 | ✅ retry 累加 + TCP keepalive |
 | Rust↔Rust 双向互通 | ✅ v3.0.4 ↔ v3.0.3 E2E 验证 |
@@ -66,6 +65,7 @@
 | 结构化 JSON 日志 | ✅ `--log-format json` |
 | Prometheus 指标 | ✅ `/metrics` 端点 |
 | Docker & Compose 部署 | ✅ Dockerfile + relay compose + Grafana |
+| MCP Bridge（AI Agent 接入） | ✅ 19 工具 + 3 资源（见 [`docs/design/AGENT_INTEGRATION.md`](docs/design/AGENT_INTEGRATION.md)） |
 | Symlink 同步 | 🔲 未实现（未来规划） |
 | Web GUI | ❌ 无（TUI + 托盘 + CLI + REST API，见 AGENTS.md 冻结声明） |
 
@@ -101,25 +101,33 @@ cargo run --release -- relay-server --listen :22067 --tls-cert cert.pem --tls-ke
 
 ```
 syncthing-rust/
-├── cmd/syncthing/          # CLI 入口 + TUI 主循环 + 守护进程
+├── cmd/
+│   ├── syncthing/            # CLI 入口 + TUI 主循环 + 守护进程 + 托盘
+│   ├── syncthing-cli/        # 独立 CLI（status / show-id / generate-cert）
+│   ├── syncthing-bench/      # 同步基准测试
+│   ├── syncthing-mcp-bridge/ # MCP Bridge（stdio JSON-RPC → REST）
+│   ├── syncthing-tray/       # Windows 托盘薄 wrapper
+│   └── syncthing-monitor/    # 监控工具（含 stress 辅助 bin）
 ├── crates/
-│   ├── syncthing-core/     # 核心类型（只读给下游）
-│   ├── bep-protocol/       # BEP 编解码（prost）+ 握手
-│   ├── syncthing-net/      # TCP+TLS, ConnectionManager, 发现, Relay
-│   ├── syncthing-sync/     # Scanner, Puller, IndexHandler, watcher
-│   ├── syncthing-fs/       # 文件系统抽象（ignore, scanner）
-│   ├── syncthing-api/      # REST API（Axum）
-│   ├── syncthing-db/       # 元数据存储
-│   └── syncthing-versioner/# 版本控制（Simple + Staggered）
-├── deploy/                 # Docker、compose、nginx、Grafana 仪表板
-├── docs/                   # 设计文档、计划、报告
-└── scripts/                # 健康检查、cloud-deploy、压力测试
+│   ├── syncthing-core/       # 核心类型与 trait（只读给下游）
+│   ├── bep-protocol/         # BEP 编解码（prost）+ 握手
+│   ├── syncthing-net/        # TCP+TLS, ConnectionManager, 发现, Relay
+│   ├── syncthing-sync/       # Scanner, Puller, IndexHandler, watcher
+│   ├── syncthing-fs/         # 文件系统抽象（ignore, scanner）
+│   ├── syncthing-api/        # REST API（Axum）+ 事件总线
+│   ├── syncthing-db/         # 元数据存储（sled-backed）
+│   ├── syncthing-versioner/  # 版本控制（Simple + Staggered）
+│   └── syncthing-test-utils/ # TestNode / MemoryPipe 等测试辅助
+├── deploy/                   # Docker、compose、nginx、Grafana 仪表板
+├── docs/                     # 设计文档、Agent 指引、计划、报告
+├── scripts/                  # 健康检查、cloud-deploy、压力测试
+└── .agents/skills/           # 仓库内 Agent 技能（bep-protocol）
 ```
 
 ### 完整架构
 
 - 项目拓扑与运行时架构：[`docs/design/topology.md`](docs/design/topology.md)
-- Agent 开发约束与代码规范：[`docs/agent/constraints.md`](docs/agent/constraints.md)
+- Agent 开发约束与代码规范：[`docs/agent/index.md`](docs/agent/index.md)
 
 ---
 
@@ -129,9 +137,11 @@ syncthing-rust/
 |:---|:---|
 | [`docs/design/topology.md`](docs/design/topology.md) | 项目拓扑、crate 依赖图、运行时组件、关键入口 |
 | [`docs/agent/index.md`](docs/agent/index.md) | Agent 开发指南总览（约束、测试、安全、运维） |
-| [`docs/agent/constraints.md`](docs/agent/constraints.md) | Crate 边界红线、禁止事项、代码规范 |
+| [`docs/design/AGENT_INTEGRATION.md`](docs/design/AGENT_INTEGRATION.md) | Agent 集成面：Skill / MCP Bridge / DSH 插件评估 |
 | [`docs/KNOWN_ISSUES.md`](docs/KNOWN_ISSUES.md) | 权威缺陷登记与事实核查 |
 | [`docs/plans/INDEX.md`](docs/plans/INDEX.md) | 路线图与计划索引 |
+| [`docs/agent/testing.md`](docs/agent/testing.md) | 测试基线与提交前检查清单（数值唯一事实源） |
+| [`.agents/skills/bep-protocol/SKILL.md`](.agents/skills/bep-protocol/SKILL.md) | 仓库内 BEP 协议 Agent 技能 |
 
 ---
 

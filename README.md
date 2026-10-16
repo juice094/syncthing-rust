@@ -10,7 +10,6 @@ Zero runtime dependencies · Wire-compatible with Go Syncthing · Single static 
 
 [![Rust](https://img.shields.io/badge/rust-1.85%2B-orange?logo=rust)](https://www.rust-lang.org)
 [![CI](https://github.com/juice094/syncthing-rust/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/juice094/syncthing-rust/actions/workflows/ci.yml)
-[![Tests](https://img.shields.io/badge/tests-413%20passed-brightgreen)](https://github.com/juice094/syncthing-rust/actions)
 [![Version](https://img.shields.io/badge/version-v3.0.4-blue)](https://github.com/juice094/syncthing-rust)
 [![License](https://img.shields.io/badge/license-MIT%20%2B%20Commercial-blue)](./LICENSE)
 
@@ -63,6 +62,7 @@ A Rust implementation of the [Syncthing](https://syncthing.net/) BEP protocol �
 | 📜 **Structured JSON Logging** | `--log-format json` for ELK/Splunk/Loki aggregation |
 | 📊 **Prometheus Metrics** | `/metrics` endpoint with build/uptime/connection/folder stats |
 | 🐳 **Docker & Compose** | Multi-stage Dockerfile + relay compose stack + Grafana dashboard |
+| 🤖 **MCP Bridge** | 19 tools + 3 resources for AI agents (see [`docs/design/AGENT_INTEGRATION.md`](docs/design/AGENT_INTEGRATION.md)) |
 
 ---
 
@@ -88,25 +88,33 @@ A Rust implementation of the [Syncthing](https://syncthing.net/) BEP protocol �
 
 ```
 syncthing-rust/
-├── cmd/syncthing/          # CLI entrypoint + TUI + daemon runner + tray
+├── cmd/
+│   ├── syncthing/          # CLI entrypoint + TUI + daemon runner + tray
+│   ├── syncthing-cli/      # Standalone CLI (status / show-id / generate-cert)
+│   ├── syncthing-bench/    # Sync benchmarks
+│   ├── syncthing-mcp-bridge/  # MCP Bridge (stdio JSON-RPC -> REST)
+│   ├── syncthing-tray/     # Windows tray thin wrapper
+│   └── syncthing-monitor/  # Monitor tool (plus stress helper binaries)
 ├── crates/
 │   ├── syncthing-core/     # Core types (DeviceId, FileInfo, VersionVector)
 │   ├── bep-protocol/       # BEP codec (prost) + handshake
 │   ├── syncthing-net/      # TCP+TLS, ConnectionManager, dial, discovery, Relay
 │   ├── syncthing-sync/     # Scanner, Puller, IndexHandler, watcher
 │   ├── syncthing-fs/       # Filesystem abstraction (ignore, scanner, watcher)
-│   ├── syncthing-api/      # REST API (Axum, Go-layout compatible)
-│   ├── syncthing-db/       # Metadata and block cache
-│   └── syncthing-versioner/# File versioning (Simple + Staggered)
+│   ├── syncthing-api/      # REST API (Axum, Go-layout compatible) + event bus
+│   ├── syncthing-db/       # Metadata and block cache (sled-backed)
+│   ├── syncthing-versioner/# File versioning (Simple + Staggered)
+│   └── syncthing-test-utils/# TestNode / MemoryPipe test harnesses
 ├── deploy/                 # Docker, compose, nginx, Grafana dashboard
-├── docs/                   # Design docs, plans, reports
-└── scripts/                # Health checks, cloud-deploy, stress tests
+├── docs/                   # Design docs, agent guidance, plans, reports
+├── scripts/                # Health checks, cloud-deploy, stress tests
+└── .agents/skills/         # In-repo agent skills (bep-protocol)
 ```
 
 ### Full Architecture
 
 - Project topology and runtime architecture: [`docs/design/topology.md`](docs/design/topology.md)
-- Agent development constraints and coding standards: [`docs/agent/constraints.md`](docs/agent/constraints.md)
+- Agent development constraints and coding standards: [`docs/agent/index.md`](docs/agent/index.md)
 
 ---
 
