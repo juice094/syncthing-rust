@@ -45,35 +45,13 @@ async fn dir_present(base: &std::path::Path, name: &str) -> bool {
     base.join(name).is_dir()
 }
 
-/// §1 ClusterConfig 竞态 workaround：显式断连后重拨（与 `e2e_sync` 的既有做法一致）。
-///
-/// `connect_to` 在已连接时直接返回 `Ok(())`，因此必须先 `disconnect`。
-async fn reconnect_pair(node_a: &TestNode, node_b: &TestNode) {
-    let _ = node_a
-        .connection_handle
-        .disconnect(&node_b.device_id, "retry")
-        .await;
-    let _ = node_b
-        .connection_handle
-        .disconnect(&node_a.device_id, "retry")
-        .await;
-    tokio::time::sleep(Duration::from_millis(500)).await;
-    let _ = node_a.connect_to(node_b).await;
-    let _ = node_b.connect_to(node_a).await;
-    let _ = node_a
-        .wait_for_connection(node_b.device_id, Duration::from_secs(10))
-        .await;
-    let _ = node_b
-        .wait_for_connection(node_a.device_id, Duration::from_secs(10))
-        .await;
-}
-
 /// 轮询 `check` 直到为真或超时。
 ///
-/// 已知 §1 ClusterConfig 竞态会让首个 BepSession 停滞，此时 `scan_folder` 触发的
-/// `LocalIndexUpdated` 会在 `bep_bridge` 中因「无连接」被静默丢弃且不重发。
-/// 因此停滞 25s 后按既有 workaround 断连重拨一次；超时会打印双方已连接设备清单，
-/// 供下一轮迭代定位丢包环节（是根本没送出，还是送出后未被接收端消费）。
+/// 超时会打印双方已连接设备清单，供下一轮迭代定位丢包环节。
+///
+/// 注意：这里**不做断连重拨**。实测中在 25s 触发重连会短暂造成「无连接」窗口，
+/// 反而让正在进行的块请求失败（`no connection ... after 3 attempts`），而块请求
+/// 自身已在 `bep_bridge` 中带重试。保持连接不动，只等 + 诊断。
 async fn wait_synced<F, Fut>(
     node_a: &TestNode,
     node_b: &TestNode,
@@ -86,19 +64,9 @@ where
     Fut: std::future::Future<Output = bool>,
 {
     let start = std::time::Instant::now();
-    let mut retried = false;
     while start.elapsed() < timeout {
         if check().await {
             return true;
-        }
-        if !retried && start.elapsed() > Duration::from_secs(25) {
-            tracing::warn!(
-                "[e2e_crud] '{}' 停滞 {}s，按 §1 workaround 重连",
-                what,
-                start.elapsed().as_secs()
-            );
-            reconnect_pair(node_a, node_b).await;
-            retried = true;
         }
         tokio::time::sleep(Duration::from_millis(200)).await;
     }
