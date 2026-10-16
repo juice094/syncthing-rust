@@ -118,6 +118,115 @@ async fn test_pull_notify_wakeup() {
     handle.await.unwrap();
 }
 
+/// 验证失败退避：首次为 INIT_MS，逐次翻倍，封顶于 MAX_MS
+#[test]
+fn test_next_pull_backoff_doubles_and_caps() {
+    use std::time::Duration;
+
+    let init = Duration::from_millis(syncthing_core::constants::PULL_RETRY_BACKOFF_INIT_MS);
+    let max = Duration::from_millis(syncthing_core::constants::PULL_RETRY_BACKOFF_MAX_MS);
+
+    let first = FolderModel::next_pull_backoff(Duration::ZERO);
+    assert_eq!(first, init, "first retry must use the initial backoff");
+
+    let second = FolderModel::next_pull_backoff(first);
+    assert_eq!(second, init * 2, "backoff must double on repeated failures");
+
+    let mut backoff = FolderModel::next_pull_backoff(second);
+    assert_eq!(backoff, init * 4);
+    for _ in 0..10 {
+        backoff = FolderModel::next_pull_backoff(backoff);
+        assert!(
+            backoff <= max,
+            "backoff must never exceed the cap: {backoff:?}"
+        );
+    }
+    assert_eq!(backoff, max, "backoff must converge to the cap");
+}
+
+/// 构造一条「远程索引已写入 DB、但块尚未落盘」的文件记录。
+fn remote_indexed_file(name: &str, size: usize) -> FileInfo {
+    FileInfo {
+        name: name.to_string(),
+        file_type: syncthing_core::types::FileType::File,
+        size: size as i64,
+        permissions: 0o644,
+        modified_s: 0,
+        modified_ns: 0,
+        version: syncthing_core::types::Vector::new(),
+        sequence: 1,
+        block_size: size as i32,
+        blocks: vec![BlockInfo {
+            size: size as i32,
+            hash: vec![0u8; 32],
+            offset: 0,
+        }],
+        symlink_target: None,
+        deleted: Some(false),
+        modified_by: None,
+        blocks_hash: None,
+        no_permissions: None,
+        base_version: None,
+    }
+}
+
+/// 拉取在途时，watcher 触发的子树扫描**不得**把「DB 有记录但尚未落盘」的文件推断为删除。
+///
+/// 回归自 2026-10-16 e2e_crud `kept/public.txt` 实测链路：pull 创建 `kept` 目录 →
+/// watcher 触发该子树扫描 → `mark_deleted_subtree` 把在途文件标记删除并以新版本广播 →
+/// 源端版本更低故把唯一副本移入 `.sttrash`，文件从此再也同步不过去。
+#[tokio::test]
+async fn test_incremental_scan_skips_delete_inference_while_pulling() {
+    let db = MemoryDatabase::new();
+    let events = EventPublisher::new(10);
+    let temp_dir = tempfile::tempdir().unwrap();
+    let folder_path = temp_dir.path().to_path_buf();
+    let folder = Folder::new("pull-guard", folder_path.to_str().unwrap());
+
+    // 对端索引已写入 DB：kept/public.txt 存在，但磁盘上只有空的 kept/ 目录（块在途）
+    db.update_file(&folder.id, remote_indexed_file("kept/public.txt", 6))
+        .await
+        .unwrap();
+    tokio::fs::create_dir(folder_path.join("kept"))
+        .await
+        .unwrap();
+
+    let model = FolderModel::new(folder.clone(), db.clone(), events, None, 1);
+
+    // 场景 1：拉取在途（status = Pulling）→ 不做删除推断
+    model.state.write().await.status = FolderStatus::Pulling;
+    let files = model
+        .scan_incremental(vec!["kept".to_string()], vec![])
+        .await
+        .unwrap();
+    assert!(
+        !files.iter().any(|f| f.name == "kept/public.txt"),
+        "in-flight pull: must not infer deletion for a not-yet-materialized file, got {:?}",
+        files
+            .iter()
+            .map(|f| (&f.name, f.is_deleted()))
+            .collect::<Vec<_>>()
+    );
+    let db_file = db.get_file(&folder.id, "kept/public.txt").await.unwrap();
+    assert!(
+        db_file.map(|f| !f.is_deleted()).unwrap_or(false),
+        "DB record must stay non-deleted after a guarded scan"
+    );
+
+    // 场景 2（阳性对照）：无在途拉取 → 仍能推断出真实删除
+    model.state.write().await.status = FolderStatus::Idle;
+    let files = model
+        .scan_incremental(vec!["kept".to_string()], vec![])
+        .await
+        .unwrap();
+    let deleted = files.iter().find(|f| f.name == "kept/public.txt");
+    assert!(
+        deleted.map(|f| f.is_deleted()).unwrap_or(false),
+        "idle folder: missing DB file under the subtree must still be inferred as deleted, got {:?}",
+        files.iter().map(|f| (&f.name, f.is_deleted())).collect::<Vec<_>>()
+    );
+}
+
 /// 验证增量扫描能只发现新增文件，而不重新全量扫描
 #[tokio::test]
 async fn test_scan_incremental_new_file() {

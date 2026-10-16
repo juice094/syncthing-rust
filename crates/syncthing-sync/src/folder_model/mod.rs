@@ -7,7 +7,7 @@ use crate::error::Result;
 use crate::events::{EventPublisher, SyncEvent};
 use crate::model::FolderState;
 use crate::orchestrator::FolderOrchestrator;
-use crate::puller::{BlockSource, ConcurrencyPolicy, Puller};
+use crate::puller::{BlockSource, ConcurrencyPolicy, PullStats, Puller};
 use crate::scanner::Scanner;
 use crate::watcher::FolderWatcher;
 use dashmap::DashSet;
@@ -310,32 +310,26 @@ impl FolderModel {
     pub async fn start_pull_loop(&self, mut shutdown: tokio::sync::watch::Receiver<bool>) {
         info!(folder_id = %self.folder.id, "Starting pull loop");
 
-        let mut interval = tokio::time::interval(Duration::from_secs(10));
+        let mut interval = tokio::time::interval(Duration::from_secs(
+            syncthing_core::constants::PULL_INTERVAL_SECS,
+        ));
+        // 失败退避：本轮出现文件级失败时提前重试，逐次翻倍并封顶于周期长度。
+        // 失败文件不需要另行登记——`check_needed_files` 依据本地 DB/FS 差异重新推导，
+        // 此处的退避只影响重试**时延**（见 docs/KNOWN_ISSUES.md §23）。
+        let mut backoff = Duration::ZERO;
 
         loop {
             tokio::select! {
-                _ = interval.tick() => {
-                    let orchestrator = self.orchestrator.read().ok().and_then(|g| g.clone());
-                    let _permit = if let Some(ref orch) = orchestrator {
-                        Some(orch.clone().begin_pull(&self.folder.id).await)
-                    } else {
-                        None
-                    };
-                    if let Err(e) = self.pull().await {
-                        error!(folder_id = %self.folder.id, error = %e, "Pull failed");
-                    }
-                }
+                _ = interval.tick() => {}
                 _ = self.pull_notify.notified() => {
                     trace!(folder_id = %self.folder.id, "Pull triggered by remote index");
-                    let orchestrator = self.orchestrator.read().ok().and_then(|g| g.clone());
-                    let _permit = if let Some(ref orch) = orchestrator {
-                        Some(orch.clone().begin_pull(&self.folder.id).await)
-                    } else {
-                        None
-                    };
-                    if let Err(e) = self.pull().await {
-                        error!(folder_id = %self.folder.id, error = %e, "Pull failed");
-                    }
+                }
+                _ = tokio::time::sleep(backoff), if !backoff.is_zero() => {
+                    debug!(
+                        folder_id = %self.folder.id,
+                        backoff_ms = backoff.as_millis() as u64,
+                        "Retrying pull after previous failures"
+                    );
                 }
                 _ = shutdown.changed() => {
                     if *shutdown.borrow() {
@@ -344,6 +338,42 @@ impl FolderModel {
                     }
                 }
             }
+
+            let orchestrator = self.orchestrator.read().ok().and_then(|g| g.clone());
+            let _permit = if let Some(ref orch) = orchestrator {
+                Some(orch.clone().begin_pull(&self.folder.id).await)
+            } else {
+                None
+            };
+
+            backoff = match self.pull().await {
+                Ok(stats) if stats.files_failed > 0 => {
+                    let next = Self::next_pull_backoff(backoff);
+                    warn!(
+                        folder_id = %self.folder.id,
+                        failed = stats.files_failed,
+                        next_retry_ms = next.as_millis() as u64,
+                        "Pull had failures; scheduling backoff retry"
+                    );
+                    next
+                }
+                Ok(_) => Duration::ZERO,
+                Err(e) => {
+                    error!(folder_id = %self.folder.id, error = %e, "Pull failed");
+                    Self::next_pull_backoff(backoff)
+                }
+            };
+        }
+    }
+
+    /// 计算下一次失败重试的退避时长：首次为 `PULL_RETRY_BACKOFF_INIT_MS`，之后翻倍，
+    /// 封顶于 `PULL_RETRY_BACKOFF_MAX_MS`。
+    fn next_pull_backoff(current: Duration) -> Duration {
+        let max = Duration::from_millis(syncthing_core::constants::PULL_RETRY_BACKOFF_MAX_MS);
+        if current.is_zero() {
+            Duration::from_millis(syncthing_core::constants::PULL_RETRY_BACKOFF_INIT_MS)
+        } else {
+            (current * 2).min(max)
         }
     }
 
@@ -548,6 +578,26 @@ impl FolderModel {
 
         let mut changed_files = Vec::new();
 
+        // 拉取在途判定：远程索引到达后，DB 记录（index_handler 写入）先于块传输落盘。
+        // 在这个窗口里按「DB 有记录但磁盘无文件」推断删除，会把**正在传输、尚未落地**
+        // 的文件标记为删除，并以新版本广播；对端版本更高 → 源端把唯一副本移入 .sttrash，
+        // 文件从此再也同步不过去（2026-10-16 e2e_crud `kept/public.txt` 实测链路：
+        // pull 创建 `kept` 目录 → watcher 触发该子树扫描 → mark_deleted_subtree 误删）。
+        // 在途判定覆盖两个阶段：pull 唤醒前（pending_pulls 非空）与 pull 执行中（status=Pulling）。
+        let pull_in_flight = {
+            let pending = !self.pending_pulls.read().await.is_empty();
+            let pulling = old_status == FolderStatus::Pulling;
+            pending || pulling
+        };
+        if pull_in_flight {
+            debug!(
+                folder_id = %folder_id,
+                changes = changes.len(),
+                deletes = deletes.len(),
+                "Pull in flight; subtree delete inference disabled for this incremental scan"
+            );
+        }
+
         // 1. 处理变更路径：目录用 scan_sub，单文件用 scan_changed_file
         let base_path = Path::new(&self.folder.path);
         for relative in changes {
@@ -560,7 +610,10 @@ impl FolderModel {
                             error!(folder_id = %folder_id, root = %relative, error = %e, "Incremental scan subtree failed");
                         }
                     }
-                    // 补全子树内删除的文件
+                    // 补全子树内删除的文件（仅在无在途拉取时推断，见 pull_in_flight 注释）
+                    if pull_in_flight {
+                        continue;
+                    }
                     match self
                         .scanner
                         .mark_deleted_subtree(&self.folder, &relative)
@@ -670,15 +723,19 @@ impl FolderModel {
     }
 
     /// 执行拉取
-    pub async fn pull(&self) -> Result<()> {
+    ///
+    /// 返回本轮拉取统计；`files_failed > 0` 表示有文件未成功拉取（失败文件本身
+    /// 不会被就地重试，调用方应据此安排退避重试）。跳过（暂停 / 不可同步 / 已在拉取 /
+    /// 无待拉取文件）时返回全零统计。
+    pub async fn pull(&self) -> Result<PullStats> {
         if self.folder.paused {
             debug!(folder_id = %self.folder.id, "Folder is paused, skipping pull");
-            return Ok(());
+            return Ok(PullStats::default());
         }
 
         if !self.folder.folder_type.can_sync() {
             debug!(folder_id = %self.folder.id, "Folder type cannot sync, skipping pull");
-            return Ok(());
+            return Ok(PullStats::default());
         }
 
         let mut state = self.state.write().await;
@@ -686,7 +743,7 @@ impl FolderModel {
         // 如果已经在拉取中，跳过
         if state.status == FolderStatus::Pulling {
             trace!(folder_id = %self.folder.id, "Already pulling, skipping");
-            return Ok(());
+            return Ok(PullStats::default());
         }
 
         let old_status = state.status;
@@ -745,7 +802,7 @@ impl FolderModel {
                 to: old_status,
             });
 
-            return Ok(());
+            return Ok(PullStats::default());
         }
 
         info!(
@@ -761,7 +818,7 @@ impl FolderModel {
         }
 
         // 执行拉取
-        match self.puller.pull_folder(&self.folder, needed_files).await {
+        let stats = match self.puller.pull_folder(&self.folder, needed_files).await {
             Ok(stats) => {
                 info!(
                     folder_id = %self.folder.id,
@@ -789,6 +846,8 @@ impl FolderModel {
                         ..Default::default()
                     },
                 });
+
+                stats
             }
             Err(e) => {
                 error!(folder_id = %self.folder.id, error = %e, "Pull failed");
@@ -805,9 +864,9 @@ impl FolderModel {
 
                 return Err(e);
             }
-        }
+        };
 
-        Ok(())
+        Ok(stats)
     }
 
     /// 处理远程索引
