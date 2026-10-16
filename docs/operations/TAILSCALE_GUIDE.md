@@ -1,5 +1,7 @@
 ---
 type: guide
+title: Tailscale Deployment Guide
+description: 用 Tailscale 的零配置 NAT 穿透 + WireGuard 加密，让 syncthing-rust 在任意网络环境下开箱即用的部署指南。
 status: active
 project: syncthing-rust
 tags: [ops, deployment, tailscale, vpn]
@@ -216,7 +218,7 @@ syncthing-cli derp-server --listen 0.0.0.0:3478
 "relays": ["derp://my-vps.example.com:3478"]
 ```
 
-属于 v0.3.0 候选范围（参见 [`NEXT_STEPS_2026-05-13.md`](../plans/NEXT_STEPS_2026-05-13.md) 第 5 章）。
+属于 v0.3.0 候选范围（参见 NEXT_STEPS_2026-05-13.md 第 5 章；该计划已归档，见 [`plans/INDEX.md`](../plans/INDEX.md)）。
 
 ---
 

@@ -10,7 +10,7 @@ resource: ./NEXT_STEPS_2026-05-17.md
 
 # 后续任务清单 — 2026-05-17（已归档）
 
-> ⚠️ **已归档**：本文档为 2026-05-17 的历史行动计划。当前后续计划见 [POST_V3_0_3_ROADMAP.md](./POST_V3_0_3_ROADMAP.md)。
+> ⚠️ **已归档**：本文档为 2026-05-17 的历史行动计划。当前后续计划见 [POST_V3_0_3_ROADMAP.md](../../plans/POST_V3_0_3_ROADMAP.md)。
 >
 > 承接 [NEXT_STEPS_2026-05-15.md](./NEXT_STEPS_2026-05-15.md)  
 > 本文档基于 v0.2.9-rc1 维护轮次完成后的状态快照生成。  
@@ -156,8 +156,8 @@ resource: ./NEXT_STEPS_2026-05-17.md
 
 - **当前权威路线图**：本文件
 - **上一版计划**：[NEXT_STEPS_2026-05-15.md](./NEXT_STEPS_2026-05-15.md)
-- **维护轮次 handoff**：[../handoffs/HANDOFF_2026-05-17_TWO_NODE_TEST.md](../handoffs/HANDOFF_2026-05-17_TWO_NODE_TEST.md)
-- **已知缺陷登记**：[../KNOWN_ISSUES.md](../KNOWN_ISSUES.md)
+- **维护轮次 handoff**：[HANDOFF_2026-05-17_TWO_NODE_TEST.md](../../handoffs/HANDOFF_2026-05-17_TWO_NODE_TEST.md)
+- **已知缺陷登记**：[KNOWN_ISSUES.md](../../KNOWN_ISSUES.md)
 - **架构路线图**：[POST_V0_2_0_ROADMAP.md](./POST_V0_2_0_ROADMAP.md)
 
 ---

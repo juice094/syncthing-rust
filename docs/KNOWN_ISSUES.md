@@ -383,7 +383,7 @@ Windows 下 TLS 握手完成后，`is_alive()` 返回 `false`，但底层 TCP �
 | C-UX-4 | 配置验证 + 快速失败 | 启动前检查 device ID、路径、地址格式 |
 | C-UX-5 | 单实例锁 | Windows `CreateMutex` / Unix `pidfile` |
 
-**追踪**：`docs/reports/DUAL_NODE_TEST_2026-05-15.md` §7 / `docs/ENGINEERING_DISCIPLINE.md` §5
+**追踪**：`docs/reports/DUAL_NODE_TEST_2026-05-15.md` §7 / `docs/operations/ENGINEERING_DISCIPLINE.md` §5
 
 ---
 
@@ -847,7 +847,7 @@ v0.2.8 完成首次双节点真实网络环境下的完整文件同步验证。
 
 **2026-10-16 第三轮结论（根治，已落地）**：
 
-- **真凶是「双方同时拨号」，不是连接竞争解决本身**。[`registry.rs`](../../crates/syncthing-net/src/manager/registry.rs)
+- **真凶是「双方同时拨号」，不是连接竞争解决本身**。[`registry.rs`](../crates/syncthing-net/src/manager/registry.rs)
   的 keep-new 判定在双方是对称且正确的（四种注册顺序组合都收敛到同一条物理连接），未改动。
   真正的问题是：竞争解决关掉的那条连接上，BepSession 仍坐在一条「本端 open、对端无人读」的链路上，
   直到 10s ClusterConfig 超时才退出——于是每个用例都要多花 10s，并与块请求的 3×超时叠加冲破 60s 断言窗口。

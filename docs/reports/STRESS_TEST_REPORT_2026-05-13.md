@@ -190,7 +190,7 @@ T-F1 deadlock 修复在工程意义上**已经验证**。继续追求 72h Window
 - 性能 baseline：[`BASELINE_2026-05-12.md`](./BASELINE_2026-05-12.md)
 - 持锁审计：[`LOCK_AWAIT_AUDIT_2026-05-12.md`](./LOCK_AWAIT_AUDIT_2026-05-12.md)
 - 会话归档：[`SESSION_SUMMARY_2026-05-12.md`](./SESSION_SUMMARY_2026-05-12.md)
-- 当前活动计划：[`../plans/NEXT_STEPS_2026-05-13.md`](../plans/NEXT_STEPS_2026-05-13.md)
+- 当前活动计划：[`../plans/INDEX.md`](../plans/INDEX.md)（NEXT_STEPS_2026-05-13.md 已归档，文件未保留）
 
 ---
 
