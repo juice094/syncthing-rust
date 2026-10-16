@@ -185,6 +185,12 @@ impl BlockSource for TestBlockSource {
         block: &syncthing_core::types::BlockInfo,
         block_no: usize,
     ) -> syncthing_sync::Result<Bytes> {
+        // 会话 churn（§1 ClusterConfig 竞态）会把请求发到一个已无会话消费的连接上，
+        // 表现为长时间 "response timeout"；实测同一块在数秒后重试即可成功。
+        // 因此每次重试都重新取连接，而不是一次用到死。
+        const ATTEMPTS: usize = 3;
+        const ATTEMPT_TIMEOUT: Duration = Duration::from_secs(10);
+
         let devices = self.manager.connected_devices();
         if devices.is_empty() {
             return Err(syncthing_sync::SyncError::pull(
@@ -194,73 +200,92 @@ impl BlockSource for TestBlockSource {
         }
         let device_id = devices[0]; // simple: just use first peer for test harness
 
-        let id = self.next_id.fetch_add(1, Ordering::SeqCst);
-        let request = bep_protocol::messages::Request {
-            id,
-            folder: folder.to_string(),
-            name: file.to_string(),
-            offset: block.offset,
-            size: block.size,
-            hash: block.hash.clone(),
-            from_temporary: false,
-            block_no: block_no as i32,
-        };
-        let payload = bep_protocol::messages::encode_message(&request).map_err(|e| {
-            syncthing_sync::SyncError::pull(file.to_string(), format!("encode failed: {}", e))
-        })?;
-
-        let conn = self.manager.get_connection(&device_id).ok_or_else(|| {
-            syncthing_sync::SyncError::pull(
-                file.to_string(),
-                format!("no connection to {}", device_id),
-            )
-        })?;
-
-        let (tx, rx) = oneshot::channel();
-        self.pending_responses.insert(id, tx);
-
-        conn.send_message(MessageType::Request, payload)
-            .await
-            .map_err(|e| {
-                syncthing_sync::SyncError::pull(file.to_string(), format!("send: {}", e))
+        let mut last_error = String::from("no attempt made");
+        for attempt in 0..ATTEMPTS {
+            let id = self.next_id.fetch_add(1, Ordering::SeqCst);
+            let request = bep_protocol::messages::Request {
+                id,
+                folder: folder.to_string(),
+                name: file.to_string(),
+                offset: block.offset,
+                size: block.size,
+                hash: block.hash.clone(),
+                from_temporary: false,
+                block_no: block_no as i32,
+            };
+            let payload = bep_protocol::messages::encode_message(&request).map_err(|e| {
+                syncthing_sync::SyncError::pull(file.to_string(), format!("encode failed: {}", e))
             })?;
 
-        let response = tokio::time::timeout(Duration::from_secs(30), rx)
-            .await
-            .map_err(|_| {
-                syncthing_sync::SyncError::pull(file.to_string(), "response timeout".to_string())
-            })?
-            .map_err(|_| {
-                syncthing_sync::SyncError::pull(
+            let conn = match self.manager.get_connection(&device_id) {
+                Some(conn) => conn,
+                None => {
+                    last_error = format!("no connection to {}", device_id);
+                    tokio::time::sleep(Duration::from_millis(500)).await;
+                    continue;
+                }
+            };
+
+            let (tx, rx) = oneshot::channel();
+            self.pending_responses.insert(id, tx);
+
+            if let Err(e) = conn.send_message(MessageType::Request, payload).await {
+                self.pending_responses.remove(&id);
+                last_error = format!("send: {}", e);
+                tokio::time::sleep(Duration::from_millis(500)).await;
+                continue;
+            }
+
+            let response = match tokio::time::timeout(ATTEMPT_TIMEOUT, rx).await {
+                Ok(Ok(response)) => response,
+                Ok(Err(_)) => {
+                    self.pending_responses.remove(&id);
+                    last_error = "response channel closed".to_string();
+                    tokio::time::sleep(Duration::from_millis(500)).await;
+                    continue;
+                }
+                Err(_) => {
+                    self.pending_responses.remove(&id);
+                    last_error = "response timeout".to_string();
+                    debug!(
+                        "[test-harness] block request for {} (block {}) timed out on attempt {}, retrying",
+                        file, block_no, attempt
+                    );
+                    tokio::time::sleep(Duration::from_millis(500)).await;
+                    continue;
+                }
+            };
+
+            debug!(
+                "Block response from {}: code={} data_len={}",
+                device_id,
+                response.code,
+                response.data.len()
+            );
+
+            if response.code != bep_protocol::messages::ErrorCode::NoError as i32 {
+                return Err(syncthing_sync::SyncError::pull(
                     file.to_string(),
-                    "response channel closed".to_string(),
-                )
-            })?;
-
-        debug!(
-            "Block response from {}: code={} data_len={}",
-            device_id,
-            response.code,
-            response.data.len()
-        );
-
-        if response.code != bep_protocol::messages::ErrorCode::NoError as i32 {
-            return Err(syncthing_sync::SyncError::pull(
-                file.to_string(),
-                format!("remote error code {} from {}", response.code, device_id),
-            ));
+                    format!("remote error code {} from {}", response.code, device_id),
+                ));
+            }
+            if response.data.len() != block.size as usize {
+                return Err(syncthing_sync::SyncError::pull(
+                    file.to_string(),
+                    format!(
+                        "block size mismatch: expected {} got {}",
+                        block.size,
+                        response.data.len()
+                    ),
+                ));
+            }
+            return Ok(Bytes::from(response.data));
         }
-        if response.data.len() != block.size as usize {
-            return Err(syncthing_sync::SyncError::pull(
-                file.to_string(),
-                format!(
-                    "block size mismatch: expected {} got {}",
-                    block.size,
-                    response.data.len()
-                ),
-            ));
-        }
-        Ok(Bytes::from(response.data))
+
+        Err(syncthing_sync::SyncError::pull(
+            file.to_string(),
+            format!("{} (after {} attempts)", last_error, ATTEMPTS),
+        ))
     }
 }
 
