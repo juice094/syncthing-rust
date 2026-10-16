@@ -4,13 +4,13 @@ type: Index
 status: archived
 project: syncthing-rust
 tags: [index, home, moc, syncthing-rust, archived]
-description: 已归档的 Obsidian 风格文档主页。当前 OKF bundle 入口为 docs/README.md。
+description: 已归档的 Obsidian wikilink 导航层（_Home + 各目录 _MOC），2026-10-16 整体移入 docs/archive/obsidian-nav/。当前 OKF bundle 入口为 docs/README.md。
 resource: ./_Home.md
 ---
 
 # syncthing-rust 文档中心（已归档）
 
-> ⚠️ **已归档**：此文件为早期 Obsidian 导航主页，使用 `[[WikiLink]]` 语法，与 OKF / GitHub 渲染不兼容。当前权威入口见 [README.md](README.md)。
+> ⚠️ **已归档**：本目录是早期 Obsidian 导航层（`[[WikiLink]]` 语法，与 GitHub / OKF 渲染不兼容），2026-10-16 整体移入此处仅作历史留存，**不作为当前导航入口**。当前权威入口见 [docs/README.md](../../README.md)。
 
 ---
 
