@@ -22,7 +22,6 @@ use async_trait::async_trait;
 use bytes::Bytes;
 use dashmap::DashMap;
 use tokio::sync::{mpsc, oneshot};
-use tokio::task::JoinHandle;
 use tracing::{debug, info, warn};
 
 use syncthing_core::{DeviceId, DeviceIdentity, SyncthingError};
@@ -367,7 +366,10 @@ pub fn install_bep_bridge(
 ) -> (PendingResponses, SessionReadiness) {
     let pending_responses: PendingResponses = Arc::new(DashMap::new());
     let readiness: SessionReadiness = Arc::new(DashMap::new());
-    let session_handles: Arc<DashMap<DeviceId, JoinHandle<()>>> = Arc::new(DashMap::new());
+    // 设备 → 当前 BepSession 任务的 AbortHandle。用 AbortHandle（而非 JoinHandle）是因为
+    // 同一任务还要被「看护任务」await，以便被中止时也能执行清理。
+    let session_handles: Arc<DashMap<DeviceId, tokio::task::AbortHandle>> =
+        Arc::new(DashMap::new());
 
     // on_connected: spawn BepSession::run()
     let sync_service_c = Arc::clone(sync_service);
@@ -377,59 +379,72 @@ pub fn install_bep_bridge(
     let sessions_c = Arc::clone(&session_handles);
     manager.on_connected(move |device_id| {
         info!("[test-harness] Device connected: {}", device_id);
+
+        // 槽位与连接都**同步**（回调内、无 await）认领：回调之间不会互相覆盖，
+        // 且本会话绑定的一定是「此刻注册在案」的那条连接。若放到 spawn 出来的任务里
+        // 再取连接，可能拿到已被 race resolution 换掉的旧连接（§23 缺陷①③）。
+        let Some(conn) = handle_c.get_connection(&device_id) else {
+            warn!("[test-harness] No connection for {}", device_id);
+            return;
+        };
+        let conn_id = conn.id();
+        if let Some((_, old)) = sessions_c.remove(&device_id) {
+            old.abort();
+        }
+
         let sync_service = Arc::clone(&sync_service_c);
-        let handle = handle_c.clone();
         let pending = Arc::clone(&pending_c);
         let readiness = Arc::clone(&readiness_c);
-        let sessions = Arc::clone(&sessions_c);
-        tokio::spawn(async move {
+
+        let session_task = tokio::spawn(async move {
             if let Err(e) = sync_service.connect_device(device_id).await {
                 warn!("[test-harness] connect_device failed: {}", e);
             }
-            if let Some((_, old)) = sessions.remove(&device_id) {
-                old.abort();
-            }
-            let handle2 = tokio::spawn(async move {
-                let (event_tx, mut event_rx) = mpsc::channel::<BepSessionEvent>(256);
-                // 事件泵：记录 ClusterConfig 就绪信号，供等待原语使用。
-                tokio::spawn(async move {
-                    while let Some(event) = event_rx.recv().await {
-                        if let BepSessionEvent::ClusterConfigComplete {
-                            device_id,
-                            shared_folders,
-                        } = event
-                        {
-                            readiness.insert(device_id, shared_folders);
-                        }
+            let (event_tx, mut event_rx) = mpsc::channel::<BepSessionEvent>(256);
+            // 事件泵：记录 ClusterConfig 就绪信号，供等待原语使用。
+            tokio::spawn(async move {
+                while let Some(event) = event_rx.recv().await {
+                    if let BepSessionEvent::ClusterConfigComplete {
+                        device_id,
+                        shared_folders,
+                    } = event
+                    {
+                        readiness.insert(device_id, shared_folders);
                     }
-                });
-                let handler = TestBepHandler {
-                    sync_service: Arc::clone(&sync_service),
-                };
-                if let Some(conn) = handle.get_connection(&device_id) {
-                    // 只断开「本会话对应的这一条连接」。按 device_id 断开会在
-                    // race resolution 换连接时连带杀掉对端刚建立的获胜连接，
-                    // 双方随之反复重拨，块请求找不到服务方而超时（§23 实测链路）。
-                    let conn_id = conn.id();
-                    let session = BepSession::with_events(
-                        Arc::new(DeviceIdentity::new(device_id)),
-                        conn,
-                        Arc::new(handler),
-                        pending,
-                        event_tx,
-                    );
-                    if let Err(e) = session.run().await {
-                        warn!("[test-harness] BepSession for {} ended: {}", device_id, e);
-                    }
-                    let _ = handle
-                        .disconnect_connection(&conn_id, "test session ended")
-                        .await;
-                } else {
-                    warn!("[test-harness] No connection for {}", device_id);
                 }
             });
-            sessions.insert(device_id, handle2);
+            let handler = TestBepHandler { sync_service };
+            let session = BepSession::with_events(
+                Arc::new(DeviceIdentity::new(device_id)),
+                conn,
+                Arc::new(handler),
+                pending,
+                event_tx,
+            );
+            if let Err(e) = session.run().await {
+                warn!("[test-harness] BepSession for {} ended: {}", device_id, e);
+            }
         });
+
+        // 看护任务：无论会话是正常结束还是被 abort，都**只断开自己那条连接**。
+        // 被 abort 的任务不会执行 `run()` 之后的清理，会留下一条「本端 open、对端无人读」
+        // 的连接，对端因此空等到 10s ClusterConfig 超时（§23 缺陷②）；而按 device_id 断开
+        // 又会连带杀掉对端刚建立的获胜连接，所以必须按 conn_id 断开。
+        let abort_handle = session_task.abort_handle();
+        let handle_w = handle_c.clone();
+        tokio::spawn(async move {
+            let aborted = session_task.await.is_err();
+            if aborted {
+                debug!(
+                    "[test-harness] BepSession for {} aborted; disconnecting its connection {}",
+                    device_id, conn_id
+                );
+            }
+            let _ = handle_w
+                .disconnect_connection(&conn_id, "test session ended")
+                .await;
+        });
+        sessions_c.insert(device_id, abort_handle);
     });
 
     // on_disconnected

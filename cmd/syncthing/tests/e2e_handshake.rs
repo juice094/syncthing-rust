@@ -21,9 +21,13 @@ async fn test_two_node_empty_folder_handshake() {
     folder_b.devices.push(node_a.device_id);
     node_b.add_folder(folder_b).await.expect("b add folder");
 
-    // Configure peers and initiate connections
+    // 单边拨号：A 拨 B，B 只登记 A。双方同时拨号会触发连接竞争解决，失败方那条连接上的
+    // BepSession 会空等到 10s ClusterConfig 超时（KNOWN_ISSUES §1 / §23）。
     node_a.connect_to(&node_b).await.expect("a connect to b");
-    node_b.connect_to(&node_a).await.expect("b connect to a");
+    node_b
+        .add_peer_device(&node_a)
+        .await
+        .expect("b registers a without dialing");
 
     // Wait for connections to establish
     node_a
