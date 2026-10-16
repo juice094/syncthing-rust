@@ -1,5 +1,8 @@
 # Releases
 
+> 说明：下方各版本的 **Stats** 为**发布时快照**（含测试数 / CI job 数），仅供历史追溯，不代表当前基线。
+> 当前测试基线与 CI job 组成见 [`docs/agent/testing.md`](docs/agent/testing.md)（唯一事实源）。
+
 ## v3.0.4 — Security Hardening & Relay Server (2026-06-27)
 
 ### Headline
@@ -92,7 +95,7 @@ BEP Relay v1 activated, sequence race fixed, CI fully green; project transitions
 
 ### Quality
 - **CI**: 19/19 jobs passing (clippy, test, deny, fmt, doc, e2e, bench-smoke, release-check, file-size).
-- **Tests**: 341 passed / 4 ignored / 0 failed at release; current workspace 433 passed / 6 ignored / 0 failed (2026-07-21).
+- **Tests**: 341 passed / 4 ignored / 0 failed at release; 当前基线见 [`docs/agent/testing.md`](docs/agent/testing.md)。
 - **Clippy**: 0 warnings.
 
 ### Known Limitations
