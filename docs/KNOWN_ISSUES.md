@@ -819,6 +819,11 @@ v0.2.8 完成首次双节点真实网络环境下的完整文件同步验证。
 - `e2e_crud` 等待统一为 `wait_synced()`（25s 断连重拨兜底、60s 上限、超时打印双方 `connected_devices()`）；
 - 测试 setup 安装 `tracing_subscriber`，可用 `RUST_LOG` + `--nocapture` 直接观测链路（此前 harness 的 `info!` 全被丢弃，只能盲猜）。
 
+**另一处已验证的产品缺陷（同批修复）**：`.stignore` 目录规则未作用于 watcher 增量路径。
+- `IgnoreMatcher::matches` 对目录规则（`dir/`）仅在 `is_dir=true` 时生效（`crates/syncthing-sync/src/ignore.rs`），而 `scan_changed_file` 传入的是**文件**路径；于是被忽略目录内新增/修改的文件仍被索引并同步给对端（实测：接收端 `Folder pull completed folder_id=e2e-ignore succeeded=3`，`ignored/secret.txt` 被拉取）；
+- 修复：新增 `is_ignored_with_ancestors()`（逐级检查祖先目录），用于 `scan_changed_file` 与 `scan_folder_at` 的 sub-scan 根；全量扫描仍通过目录剪枝生效；
+- 影响面：生产环境同样成立（被忽略目录内的编辑会被同步出去），属正确性/隐私问题。
+
 **残留事项（下一轮迭代输入）**：
 - 会话启动阶段的 ClusterConfig 超时（§1 竞态）仍会偶发；根治方向：在 `wait_for_connection` 之上补「对端 ClusterConfig 完成」的等待原语，或让 BepSession 超时后自行重试而非直接结束；
-- `test_e2e_stignore_directory_exclusion` 的负向断言（`ignored/` 不应出现）曾在基线中失败，疑似 `.stignore` 规则加载与首次 scan 存在竞态（属产品侧，需单独复现）。
+- 拉取失败（含块请求超时）后 puller 不会自动重试该文件，只能等下一次索引事件；建议为失败的 pull 增加退避重试。
