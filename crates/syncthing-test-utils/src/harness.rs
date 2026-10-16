@@ -17,7 +17,7 @@ use syncthing_sync::{
     SyncManager, SyncService,
 };
 
-use crate::bep_bridge::{install_bep_bridge, PendingResponses, TestBlockSource};
+use crate::bep_bridge::{install_bep_bridge, PendingResponses, SessionReadiness, TestBlockSource};
 
 /// Temporary test node.
 pub struct TestNode {
@@ -30,6 +30,8 @@ pub struct TestNode {
     /// T2.5 — Pending block-request responses, shared with `TestBlockSource`.
     /// Exposed for tests that want to inspect in-flight requests.
     pub pending_responses: PendingResponses,
+    /// ClusterConfig 就绪信号（对端 device_id → 对端通告的共享 folder 列表）。
+    pub readiness: SessionReadiness,
     _manager: Arc<ConnectionManager>,
 }
 
@@ -139,7 +141,7 @@ impl TestNode {
         // on_connected/on_disconnected callbacks fire for every peer connection.
         // This drives BepSession::run() per peer, enabling ClusterConfig /
         // Index / Block transfer (i.e. real end-to-end sync).
-        let pending_responses =
+        let (pending_responses, readiness) =
             install_bep_bridge(&manager, &sync_service, connection_handle.clone());
 
         // Provide a block source so the puller can fetch remote blocks via BEP.
@@ -159,6 +161,7 @@ impl TestNode {
             sync_service,
             connection_handle,
             pending_responses,
+            readiness,
             _manager: manager,
         })
     }
@@ -282,6 +285,60 @@ impl TestNode {
             }
             tokio::time::sleep(Duration::from_millis(200)).await;
         }
+    }
+
+    /// 等待与 `peer_id` 的 ClusterConfig 交换完成（即本节点已收到对端 ClusterConfig）。
+    ///
+    /// 这是 `wait_for_connection` 之上的握手就绪原语：连接建立 ≠ BEP 会话就绪，
+    /// ClusterConfig 尚未交换时索引/块传输无人收发（见 `docs/KNOWN_ISSUES.md` §1、§23）。
+    pub async fn wait_for_cluster_config(
+        &self,
+        peer_id: DeviceId,
+        timeout: Duration,
+    ) -> Result<()> {
+        let what = format!("ClusterConfig from {}", peer_id);
+        self.wait_for_ready(|r| r.contains_key(&peer_id), timeout, &what)
+            .await
+    }
+
+    /// 等待 `peer_id` 在 ClusterConfig 中通告共享 `folder_id`（双方均可收发该 folder 的索引）。
+    pub async fn wait_for_folder_ready(
+        &self,
+        peer_id: DeviceId,
+        folder_id: &str,
+        timeout: Duration,
+    ) -> Result<()> {
+        let what = format!("folder {} to be announced by {}", folder_id, peer_id);
+        self.wait_for_ready(
+            |r| {
+                r.get(&peer_id)
+                    .map(|folders| folders.iter().any(|id| id == folder_id))
+                    .unwrap_or(false)
+            },
+            timeout,
+            &what,
+        )
+        .await
+    }
+
+    /// 轮询就绪信号直到满足断言或超时；超时输出当前就绪表以便定位。
+    async fn wait_for_ready<F>(&self, mut ready: F, timeout: Duration, what: &str) -> Result<()>
+    where
+        F: FnMut(&SessionReadiness) -> bool,
+    {
+        let start = std::time::Instant::now();
+        while !ready(&self.readiness) {
+            if start.elapsed() > timeout {
+                let observed: Vec<(DeviceId, Vec<String>)> = self
+                    .readiness
+                    .iter()
+                    .map(|e| (*e.key(), e.value().clone()))
+                    .collect();
+                anyhow::bail!("timeout waiting for {}; readiness={:?}", what, observed);
+            }
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+        Ok(())
     }
 
     /// Graceful shutdown and cleanup of temporary directory.

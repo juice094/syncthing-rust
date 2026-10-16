@@ -38,6 +38,14 @@ use syncthing_sync::{puller::BlockSource, SyncManager, SyncService};
 /// run loop pops the matching sender and delivers the payload.
 pub type PendingResponses = Arc<DashMap<i32, oneshot::Sender<bep_protocol::messages::Response>>>;
 
+/// 会话就绪信号：`device_id -> 该会话最近一次 ClusterConfig 通告的共享 folder 列表`。
+///
+/// 由 `install_bep_bridge` 的事件泵在收到 `BepSessionEvent::ClusterConfigComplete` 时写入
+/// （生产侧同源实现见 `cmd/syncthing/src/tui/session_logger.rs`）。供测试用
+/// `TestNode::wait_for_cluster_config()` / `wait_for_folder_ready()` 等待握手就绪，
+/// 替代「先等连接、再靠超时重拨」的竞态规避（见 `docs/KNOWN_ISSUES.md` §23）。
+pub type SessionReadiness = Arc<DashMap<DeviceId, Vec<String>>>;
+
 /// BEP session handler suitable for test harness.
 ///
 /// Mirrors `cmd/syncthing/src/tui/bep_handler.rs::DaemonBepHandler`; ported
@@ -188,8 +196,13 @@ impl BlockSource for TestBlockSource {
         // 会话 churn（§1 ClusterConfig 竞态）会把请求发到一个已无会话消费的连接上，
         // 表现为长时间 "response timeout"；实测同一块在数秒后重试即可成功。
         // 因此每次重试都重新取连接，而不是一次用到死。
+        //
+        // 单次超时取 5s 而非 10s：测试用的块都很小（本机 loopback 下毫秒级完成），
+        // 10s 只是把「落在失效连接上」的等待成本放大到 3×10s，进而吃掉 `e2e_crud`
+        // 断言 60s 预算的一半以上（见 docs/KNOWN_ISSUES.md §23）。缩短后重试能更快
+        // 换到获胜连接，同时保留 3 次重试的容错。
         const ATTEMPTS: usize = 3;
-        const ATTEMPT_TIMEOUT: Duration = Duration::from_secs(10);
+        const ATTEMPT_TIMEOUT: Duration = Duration::from_secs(5);
 
         let devices = self.manager.connected_devices();
         if devices.is_empty() {
@@ -341,8 +354,9 @@ fn send_index_update_with_retry(
 
 /// Install the BEP session bridge on a `ConnectionManager`.
 ///
-/// Returns the `PendingResponses` map so callers can wire a matching
-/// `TestBlockSource` into the `SyncService`.
+/// Returns `(PendingResponses, SessionReadiness)`: the block-request correlation
+/// map (so callers can wire a matching `TestBlockSource` into the `SyncService`)
+/// and the ClusterConfig readiness signal (`TestNode::wait_for_cluster_config`).
 ///
 /// Must be called **before** `manager.start()` so the callbacks are
 /// registered before any connection arrives.
@@ -350,20 +364,23 @@ pub fn install_bep_bridge(
     manager: &ConnectionManager,
     sync_service: &Arc<SyncService>,
     handle: ConnectionManagerHandle,
-) -> PendingResponses {
+) -> (PendingResponses, SessionReadiness) {
     let pending_responses: PendingResponses = Arc::new(DashMap::new());
+    let readiness: SessionReadiness = Arc::new(DashMap::new());
     let session_handles: Arc<DashMap<DeviceId, JoinHandle<()>>> = Arc::new(DashMap::new());
 
     // on_connected: spawn BepSession::run()
     let sync_service_c = Arc::clone(sync_service);
     let handle_c = handle.clone();
     let pending_c = Arc::clone(&pending_responses);
+    let readiness_c = Arc::clone(&readiness);
     let sessions_c = Arc::clone(&session_handles);
     manager.on_connected(move |device_id| {
         info!("[test-harness] Device connected: {}", device_id);
         let sync_service = Arc::clone(&sync_service_c);
         let handle = handle_c.clone();
         let pending = Arc::clone(&pending_c);
+        let readiness = Arc::clone(&readiness_c);
         let sessions = Arc::clone(&sessions_c);
         tokio::spawn(async move {
             if let Err(e) = sync_service.connect_device(device_id).await {
@@ -374,7 +391,18 @@ pub fn install_bep_bridge(
             }
             let handle2 = tokio::spawn(async move {
                 let (event_tx, mut event_rx) = mpsc::channel::<BepSessionEvent>(256);
-                tokio::spawn(async move { while event_rx.recv().await.is_some() {} });
+                // 事件泵：记录 ClusterConfig 就绪信号，供等待原语使用。
+                tokio::spawn(async move {
+                    while let Some(event) = event_rx.recv().await {
+                        if let BepSessionEvent::ClusterConfigComplete {
+                            device_id,
+                            shared_folders,
+                        } = event
+                        {
+                            readiness.insert(device_id, shared_folders);
+                        }
+                    }
+                });
                 let handler = TestBepHandler {
                     sync_service: Arc::clone(&sync_service),
                 };
@@ -475,5 +503,5 @@ pub fn install_bep_bridge(
         }
     });
 
-    pending_responses
+    (pending_responses, readiness)
 }

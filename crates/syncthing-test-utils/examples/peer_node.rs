@@ -107,7 +107,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     registry.register(Arc::new(syncthing_net::transport::RawTcpTransport::new()));
     manager.set_transport_registry(Arc::new(registry));
 
-    let pending_responses = install_bep_bridge(&manager, &sync_service, connection_handle.clone());
+    let (pending_responses, _readiness) =
+        install_bep_bridge(&manager, &sync_service, connection_handle.clone());
 
     let block_source = Arc::new(TestBlockSource {
         manager: connection_handle.clone(),
