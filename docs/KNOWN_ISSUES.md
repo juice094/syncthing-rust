@@ -824,6 +824,45 @@ v0.2.8 完成首次双节点真实网络环境下的完整文件同步验证。
 - 修复：新增 `is_ignored_with_ancestors()`（逐级检查祖先目录），用于 `scan_changed_file` 与 `scan_folder_at` 的 sub-scan 根；全量扫描仍通过目录剪枝生效；
 - 影响面：生产环境同样成立（被忽略目录内的编辑会被同步出去），属正确性/隐私问题。
 
-**残留事项（下一轮迭代输入）**：
-- 会话启动阶段的 ClusterConfig 超时（§1 竞态）仍会偶发；根治方向：在 `wait_for_connection` 之上补「对端 ClusterConfig 完成」的等待原语，或让 BepSession 超时后自行重试而非直接结束；
-- 拉取失败（含块请求超时）后 puller 不会自动重试该文件，只能等下一次索引事件；建议为失败的 pull 增加退避重试。
+**残留事项（2026-10-16 第二轮迭代后更新）**：
+
+- **会话启动阶段的 ClusterConfig 超时（§1 竞态）仍未根治**。新证据（已验证，2026-10-16）：单独运行 `e2e_crud` 3 次，**每次**都出现
+  `WARN syncthing_net::session::state: Timeout waiting for ClusterConfig from <peer>` 与
+  `BepSession for <peer> ended: Timeout: remote ClusterConfig not received`（双方同时拨号时的失败方会话，10s 超时）。
+  它不再直接导致断言失败，但会把同步推迟 10–30s：三次单独运行的耗时分别为 38.80s / 26.63s / 通过。在 CPU 争用更高时
+  （`cargo test --workspace` 并发跑多个测试二进制）该延迟会与块请求 10s×3 超时叠加，突破 60s 窗口才表现为失败。
+  根治方向：①在 `TestNode` 之上提供确定性单会话策略（避免双方同时拨号）；②让 `BepSession` 在 ClusterConfig 超时后自行重试而非结束会话。
+- **已落地（本轮）**：
+  - `TestNode::wait_for_cluster_config()` / `wait_for_folder_ready()` 就绪等待原语（`crates/syncthing-test-utils/src/bep_bridge.rs` 的 `SessionReadiness` 事件泵 + `harness.rs`），
+    `e2e_crud::setup_two_node` 已在 `wait_for_connection` 之后显式等待这两个信号；
+  - 产品侧失败退避重试：`FolderModel::start_pull_loop` 在 `files_failed > 0` 时按 `PULL_RETRY_BACKOFF_INIT_MS`（500ms）起逐次翻倍、封顶 `PULL_RETRY_BACKOFF_MAX_MS`（= 原 10s 周期）提前重试，
+    成功即归零；失败文件本身不登记，正确性仍由 `check_needed_files()` 依据 DB/FS 差异重新推导（`crates/syncthing-core/src/constants.rs` + `crates/syncthing-sync/src/folder_model/mod.rs`）。
+- **`#[ignore]` 判定结论**见下方「2026-10-16 第二轮结论」。
+
+**2026-10-16 第二轮结论（已落地）**：
+
+- **`test_e2e_modify_file` 已按兜底方案加 `#[ignore]`**（原因写在该用例的属性里）。依据：单独运行 6/6 通过；作为完整 `e2e_crud` 套件的一部分运行时，修复前后合计 **4/9 次失败**（其余 8 次全部通过），失败均在第二个阶段（v2 覆盖同步）而非建连阶段。
+  判定为"套件条件下的顽固用例"（隔离运行永不失败，套件内稳定偶发），故按已批准的兜底方案处理，避免 `cargo test --workspace` 长期红色；需要验证时用
+  `cargo test -p syncthing --test e2e_crud test_e2e_modify_file -- --ignored --nocapture`。
+- **`test_e2e_stignore_directory_exclusion` 的偶发已被本轮修复消除**（修复后 6 次套件运行 0 次失败，修复前 2 次失败），原因是 §24 记录的那条"在途拉取被子树扫描误判删除"链路。
+- 其余四个用例（create / delete / rename / stignore）在修复后的 6 次套件运行中全绿。
+
+---
+
+## §24. CI 的 `e2e-test` job 实际执行 0 个用例（中等 — CI 覆盖缺口，2026-10-16 登记）
+
+**症状**：`.github/workflows/ci.yml` 的 `e2e-test` job 名为 "End-to-End Sync Test"，但命令是
+`cargo test --release -p syncthing --test e2e_sync`；而 `cmd/syncthing/tests/e2e_sync.rs` 中唯一的用例
+`test_two_node_single_file_sync` 带 `#[ignore]`（§1 竞态）。该 job 因此在 release profile 下**只证明端到端代码可编译并链接**，
+不执行任何同步断言——"CI 全绿"不能据此外推为"端到端链路被验证"。
+
+**影响**：`e2e_crud`（5 个 CRUD/`.stignore`/重命名用例）与 `e2e_handshake`、`e2e_fs_db_sync`、`e2e_encrypted_vault_sync`
+只在 `test` job 的 `cargo test --workspace` 中随其他二进制并发执行（`#[serial]` 仅在单个二进制内生效），
+因此它们的结果受 CPU 争用影响，这也是 §23 偶发失败的观测条件。
+
+**待办（需先解决 §23 的会话竞态再动手）**：把 `e2e_crud` 纳入 `e2e-test` job 并单独执行（不与其他测试二进制并发），
+同时评估该 job 的 `timeout-minutes: 5` 是否足够覆盖 release 构建 + 5 个用例。
+
+---
+
+## §N. <一句话症状>（严重程度）

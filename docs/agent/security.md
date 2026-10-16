@@ -66,4 +66,4 @@ timestamp: 2026-06-25T00:00:00Z
 - 同步目录限制在专用目录，不要选系统根目录。
 - 监控 RSS 增长；`FileSystemDatabase` 当前使用无界内存缓存。
 - 结构化 JSON 日志输出到 `logs/` 目录，日志文件可能包含文件路径、设备 ID 等敏感信息，需按机密文件处理。
-- Relay Server 默认监听 `0.0.0.0:22067`（relay）与 `0.0.0.0:22070`（status），部署时应通过防火墙限制访问范围。
+- Relay Server 默认监听 `0.0.0.0:22067`（Relay Protocol，TLS）与同 IP 的 `22068`（Session 模式，`--session-port`），部署时应通过防火墙限制访问范围。
