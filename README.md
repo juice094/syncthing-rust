@@ -168,10 +168,12 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) and [`docs/agent/constraints.md`](docs/ag
 Before submitting, run:
 
 ```bash
-cargo test --workspace        # 433 passed / 6 ignored / 0 failed
+cargo test --workspace
 cargo clippy --workspace --all-targets -- -D warnings -W clippy::await_holding_lock
 cargo fmt --all -- --check
 ```
+
+Test baseline numbers live in [`docs/agent/testing.md`](docs/agent/testing.md) (single source of truth).
 
 ---
 

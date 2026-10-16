@@ -212,10 +212,12 @@ Handler 模式：`Result<Json<T>, (StatusCode, String)>`。所有 handler 接收
 
 ## 10. 测试状态
 
-433 passed / 6 ignored / 0 failed（workspace total，含 unit + integration + doc-tests）。
+452 passed / 7 ignored / 0 failed（2026-10-16 实测，workspace total，含 unit + integration + doc-tests）。
+**唯一事实源**：[`testing.md`](testing.md) §1（本行只作快照，改动请改那里）。
 
 Ignored：
 - `test_two_node_single_file_sync`（并行测试负载下 ClusterConfig race 偶发超时）
+- `test_e2e_modify_file`（套件条件下 v2 覆盖同步偶发超时；单独运行通过，见 `KNOWN_ISSUES.md` §23）
 - `test_udp_broadcast_roundtrip`（CI runner 上 UDP loopback broadcast 不稳定）
 - `test_public_relay_pool_tls_health_check` / `test_query_public_stun_server`（需要外网）
 - 两个需要外网的 STUN doc-tests
