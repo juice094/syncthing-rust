@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [3.0.5] — 2026-10-18（Data-Loss Hardening + E2E Race Elimination）
 
 ### Fixed
 - **Remote-deletion hardening (2026-07-20 data-loss incident)**: three layered defenses. (1) Per-pull deletion quota — refuses remote deletion batches > max(20, 25% of local files); the v3.0.4 50% full-index guard did not cover incremental IndexUpdate batches (114 files lost to a stale peer index). (2) Soft delete — puller quarantines remote-driven deletions to `<folder>/.sttrash/<date>/` (7-day retention, cleaned per pull, scanner-ignored) instead of hard removal. (3) Deletion audit — every accepted remote deletion is logged at info level with source device and both version vectors. Also: stale-index health warning when a pull sees >10 NO_SUCH_FILE (error code 2) responses.

@@ -7,7 +7,7 @@
 
 ## 项目一句话
 
-`syncthing-rust` 是 Syncthing BEP 协议的 Rust 实现（v3.0.4，Production 阶段，安全加固）：零运行时依赖、单静态二进制、与 Go 版 Syncthing 线格式互通。日常部署在 ROG-X（Windows 11）↔ Gray-Cloud（Ubuntu 24.04），以自建 Relay 替代 Tailscale。
+`syncthing-rust` 是 Syncthing BEP 协议的 Rust 实现（v3.0.5，Production 阶段，数据丢失防护加固）：零运行时依赖、单静态二进制、与 Go 版 Syncthing 线格式互通。日常部署在 ROG-X（Windows 11）↔ Gray-Cloud（Ubuntu 24.04），以自建 Relay 替代 Tailscale。
 
 ---
 

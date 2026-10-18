@@ -13,7 +13,7 @@
 
 | 维度 | 事实 |
 |:---|:---|
-| 版本真源 | 根 `Cargo.toml` 的 `[workspace.package] version`（当前 `3.0.4`），各 crate 用 `version.workspace = true` 继承 |
+| 版本真源 | 根 `Cargo.toml` 的 `[workspace.package] version`（当前 `3.0.5`），各 crate 用 `version.workspace = true` 继承 |
 | 阶段 | Production（安全加固）；72h 耐久测试是 `v3.1.0` 准入线，尚未完成 |
 | 已交付 | BEP over TLS、块级 Pull/Push、三路文本合并、Simple/Staggered 版本控制、多路径发现、自建 Relay Server v1、WSS、RBAC API keys、JSON 结构化日志、Prometheus 指标、TUI、Windows 托盘、MCP Bridge |
 | 冻结项 | 共识算法、信誉系统、QUIC / MagicSocket、Web GUI（详见 [`docs/agent/constraints.md`](docs/agent/constraints.md)） |

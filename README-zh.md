@@ -10,7 +10,7 @@
 
 [![Rust](https://img.shields.io/badge/rust-1.85%2B-orange?logo=rust)](https://www.rust-lang.org)
 [![CI](https://github.com/juice094/syncthing-rust/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/juice094/syncthing-rust/actions/workflows/ci.yml)
-[![Version](https://img.shields.io/badge/version-v3.0.4-blue)](https://github.com/juice094/syncthing-rust)
+[![Version](https://img.shields.io/badge/version-v3.0.5-blue)](https://github.com/juice094/syncthing-rust)
 [![License](https://img.shields.io/badge/license-MIT%20%2B%20Commercial-blue)](./LICENSE)
 
 </div>
@@ -21,7 +21,7 @@
 
 [Syncthing](https://syncthing.net/) 协议栈的 Rust 实现，目标为**零运行时依赖**部署，与官方 Go Syncthing 守护进程线路兼容互操作。
 
-**当前阶段（v3.0.4）**：Production — 安全加固 + Relay Server v1 + RBAC + JSON 日志。测试基线数值不在此手抄，见 [`docs/agent/testing.md`](docs/agent/testing.md)（唯一事实源）与 [CI 状态](https://github.com/juice094/syncthing-rust/actions)。
+**当前阶段（v3.0.5）**：Production — 数据丢失防护加固（软删除 + 删除配额 + 版本向量修正）+ E2E 竞态根除 + MCP 工具集 19 个。
 
 - ✅ 连接层：retry 累加、TCP keepalive
 - ✅ 协议层：prost 编解码 + LZ4 压缩、wire_compat 10 tests

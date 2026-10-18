@@ -3,6 +3,32 @@
 > 说明：下方各版本的 **Stats** 为**发布时快照**（含测试数 / CI job 数），仅供历史追溯，不代表当前基线。
 > 当前测试基线与 CI job 组成见 [`docs/agent/testing.md`](docs/agent/testing.md)（唯一事实源）。
 
+## v3.0.5 — Data-Loss Hardening & E2E Race Elimination (2026-10-18)
+
+### Headline
+Three layered defenses against remote-deletion data loss, correct version vectors, and a root-caused E2E infrastructure race. **Recommended upgrade for all v3.0.x deployments.**
+
+### Data-Loss Hardening
+- **Per-pull deletion quota** — refuses remote deletion batches > max(20, 25% of local files); closes the incremental-IndexUpdate gap in the v3.0.4 50% full-index guard
+- **Soft delete** — remote-driven deletions are quarantined to `<folder>/.sttrash/<date>/` (7-day retention, scanner-ignored) instead of hard removal
+- **Deletion audit** — every accepted remote deletion logged at info level with source device and both version vectors; stale-index health warning on >10 NO_SUCH_FILE responses
+- **In-flight pull protection** — watcher-triggered subtree scans no longer infer deletions for files whose blocks are being pulled
+
+### Protocol & Sync Correctness
+- **Real version vectors** — local counter id derived from the device ID (Go ShortID semantics) instead of a hardcoded `1`; concurrent delete-vs-modify now detected and preserved as `.sync-conflict-*`
+- **BEP Ping storm fixed** — BEP Ping is unidirectional keepalive; sessions no longer ping-pong at wire speed
+- **Config renegotiation** — device/folder changes trigger session renegotiation, matching Go Syncthing behavior
+- **Pull retry with bounded backoff** — failed pulls retry early (500 ms doubling to 10 s) instead of waiting for the next index event
+- **`.stignore` privacy leak fixed** — directory rules now apply to watcher incremental paths (ancestor-aware matching)
+
+### Tooling
+- **MCP Bridge toolset 11 → 19** — health/metrics/db status, folder browse/read, pause/resume; optional `SYNCTHING_API_KEY` forwarding
+- **E2E infrastructure** — ClusterConfig race root-caused (double-dial), single-side dialing, session readiness primitives; both `#[ignore]`s removed; e2e_crud 6/6 in ~2.5 s
+- **Dependency majors upgraded** (dependabot batch, code adapted) and CI deny/audit jobs repaired
+
+### Full notes
+See [CHANGELOG.md](CHANGELOG.md#305--2026-10-18data-loss-hardening--e2e-race-elimination).
+
 ## v3.0.4 — Security Hardening & Relay Server (2026-06-27)
 
 ### Headline

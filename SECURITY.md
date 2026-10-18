@@ -9,7 +9,8 @@
 | Version | Supported | Notes |
 |---------|-----------|-------|
 | `main`  | ✅ | Active development. Receives all fixes. |
-| v3.0.4 | ✅ | Current production release. Security hardened. |
+| v3.0.5 | ✅ | Current production release. Data-loss hardening (soft delete, deletion quota, real version vectors). |
+| v3.0.4 | ✅ | Security hardened. Superseded by v3.0.5. |
 | v3.0.3 | ✅ | Receives security fixes. |
 | < v3.0.0 | ❌ | Pre-release / alpha; no support. |
 

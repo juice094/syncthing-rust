@@ -13,7 +13,7 @@ timestamp: 2026-10-16T00:00:00Z
 
 本目录包含 `syncthing-rust` 项目的设计文档、验证报告、计划、运维指南、事故复盘与历史归档。
 
-> ✅ **当前阶段（v3.0.4）**：Production — 官方 Go v2.1.1 互联实测通过，Windows 托盘 + TUI 稳定。
+> ✅ **当前阶段（v3.0.5）**：Production — 数据丢失防护加固（软删除/删除配额/版本向量修正）+ E2E 竞态根除，Windows 托盘 + TUI 稳定。
 > 测试基线与 CI job 组成见 [`agent/testing.md`](agent/testing.md)（**唯一事实源，勿在别处手抄**）。
 > **快速入口**：[`plans/POST_V3_0_3_ROADMAP.md`](plans/POST_V3_0_3_ROADMAP.md) — 当前权威路线图（v3.0.4 后更新）。
 > **历史缺陷追溯**：[`KNOWN_ISSUES.md`](KNOWN_ISSUES.md) 是权威缺陷台账（§15 stale-index 误删 RCA、§7 运行时安全审查 INC-20260514-001）。
