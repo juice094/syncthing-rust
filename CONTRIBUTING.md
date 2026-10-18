@@ -6,7 +6,7 @@
 
 | Metric | Status |
 |:---|:---|
-| Version | `v3.0.4` — authoritative source: `[workspace.package] version` in the root `Cargo.toml` |
+| Version | `v3.0.5` — authoritative source: `[workspace.package] version` in the root `Cargo.toml` |
 | Tests | See [`docs/agent/testing.md`](docs/agent/testing.md) (single source of truth; also [`CI`](https://github.com/juice094/syncthing-rust/actions)) |
 | Clippy | 0 warnings (`-D warnings`, incl. `clippy::await_holding_lock`) |
 | License | MIT (dual: commercial available) |
