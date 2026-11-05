@@ -1,10 +1,4 @@
-//! Module: syncthing-db
-//! Worker: Agent-E
-//! Status: UNVERIFIED
-//!
-//! ⚠️ 此代码由Agent生成，未经主控验证
-//!
-//! Database and Storage Layer for Syncthing
+//! Database and storage layer.
 //!
 //! This crate provides the storage layer for Syncthing, including:
 //!
@@ -12,6 +6,11 @@
 //! - **Metadata Store** (`metadata.rs`): File and folder metadata storage
 //! - **Block Cache** (`block_cache.rs`): Content-addressed block storage with LRU caching
 //! - **Store** (`store.rs`): BlockStore trait implementation
+//!
+//! All sled I/O is dispatched through [`blocking::run_blocking`]; see
+//! "docs/design/ADR-20261105-db-blocking-io.md" for the rationale and
+//! "docs/design/ADR-20261105-db-metadata-key-layout.md" for the metadata
+//! key layout and tombstone semantics.
 //!
 //! # Usage
 //!
@@ -40,7 +39,6 @@ pub mod kv;
 pub mod metadata;
 pub mod store;
 
-// Re-export main types
 pub use block_cache::{BlockStoreBuilder, CacheStats, CachedBlockStore};
 pub use kv::{SledStore, SledTree};
 pub use metadata::{FolderStats as DbFolderStats, MetadataStore};

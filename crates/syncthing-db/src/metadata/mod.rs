@@ -1,13 +1,12 @@
-//! Module: syncthing-db
-//! Worker: Agent-E
-//! Status: UNVERIFIED
+//! Metadata storage for files and folders.
 //!
-//! ⚠️ 此代码由Agent生成，未经主控验证
+//! `FileInfo` records are stored per folder and folder statistics are
+//! recalculated on every mutation. Deleted files stay in the index as
+//! tombstones.
 //!
-//! Metadata storage for files and folders
-//!
-//! This module provides storage for file metadata (FileInfo) and
-//! folder indices using sled as the underlying storage engine.
+//! See "docs/design/ADR-20261105-db-metadata-key-layout.md" for the key
+//! layout, tombstone retention, and stats recalculation rationale, and
+//! "docs/design/ADR-20261105-db-blocking-io.md" for the blocking I/O policy.
 
 use std::collections::HashMap;
 
@@ -165,6 +164,9 @@ impl MetadataStore {
     /// # Arguments
     /// * `folder` - The folder ID
     /// * `info` - The file info to store
+    ///
+    /// # Errors
+    /// Returns an error if serialization or the store write fails.
     pub async fn put_file(&self, folder: &FolderId, info: &FileInfo) -> Result<()> {
         let key = make_file_key(folder, &info.name);
         let value = serde_json::to_vec(info)
@@ -178,7 +180,6 @@ impl MetadataStore {
         })
         .await?;
 
-        // Update folder stats
         self.update_folder_stats(folder).await?;
 
         Ok(())
@@ -192,6 +193,9 @@ impl MetadataStore {
     ///
     /// # Returns
     /// `Ok(Some(FileInfo))` if found, `Ok(None)` if not
+    ///
+    /// # Errors
+    /// Returns an error if the read or deserialization fails.
     pub async fn get_file(&self, folder: &FolderId, name: &str) -> Result<Option<FileInfo>> {
         let key = make_file_key(folder, name);
         let inner = self.inner.clone();
@@ -215,11 +219,16 @@ impl MetadataStore {
 
     /// Get all files in folder
     ///
+    /// Returns entries sorted by sequence number for deterministic ordering.
+    ///
     /// # Arguments
     /// * `folder` - The folder ID
     ///
     /// # Returns
     /// Vector of all FileInfo in the folder
+    ///
+    /// # Errors
+    /// Returns an error if the scan or any deserialization fails.
     pub async fn get_folder_index(&self, folder: &FolderId) -> Result<Vec<FileInfo>> {
         let prefix = make_folder_prefix(folder);
         let inner = self.inner.clone();
@@ -238,7 +247,6 @@ impl MetadataStore {
             files.push(info);
         }
 
-        // Sort by sequence number for consistent ordering
         files.sort_by_key(|f| f.sequence);
 
         Ok(files)
@@ -251,8 +259,10 @@ impl MetadataStore {
     /// # Arguments
     /// * `folder` - The folder ID
     /// * `files` - New file index
+    ///
+    /// # Errors
+    /// Returns an error if serialization or the batch write fails.
     pub async fn update_index(&self, folder: &FolderId, files: Vec<FileInfo>) -> Result<()> {
-        // First, delete all existing entries for this folder
         let prefix = make_folder_prefix(folder);
         let inner = self.inner.clone();
         let existing = run_blocking("metadata scan existing index", move || {
@@ -265,7 +275,6 @@ impl MetadataStore {
         let mut batch: Vec<(Vec<u8>, Option<Vec<u8>>)> =
             existing.into_iter().map(|(key, _)| (key, None)).collect();
 
-        // Add all new entries
         for file in files {
             let key = make_file_key(folder, &file.name);
             let value = serde_json::to_vec(&file).map_err(|e| {
@@ -282,7 +291,6 @@ impl MetadataStore {
         })
         .await?;
 
-        // Update folder stats
         self.update_folder_stats(folder).await?;
 
         Ok(())
@@ -290,19 +298,22 @@ impl MetadataStore {
 
     /// Update index with delta (partial update)
     ///
-    /// Updates only the specified files, leaving others unchanged.
+    /// Updates only the specified files, leaving others unchanged. Deleted
+    /// files are stored as tombstones and stay in the index so the deletion
+    /// can propagate to peers.
     ///
     /// # Arguments
     /// * `folder` - The folder ID
     /// * `files` - Files to update (or delete if marked as deleted)
+    ///
+    /// # Errors
+    /// Returns an error if serialization or the batch write fails.
     pub async fn update_index_delta(&self, folder: &FolderId, files: Vec<FileInfo>) -> Result<()> {
         let mut batch: Vec<(Vec<u8>, Option<Vec<u8>>)> = Vec::new();
 
         for file in files {
             let key = make_file_key(folder, &file.name);
 
-            // Always serialize and store, even for deleted files
-            // Deleted files are kept in the index for sync purposes
             let value = serde_json::to_vec(&file).map_err(|e| {
                 SyncthingError::Storage(format!("Failed to serialize FileInfo: {}", e))
             })?;
@@ -317,7 +328,6 @@ impl MetadataStore {
         })
         .await?;
 
-        // Update folder stats
         self.update_folder_stats(folder).await?;
 
         Ok(())
@@ -328,6 +338,9 @@ impl MetadataStore {
     /// # Arguments
     /// * `folder` - The folder ID
     /// * `name` - The file name
+    ///
+    /// # Errors
+    /// Returns an error if the removal fails.
     pub async fn delete_file(&self, folder: &FolderId, name: &str) -> Result<()> {
         let key = make_file_key(folder, name);
         let inner = self.inner.clone();
@@ -338,7 +351,6 @@ impl MetadataStore {
         })
         .await?;
 
-        // Update folder stats
         self.update_folder_stats(folder).await?;
 
         Ok(())
@@ -348,6 +360,9 @@ impl MetadataStore {
     ///
     /// # Arguments
     /// * `folder` - The folder ID
+    ///
+    /// # Errors
+    /// Returns an error if the read or deserialization fails.
     pub async fn get_folder_stats(&self, folder: &FolderId) -> Result<FolderStats> {
         let key = make_folder_stats_key(folder);
         let inner = self.inner.clone();
@@ -406,6 +421,9 @@ impl MetadataStore {
     }
 
     /// Check if a file exists in the index
+    ///
+    /// # Errors
+    /// Returns an error if the lookup fails.
     pub async fn file_exists(&self, folder: &FolderId, name: &str) -> Result<bool> {
         let key = make_file_key(folder, name);
         let inner = self.inner.clone();
@@ -418,6 +436,11 @@ impl MetadataStore {
     }
 
     /// Get the number of files in a folder
+    ///
+    /// Counts all index entries, including deleted (tombstone) files.
+    ///
+    /// # Errors
+    /// Returns an error if the scan fails.
     pub async fn file_count(&self, folder: &FolderId) -> Result<usize> {
         let prefix = make_folder_prefix(folder);
         let inner = self.inner.clone();
@@ -431,6 +454,9 @@ impl MetadataStore {
     }
 
     /// Flush all pending changes to disk
+    ///
+    /// # Errors
+    /// Returns an error if the flush fails.
     pub async fn flush(&self) -> Result<()> {
         let inner = self.inner.clone();
         run_blocking("metadata flush", move || {
@@ -447,6 +473,9 @@ impl MetadataStore {
     /// * `device_id` - The device ID string
     /// * `folder` - The folder ID
     /// * `info` - The file info to store
+    ///
+    /// # Errors
+    /// Returns an error if serialization or the store write fails.
     pub async fn put_device_file(
         &self,
         device_id: &str,
@@ -474,6 +503,9 @@ impl MetadataStore {
     /// * `device_id` - The device ID string
     /// * `folder` - The folder ID
     /// * `name` - The file name
+    ///
+    /// # Errors
+    /// Returns an error if the read or deserialization fails.
     pub async fn get_device_file(
         &self,
         device_id: &str,
@@ -501,6 +533,11 @@ impl MetadataStore {
     }
 
     /// Get all files for a device in a folder
+    ///
+    /// Returns entries sorted by sequence number for deterministic ordering.
+    ///
+    /// # Errors
+    /// Returns an error if the scan or any deserialization fails.
     pub async fn get_device_files(
         &self,
         device_id: &str,

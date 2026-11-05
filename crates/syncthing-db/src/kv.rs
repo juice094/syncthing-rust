@@ -1,13 +1,8 @@
-//! Module: syncthing-db
-//! Worker: Agent-E
-//! Status: UNVERIFIED
+//! Synchronous key-value storage backed by sled.
 //!
-//! ⚠️ 此代码由Agent生成，未经主控验证
-//!
-//! Key-value storage abstraction
-//!
-//! This module provides a synchronous key-value store interface
-//! backed by sled for embedded storage.
+//! `SledStore` and `SledTree` wrap sled's synchronous API; callers in this
+//! crate always go through [`crate::blocking::run_blocking`] so the runtime
+//! is never blocked (see "docs/design/ADR-20261105-db-blocking-io.md").
 
 use std::path::Path;
 
@@ -47,6 +42,9 @@ impl SledStore {
     /// Create an in-memory database
     ///
     /// Useful for testing and temporary storage.
+    ///
+    /// # Errors
+    /// Returns an error if the in-memory database cannot be created.
     pub fn open_in_memory() -> Result<Self> {
         let db = sled::Config::new().temporary(true).open().map_err(|e| {
             SyncthingError::Storage(format!("Failed to create in-memory database: {}", e))
@@ -61,6 +59,9 @@ impl SledStore {
     ///
     /// # Returns
     /// `Ok(Some(value))` if the key exists, `Ok(None)` if not
+    ///
+    /// # Errors
+    /// Returns an error if the read fails.
     pub fn get(&self, key: &[u8]) -> Result<Option<Vec<u8>>> {
         let result = self
             .db
@@ -91,6 +92,9 @@ impl SledStore {
     ///
     /// # Returns
     /// `Ok(true)` if the key was present and deleted, `Ok(false)` if not found
+    ///
+    /// # Errors
+    /// Returns an error if the removal fails.
     pub fn delete(&self, key: &[u8]) -> Result<bool> {
         let existed = self
             .db
@@ -103,6 +107,9 @@ impl SledStore {
     ///
     /// # Arguments
     /// * `key` - The key to check
+    ///
+    /// # Errors
+    /// Returns an error if the lookup fails.
     pub fn contains(&self, key: &[u8]) -> Result<bool> {
         self.db
             .contains_key(key)
@@ -115,6 +122,9 @@ impl SledStore {
     ///
     /// # Arguments
     /// * `batch` - Vector of (key, Some(value)) for inserts or (key, None) for deletes
+    ///
+    /// # Errors
+    /// Returns an error if the batch cannot be applied.
     pub fn apply_batch(&self, batch: Vec<(Vec<u8>, Option<Vec<u8>>)>) -> Result<()> {
         let mut sled_batch = sled::Batch::default();
 
@@ -136,6 +146,9 @@ impl SledStore {
     ///
     /// # Arguments
     /// * `prefix` - The prefix to scan for
+    ///
+    /// # Errors
+    /// Returns an error if the scan encounters a corrupted entry.
     pub fn scan_prefix(&self, prefix: &[u8]) -> Result<Vec<(Vec<u8>, Vec<u8>)>> {
         let mut results = Vec::new();
         for result in self.db.scan_prefix(prefix) {
@@ -149,6 +162,9 @@ impl SledStore {
     /// Create a tree (namespace) within the database
     ///
     /// Trees provide separate key namespaces within the same database.
+    ///
+    /// # Errors
+    /// Returns an error if the tree cannot be opened.
     pub fn open_tree(&self, name: &str) -> Result<SledTree> {
         let tree = self.db.open_tree(name).map_err(|e| {
             SyncthingError::Storage(format!("Failed to open tree '{}': {}", name, e))
@@ -157,6 +173,9 @@ impl SledStore {
     }
 
     /// Flush all pending writes to disk
+    ///
+    /// # Errors
+    /// Returns an error if the flush fails.
     pub fn flush(&self) -> Result<()> {
         self.db
             .flush()
@@ -173,6 +192,9 @@ pub struct SledTree {
 
 impl SledTree {
     /// Get value by key
+    ///
+    /// # Errors
+    /// Returns an error if the read fails.
     pub fn get(&self, key: &[u8]) -> Result<Option<Vec<u8>>> {
         let result = self
             .tree
@@ -182,6 +204,9 @@ impl SledTree {
     }
 
     /// Store value by key
+    ///
+    /// # Errors
+    /// Returns an error if the write fails.
     pub fn put(&self, key: &[u8], value: &[u8]) -> Result<()> {
         self.tree
             .insert(key, value)
@@ -190,6 +215,12 @@ impl SledTree {
     }
 
     /// Delete a key-value pair
+    ///
+    /// # Returns
+    /// `Ok(true)` if the key was present and deleted, `Ok(false)` if not found
+    ///
+    /// # Errors
+    /// Returns an error if the removal fails.
     pub fn delete(&self, key: &[u8]) -> Result<bool> {
         let existed = self.tree.remove(key).map_err(|e| {
             SyncthingError::Storage(format!("Failed to delete key from tree: {}", e))
@@ -198,6 +229,9 @@ impl SledTree {
     }
 
     /// Check if a key exists
+    ///
+    /// # Errors
+    /// Returns an error if the lookup fails.
     pub fn contains(&self, key: &[u8]) -> Result<bool> {
         self.tree
             .contains_key(key)
@@ -205,6 +239,9 @@ impl SledTree {
     }
 
     /// Get all keys with a given prefix
+    ///
+    /// # Errors
+    /// Returns an error if the scan encounters a corrupted entry.
     pub fn scan_prefix(&self, prefix: &[u8]) -> Result<Vec<(Vec<u8>, Vec<u8>)>> {
         let mut results = Vec::new();
         for result in self.tree.scan_prefix(prefix) {
@@ -216,6 +253,9 @@ impl SledTree {
     }
 
     /// Apply a batch of operations atomically
+    ///
+    /// # Errors
+    /// Returns an error if the batch cannot be applied.
     pub fn apply_batch(&self, batch: Vec<(Vec<u8>, Option<Vec<u8>>)>) -> Result<()> {
         let mut sled_batch = sled::Batch::default();
 
@@ -234,6 +274,9 @@ impl SledTree {
     }
 
     /// Flush pending writes to disk
+    ///
+    /// # Errors
+    /// Returns an error if the flush fails.
     pub fn flush(&self) -> Result<()> {
         self.tree
             .flush()

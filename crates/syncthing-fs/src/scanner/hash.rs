@@ -1,7 +1,9 @@
-//! Block hashing engine (TUNING_PLAN T-B1)
+//! Parallel block hashing engine.
 //!
 //! CPU-bound SHA-256 hashing is offloaded to a dedicated rayon pool
-//! via `tokio::task::spawn_blocking`.
+//! via `tokio::task::spawn_blocking`; see
+//! "docs/design/ADR-20261105-fs-block-sizing.md" for the batch size and
+//! pool isolation rationale.
 
 use std::path::Path;
 use std::sync::OnceLock;
@@ -18,6 +20,11 @@ const HASH_BATCH_SIZE: usize = 32;
 
 /// Thread pool dedicated to SHA-256 block hashing.
 /// Isolated from tokio's blocking pool to avoid starving I/O tasks.
+///
+/// # Panics
+/// Panics if the pool cannot be built. `ThreadPoolBuilder` fails only on
+/// resource exhaustion (OOM), which is non-recoverable at process startup,
+/// so crashing is appropriate.
 fn hash_pool() -> &'static rayon::ThreadPool {
     static POOL: OnceLock<rayon::ThreadPool> = OnceLock::new();
     POOL.get_or_init(|| {
@@ -25,15 +32,17 @@ fn hash_pool() -> &'static rayon::ThreadPool {
             .num_threads(num_cpus::get().max(2))
             .thread_name(|i| format!("hash-worker-{}", i))
             .build()
-            // INVARIANT: ThreadPoolBuilder fails only on resource exhaustion (OOM).
-            // At process startup this is non-recoverable; crash is appropriate.
             .expect("rayon ThreadPoolBuilder: resource exhaustion at startup")
     })
 }
 
 /// Compute block hashes for a file.
 ///
-/// Reads the file in chunks and computes SHA-256 hashes for each block.
+/// Reads the file in batches and computes a SHA-256 hash for each block
+/// on the dedicated rayon pool.
+///
+/// # Errors
+/// Returns an error if the file cannot be opened or read.
 pub(super) async fn compute_block_hashes(path: &Path, block_size: usize) -> Result<Vec<BlockInfo>> {
     let mut file = File::open(path).await.map_err(SyncthingError::Io)?;
     let metadata = file.metadata().await.map_err(SyncthingError::Io)?;

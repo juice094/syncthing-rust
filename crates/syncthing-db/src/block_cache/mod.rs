@@ -1,13 +1,9 @@
-//! Module: syncthing-db
-//! Worker: Agent-E
-//! Status: UNVERIFIED
+//! Content-addressed block storage with LRU caching.
 //!
-//! ⚠️ 此代码由Agent生成，未经主控验证
+//! `CachedBlockStore` implements the `BlockStore` trait from syncthing-core.
 //!
-//! Block storage and caching
-//!
-//! This module provides a content-addressed block store with LRU caching.
-//! Implements the `BlockStore` trait from syncthing-core.
+//! See "docs/design/ADR-20261105-db-blocking-io.md" for why all sled access
+//! goes through the blocking thread pool.
 
 use std::sync::Arc;
 
@@ -84,6 +80,9 @@ impl CachedBlockStore {
     ///
     /// # Returns
     /// A new `CachedBlockStore` instance
+    ///
+    /// # Errors
+    /// Returns an error if the metadata tree cannot be opened.
     pub fn new(store: SledStore, cache_size: usize) -> Result<Self> {
         let metadata_tree = store
             .open_tree("metadata")
@@ -133,6 +132,12 @@ impl CachedBlockStore {
     }
 
     /// Prefetch blocks into cache
+    ///
+    /// Fetches each block from the store and inserts it into the LRU cache
+    /// if not already present.
+    ///
+    /// # Errors
+    /// Returns an error if a store read fails.
     pub async fn prefetch(&self, hashes: &[BlockHash]) -> Result<()> {
         for hash in hashes {
             let key = make_block_key(hash);
@@ -159,7 +164,6 @@ impl CachedBlockStore {
 #[async_trait]
 impl BlockStore for CachedBlockStore {
     async fn put(&self, hash: BlockHash, data: &[u8]) -> Result<()> {
-        // Verify hash matches data
         let computed_hash = BlockHash::from_data(data);
         if computed_hash != hash {
             return Err(SyncthingError::protocol(format!(
@@ -170,7 +174,6 @@ impl BlockStore for CachedBlockStore {
 
         let key = make_block_key(&hash);
 
-        // Store in sled on a blocking thread to avoid stalling the tokio runtime
         let store = self.store.clone();
         let data_vec = data.to_vec();
         run_blocking("block store put", move || {
@@ -180,7 +183,6 @@ impl BlockStore for CachedBlockStore {
         })
         .await?;
 
-        // Add to cache
         let mut cache = self.cache.write().await;
         let evicted = cache.put(hash, data.to_vec());
         let mut stats = self.stats.write().await;
@@ -190,7 +192,6 @@ impl BlockStore for CachedBlockStore {
     }
 
     async fn get(&self, hash: BlockHash) -> Result<Option<Vec<u8>>> {
-        // Check cache first with read lock
         {
             let cache = self.cache.read().await;
             if let Some(data) = cache.peek(&hash) {
@@ -203,13 +204,11 @@ impl BlockStore for CachedBlockStore {
             }
         }
 
-        // Update miss stats
         {
             let mut stats = self.stats.write().await;
             stats.misses += 1;
         }
 
-        // Fetch from store on a blocking thread
         let key = make_block_key(&hash);
         let store = self.store.clone();
         match run_blocking("block store get", move || {
@@ -220,7 +219,6 @@ impl BlockStore for CachedBlockStore {
         .await?
         {
             Some(data) => {
-                // Add to cache
                 let mut cache = self.cache.write().await;
                 let evicted = cache.put(hash, data.clone());
                 let mut stats = self.stats.write().await;
@@ -232,7 +230,6 @@ impl BlockStore for CachedBlockStore {
     }
 
     async fn has(&self, hash: BlockHash) -> Result<bool> {
-        // Check cache first
         {
             let cache = self.cache.read().await;
             if cache.contains(&hash) {
@@ -240,7 +237,6 @@ impl BlockStore for CachedBlockStore {
             }
         }
 
-        // Check store on a blocking thread
         let key = make_block_key(&hash);
         let store = self.store.clone();
         run_blocking("block store contains", move || {
@@ -254,7 +250,6 @@ impl BlockStore for CachedBlockStore {
     async fn delete(&self, hash: BlockHash) -> Result<()> {
         let key = make_block_key(&hash);
 
-        // Remove from store on a blocking thread
         let store = self.store.clone();
         run_blocking("block store delete", move || {
             store
@@ -263,7 +258,6 @@ impl BlockStore for CachedBlockStore {
         })
         .await?;
 
-        // Remove from cache
         let mut cache = self.cache.write().await;
         cache.remove(&hash);
 
@@ -302,7 +296,7 @@ impl Default for BlockStoreBuilder {
     fn default() -> Self {
         Self {
             db_path: None,
-            cache_size: 64 * 1024 * 1024, // 64 MB default
+            cache_size: 64 * 1024 * 1024,
         }
     }
 }
@@ -326,6 +320,12 @@ impl BlockStoreBuilder {
     }
 
     /// Build the block store
+    ///
+    /// Opens an on-disk database at the configured path, or an in-memory
+    /// database if no path was set.
+    ///
+    /// # Errors
+    /// Returns an error if the database cannot be opened.
     pub fn build(self) -> Result<CachedBlockStore> {
         let store = match self.db_path {
             Some(path) => SledStore::open(path)

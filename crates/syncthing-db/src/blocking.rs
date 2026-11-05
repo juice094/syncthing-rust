@@ -1,4 +1,6 @@
-//! 将同步 sled I/O 放到独立阻塞线程的工具函数
+//! Helpers for running synchronous sled I/O on tokio's blocking thread pool.
+//!
+//! See "docs/design/ADR-20261105-db-blocking-io.md".
 
 use std::time::Duration;
 
@@ -6,10 +8,14 @@ use syncthing_core::{Result, SyncthingError};
 
 const BLOCKING_TIMEOUT: Duration = Duration::from_secs(10);
 
-/// 在 tokio 的阻塞线程池中执行同步闭包，并加超时保护。
+/// Runs a synchronous closure on tokio's blocking thread pool, guarded by a timeout.
 ///
-/// 用于把 sled 等同步磁盘 I/O 从 async runtime 工作线程上挪走，
-/// 避免阻塞 tokio 的事件循环。
+/// Used to keep sled's synchronous disk I/O off the async runtime's worker
+/// threads so a slow disk cannot stall the event loop.
+///
+/// # Errors
+/// Returns a timeout error if the closure does not complete within 10 seconds,
+/// or an internal error if the closure panics.
 pub async fn run_blocking<F, T>(name: &'static str, f: F) -> Result<T>
 where
     F: FnOnce() -> Result<T> + Send + 'static,

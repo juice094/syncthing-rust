@@ -1,13 +1,9 @@
-//! Module: syncthing-db
-//! Worker: Agent-E
-//! Status: UNVERIFIED
+//! `BlockStore` trait implementation.
 //!
-//! ⚠️ 此代码由Agent生成，未经主控验证
-//!
-//! BlockStore trait implementation
-//!
-//! This module provides the main implementation of the `BlockStore` trait
-//! from syncthing-core, combining block storage, caching, and metadata management.
+//! Combines block storage, caching, and metadata management in a single
+//! store. See "docs/design/ADR-20261105-db-blocking-io.md" for the blocking
+//! I/O policy and "docs/design/ADR-20261105-db-metadata-key-layout.md" for
+//! the key layout.
 
 use std::num::NonZero;
 use std::path::Path;
@@ -58,6 +54,10 @@ impl BlockStoreImpl {
     ///
     /// # Returns
     /// A new `BlockStoreImpl` instance
+    ///
+    /// # Errors
+    /// Returns an error if the database cannot be opened or the metadata
+    /// tree cannot be created.
     pub fn open<P: AsRef<Path>>(path: P) -> Result<Self> {
         let store = SledStore::open(path)?;
         Self::from_store(store)
@@ -66,6 +66,9 @@ impl BlockStoreImpl {
     /// Create an in-memory block store
     ///
     /// Useful for testing and temporary storage.
+    ///
+    /// # Errors
+    /// Returns an error if the in-memory database cannot be created.
     pub fn open_in_memory() -> Result<Self> {
         let store = SledStore::open_in_memory()?;
         Self::from_store(store)
@@ -73,12 +76,10 @@ impl BlockStoreImpl {
 
     /// Create a block store from an existing SledStore
     fn from_store(store: SledStore) -> Result<Self> {
-        // Use the same store for metadata but with a separate tree
         let metadata_tree = store.open_tree("metadata")?;
         let metadata = MetadataStore::from_tree(metadata_tree);
 
-        // Create LRU cache with default size (64MB worth of blocks)
-        // SAFETY: 1024 是大于 0 的常量，满足 NonZero 前置条件。
+        // SAFETY: 1024 is a non-zero constant, satisfying the NonZero precondition.
         let cache = unsafe { lru::LruCache::new(NonZero::new_unchecked(1024)) };
 
         Ok(Self {
@@ -93,13 +94,16 @@ impl BlockStoreImpl {
     /// # Arguments
     /// * `path` - Path to the database directory
     /// * `cache_capacity` - Maximum number of blocks to cache
+    ///
+    /// # Errors
+    /// Returns an error if the database cannot be opened or the metadata
+    /// tree cannot be created.
     pub fn open_with_cache<P: AsRef<Path>>(path: P, cache_capacity: usize) -> Result<Self> {
         let store = SledStore::open(path)?;
         let metadata_tree = store.open_tree("metadata")?;
         let metadata = MetadataStore::from_tree(metadata_tree);
-        // cache_capacity = 0 时使用最小值 1，确保非零
         let capacity = cache_capacity.max(1);
-        // SAFETY: max(1) 保证 capacity > 0，满足 NonZero 前置条件。
+        // SAFETY: max(1) guarantees capacity > 0, satisfying the NonZero precondition.
         let cache = unsafe { lru::LruCache::new(NonZero::new_unchecked(capacity)) };
 
         Ok(Self {
@@ -117,6 +121,9 @@ impl BlockStoreImpl {
     }
 
     /// Flush all pending writes to disk
+    ///
+    /// # Errors
+    /// Returns an error if flushing the store or the metadata store fails.
     pub async fn flush(&self) -> Result<()> {
         let store = self.store.clone();
         run_blocking("store flush", move || {
@@ -135,6 +142,9 @@ impl BlockStoreImpl {
     /// * `device_id` - The device ID
     /// * `folder` - The folder ID
     /// * `name` - The file name
+    ///
+    /// # Errors
+    /// Returns an error if the metadata read or deserialization fails.
     pub async fn get_device_file(
         &self,
         device_id: &str,
@@ -150,6 +160,9 @@ impl BlockStoreImpl {
     /// * `device_id` - The device ID
     /// * `folder` - The folder ID
     /// * `info` - The file info to store
+    ///
+    /// # Errors
+    /// Returns an error if the metadata write fails.
     pub async fn put_device_file(
         &self,
         device_id: &str,
@@ -160,8 +173,10 @@ impl BlockStoreImpl {
     }
 
     /// List all folders in the database
+    ///
+    /// # Errors
+    /// Returns an error if the key scan fails.
     pub async fn list_folders(&self) -> Result<Vec<FolderId>> {
-        // Scan for folder stats keys to find all folders
         let store = self.store.clone();
         let results = run_blocking("store list folders", move || {
             store
@@ -172,9 +187,7 @@ impl BlockStoreImpl {
         let mut folders = Vec::new();
 
         for (key, _) in results {
-            // Extract folder ID from key
             if let Ok(key_str) = std::str::from_utf8(&key) {
-                // Key format: folder/<folder_id>/...
                 let parts: Vec<&str> = key_str.split('/').collect();
                 if parts.len() >= 2 {
                     folders.push(FolderId::new(parts[1]));
@@ -182,7 +195,6 @@ impl BlockStoreImpl {
             }
         }
 
-        // Deduplicate
         folders.sort_by(|a, b| a.as_str().cmp(b.as_str()));
         folders.dedup_by(|a, b| a.as_str() == b.as_str());
 
@@ -193,7 +205,6 @@ impl BlockStoreImpl {
 #[async_trait]
 impl BlockStore for BlockStoreImpl {
     async fn put(&self, hash: BlockHash, data: &[u8]) -> Result<()> {
-        // Verify hash integrity
         let computed_hash = BlockHash::from_data(data);
         if computed_hash != hash {
             return Err(SyncthingError::protocol(format!(
@@ -204,7 +215,6 @@ impl BlockStore for BlockStoreImpl {
 
         let key = Self::block_key(&hash);
 
-        // Store in database on a blocking thread
         let store = self.store.clone();
         let data_vec = data.to_vec();
         run_blocking("block store impl put", move || {
@@ -214,7 +224,6 @@ impl BlockStore for BlockStoreImpl {
         })
         .await?;
 
-        // Update cache
         let mut cache = self.block_cache.write().await;
         cache.put(hash, data.to_vec());
 
@@ -222,7 +231,6 @@ impl BlockStore for BlockStoreImpl {
     }
 
     async fn get(&self, hash: BlockHash) -> Result<Option<Vec<u8>>> {
-        // Check cache first
         {
             let cache = self.block_cache.read().await;
             if let Some(data) = cache.peek(&hash) {
@@ -230,7 +238,6 @@ impl BlockStore for BlockStoreImpl {
             }
         }
 
-        // Fetch from store on a blocking thread
         let key = Self::block_key(&hash);
         let store = self.store.clone();
         match run_blocking("block store impl get", move || {
@@ -241,7 +248,6 @@ impl BlockStore for BlockStoreImpl {
         .await?
         {
             Some(data) => {
-                // Add to cache
                 let mut cache = self.block_cache.write().await;
                 cache.put(hash, data.clone());
                 Ok(Some(data))
@@ -251,7 +257,6 @@ impl BlockStore for BlockStoreImpl {
     }
 
     async fn has(&self, hash: BlockHash) -> Result<bool> {
-        // Check cache first
         {
             let cache = self.block_cache.read().await;
             if cache.peek(&hash).is_some() {
@@ -259,7 +264,6 @@ impl BlockStore for BlockStoreImpl {
             }
         }
 
-        // Check store on a blocking thread
         let key = Self::block_key(&hash);
         let store = self.store.clone();
         run_blocking("block store impl contains", move || {
@@ -273,7 +277,6 @@ impl BlockStore for BlockStoreImpl {
     async fn delete(&self, hash: BlockHash) -> Result<()> {
         let key = Self::block_key(&hash);
 
-        // Remove from store on a blocking thread
         let store = self.store.clone();
         run_blocking("block store impl delete", move || {
             store
@@ -282,7 +285,6 @@ impl BlockStore for BlockStoreImpl {
         })
         .await?;
 
-        // Remove from cache
         let mut cache = self.block_cache.write().await;
         cache.pop(&hash);
 
@@ -355,6 +357,12 @@ impl BlockStoreImplBuilder {
     }
 
     /// Build the block store
+    ///
+    /// Requires either a path or `in_memory` to have been set.
+    ///
+    /// # Errors
+    /// Returns an error if neither path nor in-memory mode is configured,
+    /// or if the database cannot be opened.
     pub fn build(self) -> Result<BlockStoreImpl> {
         if self.in_memory {
             BlockStoreImpl::open_in_memory()
