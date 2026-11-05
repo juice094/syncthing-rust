@@ -9,7 +9,7 @@ tags: [report, audit, testing]
 # Code Health and Decoupling Audit Report
 
 > Audit Date: 2026-05-15
-> Version: syncthing-rust v0.2.6 (main @ 904a2ab)
+> Version: syncthing-rust v0.2.6 (main @ 25125ba)
 
 ---
 

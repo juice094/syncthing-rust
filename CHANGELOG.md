@@ -114,14 +114,14 @@
 ### Headline: Text file three-way merge for conflict resolution.
 
 #### Conflict Resolution
-- **Text file auto-merge**: When both sides modify the same `.md`/`.txt`/`.rs`/etc. file concurrently, non-overlapping changes (different paragraphs) are now auto-merged. Overlapping changes (same line) produce git-style conflict markers instead of `.sync-conflict-*` copies. Binary files fall back to RenameBoth (conflict copies). Uses `similar` crate for line-level diff. ([`5bf3fe8`](https://github.com/juice094/syncthing-rust/commit/5bf3fe8))
+- **Text file auto-merge**: When both sides modify the same `.md`/`.txt`/`.rs`/etc. file concurrently, non-overlapping changes (different paragraphs) are now auto-merged. Overlapping changes (same line) produce git-style conflict markers instead of `.sync-conflict-*` copies. Binary files fall back to RenameBoth (conflict copies). Uses `similar` crate for line-level diff. ([`1cb918a`](https://github.com/juice094/syncthing-rust/commit/1cb918a))
 
 ## [3.0.1] — 2026-06-07
 
 ### Headline: §15 stale-index cascade deletion root cause fixed.
 
 #### Bug Fixes
-- **§15 root cause**: `index_handler::process_files` was writing remote deletion markers to the local DB even for files never present locally. This caused the scanner to treat those DB entries as "local files were deleted" and emit `LocalIndexUpdated` with deletion flags back to the peer. On a peer with an empty/fresh DB, this triggered a cascade where the local node deleted its own files (the 2043-file mass deletion in KNOWN_ISSUES §15). Fix: ignore remote deletion markers for files that have no local DB record. ([`af229d5`](https://github.com/juice094/syncthing-rust/commit/af229d5))
+- **§15 root cause**: `index_handler::process_files` was writing remote deletion markers to the local DB even for files never present locally. This caused the scanner to treat those DB entries as "local files were deleted" and emit `LocalIndexUpdated` with deletion flags back to the peer. On a peer with an empty/fresh DB, this triggered a cascade where the local node deleted its own files (the 2043-file mass deletion in KNOWN_ISSUES §15). Fix: ignore remote deletion markers for files that have no local DB record. ([`66e1bf9`](https://github.com/juice094/syncthing-rust/commit/66e1bf9))
 
 ## [3.0.0] — 2026-06-07
 
@@ -130,14 +130,14 @@
 This release marks the transition from alpha to production-ready. syncthing-rust is now running bidirectional sync between Windows 11 (ROG-X) and Ubuntu 24.04 VPS (Gray-Cloud) over Tailscale.
 
 ### Sync Core
-- **Sequence race condition fixed**: `FileSystemDatabase::increment_sequence` read-modify-write was unprotected. `tokio::fs::write` truncates before writing, so concurrent scanner+puller could read an empty file between truncate and write, producing `"Invalid sequence: cannot parse integer from empty string"`. Fixed with per-folder `Mutex` locking the entire read-increment-write cycle. ([`6778837`](https://github.com/juice094/syncthing-rust/commit/6778837))
+- **Sequence race condition fixed**: `FileSystemDatabase::increment_sequence` read-modify-write was unprotected. `tokio::fs::write` truncates before writing, so concurrent scanner+puller could read an empty file between truncate and write, producing `"Invalid sequence: cannot parse integer from empty string"`. Fixed with per-folder `Mutex` locking the entire read-increment-write cycle. ([`5b0f9bb`](https://github.com/juice094/syncthing-rust/commit/5b0f9bb))
 
 ### BEP Relay v1
-- **Relay activation**: Fixed critical ordering bug where relay URLs were stored AFTER the `is_connected` check. On disconnect, `schedule_reconnect` read empty relay URLs → dialed with 0 relay candidates. Relay pool URLs now persisted before the dial decision. ([`7187001`](https://github.com/juice094/syncthing-rust/commit/7187001))
+- **Relay activation**: Fixed critical ordering bug where relay URLs were stored AFTER the `is_connected` check. On disconnect, `schedule_reconnect` read empty relay URLs → dialed with 0 relay candidates. Relay pool URLs now persisted before the dial decision. ([`c9e90ad`](https://github.com/juice094/syncthing-rust/commit/c9e90ad))
 - **10 relay candidates** with parallel dial racing against direct TCP
 
 ### CI / Quality
-- **Full CI green**: 19/19 jobs passing (was 7 failing). Fixed clippy warnings (10 across 5 files), benchmark compilation (missing `FileInfo` fields), `cargo fmt`, and `cargo-deny` configuration. ([`67ba7a2`](https://github.com/juice094/syncthing-rust/commit/67ba7a2), [`1c60271`](https://github.com/juice094/syncthing-rust/commit/1c60271))
+- **Full CI green**: 19/19 jobs passing (was 7 failing). Fixed clippy warnings (10 across 5 files), benchmark compilation (missing `FileInfo` fields), `cargo fmt`, and `cargo-deny` configuration. ([`1e33847`](https://github.com/juice094/syncthing-rust/commit/1e33847), [`8a8029f`](https://github.com/juice094/syncthing-rust/commit/8a8029f))
 - **deny.toml**: License auditing with allowlist (MIT, Apache-2.0, MPL-2.0, BSD, ISC, etc.) and advisory ignores for unmaintained transitive deps (paste, instant, fxhash via sled)
 
 ### Operations
@@ -372,15 +372,15 @@ file materialized on receiver). The previously-`#[ignore]`-pinned
 ### 🗂 Project Hygiene
 
 - **Phase A file splits — 6/6 complete** (T1.1–T1.6):
-  - `dialer.rs` 621 → 452 + tests 168 (`90e6d3b`)
-  - `block_cache.rs` 556 → 322 + tests 234 (`5fd42b0`)
-  - `types/mod.rs` 639 → 477 + `types/folder.rs` 176 (`f21c8fe`)
-  - `daemon_runner.rs` 596 → 476 + helpers 176 (`0140851`)
-  - `traits.rs` 574 → 463 + `traits/transport.rs` 127 (`66589c2`)
+  - `dialer.rs` 621 → 452 + tests 168 (`31f9a6d`)
+  - `block_cache.rs` 556 → 322 + tests 234 (`e65a384`)
+  - `types/mod.rs` 639 → 477 + `types/folder.rs` 176 (`f50dfbf`)
+  - `daemon_runner.rs` 596 → 476 + helpers 176 (`5d8a89f`)
+  - `traits.rs` 574 → 463 + `traits/transport.rs` 127 (`185a9d5`)
   - `service/mod.rs` 695 → 60 + 4 children 705 (T2.3 above)
 
 - **Clippy nursery — `manual_let_else`** enabled and applied across 10
-  sites in 9 files (T1.4, `921cf0f`).
+  sites in 9 files (T1.4, `c492603`).
 
 ### ⚠️ Known Limitations (unchanged from v0.2.4)
 

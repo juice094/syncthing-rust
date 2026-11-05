@@ -32,7 +32,7 @@ tags: [report, audit, testing]
 
 ### 四、Git 状态
 - 分支：`main`
-- 领先 origin: **11 commits** (01429a2)
+- 领先 origin: **11 commits** (25df4a4)
 - 推送状态：✅ 全部已推送
 
 ---
@@ -114,4 +114,4 @@ cargo build --release -p syncthing --target x86_64-unknown-linux-musl
 ---
 
 *报告生成时间：2026-05-15*
-*对应 commit：01429a2*
+*对应 commit：25df4a4*

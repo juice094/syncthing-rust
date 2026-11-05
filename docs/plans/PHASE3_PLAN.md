@@ -12,7 +12,7 @@ tags: [plan, roadmap]
 > 📋 **计划索引**：[`docs/plans/INDEX.md`](./INDEX.md) — 查看所有计划文件关系与跳转速查
 > 📋 **审计报告**：[`docs/plans/PLAN_AUDIT_2026-04-27.md`](./PLAN_AUDIT_2026-04-27.md) — 本计划勘误来源
 >
-> **基线**: Phase 2 已完成（`90776e7`），`ReliablePipe` + `BepSession` + `ConnectionManager` 多路径架构稳定。
+> **基线**: Phase 2 已完成（`cfc4e3c`），`ReliablePipe` + `BepSession` + `ConnectionManager` 多路径架构稳定。
 > **目标**: 将 BepSession 从"功能正确"推进到"生产可观测 + 长期稳定 + 上下游可集成"。
 
 ---

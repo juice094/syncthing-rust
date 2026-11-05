@@ -19,18 +19,18 @@ timestamp: 2026-10-16T00:00:00Z
 
 | Commit | 内容 |
 |:---|:---|
-| `51da17d` | **修复 dependabot 大版本升级引起的编译中断**（rand 0.8→0.10、sysinfo 0.30→0.39、ctor 0.2→1.0、tokio-tungstenite 0.30、tower 0.5 等） |
-| `55aaa5b` | **CI 自 2026-06-29 起的长期红转绿**：Cargo Deny 改用 `taiki-e/install-action`；Security Audit 补 `checks: write` |
-| `f99f0ac` | 审计债务刷新：`resvg` 关 text 特性（去 `ttf-parser`/`rustybuzz`）、去 `paste`、新增 `h2` 条目 |
-| `dce379b` `b0227b7` `b305359` | e2e_crud 加固：会话按**连接粒度**断开、块请求 3×重试且每次重取连接、IndexUpdate 退避重发 |
-| `8006088` | **产品修复：`.stignore` 目录规则未作用于 watcher 增量路径** |
-| `85190ae` | **产品修复：在途拉取被子树扫描误判删除** + 拉取失败退避重试 + 回归测试 |
-| `6aaa6aa` `3c4405b` | 就绪等待原语 + **单边拨号根治 §1 会话竞态**；e2e_sync / e2e_crud 的 `#[ignore]` 解除 |
-| `f4b3cb5` | **MCP 工具集 11 → 19** + 真实二进制集成测试 |
-| `5425be7` `fb50f6c` `b9d4da5` `3e48e13` `a33af01` | 文档生产化重构、agent bundle 刷新、KNOWN_ISSUES §1/§23/§24 登记、事实源收敛 |
-| `8a95870` | `scripts/agent-facts.ps1`（只读事实导出） |
+| `947dbcf` | **修复 dependabot 大版本升级引起的编译中断**（rand 0.8→0.10、sysinfo 0.30→0.39、ctor 0.2→1.0、tokio-tungstenite 0.30、tower 0.5 等） |
+| `5d28697` | **CI 自 2026-06-29 起的长期红转绿**：Cargo Deny 改用 `taiki-e/install-action`；Security Audit 补 `checks: write` |
+| `ca91bb2` | 审计债务刷新：`resvg` 关 text 特性（去 `ttf-parser`/`rustybuzz`）、去 `paste`、新增 `h2` 条目 |
+| `10c4383` `42b9edd` `82a785c` | e2e_crud 加固：会话按**连接粒度**断开、块请求 3×重试且每次重取连接、IndexUpdate 退避重发 |
+| `6dadd83` | **产品修复：`.stignore` 目录规则未作用于 watcher 增量路径** |
+| `50403c0` | **产品修复：在途拉取被子树扫描误判删除** + 拉取失败退避重试 + 回归测试 |
+| `bd5bd67` `7b327a8` | 就绪等待原语 + **单边拨号根治 §1 会话竞态**；e2e_sync / e2e_crud 的 `#[ignore]` 解除 |
+| `cd9ddc5` | **MCP 工具集 11 → 19** + 真实二进制集成测试 |
+| `5f8983c` `60d1376` `9ea4102` `7edb409` `ff9ec9b` | 文档生产化重构、agent bundle 刷新、KNOWN_ISSUES §1/§23/§24 登记、事实源收敛 |
+| `9b9d04d` | `scripts/agent-facts.ps1`（只读事实导出） |
 
-（另有 `c5ebc7a`/`a941226` 两条 KNOWN_ISSUES §23 根因登记。）
+（另有 `0268a75`/`c290b9e` 两条 KNOWN_ISSUES §23 根因登记。）
 
 ---
 
@@ -101,10 +101,10 @@ Cargo Deny（`taiki-e/install-action`）与 Security Audit（`checks: write`）�
 
 | 维度 | 状态 |
 |:---|:---|
-| 工作区 / 同步 | 干净；`HEAD == origin/main == a33af01` |
+| 工作区 / 同步 | 干净；`HEAD == origin/main == ff9ec9b` |
 | 测试基线 | **454 passed / 5 ignored / 0 failed**（38 个测试二进制，2026-10-16 实测） |
 | 五道门 | fmt / clippy(0 warn) / test / doc / `cargo deny check all` 全绿 |
-| CI | `CI` 17/17 job + `Build Release Binary` 3/3 job 均 success @ `a33af01` |
+| CI | `CI` 17/17 job + `Build Release Binary` 3/3 job 均 success @ `ff9ec9b` |
 | 忽略用例 | 5 个：UDP loopback broadcast（CI runner 不稳）、需外网的 relay/STUN 用例与 2 个 STUN doc-test |
 | worktree | 仅主工作树（对照用的 `sr-base` 已移入回收站，失联元数据已 prune） |
 
@@ -134,9 +134,9 @@ Cargo Deny（`taiki-e/install-action`）与 Security Audit（`checks: write`）�
 
 | Commit | 内容 |
 |:---|:---|
-| `ac3c42c` | 归档 Obsidian 导航层：`docs/_Home.md` + 9 个 `_MOC.md` → `docs/archive/obsidian-nav/`（保留原子目录层级以维持 Obsidian wikilink 解析）；此后 `docs/README.md` 是唯一 OKF 入口 |
-| `b6bd817` | `docs/README.md` 重写为**按角色进入**（开发者 / 使用者 / Agent）＋准确目录树＋各目录表；`ENGINEERING_DISCIPLINE.md` / `GRAY_CLOUD_OPS_MANUAL.md` 移入 `docs/operations/` 并修正全部引用方；修复 16 处真实断链；补 `DISASTER_RECOVERY.md` frontmatter |
-| `10ddf7c` | `RELEASES.md` 顶部标注 Stats 为发布时快照并指向 `docs/agent/testing.md` 事实源；移除唯一的 "current workspace" 表述 |
+| `92a8031` | 归档 Obsidian 导航层：`docs/_Home.md` + 9 个 `_MOC.md` → `docs/archive/obsidian-nav/`（保留原子目录层级以维持 Obsidian wikilink 解析）；此后 `docs/README.md` 是唯一 OKF 入口 |
+| `459d709` | `docs/README.md` 重写为**按角色进入**（开发者 / 使用者 / Agent）＋准确目录树＋各目录表；`ENGINEERING_DISCIPLINE.md` / `GRAY_CLOUD_OPS_MANUAL.md` 移入 `docs/operations/` 并修正全部引用方；修复 16 处真实断链；补 `DISASTER_RECOVERY.md` frontmatter |
+| `690f938` | `RELEASES.md` 顶部标注 Stats 为发布时快照并指向 `docs/agent/testing.md` 事实源；移除唯一的 "current workspace" 表述 |
 
 **验证**：断链 18 → 2（余 2 处为正文里的字面示例 `[[WikiLink]]` / `[[wikilink]]`，非真实链接）；孤儿文档 4 → 0；`cargo fmt --all -- --check` 通过；CI（run 38849513049）全绿。
 

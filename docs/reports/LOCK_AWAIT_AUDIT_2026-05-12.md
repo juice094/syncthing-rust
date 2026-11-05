@@ -10,7 +10,7 @@ tags: [report, audit, concurrency, safety]
 
 ## 背景
 
-修复 T-F1 死锁后（commit `0d3e8bb`），全面审查工程中是否存在
+修复 T-F1 死锁后（commit `49d4a19`），全面审查工程中是否存在
 类似的同步锁跨 `.await` 持有模式，避免未来出现相同问题。
 
 ## 审查范围
@@ -82,7 +82,7 @@ if let Some(mut guard) = self.dashmap.get_mut(&key) {
 ## 后续防护
 
 ### 已实施
-- `T-F1` 修复（commit `0d3e8bb`）
+- `T-F1` 修复（commit `49d4a19`）
 - 86 + 40 个单测验证
 - 72h 压测验证（当前 T+7h+ 稳定运行）
 

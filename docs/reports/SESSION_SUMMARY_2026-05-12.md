@@ -179,25 +179,25 @@ CSV:     537+ 行（每 60s）
 ## 八、commit 完整列表（按时间倒序）
 
 ```
-29aa44f style: cargo fmt formatting follow-up for logging_buffer.rs
-5ecce42 refactor: 修复 5 处 or_fun_call lint（懒求值优化）
-1f57736 refactor(T-E1): 提取 TcpBiStream 到 connection/tcp_pipe.rs (695→603)
-42916ca refactor(T-E1): 提取 BEP 消息类型转换到 conversions.rs (697→560)
-bc6da3d release: v0.2.4
-9094ce8 refactor: 修复 clippy redundant_field_names
-20a02f9 refactor: 修复 4 处 redundant_clone（clippy 自动修复）
-8d150a2 refactor: 移除真正死代码 + 文档化保留的 dead_code 标注
-eedcb5e refactor(types): 提取连接相关类型到 types/connection.rs (805→639)
-a78655b ci+docs: 启用 await_holding_lock lint + 全工程持锁审计文档
-4fbeb65 bench(T-B1): 验证 Scanner rayon 并行化收益（9-11x 加速）
-6b90ffb ci(T-G2): 添加 bench-smoke 工作流 + 更新 CHANGELOG
-e57f99d refactor(T-E1): 拆分剩余 5 个大文件的测试代码到独立 tests.rs
-4105e5c docs(T-A1): 完整 Criterion baseline (scanner + puller + encode/decode)
-c28c50c refactor(T-F2): unwrap/expect 全工程审计 + 修复运行时风险点
-0d3e8bb fix(net): 修复 BEP race resolution 中跨 .await 持锁的死锁 (T-F1)
-6392ba2 diag(T-F1): 增加主线程心跳 + 监控任务 60s 频率 + stderr 捕获
-9dbbc85 feat(stress): T-F1 panic hook + monitor alive log; T-A1 baseline report
-b8fbcd7 chore: cleanup temp artifacts + roadmap update
+46bcfe0 style: cargo fmt formatting follow-up for logging_buffer.rs
+8138aa8 refactor: 修复 5 处 or_fun_call lint（懒求值优化）
+24202cc refactor(T-E1): 提取 TcpBiStream 到 connection/tcp_pipe.rs (695→603)
+6b5a0e1 refactor(T-E1): 提取 BEP 消息类型转换到 conversions.rs (697→560)
+f46c60e release: v0.2.4
+9cd4de3 refactor: 修复 clippy redundant_field_names
+79f1049 refactor: 修复 4 处 redundant_clone（clippy 自动修复）
+63c3ee9 refactor: 移除真正死代码 + 文档化保留的 dead_code 标注
+bb89127 refactor(types): 提取连接相关类型到 types/connection.rs (805→639)
+71e0e5a ci+docs: 启用 await_holding_lock lint + 全工程持锁审计文档
+f48d825 bench(T-B1): 验证 Scanner rayon 并行化收益（9-11x 加速）
+2646779 ci(T-G2): 添加 bench-smoke 工作流 + 更新 CHANGELOG
+0a4633a refactor(T-E1): 拆分剩余 5 个大文件的测试代码到独立 tests.rs
+b4b1190 docs(T-A1): 完整 Criterion baseline (scanner + puller + encode/decode)
+4e7ca0d refactor(T-F2): unwrap/expect 全工程审计 + 修复运行时风险点
+49d4a19 fix(net): 修复 BEP race resolution 中跨 .await 持锁的死锁 (T-F1)
+4ed45fb diag(T-F1): 增加主线程心跳 + 监控任务 60s 频率 + stderr 捕获
+6b8db2b feat(stress): T-F1 panic hook + monitor alive log; T-A1 baseline report
+b87e204 chore: cleanup temp artifacts + roadmap update
 ```
 
 ## 九、关联文档

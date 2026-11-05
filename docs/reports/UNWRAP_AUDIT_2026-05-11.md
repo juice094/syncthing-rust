@@ -88,4 +88,4 @@ tags: [report, audit, safety, rust]
 
 ## Progress Log
 
-- **2026-05-11**: Fixed 4 occurrences in `syncthing-core` + `syncthing-api` (commit `5d32af0`).
+- **2026-05-11**: Fixed 4 occurrences in `syncthing-core` + `syncthing-api` (commit `08937e8`).

@@ -49,7 +49,7 @@ race resolution 替换连接时，旧连接的 `close()` 触发 `Disconnected` �
 `sessions.remove(&device_id)` 拿到的是**新 session 的 handle**，随后的 `handle.abort()` 误杀了刚启动的正确 BepSession。
 结果：双方保留的物理连接上无人运行 BepSession，ClusterConfig 无人收发，10s 超时。
 
-**修复**（commit `3656007`）：
+**修复**（commit `4500ae8`）：
 - `daemon_runner.rs` / `bep_bridge.rs`：`on_disconnected` 只 `sessions.remove` 清理句柄，**不再 `abort`**。
 - 旧 BepSession 自己会在连接关闭后检测到 `recv/send` 错误并退出。
 - 新增 `ConnectionManagerHandle::reconnect_device` API，支持显式断开+清 pending+重拨。
@@ -152,14 +152,14 @@ File download completed file=hello.txt
 ## §5. CSV 时间戳格式（已修复 ✅）
 
 **症状**：stress_test 输出 `20585T05:07:55Z`（broken format）。  
-**修复**：`38fb07f feat(T2.2)`（chrono ISO 8601）。
+**修复**：`bfbb39d feat(T2.2)`（chrono ISO 8601）。
 
 ---
 
 ## §6. stress_test `rss_mb` 恒为 0（已修复 ✅）
 
 **症状**：monitor CSV `rss_mb` 列全 0。  
-**修复**：T-F1 周期内 patch（process name fix）。本 commit `38fb07f` 仍未带新 binary，下次重跑生效。
+**修复**：T-F1 周期内 patch（process name fix）。本 commit `bfbb39d` 仍未带新 binary，下次重跑生效。
 
 ---
 
@@ -208,7 +208,7 @@ File download completed file=hello.txt
 - `cmd/syncthing/src/tui/daemon_runner.rs:202` — BepSessionEvent
 - `crates/syncthing-sync/src/watcher.rs:30` — notify Event
 
-**修复**（commit `ecfbfed`）：
+**修复**（commit `3edae45`）：
 - DERP 全链路（`derp/pipe.rs`、`derp/server.rs`）：`unbounded_channel` → `channel(1024)`
 - 发送端 `send()` → `try_send()`，满时丢弃而非阻塞
 - 其余位置（connection、manager、watcher）使用 `tokio::sync::broadcast` 或 `notify` 内置 channel，已由上游库保证有界
@@ -217,7 +217,7 @@ File download completed file=hello.txt
 - `BepSessionEvent`（`daemon_runner.rs:202`）：使用 `tokio::sync::mpsc::channel(256)`，已有界
 - `notify Event`（`watcher.rs:30`）：`notify` 库内部使用有界 channel
 
-**追踪**：v0.2.6 hotfix H-3 / commit `ecfbfed`
+**追踪**：v0.2.6 hotfix H-3 / commit `3edae45`
 
 ### §7.4 丢弃的 Receiver + 无界发送 = 确定泄漏（P1，**已修复 ✅** v3.0.0）
 
@@ -343,7 +343,7 @@ Windows 下 TLS 握手完成后，`is_alive()` 返回 `false`，但底层 TCP �
 1. **临时文件命名与 block_server 不对齐**：puller 使用 `with_extension("syncthing.tmp")` 生成 `large_file.syncthing.tmp`，而 block_server 期望 `.syncthing.large_file.bin.tmp`。远程从临时文件恢复块请求时，block_server 找不到对应路径，导致请求失败。
 2. **下载失败后未清理临时文件**：`puller::download_file` 中任何块请求失败（超时/哈希校验失败/写入失败）均直接 `return Err(e)`，临时文件永远残留。残留的 0 字节临时文件导致远程索引与实际文件不一致，触发 conflict resolver 删除本地文件。
 
-**修复**（commit `43a4487`）：
+**修复**（commit `6b49b44`）：
 - `puller/mod.rs`：新增 `temp_path_for()` 函数，生成 `.syncthing.{filename}.tmp` 格式，与 block_server 对齐。
 - `puller/mod.rs`：新增 `cleanup_temp()` 辅助函数，在所有错误路径（块下载失败、哈希校验失败、写入失败、flush 失败、rename 失败）上调用，确保下载失败时删除残留临时文件。
 
@@ -428,7 +428,7 @@ v0.2.8 完成首次双节点真实网络环境下的完整文件同步验证。
 
 ## §11. Scanner 不自动排除元数据文件（P1，D-1）— **已修复 ✅**
 
-> **修复 commit**：`d6d8c01`（PR #1，2026-05-16）
+> **修复 commit**：`afae882`（PR #1，2026-05-16）
 
 **症状**：`scanner` 将 syncthing 自身产生的元数据文件/目录当作普通文件索引并同步，包括 `config.json`、`cert.pem`、`key.pem`、`db/`、`logs/`、`*.syncthing.tmp`、`.stfolder` 等。当同步目录与配置目录重合时，递归扫描导致同步爆炸（`Pull error: Is a directory`）。
 
@@ -733,7 +733,7 @@ v0.2.8 完成首次双节点真实网络环境下的完整文件同步验证。
 
 ---
 
-## §20. 下游（Obsidian bridge）实测上报缺陷组（2026-07，**全部修复 ✅** commit `378b03a`）
+## §20. 下游（Obsidian bridge）实测上报缺陷组（2026-07，**全部修复 ✅** commit `426b8f6`）
 
 下游 bridge 项目在 Android/双 rust 节点实测中上报，全部复现于 syncthing-rust ↔ syncthing-rust，与官方实现无关。
 
@@ -759,7 +759,7 @@ v0.2.8 完成首次双节点真实网络环境下的完整文件同步验证。
 
 **修复**：`SyncService` 新增 `set_renegotiation_hook`（sync crate 保持零网络依赖），五个配置变更点均携带当前已连接设备触发钩子；daemon（`daemon_runner.rs`）注册为 `reconnect_device_by_id`。
 
-### §20.4 TUI 添加文件夹静默丢失（中等 — TUI，**已修复 ✅** commit `30337a4`）
+### §20.4 TUI 添加文件夹静默丢失（中等 — TUI，**已修复 ✅** commit `17912f0`）
 
 **症状**：TUI Folders 页 `a`/`Ins` 添加文件夹，表单正常关闭但文件夹从未写入 config。
 
@@ -770,7 +770,7 @@ v0.2.8 完成首次双节点真实网络环境下的完整文件同步验证。
 
 ---
 
-## §21. 版本向量本地计数器 ID 硬编码为 1（严重 — 数据安全，**已修复 ✅** commit `8225c0f`）
+## §21. 版本向量本地计数器 ID 硬编码为 1（严重 — 数据安全，**已修复 ✅** commit `73cab57`）
 
 **症状**（下游 bridge 生产上报）：一端删除文件后，另一端离线期间的本地修改被静默覆盖；已删除文件在对端重连后复活。rust ↔ rust 复现，与官方实现无关。
 
@@ -786,13 +786,13 @@ v0.2.8 完成首次双节点真实网络环境下的完整文件同步验证。
 
 ---
 
-## §22. 云端陈旧索引致本地课程目录批量删除（严重 — 数据安全事故，**已修复 ✅** commit `0be7f19`）
+## §22. 云端陈旧索引致本地课程目录批量删除（严重 — 数据安全事故，**已修复 ✅** commit `66e0af8`）
 
 **症状**（2026-07-20 本地 09:58 与 16:23 两波）：puller 应用云端（IYGOGGD）索引中的删除标记，共删除 114 个路径——`obsidian-notes`（10-Courses）60 个（信息检索与搜索引擎/*、农业大数据应用/* 等课程目录）+ `default` 54 个。`versioning: null`，无 syncthing 侧备份。
 
 **根因链**：
 1. 云端索引已腐败（大量 BEP error code 2 / NO_SUCH_FILE——通告了无实体的文件）；
-2. §21 版本向量计数器硬编码使云端删除标记被误判为线性支配（修复于 `8225c0f`）；
+2. §21 版本向量计数器硬编码使云端删除标记被误判为线性支配（修复于 `73cab57`）；
 3. 删除以 IndexUpdate 增量批次进入，v3.0.4 的 50% 全量索引阈值（§15）无法覆盖；
 4. puller 硬删无回收站，删除动作仅 debug 级日志，事故后定位成本高。
 
@@ -812,7 +812,7 @@ v0.2.8 完成首次双节点真实网络环境下的完整文件同步验证。
 
 **症状**：`cargo test --workspace` 或单独跑 `cargo test -p syncthing --test e2e_crud` 时，5 个用例中随机 1–3 个失败（每次失败的用例不同），断言卡在同步等待上；单独跑某个用例常在 1s 内通过。
 
-**基线对照（已验证）**：在 dependabot 依赖升级之前的提交 `e8a47c9` 上独立运行该二进制 3 次，**3/3 失败**（`test_e2e_rename_file` ×2、`test_e2e_stignore_directory_exclusion` ×1）→ 属原生脆弱性，与依赖升级（rand 0.8→0.10、tokio 1.52→1.53 等）无关。
+**基线对照（已验证）**：在 dependabot 依赖升级之前的提交 `4e218c3` 上独立运行该二进制 3 次，**3/3 失败**（`test_e2e_rename_file` ×2、`test_e2e_stignore_directory_exclusion` ×1）→ 属原生脆弱性，与依赖升级（rand 0.8→0.10、tokio 1.52→1.53 等）无关。
 
 **根因（2026-10-15 日志实测，非推断）**：以 `RUST_LOG=syncthing_test_utils=info,syncthing_sync=info,syncthing_net=info` + `--nocapture` 复现，链路断点为：
 1. 索引**已经送达**接收端（`Received IndexUpdate ... seq=2-2`）——所以并非「事件被静默丢弃」；

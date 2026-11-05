@@ -68,7 +68,7 @@ tags: [report, audit, safety, rust]
 
 ## 关联 PR/Commit
 
-- `0d3e8bb` fix(net): DashMap 跨 await 持锁死锁修复（间接发现）
+- `49d4a19` fix(net): DashMap 跨 await 持锁死锁修复（间接发现）
 - 本次提交：T-F2 unwrap 审计 + 修复
 
 ## 状态

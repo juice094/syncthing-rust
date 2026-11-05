@@ -18,15 +18,15 @@ timestamp: 2026-07-21T00:00:00Z
 
 | Commit | 内容 |
 |:---|:---|
-| `30337a4` | TUI AddFolder 静默丢失修复 + TUI 事件层 11 个 handler 级测试 |
-| `378b03a` | BEP Ping 风暴（互答循环）、block_source 时机、配置重协商钩子 |
-| `83acf07` / `9b1da43` | 文档：§20/§21 登记、基线同步 |
-| `8225c0f` | **版本向量真实设备计数器 ID**（硬编码 1 → 证书派生，Go ShortID 语义） |
-| `0be7f19` | 删除路径三层加固：pull 删除配额 / `.sttrash` 软删除 / 删除审计日志 |
-| `94e5db0` | 文档：§22 数据安全事故 RCA |
-| `e2cf6fa`~`886ccee` | （下游会话）幻影删除、last_pong、僵尸会话重连、版本乒乓、.stversions 泄漏 |
-| `9c9877a` | 冲突死循环分析报告与修复计划（`docs/plans/CONFLICT_RESOLUTION_ALIGNMENT_2026-07-21.md`） |
-| `73b42c5` | **确定性冲突胜者仲裁**（Go WinsConflict 语义）+ 收敛证明测试 |
+| `17912f0` | TUI AddFolder 静默丢失修复 + TUI 事件层 11 个 handler 级测试 |
+| `426b8f6` | BEP Ping 风暴（互答循环）、block_source 时机、配置重协商钩子 |
+| `3eff3cc` / `6aa7c7e` | 文档：§20/§21 登记、基线同步 |
+| `73cab57` | **版本向量真实设备计数器 ID**（硬编码 1 → 证书派生，Go ShortID 语义） |
+| `66e0af8` | 删除路径三层加固：pull 删除配额 / `.sttrash` 软删除 / 删除审计日志 |
+| `eb8873e` | 文档：§22 数据安全事故 RCA |
+| `0677201`~`2c94a2a` | （下游会话）幻影删除、last_pong、僵尸会话重连、版本乒乓、.stversions 泄漏 |
+| `4124bf6` | 冲突死循环分析报告与修复计划（`docs/plans/CONFLICT_RESOLUTION_ALIGNMENT_2026-07-21.md`） |
+| `edd431b` | **确定性冲突胜者仲裁**（Go WinsConflict 语义）+ 收敛证明测试 |
 
 测试基线：**433 passed / 6 ignored / 0 failed**（单元+集成；e2e_crud 当前红色，见 §四）。
 
@@ -44,7 +44,7 @@ timestamp: 2026-07-21T00:00:00Z
 
 ## 四、当前系统状态
 
-- **e2e_crud 红色（待下游修复）**：二分归因 `886ccee`（content-hash-first change detection）。`94e5db0`/`f4fce05` 全绿，`9c9877a` 起 2/5 超时失败。疑似哈希优先检测误判新下载文件为本地变更。
+- **e2e_crud 红色（待下游修复）**：二分归因 `2c94a2a`（content-hash-first change detection）。`eb8873e`/`bcdb9ab` 全绿，`4124bf6` 起 2/5 超时失败。疑似哈希优先检测误判新下载文件为本地变更。
 - **官方互联**：syncthing-rust ↔ Go Syncthing v2.1.1 loopback 双向同步 + 1MiB 多块 SHA-256 一致（`target/interop/` 可复跑）。
 - **本机生产节点**（PID 27660，新二进制）：REST 绑回 `127.0.0.1:8385`；两文件夹 Simple versioning keep=5；删除加固激活。
 - **云端（Gray-Cloud）**：**仍是事故前旧二进制**，索引疑似腐败；`target/release/syncthing-linux-x86_64` 新件已备（含全部修复）。
@@ -52,7 +52,7 @@ timestamp: 2026-07-21T00:00:00Z
 
 ## 五、Backlog（按优先级）
 
-1. **下游修复 `886ccee`** e2e 回归（或评估 revert）——origin/main 套件红色中。
+1. **下游修复 `2c94a2a`** e2e 回归（或评估 revert）——origin/main 套件红色中。
 2. **云端更新**（P2-1）：先 SSH 确认 10-Courses 实体文件是否还在 → 部署新二进制 → 验证重连。
 3. **冲突 Phase 2**：`is_conflict` 内容精化短路（Go `InConflictWith` 语义）。
 4. **`ignore_delete` 文件夹选项**（Go `ignoreDelete` 对齐，puller 删除分支按配置跳过）。

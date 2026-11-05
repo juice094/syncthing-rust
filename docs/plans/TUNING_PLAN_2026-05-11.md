@@ -157,7 +157,7 @@ tags: [plan, roadmap]
 `crates/bep-protocol/src/messages.rs::Hello::encode_to_vec`：
 - 当前 `BytesMut::new` → 写入 → `to_vec()` 拷贝
 - **新增 `encode_to_bytes(&self) -> Bytes`**；`encode_to_vec` 委托 `encode_to_bytes().to_vec()` 保持兼容
-- commit `78061b7` 已对 `encode_message` 做过类似优化，复用思路
+- commit `b7e11c1` 已对 `encode_message` 做过类似优化，复用思路
 - **状态**：已落地。bench 编译通过。
 
 ### T-D2 BepSession 热循环 instrument ✅

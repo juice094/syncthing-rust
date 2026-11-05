@@ -34,17 +34,17 @@ readiness. Key deliverables:
 
 | Hash | Subject |
 |------|---------|
-| `20bb475` | tools: add gen_test_config binary and fix two-node orchestrator |
-| `18909e8` | tools: add two-node real-network stress test orchestration |
-| `4c34324` | tools: add cross-platform syncthing-monitor binary + peer-addr support |
-| `f6a6c9e` | ci: add cargo-deny, all-features test, macOS matrix, and justfile |
-| `771e544` | refactor(net): split oversized session and connection modules |
-| `3009596` | chore(dead_code): annotate placeholder fields with TODO(v0.3.0) |
-| `26db471` | feat(api): add Prometheus /metrics endpoint |
-| `a1461f3` | refactor(net): extract self_weak helper and add INVARIANT comments |
-| `0f1ad9f` | build: align crate versions, centralize deps, add publish=false |
-| `b713b4c` | docs: reconcile version numbers, test counts, and stale references |
-| `62541cb` | chore(hygiene): archive stale docs and remove root clutter |
+| `861a32d` | tools: add gen_test_config binary and fix two-node orchestrator |
+| `76bd3d1` | tools: add two-node real-network stress test orchestration |
+| `0fa34f6` | tools: add cross-platform syncthing-monitor binary + peer-addr support |
+| `7a0ec62` | ci: add cargo-deny, all-features test, macOS matrix, and justfile |
+| `360e7cf` | refactor(net): split oversized session and connection modules |
+| `e4cd29e` | chore(dead_code): annotate placeholder fields with TODO(v0.3.0) |
+| `146f520` | feat(api): add Prometheus /metrics endpoint |
+| `8da2c16` | refactor(net): extract self_weak helper and add INVARIANT comments |
+| `826da98` | build: align crate versions, centralize deps, add publish=false |
+| `f7b7966` | docs: reconcile version numbers, test counts, and stale references |
+| `e76eeed` | chore(hygiene): archive stale docs and remove root clutter |
 
 ---
 

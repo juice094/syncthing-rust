@@ -8,7 +8,7 @@ tags: [plan, conflict, vector-clock, go-alignment]
 
 # 冲突死循环检查报告与修复计划（对齐 Go 官方实现）
 
-> **来源**：下游会话转述——五个修复（幻影删除、last_pong 未更新、僵尸会话拒绝重连、权限/mtime 噪声版本乒乓、.stversions 泄漏）已提交本地 main（`e2cf6fa`~`886ccee`，已随本文件推送）；残余问题为**分叉版本向量的冲突死循环**（双端同文件独立谱系时反复回拉覆盖）。
+> **来源**：下游会话转述——五个修复（幻影删除、last_pong 未更新、僵尸会话拒绝重连、权限/mtime 噪声版本乒乓、.stversions 泄漏）已提交本地 main（`0677201`~`2c94a2a`，已随本文件推送）；残余问题为**分叉版本向量的冲突死循环**（双端同文件独立谱系时反复回拉覆盖）。
 > **对照基准**：`dev/syncthing-go` 官方实现（`lib/protocol/vector.go`、`bep_fileinfo.go`、`lib/model/folder_sendrecv.go`）。
 
 ---
