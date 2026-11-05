@@ -1,6 +1,9 @@
-//! 文件拉取器
+//! File puller.
 //!
-//! 实现从远程设备下载文件的功能
+//! Downloads files from remote devices.
+//!
+//! See "docs/design/ADR-20261105-pull-delete-quota.md" and
+//! "docs/design/ADR-20261105-remote-deletion-guards.md".
 
 pub mod concurrency;
 pub(crate) mod ops;
@@ -25,9 +28,15 @@ use tokio::fs;
 use tokio::io::AsyncWriteExt;
 use tracing::{debug, error, info, trace, warn};
 
-/// 块数据源 trait
+/// Source of file blocks for downloads.
 #[async_trait::async_trait]
 pub trait BlockSource: Send + Sync {
+    /// Requests one block of a file from a peer.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SyncError`] when the block cannot be fetched (e.g. the peer
+    /// no longer has the file).
     async fn request_block(
         &self,
         folder: &str,
@@ -37,7 +46,7 @@ pub trait BlockSource: Send + Sync {
     ) -> Result<Bytes>;
 }
 
-/// 文件拉取器
+/// Downloads needed files from remote devices.
 pub struct Puller {
     db: Arc<dyn LocalDatabase>,
     events: EventPublisher,
@@ -49,51 +58,56 @@ pub struct Puller {
 }
 
 impl Puller {
-    /// 创建新的拉取器
+    /// Creates a new puller.
+    ///
+    /// Defaults to a conservative 2 concurrent file downloads (friendly to
+    /// high-latency links) and 4 concurrent block requests per file (avoids
+    /// head-of-line blocking).
     pub fn new(db: Arc<dyn LocalDatabase>, events: EventPublisher) -> Self {
         Self {
             db,
             events,
-            max_concurrent_downloads: 2, // 保守默认 — 高延迟链路友好
-            max_concurrent_blocks: 4,    // 减少并发避免 HEAD-of-line blocking
+            max_concurrent_downloads: 2,
+            max_concurrent_blocks: 4,
             concurrency_policy: RwLock::new(None),
             block_source: RwLock::new(None),
             versioner: None,
         }
     }
 
-    /// 设置最大并发下载数（文件级）
+    /// Sets the max concurrent downloads (file level, builder style).
     pub fn with_max_concurrent(mut self, max: usize) -> Self {
         self.max_concurrent_downloads = max;
         self
     }
 
-    /// 设置单文件内最大并发块请求数
+    /// Sets the max concurrent block requests within one file (builder style).
     pub fn with_max_concurrent_blocks(mut self, max: usize) -> Self {
         self.max_concurrent_blocks = max;
         self
     }
 
-    /// 设置共享并发策略
+    /// Sets the shared concurrency policy (builder style).
     pub fn with_concurrency_policy(mut self, policy: Option<Arc<ConcurrencyPolicy>>) -> Self {
         self.concurrency_policy = RwLock::new(policy);
         self
     }
 
-    /// 动态更新共享并发策略
+    /// Updates the shared concurrency policy at runtime.
     pub fn set_concurrency_policy(&self, policy: Option<Arc<ConcurrencyPolicy>>) {
         if let Ok(mut guard) = self.concurrency_policy.write() {
             *guard = policy;
         }
     }
 
-    /// 设置块数据源
+    /// Sets the block source (builder style).
     pub fn with_block_source(mut self, source: Option<Arc<dyn BlockSource>>) -> Self {
         self.block_source = RwLock::new(source);
         self
     }
 
-    /// 动态更新块数据源（允许 add_folder 之后补配，修复此前仅创建时读取的缺陷）
+    /// Updates the block source at runtime (allows wiring it in after
+    /// `add_folder`, fixing the previous read-only-at-creation defect).
     pub fn set_block_source(&self, source: Option<Arc<dyn BlockSource>>) {
         if let Ok(mut guard) = self.block_source.write() {
             *guard = source;
@@ -109,13 +123,26 @@ impl Puller {
             .unwrap_or(false)
     }
 
-    /// 设置版本管理器
+    /// Sets the versioner used to archive overwritten/deleted files (builder style).
     pub fn with_versioner(mut self, versioner: Option<Arc<dyn Versioner>>) -> Self {
         self.versioner = versioner;
         self
     }
 
-    /// 拉取文件夹
+    /// Pulls all needed files of a folder from remote devices.
+    ///
+    /// Applies the per-pull remote-deletion quota before processing (see
+    /// `docs/design/ADR-20261105-pull-delete-quota.md`).
+    ///
+    /// Failures are counted, never retried inline: failed files are retried
+    /// with backoff by the folder's pull loop, and correctness relies on
+    /// `check_needed_files()` re-deriving the needed set each round.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SyncError`] when the target directory cannot be created.
+    /// Individual file failures are counted in [`PullStats`] and do not
+    /// abort the pull.
     pub async fn pull_folder(
         &self,
         folder: &Folder,
@@ -126,7 +153,6 @@ impl Puller {
         let mut stats = PullStats::default();
         let base_path = Path::new(&folder.path);
 
-        // 确保目标目录存在
         fs::create_dir_all(&base_path).await.map_err(|e| {
             SyncError::pull(
                 folder.path.clone(),
@@ -134,9 +160,9 @@ impl Puller {
             )
         })?;
 
-        // 批量删除速率防护：单次 pull 的远程删除数超过配额时拒绝整个删除批次
-        //（下载/修改不受影响）。防止陈旧/损坏的对端索引静默清空本地——
-        // 2026-07-20 事故中 114 个文件经增量批次被删，全量索引阈值无法覆盖。
+        // Per-pull remote-deletion quota (see the module-level ADR pointer):
+        // an over-quota deletion batch is dropped wholesale; downloads and
+        // modifications are unaffected.
         let local_count = self
             .db
             .get_folder_files(&folder.id)
@@ -165,10 +191,8 @@ impl Puller {
             needed_files
         };
 
-        // 顺带清理过期回收站（每次 pull 一次，代价极低）
         Self::cleanup_sttrash(base_path).await;
 
-        // 使用信号量限制并发：优先读取共享并发策略，否则使用固定默认值
         let policy = self.concurrency_policy.read().ok().and_then(|g| g.clone());
         let max_concurrent_downloads = policy
             .as_ref()
@@ -197,7 +221,7 @@ impl Puller {
             let versioner = self.versioner.clone();
 
             let handle = tokio::spawn(async move {
-                let _permit = permit; // 持有直到任务完成
+                let _permit = permit;
 
                 events.publish(SyncEvent::ItemStarted {
                     folder: folder_id.clone(),
@@ -270,7 +294,6 @@ impl Puller {
             handles.push(handle);
         }
 
-        // 等待所有任务完成
         let mut stale_index_errors = 0usize;
         for handle in handles {
             match handle.await {
@@ -278,8 +301,10 @@ impl Puller {
                     stats.files_succeeded += 1;
                 }
                 Ok(Err(e)) => {
-                    // ponytail: BEP error code 2 (NO_SUCH_FILE) 经桥接层格式化为字符串，
-                    // 此处以子串统计；结构化错误码需改桥接层签名，收益不成比例。
+                    // ponytail: BEP error code 2 (NO_SUCH_FILE) reaches us as a
+                    // formatted string from the bridge layer, so we count by
+                    // substring; structured error codes would require changing
+                    // the bridge signature, which is not worth the benefit.
                     if e.to_string().contains("error code 2") {
                         stale_index_errors += 1;
                     }
@@ -312,7 +337,11 @@ impl Puller {
         Ok(stats)
     }
 
-    /// 下载单个文件
+    /// Downloads a single file into a temporary file, then atomically renames
+    /// it into place.
+    ///
+    /// Block requests run concurrently (bounded by `max_concurrent_blocks`)
+    /// but are written to disk in order.
     #[allow(clippy::too_many_arguments)]
     async fn download_file(
         folder_path: &Path,
@@ -324,7 +353,7 @@ impl Puller {
         max_concurrent_blocks: usize,
         versioner: Option<&Arc<dyn Versioner>>,
     ) -> Result<()> {
-        // SAFETY: 防御路径穿越 — 拒绝来自远程对端的恶意文件名
+        // Path-traversal defense: reject malicious names from the peer.
         validate_remote_name(&file_info.name).map_err(|e| {
             SyncError::pull(
                 file_info.name.clone(),
@@ -337,7 +366,6 @@ impl Puller {
         let file_path = folder_path.join(&file_info.name);
         let temp_path = temp_path_for(&file_path);
 
-        // 辅助函数：下载失败时清理临时文件
         async fn cleanup_temp(path: &Path) {
             if path.exists() {
                 if let Err(e) = fs::remove_file(path).await {
@@ -348,7 +376,6 @@ impl Puller {
             }
         }
 
-        // P1: 重命名优化——如果本地有相同块哈希的文件，直接复制
         if let Some(source_path) =
             find_local_copy_source(folder_path, file_info, db, folder_id).await?
         {
@@ -367,14 +394,12 @@ impl Puller {
                     format!("Failed to copy from local source: {}", e),
                 )
             })?;
-            // 在覆盖前存档旧版本
             if let Some(v) = versioner {
                 if file_path.exists() {
                     let _ = v.archive(&file_path).await;
                 }
             }
             rename_with_retry(&temp_path, &file_path, &file_info.name).await?;
-            // 设置修改时间
             let modified = std::time::SystemTime::UNIX_EPOCH
                 + std::time::Duration::from_secs(file_info.modified_s as u64)
                 + std::time::Duration::from_nanos(file_info.modified_ns as u64);
@@ -388,7 +413,6 @@ impl Puller {
             return Ok(());
         }
 
-        // 确保父目录存在
         if let Some(parent) = file_path.parent() {
             fs::create_dir_all(parent).await.map_err(|e| {
                 SyncError::pull(
@@ -398,7 +422,6 @@ impl Puller {
             })?;
         }
 
-        // 创建临时文件
         let mut file = fs::File::create(&temp_path).await.map_err(|e| {
             SyncError::pull(
                 file_info.name.clone(),
@@ -408,7 +431,6 @@ impl Puller {
 
         let mut bytes_downloaded = 0u64;
 
-        // 块级并发：使用信号量限制并发请求数，JoinHandle 按顺序 await 保证写入顺序
         let block_semaphore = Arc::new(tokio::sync::Semaphore::new(max_concurrent_blocks));
         let mut handles = Vec::with_capacity(file_info.blocks.len());
 
@@ -445,7 +467,6 @@ impl Puller {
             handles.push(handle);
         }
 
-        // 按顺序 await 并写入，保持文件块顺序
         for handle in handles {
             let (idx, offset, block_data, expected_hash) = match handle.await {
                 Ok(Ok(result)) => result,
@@ -466,14 +487,12 @@ impl Puller {
 
             trace!(file = %file_info.name, block = idx, offset = offset, size = block_data.len(), "Writing block");
 
-            // 验证块哈希
             let hash = sha2::Sha256::digest(&block_data);
             if hash.as_slice() != expected_hash.as_slice() {
                 cleanup_temp(&temp_path).await;
                 return Err(SyncError::ChecksumMismatch { offset });
             }
 
-            // 写入文件
             if let Err(e) = file.write_all(&block_data).await {
                 cleanup_temp(&temp_path).await;
                 return Err(SyncError::pull(
@@ -484,7 +503,6 @@ impl Puller {
 
             bytes_downloaded += block_data.len() as u64;
 
-            // 发布进度事件
             events.publish(SyncEvent::DownloadProgress {
                 folder: folder_id.to_string(),
                 file: file_info.name.clone(),
@@ -493,7 +511,6 @@ impl Puller {
             });
         }
 
-        // 刷新并关闭文件
         if let Err(e) = file.flush().await {
             cleanup_temp(&temp_path).await;
             return Err(SyncError::pull(
@@ -503,7 +520,6 @@ impl Puller {
         }
         drop(file);
 
-        // 设置文件权限（Unix）
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
@@ -517,7 +533,6 @@ impl Puller {
             }
         }
 
-        // 在覆盖前尝试三路合并（文本文件且本地 DB 有 base_version 时）
         let mut merged_info = file_info.clone();
         let local_info = db.get_file(folder_id, &file_info.name).await.ok().flatten();
         debug!(
@@ -561,7 +576,6 @@ impl Puller {
                                         has_conflicts = merged.has_conflicts,
                                         "Three-way merge completed"
                                     );
-                                    // 更新 base_version 为合并结果
                                     let hash = content_hash(merged.content.as_bytes());
                                     merged_info.base_version = Some(FileInfoBase {
                                         size: merged.content.len() as i64,
@@ -580,7 +594,6 @@ impl Puller {
             }
         }
 
-        // 在覆盖前存档旧版本
         if let Some(v) = versioner {
             if file_path.exists() {
                 if let Err(e) = v.archive(&file_path).await {
@@ -589,10 +602,8 @@ impl Puller {
             }
         }
 
-        // 重命名为最终文件名
         rename_with_retry(&temp_path, &file_path, &file_info.name).await?;
 
-        // 设置修改时间（精确到纳秒）
         let modified = std::time::SystemTime::UNIX_EPOCH
             + std::time::Duration::from_secs(file_info.modified_s as u64)
             + std::time::Duration::from_nanos(file_info.modified_ns as u64);
@@ -606,7 +617,6 @@ impl Puller {
             );
         }
 
-        // 更新数据库，标记文件已同步
         if let Err(e) = db.update_file(folder_id, merged_info).await {
             warn!(file = %file_info.name, error = %e, "Failed to update database after download");
         }
@@ -615,9 +625,8 @@ impl Puller {
         Ok(())
     }
 
-    /// 创建目录
+    /// Creates a directory (idempotent when it already exists).
     async fn create_directory(folder_path: &Path, file_info: &FileInfo) -> Result<()> {
-        // SAFETY: 防御路径穿越
         validate_remote_name(&file_info.name).map_err(|e| {
             SyncError::pull(
                 file_info.name.clone(),
@@ -650,14 +659,17 @@ impl Puller {
         Ok(())
     }
 
-    /// 删除文件
+    /// Deletes a file, quarantining it into `.sttrash` first (soft delete).
+    ///
+    /// Remote-driven deletions are quarantined rather than unlinked so that a
+    /// corrupted peer index cannot destroy local data irreversibly (see
+    /// "docs/design/ADR-20261105-remote-deletion-guards.md").
     async fn delete_file(
         folder_path: &Path,
         file_info: &FileInfo,
         db: &dyn LocalDatabase,
         folder_id: &str,
     ) -> Result<()> {
-        // SAFETY: 防御路径穿越
         validate_remote_name(&file_info.name).map_err(|e| {
             SyncError::pull(
                 file_info.name.clone(),
@@ -673,8 +685,8 @@ impl Puller {
         let file_path = folder_path.join(&file_info.name);
 
         if file_path.exists() {
-            // 软删除：远程驱动的删除先隔离到 .sttrash，避免对端索引损坏时
-            // 本地数据不可恢复（2026-07-20 事故 versioning: null 零兜底）。
+            // Soft delete: quarantine into .sttrash so a corrupted peer index
+            // cannot destroy local data irreversibly (see delete_file docs).
             match Self::move_to_trash(&file_path, folder_path, &file_info.name).await {
                 Ok(trash_path) => {
                     info!(
@@ -694,14 +706,13 @@ impl Puller {
             warn!(file = %file_info.name, "File to delete not found");
         }
 
-        // 更新数据库中的删除状态
         db.update_file(folder_id, file_info.clone()).await?;
 
         Ok(())
     }
 
-    /// 将目标移入 `<folder>/.sttrash/<YYYYMMDD>/<相对路径>`，重名时追加时间戳。
-    /// 返回回收站中的最终路径。
+    /// Moves the target into `<folder>/.sttrash/<YYYYMMDD>/<relative path>`,
+    /// appending a timestamp on name collisions. Returns the final trash path.
     async fn move_to_trash(
         file_path: &Path,
         folder_path: &Path,
@@ -735,13 +746,16 @@ impl Puller {
         Ok(dest)
     }
 
-    /// 清理 .sttrash 中超过保留期（7 天）的日期目录。
-    /// ponytail: 按目录名日期判断，不递归检查内容；清理失败仅告警。
+    /// Removes `.sttrash` date directories older than the 7-day retention.
+    ///
+    /// ponytail: dates are judged by directory name only (no recursive content
+    /// checks); cleanup failures are warned about, never fatal.
     async fn cleanup_sttrash(folder_path: &Path) {
         let trash_root = folder_path.join(".sttrash");
         let mut entries = match fs::read_dir(&trash_root).await {
             Ok(e) => e,
-            Err(_) => return, // 无回收站，正常路径
+            // No trash directory: normal path.
+            Err(_) => return,
         };
         let cutoff = chrono::Utc::now() - chrono::Duration::days(7);
         while let Ok(Some(entry)) = entries.next_entry().await {
@@ -764,7 +778,15 @@ impl Puller {
         }
     }
 
-    /// 检查文件是否需要下载
+    /// Re-derives the set of files that still need to be pulled.
+    ///
+    /// A file is needed when it is marked deleted in the DB but still exists
+    /// on disk, or when it is missing on disk, or when its size differs.
+    /// Directories only need to exist and are not content-checked.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SyncError`] when a database lookup or metadata read fails.
     pub async fn check_needed_files(&self, folder: &Folder) -> Result<Vec<FileInfo>> {
         let db_files: Vec<syncthing_core::types::FileInfo> =
             self.db.get_folder_files(&folder.id).await?;
@@ -774,21 +796,17 @@ impl Puller {
 
         for file_info in db_files {
             if file_info.is_deleted() {
-                // 检查本地文件是否还存在
                 let file_path = base_path.join(&file_info.name);
                 if file_path.exists() {
                     needed.push(file_info);
                 }
             } else {
-                // 检查本地文件/目录是否需要更新
                 let file_path = base_path.join(&file_info.name);
                 if !file_path.exists() {
                     needed.push(file_info);
                 } else if file_info.file_type == FileType::Directory {
-                    // 目录只需存在即可，不检查大小/修改时间
                     dirs_unchanged += 1;
                 } else {
-                    // 可以添加更多检查，如大小、修改时间等
                     let metadata = fs::metadata(&file_path).await?;
                     if metadata.len() != file_info.size as u64 {
                         needed.push(file_info);
@@ -805,11 +823,14 @@ impl Puller {
     }
 }
 
-/// 拉取统计
+/// Per-folder pull statistics.
 #[derive(Debug, Clone, Default)]
 pub struct PullStats {
+    /// Number of files pulled successfully.
     pub files_succeeded: usize,
+    /// Number of files that failed (retried later by the folder pull loop).
     pub files_failed: usize,
+    /// Total bytes transferred.
     pub bytes_transferred: u64,
 }
 

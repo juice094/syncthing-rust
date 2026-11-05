@@ -1,52 +1,52 @@
-//! 同步事件系统
+//! Sync event system.
 //!
-//! 提供事件发布和订阅机制，用于通知状态变更
+//! Provides a publish/subscribe mechanism for state-change notifications.
 
 use syncthing_core::types::{FileInfo, Folder, Vector};
 use tokio::sync::broadcast;
 
-/// 同步事件
+/// Events emitted by the sync engine.
 #[derive(Debug, Clone)]
 pub enum SyncEvent {
-    /// 本地索引更新
+    /// Local index has been updated.
     LocalIndexUpdated {
         folder: String,
         files: Vec<FileInfo>,
     },
 
-    /// 远程索引接收
+    /// Index update received from a remote device.
     RemoteIndexReceived {
         folder: String,
         device: syncthing_core::DeviceId,
         files: Vec<FileInfo>,
     },
 
-    /// 文件夹扫描完成
+    /// A folder scan completed.
     FolderScanCompleted {
         folder: String,
         files_changed: usize,
     },
 
-    /// 文件夹扫描失败
+    /// A folder scan failed.
     FolderScanFailed { folder: String, error: String },
 
-    /// Watcher 脏路径集合大小（用于观测增量扫描压力）
+    /// Size of the watcher's dirty-path set (indicates incremental scan pressure).
     WatcherDirtySetSize { folder: String, size: usize },
 
-    /// Watcher 事件丢失计数
+    /// Number of watcher events dropped due to channel backpressure.
     WatcherEventsDropped { folder: String, dropped: u64 },
 
-    /// 增量扫描被触发（相对于全量扫描）
+    /// An incremental (watcher-triggered) scan was triggered, as opposed to a full scan.
     IncrementalScanTriggered { folder: String, paths: usize },
 
-    /// 项目开始处理
+    /// Processing of an item has started.
     ItemStarted {
         folder: String,
         item: String,
         action: ItemAction,
     },
 
-    /// 项目完成处理
+    /// Processing of an item has finished.
     ItemFinished {
         folder: String,
         item: String,
@@ -54,7 +54,7 @@ pub enum SyncEvent {
         error: Option<String>,
     },
 
-    /// 冲突检测
+    /// A conflict between local and remote versions was detected.
     ConflictDetected {
         folder: String,
         item: String,
@@ -62,14 +62,14 @@ pub enum SyncEvent {
         remote_version: Vector,
     },
 
-    /// 冲突解决
+    /// A previously detected conflict has been resolved.
     ConflictResolved {
         folder: String,
         item: String,
         resolution: ConflictResolution,
     },
 
-    /// 下载进度
+    /// Progress of a file download.
     DownloadProgress {
         folder: String,
         file: String,
@@ -77,7 +77,7 @@ pub enum SyncEvent {
         bytes_total: u64,
     },
 
-    /// 上传进度
+    /// Progress of a file upload.
     UploadProgress {
         folder: String,
         file: String,
@@ -85,29 +85,29 @@ pub enum SyncEvent {
         bytes_total: u64,
     },
 
-    /// 文件夹状态变更
+    /// A folder's state has changed.
     FolderStateChanged {
         folder: String,
         from: syncthing_core::types::FolderStatus,
         to: syncthing_core::types::FolderStatus,
     },
 
-    /// 文件夹配置更新
+    /// Folder configuration was updated.
     FolderConfigUpdated { folder: Folder },
 
-    /// 连接设备
+    /// A device has connected.
     DeviceConnected { device: syncthing_core::DeviceId },
 
-    /// 断开设备
+    /// A device has disconnected.
     DeviceDisconnected {
         device: syncthing_core::DeviceId,
         reason: String,
     },
 
-    /// 同步完成
+    /// Synchronization of a folder completed.
     SyncComplete { folder: String, stats: SyncStats },
 
-    /// IndexUpdate 分片发送
+    /// A chunk of an IndexUpdate message has been sent.
     IndexUpdateChunkSent {
         folder: String,
         device: syncthing_core::DeviceId,
@@ -118,7 +118,7 @@ pub enum SyncEvent {
     },
 }
 
-/// 项目动作
+/// Action performed on an item.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ItemAction {
     Add,
@@ -127,7 +127,7 @@ pub enum ItemAction {
     Conflict,
 }
 
-/// 冲突解决方式
+/// How a conflict was resolved.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ConflictResolution {
     UseLocal,
@@ -136,7 +136,7 @@ pub enum ConflictResolution {
     RenameBoth,
 }
 
-/// 同步统计
+/// Statistics for a completed sync round.
 #[derive(Debug, Clone, Default)]
 pub struct SyncStats {
     pub files_added: usize,
@@ -147,25 +147,25 @@ pub struct SyncStats {
     pub conflicts_resolved: usize,
 }
 
-/// 事件发布者
+/// Broadcast publisher for [`SyncEvent`]s.
 #[derive(Debug, Clone)]
 pub struct EventPublisher {
     sender: broadcast::Sender<SyncEvent>,
 }
 
 impl EventPublisher {
-    /// 创建新的事件发布者
+    /// Creates a new publisher with the given channel capacity.
     pub fn new(capacity: usize) -> Self {
         let (sender, _) = broadcast::channel(capacity);
         Self { sender }
     }
 
-    /// 发布事件
+    /// Publishes an event; slow subscribers that lag behind are silently dropped.
     pub fn publish(&self, event: SyncEvent) {
         let _ = self.sender.send(event);
     }
 
-    /// 获取订阅者
+    /// Returns a new subscriber.
     pub fn subscribe(&self) -> EventSubscriber {
         EventSubscriber {
             receiver: self.sender.subscribe(),
@@ -179,19 +179,19 @@ impl Default for EventPublisher {
     }
 }
 
-/// 事件订阅者
+/// Receiving end of the sync event broadcast channel.
 #[derive(Debug)]
 pub struct EventSubscriber {
     receiver: broadcast::Receiver<SyncEvent>,
 }
 
 impl EventSubscriber {
-    /// 接收事件
+    /// Receives the next event, or `None` if the publisher is gone.
     pub async fn recv(&mut self) -> Option<SyncEvent> {
         self.receiver.recv().await.ok()
     }
 
-    /// 尝试接收事件（非阻塞）
+    /// Tries to receive an event without blocking.
     pub fn try_recv(&mut self) -> Result<SyncEvent, broadcast::error::TryRecvError> {
         self.receiver.try_recv()
     }

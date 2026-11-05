@@ -20,16 +20,13 @@ impl syncthing_core::traits::SyncModel for SyncService {
     async fn stop_folder(&self, folder: syncthing_core::FolderId) -> syncthing_core::Result<()> {
         let folder_id = folder.as_str();
 
-        // 检查是否在运行
         let handles = self.folder_tasks.get(folder_id).ok_or_else(|| {
             syncthing_core::SyncthingError::internal(format!("Folder not running: {}", folder_id))
         })?;
 
-        // 发送停止信号
         handles.shutdown_tx.send(true).ok();
         drop(handles);
 
-        // 等待任务完成并移除
         if let Some((_, handles)) = self.folder_tasks.remove(folder_id) {
             let _ = handles.scan_handle.await;
             let _ = handles.pull_handle.await;
@@ -115,7 +112,6 @@ impl syncthing_core::traits::SyncModel for SyncService {
         device: syncthing_core::DeviceId,
     ) -> syncthing_core::Result<u64> {
         let needed = self.get_folder_completion(device, folder.as_str());
-        // Simple completion: 100% if needed == 0, else heuristic based on total files
         let total_files = self
             .db
             .get_folder_files(folder.as_str())

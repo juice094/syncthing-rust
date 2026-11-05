@@ -1,6 +1,7 @@
-//! 文件系统监视器
+//! Filesystem watcher.
 //!
-//! 基于 `notify` crate 实现秒级文件变更检测，替代长轮询扫描。
+//! Provides sub-second file-change detection on top of the `notify` crate,
+//! replacing long-polling scans.
 
 use crate::error::{Result, SyncError};
 use notify::{Config, Event, RecommendedWatcher, RecursiveMode, Watcher};
@@ -9,15 +10,21 @@ use std::sync::Arc;
 use tokio::sync::mpsc;
 use tracing::{info, warn};
 
-/// 文件夹文件系统监视器
+/// Recursive filesystem watcher for one folder.
 pub struct FolderWatcher;
 
 impl FolderWatcher {
-    /// 启动对指定路径的递归监听。
+    /// Starts recursively watching the given path.
     ///
-    /// 返回 watcher 和事件接收器。
-    /// 调用者需在异步循环中读取事件、实现去抖动，并在 drop watcher 时自动停止监听。
-    /// `dropped` 计数器会在 watcher 回调因通道满而丢事件时递增。
+    /// Returns the watcher and an event receiver. The caller must read events
+    /// in an async loop, implement debouncing, and drop the watcher to stop
+    /// watching. The `dropped` counter is incremented whenever the watcher
+    /// callback drops an event because the channel is full.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SyncError::Scan`] when the path does not exist, watcher
+    /// creation fails, or the path cannot be watched.
     pub fn watch(
         folder_id: &str,
         path: &str,
@@ -40,7 +47,7 @@ impl FolderWatcher {
             move |res: std::result::Result<Event, notify::Error>| {
                 match res {
                     Ok(event) => {
-                        // 过滤掉纯访问事件，减少噪音
+                        // Skip pure-access events to reduce noise.
                         match event.kind {
                             notify::EventKind::Access(_) => {}
                             _ => {

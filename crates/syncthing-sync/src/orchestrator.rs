@@ -1,11 +1,11 @@
-//! 文件夹编排器（Folder Orchestrator）
+//! Folder orchestrator.
 //!
-//! 为多个文件夹的扫描与拉取提供全局统一调度：
+//! Provides globally unified scheduling of scans and pulls across folders:
 //!
-//! - 限制全局并发扫描/拉取数量，避免 I/O 与 CPU 尖峰；
-//! - 对首次扫描做随机抖动（jitter），避免所有 folder 在同一时刻启动；
-//! - 支持 folder 优先级；
-//! - 暴露当前负载快照，供 monitor 与 health predictor 消费。
+//! - limits global concurrent scan/pull counts to avoid I/O and CPU spikes;
+//! - applies random jitter to first scans so folders do not all start at once;
+//! - supports per-folder priorities;
+//! - exposes a load snapshot for the monitor and health predictor.
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
@@ -15,21 +15,22 @@ use std::time::Duration;
 use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 use tracing::{debug, info, trace, warn};
 
-/// 编排器配置
+/// Orchestrator configuration.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct OrchestratorConfig {
-    /// 最大并发扫描文件夹数（默认 2）
+    /// Maximum number of folders scanning concurrently (default 2).
     pub max_concurrent_scans: usize,
-    /// 最大并发拉取文件夹数（默认 3）
+    /// Maximum number of folders pulling concurrently (default 3).
     pub max_concurrent_pulls: usize,
-    /// 是否对首次扫描启用抖动
+    /// Whether to jitter first scans.
     pub enable_scan_stagger: bool,
-    /// 首次扫描最大抖动秒数（默认 60）
+    /// Maximum first-scan jitter in seconds (default 60).
     pub scan_stagger_secs: u64,
-    /// 动态节流因子：100 表示正常，50 表示减半并发（默认 100）
+    /// Dynamic throttle factor: 100 means normal, 50 means halved (default 100).
     ///
-    /// 当前仅作为观测指标与调度建议；实际并发上限仍由
-    /// `max_concurrent_scans` / `max_concurrent_pulls` 决定。
+    /// Currently serves as an observability signal and scheduling hint only;
+    /// the effective concurrency limits remain
+    /// `max_concurrent_scans` / `max_concurrent_pulls`.
     pub throttle_percent: u64,
 }
 
@@ -46,7 +47,7 @@ impl Default for OrchestratorConfig {
 }
 
 impl OrchestratorConfig {
-    /// 创建保守配置，适用于低资源或高延迟环境
+    /// Creates a conservative profile for low-resource or high-latency environments.
     pub fn conservative() -> Self {
         Self {
             max_concurrent_scans: 1,
@@ -57,7 +58,7 @@ impl OrchestratorConfig {
         }
     }
 
-    /// 创建激进配置，适用于本地高速磁盘
+    /// Creates an aggressive profile for fast local disks.
     pub fn aggressive() -> Self {
         Self {
             max_concurrent_scans: 4,
@@ -69,31 +70,36 @@ impl OrchestratorConfig {
     }
 }
 
-/// 文件夹优先级
+/// Folder scheduling priority.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum FolderPriority {
-    /// 低优先级（大文件夹、归档目录）
+    /// Low priority (large folders, archives).
     Low = 0,
-    /// 普通优先级
+    /// Normal priority.
     #[default]
     Normal = 1,
-    /// 高优先级（工作区、活跃目录）
+    /// High priority (workspaces, active directories).
     High = 2,
-    /// 关键优先级（系统配置、小文件）
+    /// Critical priority (system configuration, small files).
     Critical = 3,
 }
 
-/// 编排器负载快照
+/// Point-in-time snapshot of orchestrator load.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct OrchestratorLoad {
+    /// Number of folders currently scanning.
     pub active_scans: usize,
+    /// Number of folders currently pulling.
     pub active_pulls: usize,
+    /// Number of scans waiting for a concurrency slot.
     pub queued_scans: usize,
+    /// Number of pulls waiting for a concurrency slot.
     pub queued_pulls: usize,
+    /// Current throttle factor (0-100).
     pub throttle_percent: u64,
 }
 
-/// 扫描许可守卫：持有期间占用一个并发槽，Drop 时释放
+/// Scan permit guard: holds one concurrency slot, released on drop.
 pub struct ScanPermit {
     #[allow(dead_code)]
     permit: Option<OwnedSemaphorePermit>,
@@ -110,7 +116,7 @@ impl Drop for ScanPermit {
     }
 }
 
-/// 拉取许可守卫
+/// Pull permit guard: holds one concurrency slot, released on drop.
 pub struct PullPermit {
     #[allow(dead_code)]
     permit: Option<OwnedSemaphorePermit>,
@@ -127,9 +133,10 @@ impl Drop for PullPermit {
     }
 }
 
-/// 文件夹编排器
+/// Globally coordinates scan/pull concurrency across folders.
 ///
-/// 内部使用 `tokio::sync::Semaphore` 做并发控制，使用原子计数器做观测。
+/// Internally uses `tokio::sync::Semaphore` for concurrency control and
+/// atomic counters for observability.
 #[derive(Debug)]
 pub struct FolderOrchestrator {
     max_concurrent_scans: AtomicUsize,
@@ -143,21 +150,21 @@ pub struct FolderOrchestrator {
     pull_active: AtomicUsize,
     scan_queued: AtomicUsize,
     pull_queued: AtomicUsize,
-    /// 每个 folder 是否已完成过首次扫描抖动
+    /// Folders whose first-scan jitter has already been applied.
     staggered: Mutex<HashMap<String, ()>>,
-    /// folder 优先级映射
+    /// Per-folder priority overrides.
     priorities: Mutex<HashMap<String, FolderPriority>>,
-    /// 全局扫描计数，用于基于 folder_id hash 生成更分散的抖动
+    /// Global scan counter used as salt for more dispersed jitter.
     scan_counter: AtomicU64,
 }
 
 impl FolderOrchestrator {
-    /// 使用默认配置创建编排器
+    /// Creates an orchestrator with default configuration.
     pub fn new() -> Arc<Self> {
         Self::with_config(OrchestratorConfig::default())
     }
 
-    /// 使用指定配置创建编排器
+    /// Creates an orchestrator with the given configuration.
     pub fn with_config(config: OrchestratorConfig) -> Arc<Self> {
         let max_scans = config.max_concurrent_scans.max(1);
         let max_pulls = config.max_concurrent_pulls.max(1);
@@ -179,7 +186,8 @@ impl FolderOrchestrator {
         })
     }
 
-    /// 更新配置（新容量在当前 permit 释放后自然生效）
+    /// Updates the configuration (new capacities take effect as current
+    /// permits are released).
     pub fn set_config(&self, config: OrchestratorConfig) {
         self.max_concurrent_scans
             .store(config.max_concurrent_scans.max(1), Ordering::Relaxed);
@@ -199,7 +207,7 @@ impl FolderOrchestrator {
         );
     }
 
-    /// 设置 folder 优先级
+    /// Sets a folder's scheduling priority.
     pub fn set_priority(&self, folder_id: &str, priority: FolderPriority) {
         if let Ok(mut guard) = self.priorities.lock() {
             guard.insert(folder_id.to_string(), priority);
@@ -207,27 +215,29 @@ impl FolderOrchestrator {
         debug!(folder_id = %folder_id, ?priority, "Folder priority set");
     }
 
-    /// 设置全局节流因子（0-100）
+    /// Sets the global throttle factor (0-100).
     ///
-    /// 当前作为健康预测器的调控信号；并发上限仍由配置决定。
+    /// Currently acts as a control signal for the health predictor; the
+    /// concurrency limits remain configuration-driven.
     pub fn set_throttle(&self, percent: u64) {
         let percent = percent.min(100);
         self.throttle_percent.store(percent, Ordering::Relaxed);
         info!(throttle_percent = percent, "Orchestrator throttle updated");
     }
 
-    /// 申请一次扫描许可，可能需要等待并发槽并做首次抖动
+    /// Acquires a scan permit, waiting for a concurrency slot and applying
+    /// first-scan jitter if configured.
     pub async fn begin_scan(self: Arc<Self>, folder_id: &str) -> ScanPermit {
         self.scan_queued.fetch_add(1, Ordering::Relaxed);
         trace!(folder_id = %folder_id, "Waiting for scan permit");
 
-        // 首次扫描做抖动，避免所有 folder 同时启动
         self.maybe_stagger(folder_id).await;
 
         let permit = match self.scan_sem.clone().acquire_owned().await {
             Ok(p) => Some(p),
             Err(_) => {
-                // Semaphore 通常不会关闭，除非程序正在关闭；返回一个虚拟 permit 以允许优雅降级
+                // The semaphore is normally never closed except during
+                // shutdown; hand out a dummy permit to degrade gracefully.
                 warn!(folder_id = %folder_id, "Scan semaphore closed, allowing degraded scan");
                 Arc::new(Semaphore::new(1)).try_acquire_owned().ok()
             }
@@ -244,7 +254,7 @@ impl FolderOrchestrator {
         }
     }
 
-    /// 申请一次拉取许可
+    /// Acquires a pull permit, waiting for a concurrency slot.
     pub async fn begin_pull(self: Arc<Self>, folder_id: &str) -> PullPermit {
         self.pull_queued.fetch_add(1, Ordering::Relaxed);
         trace!(folder_id = %folder_id, "Waiting for pull permit");
@@ -268,7 +278,7 @@ impl FolderOrchestrator {
         }
     }
 
-    /// 当前负载快照
+    /// Returns the current load snapshot.
     pub fn load(&self) -> OrchestratorLoad {
         OrchestratorLoad {
             active_scans: self.scan_active.load(Ordering::Relaxed),
@@ -279,7 +289,7 @@ impl FolderOrchestrator {
         }
     }
 
-    /// 获取 folder 优先级
+    /// Returns a folder's priority (default `Normal` when unset).
     pub fn priority(&self, folder_id: &str) -> FolderPriority {
         self.priorities
             .lock()
@@ -310,11 +320,10 @@ impl FolderOrchestrator {
             return;
         }
 
-        // 基于 folder_id 计算确定性抖动，避免每次重启都相同分布
         let hash = Self::stable_hash(folder_id, self.scan_counter.fetch_add(1, Ordering::Relaxed));
         let jitter_ms = (hash % (max_secs.max(1) * 1000)).max(1);
         let priority = self.priority(folder_id) as u64;
-        // 高优先级 folder 抖动减半
+        // Higher-priority folders get half the jitter.
         let jitter_ms = jitter_ms / (1 + (3 - priority.min(3)));
 
         info!(

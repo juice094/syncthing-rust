@@ -1,11 +1,12 @@
-//! 重命名检测
+//! Rename detection.
 //!
-//! 通过块哈希比较识别文件重命名操作，优化同步效率。
+//! Identifies file renames by comparing block hashes, improving sync
+//! efficiency (the receiver can copy content from the old file).
 
 use syncthing_core::types::FileInfo;
 use tracing::info;
 
-/// 判断两个文件是否具有完全相同的块哈希
+/// Returns `true` when two files have identical block hash lists.
 pub(crate) fn has_same_blocks(a: &FileInfo, b: &FileInfo) -> bool {
     if a.blocks.len() != b.blocks.len() || a.blocks.is_empty() {
         return false;
@@ -16,11 +17,12 @@ pub(crate) fn has_same_blocks(a: &FileInfo, b: &FileInfo) -> bool {
         .all(|(a_blk, b_blk)| a_blk.hash == b_blk.hash)
 }
 
-/// 检测重命名操作并重新排序 changed_files
+/// Detects renames within `changed_files` and reorders the list.
 ///
-/// 当新文件的块哈希与某个已删除文件完全匹配时，识别为重命名。
-/// 将新文件移到列表前面，确保接收端先创建新文件（可从旧文件复制内容），
-/// 再删除旧文件。
+/// When a new file's block hashes exactly match a deleted file, it is treated
+/// as a rename. New files are moved to the front of the list so the receiver
+/// creates the new file first (copying content from the old file) and deletes
+/// the old file afterwards.
 pub(crate) fn detect_and_reorder_renames(changed_files: Vec<FileInfo>) -> Vec<FileInfo> {
     let mut rename_targets: Vec<usize> = Vec::new();
 
@@ -28,7 +30,6 @@ pub(crate) fn detect_and_reorder_renames(changed_files: Vec<FileInfo>) -> Vec<Fi
         if file.is_deleted() || file.blocks.is_empty() {
             continue;
         }
-        // 查找相同块哈希的已删除文件
         for (del_idx, del_file) in changed_files.iter().enumerate() {
             if del_idx == idx {
                 continue;
@@ -50,7 +51,7 @@ pub(crate) fn detect_and_reorder_renames(changed_files: Vec<FileInfo>) -> Vec<Fi
         return changed_files;
     }
 
-    // 重新排序：重命名的新文件在前，其余保持原顺序
+    // New (renamed) files first; everything else keeps its original order.
     let mut reordered = Vec::with_capacity(changed_files.len());
     let mut added = vec![false; changed_files.len()];
 

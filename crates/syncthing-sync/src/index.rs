@@ -1,6 +1,9 @@
-//! 索引管理器
+//! Index manager.
 //!
-//! 实现 Delta Index（增量索引）机制，支持全量索引和增量更新
+//! Implements the Delta Index (incremental index) mechanism, supporting both
+//! full index and incremental updates.
+//!
+//! See "docs/design/ADR-20261105-index-sequence-authority.md".
 
 use crate::database::LocalDatabase;
 use crate::error::Result;
@@ -10,9 +13,10 @@ use syncthing_core::types::{FileInfo, IndexDelta, IndexID};
 use syncthing_core::DeviceId;
 use tracing::{debug, info, warn};
 
-/// 索引管理器
+/// Index manager for one folder.
 ///
-/// 负责维护本地索引状态、生成增量索引、以及与远程设备的索引同步
+/// Maintains local index state, generates index deltas, and tracks which
+/// index state each remote device has received.
 pub struct IndexManager {
     db: Arc<dyn LocalDatabase>,
     folder: String,
@@ -23,12 +27,13 @@ pub struct IndexManager {
 }
 
 impl IndexManager {
-    /// 创建新的索引管理器
+    /// Creates a new index manager, restoring index metadata from the database.
+    ///
+    /// The database is the single source of truth for sequence numbers (see
+    /// the module-level ADR pointer).
     pub async fn new(db: Arc<dyn LocalDatabase>, folder: impl Into<String>) -> Result<Self> {
         let folder = folder.into();
 
-        // IndexID 从 index_meta 恢复；sequence 的单一权威源是 db.get_sequence()，
-        // 避免与 Scanner 使用的 increment_sequence 路径产生分歧。
         let local_index_id = db.get_folder_index_meta(&folder).await?.map(|(id, _)| id);
         let local_max_sequence = db.get_sequence(&folder).await?;
 
@@ -42,27 +47,27 @@ impl IndexManager {
         })
     }
 
-    /// 获取本地 IndexID
+    /// Returns the local index ID, if one has been assigned.
     pub fn local_index_id(&self) -> Option<IndexID> {
         self.local_index_id
     }
 
-    /// 获取本地最大序列号
+    /// Returns the local maximum sequence number.
     pub fn local_max_sequence(&self) -> u64 {
         self.local_max_sequence
     }
 
-    /// 获取远程设备的 IndexID
+    /// Returns the index ID a remote device last acknowledged.
     pub fn remote_index_id(&self, device: &DeviceId) -> Option<IndexID> {
         self.remote_index_ids.get(device).copied()
     }
 
-    /// 获取远程设备已知的最大序列号
+    /// Returns the maximum sequence number a remote device has received.
     pub fn remote_max_sequence(&self, device: &DeviceId) -> Option<u64> {
         self.remote_max_sequences.get(device).copied()
     }
 
-    /// 注册远程设备的索引状态
+    /// Records a remote device's acknowledged index state.
     pub fn register_remote_index(
         &mut self,
         device: DeviceId,
@@ -73,10 +78,12 @@ impl IndexManager {
         self.remote_max_sequences.insert(device, max_sequence);
     }
 
-    /// 获取指定设备的索引增量
+    /// Returns the index delta for the given device, if one can be sent.
     ///
-    /// - 如果远程设备的 IndexID 与本地匹配，返回 sequence > remote_max_sequence 的文件
-    /// - 如果不匹配或远程没有记录，返回 None（需要发送全量索引）
+    /// - When the remote device's index ID matches the local one, returns the
+    ///   files with sequence greater than the remote maximum.
+    /// - When the IDs mismatch or the device is unknown, returns `None`
+    ///   (a full index must be sent instead).
     pub async fn get_index_delta(&self, device: &DeviceId) -> Option<IndexDelta> {
         let local_index_id = self.local_index_id?;
         let remote_index_id = self.remote_index_ids.get(device)?;
@@ -92,7 +99,6 @@ impl IndexManager {
 
         let remote_sequence = self.remote_max_sequences.get(device).copied().unwrap_or(0);
 
-        // 从数据库获取序列号大于 remote_sequence 的文件
         let files = match self
             .db
             .get_needed_files(&self.folder, remote_sequence)
@@ -126,15 +132,17 @@ impl IndexManager {
         })
     }
 
-    /// 更新本地 IndexID（在重大变更时调用，如首次扫描、重建索引）
+    /// Rotates the local index ID (called on major changes such as the first
+    /// scan or an index rebuild).
     ///
-    /// 生成新的随机 IndexID 并将序列号重置为 0
+    /// Generates a new random index ID and resets the sequence number to 0.
+    /// The database remains the single source of truth for sequences (see
+    /// the module-level ADR pointer).
     pub async fn update_index_id(&mut self) -> Result<IndexID> {
         let new_id = IndexID::random();
         self.local_index_id = Some(new_id);
         self.local_max_sequence = 0;
 
-        // sequence 单一权威源是 db；重置 sequence 并持久化新的 IndexID
         self.db.reset_sequence(&self.folder).await?;
         self.db
             .update_folder_index_meta(&self.folder, new_id, 0)
@@ -149,11 +157,14 @@ impl IndexManager {
         Ok(new_id)
     }
 
-    /// 更新索引（全量替换）
+    /// Replaces the full index, assigning increasing sequence numbers.
     ///
-    /// 为每个文件分配递增的序列号，并持久化到数据库
+    /// Sequences are allocated from the database (the single source of
+    /// truth) and all files plus metadata are persisted.
     pub async fn update_index(&mut self, files: &mut [FileInfo]) -> Result<()> {
-        // 确保有 IndexID（先获取，避免重置已分配的 sequence）
+        // Fetch (or create) the index ID before assigning sequences, so the
+        // sequence reset implied by a fresh ID never discards already
+        // allocated sequence numbers.
         let index_id = match self.local_index_id {
             Some(id) => id,
             None => {
@@ -163,12 +174,10 @@ impl IndexManager {
             }
         };
 
-        // sequence 单一权威源是 db，避免与 Scanner 的 increment_sequence 路径冲突
         for file in files.iter_mut() {
             file.sequence = self.db.increment_sequence(&self.folder).await?;
         }
 
-        // 持久化文件和元数据
         self.db.update_files(&self.folder, files.to_vec()).await?;
         let max_sequence = self.db.get_sequence(&self.folder).await?;
         self.local_max_sequence = max_sequence;
@@ -186,11 +195,14 @@ impl IndexManager {
         Ok(())
     }
 
-    /// 更新索引增量
+    /// Applies an incremental index update, assigning increasing sequence numbers.
     ///
-    /// 为每个文件分配递增的序列号，并持久化到数据库
+    /// Sequences are allocated from the database (the single source of
+    /// truth) and all files plus metadata are persisted.
     pub async fn update_index_delta(&mut self, files: &mut [FileInfo]) -> Result<()> {
-        // 确保有 IndexID（先获取，避免重置已分配的 sequence）
+        // Fetch (or create) the index ID before assigning sequences, so the
+        // sequence reset implied by a fresh ID never discards already
+        // allocated sequence numbers.
         let index_id = match self.local_index_id {
             Some(id) => id,
             None => {
@@ -200,12 +212,10 @@ impl IndexManager {
             }
         };
 
-        // sequence 单一权威源是 db，避免与 Scanner 的 increment_sequence 路径冲突
         for file in files.iter_mut() {
             file.sequence = self.db.increment_sequence(&self.folder).await?;
         }
 
-        // 持久化文件和元数据
         self.db.update_files(&self.folder, files.to_vec()).await?;
         let max_sequence = self.db.get_sequence(&self.folder).await?;
         self.local_max_sequence = max_sequence;
@@ -223,9 +233,10 @@ impl IndexManager {
         Ok(())
     }
 
-    /// 决定发送全量索引还是增量更新
+    /// Decides between sending a full index or an incremental update.
     ///
-    /// 如果 delta 可用且非空，返回增量；否则返回全量文件列表
+    /// Returns the delta when one is available and non-empty; otherwise
+    /// returns the full file list.
     pub async fn prepare_index_for_device(&self, device: &DeviceId) -> Result<EitherIndex> {
         match self.get_index_delta(device).await {
             Some(delta) if !delta.files.is_empty() => Ok(EitherIndex::Delta(delta)),
@@ -237,12 +248,12 @@ impl IndexManager {
     }
 }
 
-/// 索引发送类型：全量或增量
+/// Index payload to send: full or delta.
 #[derive(Debug, Clone)]
 pub enum EitherIndex {
-    /// 全量索引
+    /// Full index (complete file list).
     Full(Vec<FileInfo>),
-    /// 增量索引
+    /// Incremental index delta.
     Delta(IndexDelta),
 }
 

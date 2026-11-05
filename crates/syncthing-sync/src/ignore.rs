@@ -1,39 +1,40 @@
-//! `.stignore` 解析与匹配
+//! `.stignore` parsing and matching.
 //!
-//! 实现 Syncthing 风格的 ignore 规则，支持：
-//! - `*.ext` / `name` / `path/name` 模式匹配
-//! - `!pattern` 否定规则（不忽略）
-//! - `/pattern` 锚定到根目录
-//! - `pattern/` 仅匹配目录
-//! - `# comment` 注释
+//! Implements Syncthing-style ignore rules:
+//! - `*.ext` / `name` / `path/name` pattern matching
+//! - `!pattern` negation (do not ignore)
+//! - `/pattern` anchored to the folder root
+//! - `pattern/` directories only
+//! - `# comment` lines
 
 use tracing::{debug, trace};
 
-/// 单条 ignore 规则
+/// A single ignore rule.
 #[derive(Debug, Clone)]
 struct IgnoreRule {
-    /// 匹配模式（已去除前缀/后缀修饰符）
+    /// Match pattern with prefix/suffix modifiers stripped.
     pattern: String,
-    /// 是否为否定规则（!）
+    /// Whether this is a negation rule (`!`).
     is_negation: bool,
-    /// 是否锚定到根目录（/）
+    /// Whether the pattern is anchored to the folder root (`/`).
     anchored: bool,
-    /// 是否仅匹配目录（以 / 结尾）
+    /// Whether the rule only matches directories (trailing `/`).
     directory_only: bool,
 }
 
-/// `.stignore` 规则集
+/// A set of `.stignore` rules.
 #[derive(Debug, Clone, Default)]
 pub struct IgnoreMatcher {
     rules: Vec<IgnoreRule>,
 }
 
 impl IgnoreMatcher {
+    /// Creates an empty matcher.
     pub fn new() -> Self {
         Self { rules: Vec::new() }
     }
 
-    /// 从文件路径加载规则
+    /// Loads rules from a file path; a missing file yields an empty matcher.
     pub fn load(path: &std::path::Path) -> Self {
         let mut matcher = Self::new();
         match std::fs::read_to_string(path) {
@@ -50,10 +51,9 @@ impl IgnoreMatcher {
         matcher
     }
 
-    /// 解析单行规则
+    /// Parses and adds a single rule line.
     pub fn add_line(&mut self, line: &str) {
         let line = line.trim();
-        // SAFETY: `#` 是标准 syncthing .stignore 唯一注释语法
         if line.is_empty() || line.starts_with('#') {
             return;
         }
@@ -82,10 +82,11 @@ impl IgnoreMatcher {
         });
     }
 
-    /// 判断给定相对路径是否应被忽略
+    /// Returns `true` when the given relative path should be ignored.
     ///
-    /// `relative_path` 使用 `/` 分隔（如 `foo/bar.txt`）
-    /// `is_dir` 表示该路径是否为目录
+    /// `relative_path` uses `/` separators (e.g. `foo/bar.txt`); `is_dir`
+    /// indicates whether the path is a directory. Later rules override
+    /// earlier ones for the same path.
     pub fn matches(&self, relative_path: &str, is_dir: bool) -> bool {
         let mut ignored = false;
 
@@ -108,17 +109,19 @@ impl IgnoreMatcher {
         ignored
     }
 
+    /// Returns `true` when no rules have been loaded.
     pub fn is_empty(&self) -> bool {
         self.rules.is_empty()
     }
 
-    /// 返回已加载的规则数量
+    /// Returns the number of loaded rules.
     pub fn len(&self) -> usize {
         self.rules.len()
     }
 }
 
-/// 简单 glob 匹配：* 匹配任意字符序列（不含 /），? 匹配单个字符
+/// Simple glob matching: `*` matches any sequence of characters (excluding
+/// `/`), `?` matches a single character.
 fn glob_match(pattern: &str, text: &str) -> bool {
     let pat = pattern.as_bytes();
     let txt = text.as_bytes();
@@ -151,7 +154,7 @@ fn glob_match(pattern: &str, text: &str) -> bool {
     p == pat.len()
 }
 
-/// 非锚定匹配：模式可以匹配路径的任何层级
+/// Unanchored matching: the pattern may match at any level of the path.
 fn unanchored_match(pattern: &str, path: &str) -> bool {
     let path_components: Vec<&str> = path.split('/').collect();
 
@@ -175,7 +178,7 @@ fn unanchored_match(pattern: &str, path: &str) -> bool {
     }
 }
 
-/// 锚定匹配：模式必须从路径的根开始匹配
+/// Anchored matching: the pattern must match starting at the path root.
 fn anchored_match(pattern: &str, path: &str) -> bool {
     let pat_components: Vec<&str> = pattern.split('/').collect();
     let path_components: Vec<&str> = path.split('/').collect();

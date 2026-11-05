@@ -1,4 +1,4 @@
-//! 同步模型 trait 和状态定义
+//! Sync model traits and state definitions.
 
 use crate::error::Result;
 use crate::events::EventSubscriber;
@@ -7,76 +7,86 @@ use std::collections::HashMap;
 use syncthing_core::types::{Config, Folder, FolderStatus};
 use syncthing_core::DeviceId;
 
-/// 同步模型 trait
+/// High-level sync operations exposed to upper layers (API, TUI, CLI).
 #[async_trait]
 pub trait SyncManager: Send + Sync {
-    /// 获取配置
+    /// Returns the current configuration.
     async fn get_config(&self) -> Result<Config>;
 
-    /// 更新配置
+    /// Updates the configuration.
     async fn update_config(&self, config: Config) -> Result<()>;
 
-    /// 添加设备
+    /// Adds a device to the configuration.
     async fn add_device(&self, device: syncthing_core::types::Device) -> Result<()>;
 
-    /// 移除设备
+    /// Removes a device from the configuration.
     async fn remove_device(&self, device_id: &DeviceId) -> Result<()>;
 
-    /// 添加文件夹
+    /// Adds a folder to the configuration.
     async fn add_folder(&self, folder: Folder) -> Result<()>;
 
-    /// 移除文件夹
+    /// Removes a folder from the configuration.
     async fn remove_folder(&self, folder_id: &str) -> Result<()>;
 
-    /// 获取文件夹状态
+    /// Returns the current state of a folder.
     async fn get_folder_state(&self, folder_id: &str) -> Result<FolderState>;
 
-    /// 启动同步
+    /// Starts the sync engine.
     async fn start(&self) -> Result<()>;
 
-    /// 停止同步
+    /// Stops the sync engine.
     async fn stop(&self) -> Result<()>;
 
-    /// 触发文件夹扫描
+    /// Triggers a full scan of a folder.
     async fn scan_folder(&self, folder_id: &str) -> Result<()>;
 
-    /// 触发子目录扫描
+    /// Triggers a scan of a subdirectory within a folder.
     async fn scan_folder_sub(&self, folder_id: &str, sub: &str) -> Result<()>;
 
-    /// 触发文件夹拉取
+    /// Triggers a pull round for a folder.
     async fn pull_folder(&self, folder_id: &str) -> Result<()>;
 
-    /// 获取连接的设备列表
+    /// Returns the list of currently connected devices.
     async fn get_connected_devices(&self) -> Result<Vec<DeviceId>>;
 
-    /// 连接到设备
+    /// Connects to a device.
     async fn connect_device(&self, device_id: DeviceId) -> Result<()>;
 
-    /// 断开设备连接
+    /// Disconnects a device.
     async fn disconnect_device(&self, device_id: DeviceId) -> Result<()>;
 
-    /// 订阅事件
+    /// Returns a subscriber to the sync event stream.
     fn subscribe_events(&self) -> EventSubscriber;
 
-    /// 获取统计信息
+    /// Returns aggregate sync statistics.
     async fn get_stats(&self) -> Result<SyncStats>;
 }
 
-/// 文件夹状态
+/// Live state of a single folder.
 #[derive(Debug, Clone)]
 pub struct FolderState {
+    /// Folder identifier.
     pub folder_id: String,
+    /// Current folder status.
     pub status: FolderStatus,
+    /// Time of the last completed scan, if any.
     pub last_scan: Option<chrono::DateTime<chrono::Utc>>,
+    /// Time of the last completed pull, if any.
     pub last_pull: Option<chrono::DateTime<chrono::Utc>>,
+    /// Number of files known locally.
     pub local_files: usize,
+    /// Number of files known from remote indexes.
     pub remote_files: usize,
+    /// Number of files currently in sync.
     pub in_sync_files: usize,
+    /// Number of files that still need to be synced.
     pub need_files: usize,
+    /// Recent errors for this folder.
     pub errors: Vec<String>,
 }
 
 impl FolderState {
+    /// Creates an idle state for the given folder.
     pub fn new(folder_id: impl Into<String>) -> Self {
         Self {
             folder_id: folder_id.into(),
@@ -91,7 +101,7 @@ impl FolderState {
         }
     }
 
-    /// 计算完成度百分比
+    /// Returns the completion percentage (0-100).
     pub fn completion(&self) -> u8 {
         if self.local_files == 0 {
             return 100;
@@ -101,33 +111,45 @@ impl FolderState {
     }
 }
 
-/// 同步统计
+/// Aggregate sync statistics across all folders.
 #[derive(Debug, Clone, Default)]
 pub struct SyncStats {
+    /// Per-folder statistics.
     pub folders: HashMap<String, FolderStats>,
+    /// Total number of files across all folders.
     pub total_files: usize,
+    /// Total number of bytes across all folders.
     pub total_bytes: u64,
+    /// Engine uptime in seconds.
     pub uptime_secs: u64,
 }
 
-/// 文件夹统计
+/// File-count statistics for a single folder.
 #[derive(Debug, Clone, Default)]
 pub struct FolderStats {
+    /// Number of regular files.
     pub files: usize,
+    /// Number of directories.
     pub directories: usize,
+    /// Number of symlinks.
     pub symlinks: usize,
+    /// Total size in bytes.
     pub total_bytes: u64,
+    /// Number of deleted entries.
     pub deleted: usize,
 }
 
-/// 同步任务句柄
+/// Handle to a running per-folder background task.
 pub struct SyncTaskHandle {
+    /// Folder the task belongs to.
     pub folder_id: String,
+    /// Kind of background task.
     pub task_type: SyncTaskType,
+    /// Handle used to abort the task.
     pub abort_handle: tokio::task::AbortHandle,
 }
 
-/// 同步任务类型
+/// Kind of a per-folder background task.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SyncTaskType {
     Scan,
@@ -135,16 +157,21 @@ pub enum SyncTaskType {
     Push,
 }
 
-/// 文件夹配置与状态
+/// A folder's configuration paired with its live state.
 #[derive(Debug, Clone)]
 pub struct FolderConfigState {
+    /// Static folder configuration.
     pub config: Folder,
+    /// Live folder state.
     pub state: FolderState,
+    /// Last locally assigned sequence number.
     pub local_sequence: u64,
+    /// Devices that share this folder.
     pub remote_devices: Vec<DeviceId>,
 }
 
 impl FolderConfigState {
+    /// Creates a new entry from configuration, with fresh idle state.
     pub fn new(config: Folder) -> Self {
         let folder_id = config.id.clone();
         Self {
@@ -155,7 +182,7 @@ impl FolderConfigState {
         }
     }
 
-    /// 检查是否应该扫描
+    /// Returns `true` when the folder is due for a scan.
     pub fn should_scan(&self) -> bool {
         if self.config.paused {
             return false;
@@ -167,13 +194,12 @@ impl FolderConfigState {
         )
     }
 
-    /// 检查是否应该拉取
+    /// Returns `true` when the folder is due for a pull.
     pub fn should_pull(&self) -> bool {
         if self.config.paused {
             return false;
         }
 
-        // 只有发送接收和仅接收文件夹可以拉取
         if !self.config.folder_type.can_sync() {
             return false;
         }

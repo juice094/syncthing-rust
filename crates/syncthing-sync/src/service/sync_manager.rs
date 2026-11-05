@@ -47,13 +47,11 @@ impl SyncManager for SyncService {
     }
 
     async fn add_folder(&self, folder: Folder) -> Result<()> {
-        // 添加到配置
         {
             let mut config = self.config.write().await;
             config.folders.push(folder.clone());
         }
 
-        // 初始化文件夹（创建 FolderModel）
         let folder_id = folder.id.clone();
         self.add_folder_internal(folder).await?;
 
@@ -67,20 +65,17 @@ impl SyncManager for SyncService {
         // running), so this is safe to call unconditionally.
         self.start_folder_internal(&folder_id).await?;
 
-        // 文件夹共享关系变化会影响 ClusterConfig 内容，需重协商
         self.fire_renegotiation_hook().await;
 
         Ok(())
     }
 
     async fn remove_folder(&self, folder_id: &str) -> Result<()> {
-        // 从配置中移除
         {
             let mut config = self.config.write().await;
             config.folders.retain(|f| f.id != folder_id);
         }
 
-        // 从运行时移除
         if self.folders.remove(folder_id).is_some() {
             info!(folder_id = %folder_id, "Folder removed");
         }
@@ -100,10 +95,8 @@ impl SyncManager for SyncService {
     async fn start(&self) -> Result<()> {
         info!("Starting sync service");
 
-        // 初始化文件夹
         self.init_folders().await?;
 
-        // 启动文件夹循环
         self.start_folder_loops().await;
 
         info!("Sync service started");
@@ -113,20 +106,16 @@ impl SyncManager for SyncService {
     async fn stop(&self) -> Result<()> {
         info!("Stopping sync service");
 
-        // 发送全局关闭信号
         self.shutdown_tx.send(true).ok();
 
-        // 收集所有 folder_id
         let folder_ids: Vec<String> = self.folder_tasks.iter().map(|e| e.key().clone()).collect();
 
-        // 发送停止信号
         for folder_id in &folder_ids {
             if let Some(handles) = self.folder_tasks.get(folder_id) {
                 handles.shutdown_tx.send(true).ok();
             }
         }
 
-        // 等待所有任务完成
         for folder_id in folder_ids {
             if let Some((_, handles)) = self.folder_tasks.remove(&folder_id) {
                 let _ = handles.scan_handle.await;

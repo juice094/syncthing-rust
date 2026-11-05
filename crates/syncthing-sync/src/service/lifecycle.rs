@@ -22,7 +22,7 @@ use tokio::sync::RwLock;
 use tracing::{info, warn};
 
 impl SyncService {
-    /// 创建新的同步服务
+    /// Creates a new sync service.
     pub fn new(db: Arc<dyn LocalDatabase>) -> Self {
         let events = EventPublisher::new(1000);
         let (shutdown_tx, shutdown_rx) = tokio::sync::watch::channel(false);
@@ -46,7 +46,7 @@ impl SyncService {
         }
     }
 
-    /// 使用配置创建服务
+    /// Sets the configuration (builder style).
     pub async fn with_config(self, config: Config) -> Self {
         if let Some(id) = config.local_device_id {
             self.index_handler.set_local_device_id(id);
@@ -55,31 +55,31 @@ impl SyncService {
         self
     }
 
-    /// 设置块数据源（同步构建器）
+    /// Sets the block source (synchronous builder).
     pub fn with_block_source(self, source: Arc<dyn BlockSource>) -> Self {
         *self.block_source.blocking_write() = Some(source);
         self
     }
 
-    /// 设置块数据源
+    /// Sets the block source and propagates it to existing folder models.
     pub async fn set_block_source(&self, source: Arc<dyn BlockSource>) {
         *self.block_source.write().await = Some(source.clone());
-        // 传播到已存在的 FolderModel（此前仅创建时读取，add_folder 后设置不生效）
         for entry in self.folders.iter() {
             entry.value().set_block_source(Some(source.clone()));
         }
     }
 
-    /// 注册配置变更重协商钩子。
+    /// Registers the configuration-change renegotiation hook.
     ///
-    /// BEP 只在连接建立时交换 ClusterConfig；配置变更后必须断开重连
-    /// 才会重新交换（Go Syncthing 行为）。sync crate 不触碰网络，
-    /// 由 daemon 注册本钩子执行实际的 reconnect。
+    /// BEP only exchanges ClusterConfig at connection establishment; after a
+    /// configuration change a disconnect/reconnect is required to re-exchange
+    /// it (Go Syncthing behavior). The sync crate does not touch the network,
+    /// so the daemon registers this hook to perform the actual reconnect.
     pub async fn set_renegotiation_hook(&self, hook: crate::service::RenegotiationHook) {
         *self.renegotiation_hook.write().await = Some(hook);
     }
 
-    /// 配置变更后调用：以当前已连接设备列表触发重协商钩子
+    /// Fires the renegotiation hook with the current connected device list.
     pub(super) async fn fire_renegotiation_hook(&self) {
         let hook = self.renegotiation_hook.read().await.clone();
         if let Some(hook) = hook {
@@ -90,13 +90,13 @@ impl SyncService {
         }
     }
 
-    /// 设置共享并发策略（构建器模式）
+    /// Sets the shared concurrency policy (builder style).
     pub fn with_concurrency_policy(self, policy: Arc<ConcurrencyPolicy>) -> Self {
         *self.concurrency_policy.blocking_write() = Some(policy);
         self
     }
 
-    /// 设置共享并发策略并动态下发到所有已存在的文件夹模型
+    /// Sets the shared concurrency policy and pushes it to existing folder models.
     pub async fn set_concurrency_policy(&self, policy: Arc<ConcurrencyPolicy>) {
         *self.concurrency_policy.write().await = Some(policy.clone());
         for entry in self.folders.iter() {
@@ -104,13 +104,13 @@ impl SyncService {
         }
     }
 
-    /// 设置文件夹编排器（构建器模式）
+    /// Sets the folder orchestrator (builder style).
     pub fn with_orchestrator(self, orchestrator: Arc<FolderOrchestrator>) -> Self {
         *self.orchestrator.blocking_write() = Some(orchestrator);
         self
     }
 
-    /// 设置文件夹编排器并动态下发到所有已存在的文件夹模型
+    /// Sets the folder orchestrator and pushes it to existing folder models.
     pub async fn set_orchestrator(&self, orchestrator: Arc<FolderOrchestrator>) {
         *self.orchestrator.write().await = Some(orchestrator.clone());
         for entry in self.folders.iter() {
@@ -118,7 +118,7 @@ impl SyncService {
         }
     }
 
-    /// 设置编排器配置（当编排器已存在时）
+    /// Updates the orchestrator configuration (when an orchestrator is set).
     pub fn set_orchestrator_config(&self, config: OrchestratorConfig) {
         if let Ok(guard) = self.orchestrator.try_read() {
             if let Some(ref orch) = *guard {
@@ -127,17 +127,17 @@ impl SyncService {
         }
     }
 
-    /// 启动同步服务
+    /// Starts the sync service.
     pub async fn start(&self) -> Result<()> {
         <Self as SyncManager>::start(self).await
     }
 
-    /// 停止同步服务
+    /// Stops the sync service.
     pub async fn stop(&self) -> Result<()> {
         <Self as SyncManager>::stop(self).await
     }
 
-    /// 运行同步服务直到收到关闭信号
+    /// Runs the sync service until the shutdown signal fires.
     pub async fn run(&self) -> Result<()> {
         self.start().await?;
         let mut shutdown_rx = self.shutdown_rx.read().await.clone();
@@ -149,17 +149,17 @@ impl SyncService {
         self.stop().await
     }
 
-    /// 获取数据库引用
+    /// Returns a handle to the local database.
     pub fn db(&self) -> Arc<dyn LocalDatabase> {
         self.db.clone()
     }
 
-    /// 获取事件发布者
+    /// Returns the event publisher.
     pub fn events(&self) -> &EventPublisher {
         &self.events
     }
 
-    /// 初始化文件夹
+    /// Initializes all configured folders.
     pub(super) async fn init_folders(&self) -> Result<()> {
         let config = self.config.read().await;
 
@@ -171,25 +171,24 @@ impl SyncService {
         Ok(())
     }
 
-    /// 内部添加文件夹
+    /// Adds a single folder (runtime + persistence).
     pub(super) async fn add_folder_internal(&self, folder: Folder) -> Result<()> {
         let folder_id = folder.id.clone();
 
-        // 检查是否已存在
         if self.folders.contains_key(&folder_id) {
             warn!(folder_id = %folder_id, "Folder already exists");
             return Ok(());
         }
 
-        // 更新数据库中的文件夹配置
         self.db.update_folder(folder.clone()).await?;
 
-        // 创建文件夹模型
         let block_source = self.block_source.read().await.clone();
         let concurrency_policy = self.concurrency_policy.read().await.clone();
         let orchestrator = self.orchestrator.read().await.clone();
-        // 版本向量的本地计数器 ID 必须来自真实设备 ID（硬编码 1 会导致
-        // 双端离线并发修改被误判为线性历史，删除方静默覆盖对端修改）
+        // The version-vector local counter ID must come from the real device
+        // ID: hardcoding it would misclassify concurrent offline edits on
+        // both sides as linear history, silently letting the deleter
+        // overwrite the peer's modifications.
         let local_counter_id = self
             .config
             .read()
@@ -217,14 +216,15 @@ impl SyncService {
         );
 
         self.folders.insert(folder_id.clone(), folder_model.clone());
-        // 从持久化数据库恢复文件夹状态计数，使重启后索引统计立即可见。
+        // Restore folder state counters from the persisted database so index
+        // statistics are immediately visible after a restart.
         folder_model.init_state_from_db().await;
         info!(folder_id = %folder_id, "Folder added");
 
         Ok(())
     }
 
-    /// 启动所有文件夹循环
+    /// Starts the loops of all folders.
     pub(super) async fn start_folder_loops(&self) {
         for entry in self.folders.iter() {
             let folder_id = entry.key().clone();
@@ -234,21 +234,18 @@ impl SyncService {
         }
     }
 
-    /// 内部启动单个文件夹循环
+    /// Starts the loops of a single folder (idempotent).
     pub(super) async fn start_folder_internal(&self, folder_id: &str) -> Result<()> {
-        // 检查 folder 是否存在
         let folder_model = self
             .folders
             .get(folder_id)
             .ok_or_else(|| SyncError::FolderNotFound(folder_id.to_string()))?;
 
-        // 如果已经在运行，直接返回
         if self.folder_tasks.contains_key(folder_id) {
             warn!(folder_id = %folder_id, "Folder already running, skipping start_folder_internal");
             return Ok(());
         }
 
-        // 创建独立的 shutdown channel
         let (shutdown_tx, scan_shutdown) = tokio::sync::watch::channel(false);
         let pull_shutdown = shutdown_tx.subscribe();
         let watcher_shutdown = shutdown_tx.subscribe();

@@ -1,6 +1,6 @@
-//! 文件夹模型实现
+//! Folder model.
 //!
-//! 实现文件夹级别的扫描和拉取循环
+//! Implements the per-folder scan and pull loops.
 
 use crate::database::LocalDatabase;
 use crate::error::Result;
@@ -20,7 +20,7 @@ use syncthing_core::DeviceId;
 use tokio::sync::RwLock;
 use tracing::{debug, error, info, trace, warn};
 
-/// 文件夹模型
+/// Per-folder runtime: scan/pull/watcher loops and state machine.
 pub struct FolderModel {
     folder: Folder,
     state: RwLock<FolderState>,
@@ -33,22 +33,22 @@ pub struct FolderModel {
     watcher: RwLock<Option<notify::RecommendedWatcher>>,
     pull_notify: tokio::sync::Notify,
     pending_pulls: RwLock<Vec<FileInfo>>,
-    /// watcher 观测到的变更路径集合（用于增量扫描）
+    /// Paths of changes observed by the watcher (for incremental scans).
     dirty_changes: Arc<DashSet<String>>,
-    /// watcher 观测到的删除路径集合
+    /// Paths of deletions observed by the watcher.
     dirty_deletes: Arc<DashSet<String>>,
-    /// watcher 收到的事件总数
+    /// Total number of events received by the watcher.
     watcher_events_received: Arc<AtomicU64>,
-    /// watcher 通道丢弃的事件数（由 watcher.rs 维护）
+    /// Number of events dropped by the watcher channel (maintained by watcher.rs).
     watcher_dropped: Arc<AtomicU64>,
-    /// 上一次已报告的丢弃数，用于计算差值
+    /// Last reported drop count, used to compute deltas.
     last_reported_dropped: AtomicU64,
-    /// 本地设备的版本向量计数器 ID（override 等本地递增路径使用）
+    /// Local version-vector counter ID (used by local increment paths such as override).
     local_counter_id: u64,
 }
 
 impl FolderModel {
-    /// 创建新的文件夹模型
+    /// Creates a new folder model.
     pub fn new(
         folder: Folder,
         db: Arc<dyn LocalDatabase>,
@@ -67,7 +67,7 @@ impl FolderModel {
         )
     }
 
-    /// 创建文件夹模型并指定共享并发策略与编排器
+    /// Creates a folder model with the shared concurrency policy and orchestrator.
     fn new_with_policy_and_orchestrator(
         folder: Folder,
         db: Arc<dyn LocalDatabase>,
@@ -111,14 +111,14 @@ impl FolderModel {
         }
     }
 
-    /// 设置共享并发策略（构建器模式）
+    /// Sets the shared concurrency policy (builder style).
     pub fn with_concurrency_policy(mut self, policy: Option<Arc<ConcurrencyPolicy>>) -> Self {
         self.concurrency_policy = SyncRwLock::new(policy.clone());
         self.puller = self.puller.with_concurrency_policy(policy);
         self
     }
 
-    /// 动态更新共享并发策略
+    /// Updates the shared concurrency policy at runtime.
     pub fn set_concurrency_policy(&self, policy: Arc<ConcurrencyPolicy>) {
         if let Ok(mut guard) = self.concurrency_policy.write() {
             *guard = Some(policy.clone());
@@ -126,7 +126,7 @@ impl FolderModel {
         self.puller.set_concurrency_policy(Some(policy));
     }
 
-    /// 动态更新块数据源（允许文件夹创建后补配）
+    /// Updates the block source at runtime (allows wiring it in after creation).
     pub fn set_block_source(&self, source: Option<Arc<dyn BlockSource>>) {
         self.puller.set_block_source(source);
     }
@@ -137,35 +137,35 @@ impl FolderModel {
         self.puller.block_source_present()
     }
 
-    /// 设置文件夹编排器（构建器模式）
+    /// Sets the folder orchestrator (builder style).
     pub fn with_orchestrator(mut self, orchestrator: Option<Arc<FolderOrchestrator>>) -> Self {
         self.orchestrator = SyncRwLock::new(orchestrator);
         self
     }
 
-    /// 动态更新文件夹编排器
+    /// Updates the folder orchestrator at runtime.
     pub fn set_orchestrator(&self, orchestrator: Arc<FolderOrchestrator>) {
         if let Ok(mut guard) = self.orchestrator.write() {
             *guard = Some(orchestrator);
         }
     }
 
-    /// 获取文件夹ID
+    /// Returns the folder ID.
     pub fn id(&self) -> &str {
         &self.folder.id
     }
 
-    /// 获取文件夹配置
+    /// Returns the folder configuration.
     pub fn config(&self) -> &Folder {
         &self.folder
     }
 
-    /// 获取文件夹状态
+    /// Returns a snapshot of the folder state.
     pub async fn state(&self) -> FolderState {
         self.state.read().await.clone()
     }
 
-    /// 启动扫描循环
+    /// Runs the periodic scan loop until the shutdown signal fires.
     pub async fn start_scan_loop(&self, mut shutdown: tokio::sync::watch::Receiver<bool>) {
         let interval_secs = if self.folder.rescan_interval_secs > 0 {
             self.folder.rescan_interval_secs as u64
@@ -205,7 +205,8 @@ impl FolderModel {
         }
     }
 
-    /// 启动文件系统监视循环
+    /// Runs the filesystem watcher loop (debounced incremental scans) until
+    /// the shutdown signal fires.
     pub async fn start_watcher_loop(&self, mut shutdown: tokio::sync::watch::Receiver<bool>) {
         let folder_id = self.folder.id.clone();
         let path = self.folder.path.clone();
@@ -227,7 +228,6 @@ impl FolderModel {
         let mut debounce_timer: Option<std::pin::Pin<Box<tokio::time::Sleep>>> = None;
         let mut last_scan = tokio::time::Instant::now() - MIN_SCAN_GAP;
 
-        // 绑定共享集合，供同步 watcher 回调使用
         let dirty_changes = self.dirty_changes.clone();
         let dirty_deletes = self.dirty_deletes.clone();
         let events_received = self.watcher_events_received.clone();
@@ -297,7 +297,8 @@ impl FolderModel {
         }
     }
 
-    /// 将绝对路径转换为 folder 根目录下的相对路径（统一正斜杠）。
+    /// Converts an absolute path to a path relative to the folder root
+    /// (normalized to forward slashes).
     fn relative_path(folder_path: &str, abs_path: &Path) -> Option<String> {
         let base = Path::new(folder_path);
         abs_path
@@ -306,16 +307,20 @@ impl FolderModel {
             .map(|p| p.to_string_lossy().replace('\\', "/"))
     }
 
-    /// 启动拉取循环
+    /// Runs the pull loop until the shutdown signal fires.
+    ///
+    /// After a round with file-level failures, the next round is scheduled
+    /// earlier using exponential backoff (`PULL_RETRY_BACKOFF_INIT_MS`,
+    /// doubling up to `PULL_RETRY_BACKOFF_MAX_MS`). Failed files are not
+    /// tracked here: `check_needed_files()` re-derives them from the local
+    /// DB/FS diff, so the backoff only affects retry timing (see
+    /// `docs/KNOWN_ISSUES.md` §23).
     pub async fn start_pull_loop(&self, mut shutdown: tokio::sync::watch::Receiver<bool>) {
         info!(folder_id = %self.folder.id, "Starting pull loop");
 
         let mut interval = tokio::time::interval(Duration::from_secs(
             syncthing_core::constants::PULL_INTERVAL_SECS,
         ));
-        // 失败退避：本轮出现文件级失败时提前重试，逐次翻倍并封顶于周期长度。
-        // 失败文件不需要另行登记——`check_needed_files` 依据本地 DB/FS 差异重新推导，
-        // 此处的退避只影响重试**时延**（见 docs/KNOWN_ISSUES.md §23）。
         let mut backoff = Duration::ZERO;
 
         loop {
@@ -366,8 +371,9 @@ impl FolderModel {
         }
     }
 
-    /// 计算下一次失败重试的退避时长：首次为 `PULL_RETRY_BACKOFF_INIT_MS`，之后翻倍，
-    /// 封顶于 `PULL_RETRY_BACKOFF_MAX_MS`。
+    /// Computes the next failure-retry backoff: first
+    /// `PULL_RETRY_BACKOFF_INIT_MS`, then doubling, capped at
+    /// `PULL_RETRY_BACKOFF_MAX_MS`.
     fn next_pull_backoff(current: Duration) -> Duration {
         let max = Duration::from_millis(syncthing_core::constants::PULL_RETRY_BACKOFF_MAX_MS);
         if current.is_zero() {
@@ -377,12 +383,20 @@ impl FolderModel {
         }
     }
 
-    /// 执行扫描
+    /// Runs a full scan of the folder.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SyncError`](crate::SyncError) when the scan fails; the folder state is restored.
     pub async fn scan(&self) -> Result<Vec<FileInfo>> {
         self.scan_inner(None).await
     }
 
-    /// 扫描子目录
+    /// Scans a subdirectory of the folder.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SyncError`](crate::SyncError) when the scan fails; the folder state is restored.
     pub async fn scan_sub(&self, sub: &str) -> Result<Vec<FileInfo>> {
         self.scan_inner(Some(sub)).await
     }
@@ -395,7 +409,6 @@ impl FolderModel {
 
         let mut state = self.state.write().await;
 
-        // 更新状态
         let old_status = state.status;
         state.status = FolderStatus::Scanning;
         drop(state);
@@ -408,7 +421,6 @@ impl FolderModel {
 
         info!(folder_id = %self.folder.id, sub = ?sub, "Starting scan");
 
-        // 执行扫描
         let scan_result = match sub {
             Some(s) => self.scanner.scan_folder_sub(&self.folder, s).await,
             None => self.scanner.scan_folder(&self.folder).await,
@@ -423,7 +435,6 @@ impl FolderModel {
                     "Scan completed"
                 );
 
-                // 如果有变更，发布索引更新事件
                 if !files.is_empty() {
                     info!(
                         folder_id = %self.folder.id,
@@ -445,7 +456,6 @@ impl FolderModel {
                 let mut state = self.state.write().await;
                 state.errors.push(err_str);
 
-                // 恢复状态
                 state.status = old_status;
                 self.events.publish(SyncEvent::FolderStateChanged {
                     folder: self.folder.id.clone(),
@@ -457,12 +467,10 @@ impl FolderModel {
             }
         };
 
-        // 更新状态
         let mut state = self.state.write().await;
         state.status = FolderStatus::Idle;
         state.last_scan = Some(chrono::Utc::now());
 
-        // 更新文件计数
         if let Ok(all_files) = self.db.get_folder_files(&self.folder.id).await {
             let files: &Vec<syncthing_core::types::FileInfo> = &all_files;
             state.local_files = files.len();
@@ -477,11 +485,11 @@ impl FolderModel {
         Ok(changed_files)
     }
 
-    /// 处理 watcher 累积的脏路径集合，决定全量或增量扫描。
+    /// Processes the dirty path sets accumulated by the watcher, choosing
+    /// between a full scan and an incremental scan.
     async fn process_dirty_set(&self) -> Result<Vec<FileInfo>> {
         let folder_id = self.folder.id.clone();
 
-        // 取出并清空脏集合
         let changes: Vec<String> = {
             let mut v = Vec::with_capacity(self.dirty_changes.len());
             for entry in self.dirty_changes.iter() {
@@ -509,7 +517,6 @@ impl FolderModel {
             size: dirty_count,
         });
 
-        // 报告 watcher 丢事件数
         let total_dropped = self.watcher_dropped.load(Ordering::Relaxed);
         let last = self.last_reported_dropped.load(Ordering::Relaxed);
         if total_dropped > last {
@@ -521,11 +528,11 @@ impl FolderModel {
             });
         }
 
-        // 阈值：取 max(100, local_files / 10)，避免小 folder 过度碎片化
+        // Threshold: max(100, local_files / 10), so small folders do not
+        // over-fragment into incremental scans.
         let local_files = self.state.read().await.local_files;
         let threshold = std::cmp::max(100usize, local_files / 10);
 
-        // 如果脏路径包含根目录或超过阈值，回退到全量扫描
         let fallback_to_full = dirty_count > threshold
             || changes.iter().any(|p| p.is_empty() || p == "/")
             || deletes.iter().any(|p| p.is_empty() || p == "/");
@@ -555,7 +562,9 @@ impl FolderModel {
         self.scan_incremental(changes, deletes).await
     }
 
-    /// 执行增量扫描：只扫描脏路径涉及的子树，并处理显式删除事件。
+    /// Runs an incremental scan over the dirty subtrees and explicit deletions.
+    ///
+    /// See "docs/design/ADR-20261105-scanner-incremental-paths.md".
     async fn scan_incremental(
         &self,
         changes: Vec<String>,
@@ -563,7 +572,6 @@ impl FolderModel {
     ) -> Result<Vec<FileInfo>> {
         let folder_id = self.folder.id.clone();
 
-        // 进入 Scanning 状态
         let old_status = {
             let mut state = self.state.write().await;
             let old = state.status;
@@ -578,12 +586,11 @@ impl FolderModel {
 
         let mut changed_files = Vec::new();
 
-        // 拉取在途判定：远程索引到达后，DB 记录（index_handler 写入）先于块传输落盘。
-        // 在这个窗口里按「DB 有记录但磁盘无文件」推断删除，会把**正在传输、尚未落地**
-        // 的文件标记为删除，并以新版本广播；对端版本更高 → 源端把唯一副本移入 .sttrash，
-        // 文件从此再也同步不过去（2026-10-16 e2e_crud `kept/public.txt` 实测链路：
-        // pull 创建 `kept` 目录 → watcher 触发该子树扫描 → mark_deleted_subtree 误删）。
-        // 在途判定覆盖两个阶段：pull 唤醒前（pending_pulls 非空）与 pull 执行中（status=Pulling）。
+        // Pull-in-flight detection: while a pull is pending or running, a
+        // subtree scan must not infer deletions from "in DB but missing on
+        // disk", otherwise in-flight downloads get marked deleted and the
+        // source quarantines its only copy (see
+        // "docs/design/ADR-20261105-scanner-incremental-paths.md").
         let pull_in_flight = {
             let pending = !self.pending_pulls.read().await.is_empty();
             let pulling = old_status == FolderStatus::Pulling;
@@ -598,7 +605,6 @@ impl FolderModel {
             );
         }
 
-        // 1. 处理变更路径：目录用 scan_sub，单文件用 scan_changed_file
         let base_path = Path::new(&self.folder.path);
         for relative in changes {
             let full = base_path.join(&relative);
@@ -610,7 +616,6 @@ impl FolderModel {
                             error!(folder_id = %folder_id, root = %relative, error = %e, "Incremental scan subtree failed");
                         }
                     }
-                    // 补全子树内删除的文件（仅在无在途拉取时推断，见 pull_in_flight 注释）
                     if pull_in_flight {
                         continue;
                     }
@@ -644,11 +649,13 @@ impl FolderModel {
             }
         }
 
-        // 2. 处理显式删除事件（文件或子树）
         for relative in deletes {
-            // watcher 对截断覆写（如 shell `>`、编辑器保存）会上报 remove+create，
-            // 同一路径同时出现在 changes 与 deletes；文件仍存在说明删除事件
-            // 是陈旧的，跳过——否则删除记录会盖掉刚扫到的新版本并广播（幻影删除）。
+            // Truncating overwrites (shell `>`, editor saves) surface as
+            // remove+create, so the same path appears in both changes and
+            // deletes; when the file still exists the delete event is stale
+            // and must be skipped, otherwise the deletion record would
+            // overwrite the freshly scanned version and broadcast a phantom
+            // deletion (see the module-level ADR pointer).
             if base_path.join(&relative).exists() {
                 trace!(folder_id = %folder_id, path = %relative, "Stale delete event for existing file, skipping");
                 continue;
@@ -665,7 +672,6 @@ impl FolderModel {
             }
         }
 
-        // 3. 重命名检测与 blocks 清理
         changed_files = crate::scanner::detect_and_reorder_renames(changed_files);
         for file in &mut changed_files {
             if file.is_deleted() {
@@ -673,7 +679,6 @@ impl FolderModel {
             }
         }
 
-        // 4. 更新数据库
         if let Err(e) = self
             .db
             .update_files(&folder_id, changed_files.clone())
@@ -692,7 +697,6 @@ impl FolderModel {
             return Err(e);
         }
 
-        // 5. 发布索引更新
         if !changed_files.is_empty() {
             self.events.publish(SyncEvent::LocalIndexUpdated {
                 folder: folder_id.clone(),
@@ -700,7 +704,6 @@ impl FolderModel {
             });
         }
 
-        // 6. 更新状态
         {
             let mut state = self.state.write().await;
             state.status = FolderStatus::Idle;
@@ -722,11 +725,17 @@ impl FolderModel {
         Ok(changed_files)
     }
 
-    /// 执行拉取
+    /// Runs one pull round.
     ///
-    /// 返回本轮拉取统计；`files_failed > 0` 表示有文件未成功拉取（失败文件本身
-    /// 不会被就地重试，调用方应据此安排退避重试）。跳过（暂停 / 不可同步 / 已在拉取 /
-    /// 无待拉取文件）时返回全零统计。
+    /// Returns the round's statistics; `files_failed > 0` means some files
+    /// were not pulled (failed files are never retried inline — the caller
+    /// schedules a backoff retry). Skipped states (paused / non-syncable /
+    /// already pulling / nothing to pull) return an all-zero stat.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SyncError`](crate::SyncError) when the needed-files check or the pull itself
+    /// fails; the folder state is restored.
     pub async fn pull(&self) -> Result<PullStats> {
         if self.folder.paused {
             debug!(folder_id = %self.folder.id, "Folder is paused, skipping pull");
@@ -740,7 +749,6 @@ impl FolderModel {
 
         let mut state = self.state.write().await;
 
-        // 如果已经在拉取中，跳过
         if state.status == FolderStatus::Pulling {
             trace!(folder_id = %self.folder.id, "Already pulling, skipping");
             return Ok(PullStats::default());
@@ -758,14 +766,11 @@ impl FolderModel {
 
         debug!(folder_id = %self.folder.id, "Starting pull");
 
-        // 获取需要拉取的文件列表
-        // 1. 先检查 pending_pulls（由远程索引触发）
         let mut pending_files = {
             let mut pending = self.pending_pulls.write().await;
             std::mem::take(&mut *pending)
         };
 
-        // 2. 再检查文件系统状态（补充本地缺失的文件）
         let fs_needed = match self.puller.check_needed_files(&self.folder).await {
             Ok(files) => files,
             Err(e) => {
@@ -783,7 +788,6 @@ impl FolderModel {
             }
         };
 
-        // 合并 pending_pulls 和 fs_needed，去重
         for file in fs_needed {
             if !pending_files.iter().any(|f| f.name == file.name) {
                 pending_files.push(file);
@@ -811,13 +815,11 @@ impl FolderModel {
             "Pulling files"
         );
 
-        // 更新状态
         {
             let mut state = self.state.write().await;
             state.need_files = needed_files.len();
         }
 
-        // 执行拉取
         let stats = match self.puller.pull_folder(&self.folder, needed_files).await {
             Ok(stats) => {
                 info!(
@@ -827,7 +829,6 @@ impl FolderModel {
                     "Pull completed"
                 );
 
-                // 更新状态
                 let mut state = self.state.write().await;
                 state.status = FolderStatus::Idle;
                 state.last_pull = Some(chrono::Utc::now());
@@ -869,7 +870,11 @@ impl FolderModel {
         Ok(stats)
     }
 
-    /// 处理远程索引
+    /// Handles a remote index: queues needed files and wakes the pull loop.
+    ///
+    /// # Errors
+    ///
+    /// This method currently never fails; the `Result` is reserved for future use.
     pub async fn handle_remote_index(&self, device: DeviceId, files: Vec<FileInfo>) -> Result<()> {
         debug!(
             folder_id = %self.folder.id,
@@ -878,7 +883,6 @@ impl FolderModel {
             "Handling remote index"
         );
 
-        // 将需要拉取的文件加入 pending_pulls
         if !files.is_empty() {
             let mut pending = self.pending_pulls.write().await;
             for file in files {
@@ -889,15 +893,15 @@ impl FolderModel {
             drop(pending);
         }
 
-        // 唤醒 pull loop 立即处理远程索引
-        // 使用 notify_one 而非 notify_waiters，确保即使 pull loop 正在执行 pull()
-        // 也能在完成后立即收到通知，不会丢失唤醒信号。
+        // Wake the pull loop immediately. `notify_one` (not `notify_waiters`)
+        // guarantees the loop receives the notification right after the
+        // in-flight `pull()` finishes, without losing wakeups.
         self.pull_notify.notify_one();
 
         Ok(())
     }
 
-    /// 更新文件夹配置
+    /// Replaces the folder configuration.
     pub async fn update_config(&mut self, config: Folder) {
         self.folder = config;
         self.events.publish(SyncEvent::FolderConfigUpdated {
@@ -905,14 +909,14 @@ impl FolderModel {
         });
     }
 
-    /// 暂停文件夹
+    /// Pauses the folder.
     pub async fn pause(&self) {
         let mut state = self.state.write().await;
         state.status = FolderStatus::Idle;
         info!(folder_id = %self.folder.id, "Folder paused");
     }
 
-    /// 恢复文件夹
+    /// Resumes the folder.
     pub async fn resume(&self) {
         info!(folder_id = %self.folder.id, "Folder resumed");
     }

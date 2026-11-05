@@ -1,7 +1,8 @@
-//! 块上传服务
+//! Block upload service.
 //!
-//! 处理远程节点通过 BEP Request 发起的块读取请求。
-//! 提供路径安全校验、hash 校验、临时文件支持和标准错误码映射。
+//! Serves block read requests issued by remote peers via BEP Request messages,
+//! with path-traversal validation, hash verification, temporary-file support,
+//! and standard BEP error-code mapping.
 
 use std::path::{Path, PathBuf};
 
@@ -9,22 +10,23 @@ use bep_protocol::messages::{ErrorCode, Request};
 use sha2::{Digest, Sha256};
 use tokio::task;
 
-/// 块请求错误，直接映射到 BEP ErrorCode
+/// Errors while serving a block request, mapped directly to BEP `ErrorCode`.
 #[derive(Debug, Clone, PartialEq)]
 pub enum BlockRequestError {
-    /// 文件夹不存在 -> NoSuchFile
+    /// The folder does not exist. Maps to `ErrorCode::NoSuchFile`.
     FolderNotFound,
-    /// 文件不存在 -> NoSuchFile
+    /// The file does not exist. Maps to `ErrorCode::NoSuchFile`.
     FileNotFound,
-    /// 文件名不合法（路径遍历等） -> InvalidFile
+    /// The file name is invalid (e.g. path traversal). Maps to `ErrorCode::InvalidFile`.
     InvalidFileName,
-    /// Hash 不匹配 -> InvalidFile
+    /// The block hash does not match. Maps to `ErrorCode::InvalidFile`.
     HashMismatch,
-    /// 通用 I/O 错误 -> Generic
+    /// Any other I/O failure. Maps to `ErrorCode::Generic`.
     IoError(String),
 }
 
 impl BlockRequestError {
+    /// Returns the BEP `ErrorCode` corresponding to this error.
     pub fn error_code(&self) -> ErrorCode {
         match self {
             BlockRequestError::FolderNotFound => ErrorCode::NoSuchFile,
@@ -50,18 +52,17 @@ impl std::fmt::Display for BlockRequestError {
 
 impl std::error::Error for BlockRequestError {}
 
-/// 校验文件 name 字符串（不构建 PathBuf）
+/// Validates a remote file `name` string without building a `PathBuf`.
 ///
-/// BEP 的 name 使用 '/' 作为分隔符。拒绝：
-/// - 空字符串
-/// - 以 '/' 或 '\\' 开头（绝对路径）
-/// - 包含 '\0'（空字节）
-/// - 包含 ".." 段（父目录穿越）
-/// - 包含 "." 段
-/// - 包含空段、反斜杠段
+/// BEP names use `/` as the separator. Rejects:
+/// - empty strings
+/// - names starting with `/` or `\\` (absolute paths)
+/// - names containing `\0` (NUL bytes)
+/// - names containing `..` or `.` segments (parent-directory traversal)
+/// - names containing empty segments or backslashes within a segment
 ///
-/// SAFETY: 此函数必须在所有从远程接收的 file_info.name 上调用，
-/// 以防止路径穿越攻击将文件写出同步目录之外。
+/// SAFETY: this must be called on every remote-received `file_info.name`
+/// to prevent path-traversal attacks from writing outside the sync folder.
 pub(crate) fn validate_remote_name(name: &str) -> Result<(), BlockRequestError> {
     if name.is_empty() {
         return Err(BlockRequestError::InvalidFileName);
@@ -83,12 +84,10 @@ pub(crate) fn validate_remote_name(name: &str) -> Result<(), BlockRequestError> 
     Ok(())
 }
 
-/// 校验并规范化文件路径中的 name 段
+/// Validates and normalizes the `name` segments of a file path.
 ///
-/// BEP 的 req.name 使用 '/' 作为分隔符。我们需要确保：
-/// - 不包含 '..' 段
-/// - 不以 '/' 开头（绝对路径）
-/// - 不包含空段或含空字节的段
+/// Ensures the BEP `/`-separated name contains no `..` segments, is not
+/// absolute, and contains no empty or NUL-containing segments.
 fn sanitize_name(name: &str) -> Result<PathBuf, BlockRequestError> {
     validate_remote_name(name)?;
     let mut result = PathBuf::new();
@@ -98,9 +97,15 @@ fn sanitize_name(name: &str) -> Result<PathBuf, BlockRequestError> {
     Ok(result)
 }
 
-/// 处理单个块请求
+/// Serves a single block request.
 ///
-/// 在 blocking task 中完成文件读取与 hash 校验，返回块数据或错误。
+/// Performs the file read and hash verification in a blocking task and
+/// returns the block data or the corresponding [`BlockRequestError`].
+///
+/// # Errors
+///
+/// Returns [`BlockRequestError`] when the name is invalid, the file is
+/// missing, I/O fails, or a supplied block hash does not match.
 pub async fn serve_block_request(
     folder_root: &Path,
     req: &Request,
@@ -117,10 +122,8 @@ fn serve_block_request_sync(
     folder_root: &Path,
     req: &Request,
 ) -> Result<Vec<u8>, BlockRequestError> {
-    // 1. 路径安全校验
     let relative_path = sanitize_name(&req.name)?;
 
-    // 2. 确定最终路径与临时路径
     let final_path = folder_root.join(&relative_path);
 
     let file_path = if req.from_temporary {
@@ -135,14 +138,15 @@ fn serve_block_request_sync(
         final_path
     };
 
-    // 3. 二次确认实际路径在 folder_root 下（防御目录穿越的绝对路径或符号链接攻击）
+    // Defense in depth: re-verify the canonicalized path stays under
+    // folder_root, guarding against symlink attacks even if name validation
+    // was bypassed. When the file does not exist yet, canonicalize fails and
+    // a normalized absolute path is used for the prefix check instead.
     let canonical_root =
         std::fs::canonicalize(folder_root).unwrap_or_else(|_| folder_root.to_path_buf());
     let canonical_file = match std::fs::canonicalize(&file_path) {
         Ok(p) => p,
         Err(_) => {
-            // 如果文件不存在，canonicalize 会失败。此时我们退而用规范化后的绝对路径比较前缀
-
             if file_path.is_absolute() {
                 file_path
             } else {
@@ -157,18 +161,15 @@ fn serve_block_request_sync(
         return Err(BlockRequestError::InvalidFileName);
     }
 
-    // 4. 打开文件
     let mut file = std::fs::File::open(&canonical_file).map_err(|e| match e.kind() {
         std::io::ErrorKind::NotFound => BlockRequestError::FileNotFound,
         _ => BlockRequestError::IoError(e.to_string()),
     })?;
 
-    // 5. Seek
     use std::io::{Read, Seek};
     file.seek(std::io::SeekFrom::Start(req.offset as u64))
         .map_err(|e| BlockRequestError::IoError(e.to_string()))?;
 
-    // 6. 读取
     let size = req.size.max(0) as usize;
     let mut buf = vec![0u8; size];
     let n = file
@@ -176,7 +177,6 @@ fn serve_block_request_sync(
         .map_err(|e| BlockRequestError::IoError(e.to_string()))?;
     buf.truncate(n);
 
-    // 7. Hash 校验（如果请求中提供了 hash）
     if !req.hash.is_empty() {
         let actual_hash = Sha256::digest(&buf);
         if actual_hash.as_slice() != req.hash.as_slice() {

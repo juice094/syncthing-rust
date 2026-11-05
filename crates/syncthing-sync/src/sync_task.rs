@@ -1,6 +1,6 @@
-//! 同步任务管理
+//! Sync task management.
 //!
-//! 管理同步任务队列和执行
+//! Manages the sync task queue and its execution.
 
 use crate::error::Result;
 use std::collections::VecDeque;
@@ -9,36 +9,49 @@ use syncthing_core::types::FileInfo;
 use tokio::sync::Mutex;
 use tracing::{debug, trace};
 
-/// 同步任务
+/// A single sync task.
 #[derive(Debug, Clone)]
 pub struct SyncTask {
+    /// Unique task identifier.
     pub id: String,
+    /// Folder the task belongs to.
     pub folder: String,
+    /// File the task operates on.
     pub file: FileInfo,
+    /// What triggered the task.
     pub source: TaskSource,
+    /// Scheduling priority.
     pub priority: TaskPriority,
 }
 
-/// 任务来源
+/// What triggered a sync task.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TaskSource {
-    Local,  // 本地变更
-    Remote, // 远程同步
-    Manual, // 手动触发
+    /// Local change.
+    Local,
+    /// Remote sync.
+    Remote,
+    /// Manually triggered.
+    Manual,
 }
 
-/// 任务优先级
+/// Scheduling priority of a sync task (lower value = higher priority).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum TaskPriority {
-    Critical = 0,   // 关键任务（如删除操作）
-    High = 1,       // 高优先级
-    Normal = 2,     // 普通优先级
-    Low = 3,        // 低优先级
-    Background = 4, // 后台任务
+    /// Critical tasks (e.g. deletions).
+    Critical = 0,
+    /// High priority.
+    High = 1,
+    /// Normal priority.
+    Normal = 2,
+    /// Low priority.
+    Low = 3,
+    /// Background tasks.
+    Background = 4,
 }
 
 impl SyncTask {
-    /// 创建新任务
+    /// Creates a new task with normal priority.
     pub fn new(folder: impl Into<String>, file: FileInfo, source: TaskSource) -> Self {
         Self {
             id: uuid::Uuid::new_v4().to_string(),
@@ -49,21 +62,21 @@ impl SyncTask {
         }
     }
 
-    /// 设置优先级
+    /// Sets the task priority (builder style).
     pub fn with_priority(mut self, priority: TaskPriority) -> Self {
         self.priority = priority;
         self
     }
 }
 
-/// 任务队列
+/// Bounded, priority-ordered task queue.
 pub struct TaskQueue {
     queue: Mutex<VecDeque<SyncTask>>,
     max_size: usize,
 }
 
 impl TaskQueue {
-    /// 创建新的任务队列
+    /// Creates a new queue holding at most `max_size` tasks.
     pub fn new(max_size: usize) -> Arc<Self> {
         Arc::new(Self {
             queue: Mutex::new(VecDeque::new()),
@@ -71,7 +84,11 @@ impl TaskQueue {
         })
     }
 
-    /// 添加任务
+    /// Adds a task, inserting it ahead of lower-priority tasks.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SyncError::Other`](crate::SyncError::Other) when the queue is full.
     pub async fn push(&self, task: SyncTask) -> Result<()> {
         let mut queue = self.queue.lock().await;
 
@@ -81,7 +98,6 @@ impl TaskQueue {
             ));
         }
 
-        // 按优先级插入
         let insert_pos = queue
             .iter()
             .position(|t| t.priority > task.priority)
@@ -93,7 +109,7 @@ impl TaskQueue {
         Ok(())
     }
 
-    /// 获取下一个任务
+    /// Removes and returns the highest-priority task, if any.
     pub async fn pop(&self) -> Option<SyncTask> {
         let mut queue = self.queue.lock().await;
         let task = queue.pop_front();
@@ -103,30 +119,30 @@ impl TaskQueue {
         task
     }
 
-    /// 查看下一个任务（不删除）
+    /// Returns the highest-priority task without removing it.
     pub async fn peek(&self) -> Option<SyncTask> {
         let queue = self.queue.lock().await;
         queue.front().cloned()
     }
 
-    /// 获取队列大小
+    /// Returns the number of queued tasks.
     pub async fn len(&self) -> usize {
         self.queue.lock().await.len()
     }
 
-    /// 检查队列是否为空
+    /// Returns `true` when the queue is empty.
     pub async fn is_empty(&self) -> bool {
         self.queue.lock().await.is_empty()
     }
 
-    /// 清空队列
+    /// Removes all tasks from the queue.
     pub async fn clear(&self) {
         let mut queue = self.queue.lock().await;
         queue.clear();
         debug!("Task queue cleared");
     }
 
-    /// 移除特定文件的任务
+    /// Removes and returns all tasks for a specific file.
     pub async fn remove_file(&self, folder: &str, file_name: &str) -> Vec<SyncTask> {
         let mut queue = self.queue.lock().await;
         let mut removed = Vec::new();
@@ -142,7 +158,7 @@ impl TaskQueue {
         removed
     }
 
-    /// 获取指定文件夹的所有任务
+    /// Returns all queued tasks for the given folder.
     pub async fn get_folder_tasks(&self, folder: &str) -> Vec<SyncTask> {
         let queue = self.queue.lock().await;
         queue
@@ -153,14 +169,15 @@ impl TaskQueue {
     }
 }
 
-/// 任务执行器
+/// Drains a [`TaskQueue`] and runs tasks with bounded concurrency.
 pub struct TaskExecutor {
     queue: Arc<TaskQueue>,
     max_concurrent: usize,
 }
 
 impl TaskExecutor {
-    /// 创建新的任务执行器
+    /// Creates a new executor draining `queue` with at most `max_concurrent`
+    /// tasks in flight.
     pub fn new(queue: Arc<TaskQueue>, max_concurrent: usize) -> Self {
         Self {
             queue,
@@ -168,7 +185,10 @@ impl TaskExecutor {
         }
     }
 
-    /// 启动执行器
+    /// Runs the executor loop until the shutdown watch fires.
+    ///
+    /// Tasks are popped from the queue and spawned with bounded concurrency;
+    /// handler errors are logged and do not stop the loop.
     pub async fn run<F, Fut>(self, mut handler: F, mut shutdown: tokio::sync::watch::Receiver<bool>)
     where
         F: FnMut(SyncTask) -> Fut + Send + 'static,

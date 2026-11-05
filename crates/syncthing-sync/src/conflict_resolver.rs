@@ -1,6 +1,9 @@
-//! 冲突解决器
+//! Conflict resolver.
 //!
-//! 处理文件版本冲突，实现 Syncthing 的冲突解决策略
+//! Handles file version conflicts and implements Syncthing's conflict
+//! resolution strategy.
+//!
+//! See "docs/design/ADR-20261105-conflict-arbitration.md".
 
 use crate::database::LocalDatabase;
 use crate::error::{Result, SyncError};
@@ -11,16 +14,17 @@ use syncthing_core::types::{ConcurrentOrder, FileInfo, Vector};
 use tokio::fs;
 use tracing::{debug, info, warn};
 
-/// 冲突解决器
+/// Resolves version conflicts between local and remote file states.
 pub struct ConflictResolver {
     db: Arc<dyn LocalDatabase>,
     events: EventPublisher,
-    /// 本地设备 ID（冲突文件命名用；构造后由 service 层注入）
+    /// Local device ID (used to name conflict files; injected by the service
+    /// layer after construction).
     local_device_id: RwLock<Option<syncthing_core::DeviceId>>,
 }
 
 impl ConflictResolver {
-    /// 创建新的冲突解决器
+    /// Creates a new conflict resolver.
     pub fn new(db: Arc<dyn LocalDatabase>, events: EventPublisher) -> Self {
         Self {
             db,
@@ -29,18 +33,21 @@ impl ConflictResolver {
         }
     }
 
-    /// 注入本地设备 ID（用于冲突文件命名的来源标识）
+    /// Injects the local device ID (used as the origin tag in conflict file names).
     pub fn set_local_device_id(&self, id: syncthing_core::DeviceId) {
         if let Ok(mut guard) = self.local_device_id.write() {
             *guard = Some(id);
         }
     }
 
-    /// 确定性胜者仲裁（对齐 Go `FileInfo.WinsConflict`，bep_fileinfo.go:210）。
+    /// Determines the deterministic winner of a conflict.
     ///
-    /// 返回 true 表示远程胜。规则：mtime 新者胜；mtime 相等则按版本向量的
-    /// 并发方向（首个分歧计数器）决胜。双端独立计算必得同一胜者，
-    /// 冲突在一次索引交换内收敛，不再形成回拉死循环。
+    /// Aligned with Go `FileInfo.WinsConflict` (bep_fileinfo.go). Returns
+    /// `true` when the remote side wins: newer mtime wins; on mtime ties the
+    /// version vector's concurrent direction (first divergent counter)
+    /// decides. Both peers compute the same winner independently, so the
+    /// conflict converges within one index exchange. See
+    /// "docs/design/ADR-20261105-conflict-arbitration.md".
     pub fn remote_wins_conflict(&self, local: &FileInfo, remote: &FileInfo) -> bool {
         if (remote.modified_s, remote.modified_ns) > (local.modified_s, local.modified_ns) {
             return true;
@@ -54,7 +61,12 @@ impl ConflictResolver {
         )
     }
 
-    /// 检查并解决冲突
+    /// Checks for and resolves a conflict between the local and remote versions.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SyncError`] when database updates or filesystem operations
+    /// (rename, merge write) fail.
     pub async fn resolve_conflict(
         &self,
         folder: &str,
@@ -70,7 +82,6 @@ impl ConflictResolver {
             "Checking for conflicts"
         );
 
-        // 检查是否真的是冲突（版本向量不可比较）
         if !self.is_conflict(local, remote) {
             debug!(file = %local.name, "No conflict detected");
             return Ok(ConflictResolution::UseRemote);
@@ -88,8 +99,8 @@ impl ConflictResolver {
             remote_version: remote.version.clone(),
         });
 
-        // 确定性胜者仲裁（Go WinsConflict）：双端必收敛同一胜者。
-        // 本地胜 → 保留本地谱系，远程版本天然被支配，不做任何磁盘动作。
+        // Local wins: keep the local lineage, the remote version is naturally
+        // dominated, and no disk action is taken.
         if !self.remote_wins_conflict(local, remote) {
             info!(
                 file = %local.name,
@@ -104,7 +115,8 @@ impl ConflictResolver {
             return Ok(ConflictResolution::UseLocal);
         }
 
-        // 远程胜：对可合并文本文件尝试自动合并，否则本地留证（sync-conflict）后接受远程
+        // Remote wins: try auto-merge for text files, otherwise keep local
+        // evidence (sync-conflict copy) and accept the remote version.
         let resolution = if crate::merge::is_mergeable_text(&local.name) {
             ConflictResolution::Merge
         } else {
@@ -112,8 +124,9 @@ impl ConflictResolver {
         };
 
         if resolution == ConflictResolution::Merge {
-            // 文本合并推迟到 Puller：先接受 remote 版本，让 Puller 在下载完成后
-            // 使用 base_version 做真正的三路合并。
+            // Text merging is deferred to the Puller: accept the remote
+            // version now so the Puller can run a true three-way merge
+            // against base_version once the download completes.
             self.db.update_file(folder, remote.clone()).await?;
             self.events.publish(SyncEvent::ConflictResolved {
                 folder: folder.to_string(),
@@ -135,23 +148,20 @@ impl ConflictResolver {
         Ok(resolution)
     }
 
-    /// 检查是否为冲突
+    /// Returns `true` when the two version vectors are concurrent (a real conflict).
     pub fn is_conflict(&self, local: &FileInfo, remote: &FileInfo) -> bool {
-        // 如果本地版本支配远程版本，没有冲突
         if local.version.dominates(&remote.version) {
             return false;
         }
 
-        // 如果远程版本支配本地版本，没有冲突
         if remote.version.dominates(&local.version) {
             return false;
         }
 
-        // 版本向量不可比较，存在冲突
         true
     }
 
-    /// 应用冲突解决方案
+    /// Applies the chosen conflict resolution.
     async fn apply_resolution(
         &self,
         folder: &str,
@@ -162,23 +172,18 @@ impl ConflictResolver {
     ) -> Result<()> {
         match resolution {
             ConflictResolution::UseLocal => {
-                // 保留本地版本，发送给远程
                 debug!(file = %local.name, "Keeping local version");
-                // 更新数据库中的版本
                 self.db.update_file(folder, local.clone()).await?;
             }
             ConflictResolution::UseRemote => {
-                // 使用远程版本
                 debug!(file = %local.name, "Using remote version");
                 self.db.update_file(folder, remote.clone()).await?;
             }
             ConflictResolution::Merge => {
-                // 尝试合并（仅对文本文件有效）
                 debug!(file = %local.name, "Attempting merge");
                 self.merge_files(folder, local, remote, folder_path).await?;
             }
             ConflictResolution::RenameBoth => {
-                // 重命名保留双方修改
                 debug!(file = %local.name, "Renaming conflicting files");
                 self.rename_conflict_files(folder, local, remote, folder_path)
                     .await?;
@@ -188,7 +193,11 @@ impl ConflictResolver {
         Ok(())
     }
 
-    /// 重命名冲突文件
+    /// Renames the local file to a Go-compatible conflict name and accepts the remote version.
+    ///
+    /// The conflict name is `name.sync-conflict-<timestamp>-<device short ID>.ext`,
+    /// matching Go Syncthing's naming so cross-implementation conflict files
+    /// stay recognizable.
     async fn rename_conflict_files(
         &self,
         folder: &str,
@@ -206,7 +215,6 @@ impl ConflictResolver {
             .map(|id| id.short_id())
             .unwrap_or_else(|| "local".to_string());
 
-        // 生成冲突文件名（Go 兼容：原名.sync-conflict-时间戳-设备短ID.扩展名）
         let (stem, ext) = match local.name.rsplit_once('.') {
             Some((s, e)) if !e.contains('/') && !e.contains('\\') => {
                 (s.to_string(), format!(".{}", e))
@@ -216,7 +224,6 @@ impl ConflictResolver {
         let conflict_name = format!("{}.sync-conflict-{}-{}{}", stem, timestamp, device_tag, ext);
         let conflict_path = folder_path.join(&conflict_name);
 
-        // 如果本地文件存在，重命名为冲突文件
         if local_path.exists() {
             fs::rename(&local_path, &conflict_path).await.map_err(|e| {
                 SyncError::conflict(
@@ -231,13 +238,12 @@ impl ConflictResolver {
             );
         }
 
-        // 接受远程版本
         self.db.update_file(folder, remote.clone()).await?;
 
         Ok(())
     }
 
-    /// 合并文件（文本文件三向合并）
+    /// Merges two text files (three-way merge).
     async fn merge_files(
         &self,
         folder: &str,
@@ -247,7 +253,6 @@ impl ConflictResolver {
     ) -> Result<()> {
         use crate::merge::{is_mergeable_text, merge_text};
 
-        // 仅对已知文本类型尝试合并
         if !is_mergeable_text(&local.name) {
             warn!(file = %local.name, "Not a mergeable text file, using rename strategy");
             return self
@@ -257,14 +262,12 @@ impl ConflictResolver {
 
         let local_path = folder_path.join(&local.name);
 
-        // 读取本地文件内容
         let local_content = if local_path.exists() {
             fs::read_to_string(&local_path).await.ok()
         } else {
             None
         };
 
-        // 如果无法读取为文本，回退到重命名策略
         let local_content = match local_content {
             Some(c) => c,
             None => {
@@ -275,7 +278,6 @@ impl ConflictResolver {
             }
         };
 
-        // 下载/读取远程文件内容
         let remote_path = folder_path.join(&remote.name);
         let remote_content = if remote_path.exists() {
             fs::read_to_string(&remote_path).await.ok()
@@ -293,10 +295,8 @@ impl ConflictResolver {
             }
         };
 
-        // 执行文本合并
         let merged = merge_text(&local_content, &remote_content, &local.name);
 
-        // 写入合并结果
         fs::write(&local_path, &merged.content).await.map_err(|e| {
             SyncError::conflict(
                 local.name.clone(),
@@ -319,13 +319,18 @@ impl ConflictResolver {
             info!(file = %local.name, "Auto-merged without conflicts");
         }
 
-        // 更新数据库为远程版本（合并后的文件由 puller 后续处理）
+        // Record the remote version; the merged file on disk is handled by the
+        // puller in subsequent rounds.
         self.db.update_file(folder, remote.clone()).await?;
 
         Ok(())
     }
 
-    /// 批量检查冲突
+    /// Checks a batch of remote files for conflicts against the local database.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SyncError`] when a database lookup fails.
     pub async fn check_conflicts(
         &self,
         folder: &str,
@@ -345,34 +350,28 @@ impl ConflictResolver {
         Ok(conflicts)
     }
 
-    /// 选择获胜版本（基于版本向量）
+    /// Selects the winning version based on version vectors, falling back to mtime.
     pub fn select_winner<'a>(&self, local: &'a FileInfo, remote: &'a FileInfo) -> &'a FileInfo {
-        // 如果远程版本支配本地，选择远程
         if remote.version.dominates(&local.version) {
             return remote;
         }
 
-        // 如果本地版本支配远程，选择本地
         if local.version.dominates(&remote.version) {
             return local;
         }
 
-        // 冲突情况：比较修改时间
         if remote.modified_s > local.modified_s {
             remote
         } else if remote.modified_s < local.modified_s {
             local
+        } else if remote.modified_ns > local.modified_ns {
+            remote
         } else {
-            // 修改时间相同，比较纳秒
-            if remote.modified_ns > local.modified_ns {
-                remote
-            } else {
-                local
-            }
+            local
         }
     }
 
-    /// 比较两个版本向量
+    /// Compares two version vectors.
     pub fn compare_versions(&self, v1: &Vector, v2: &Vector) -> VersionComparison {
         let v1_dominates = v1.dominates(v2);
         let v2_dominates = v2.dominates(v1);
@@ -382,7 +381,6 @@ impl ConflictResolver {
         } else if v2_dominates && !v1_dominates {
             VersionComparison::Less
         } else if v1_dominates && v2_dominates {
-            // 这种情况不应该发生
             VersionComparison::Equal
         } else {
             VersionComparison::Conflict
@@ -390,12 +388,16 @@ impl ConflictResolver {
     }
 }
 
-/// 版本比较结果
+/// Result of comparing two version vectors.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum VersionComparison {
+    /// The vectors are identical.
     Equal,
+    /// The first vector dominates the second.
     Greater,
+    /// The second vector dominates the first.
     Less,
+    /// The vectors are concurrent.
     Conflict,
 }
 

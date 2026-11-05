@@ -1,6 +1,9 @@
-//! 文件夹扫描器
+//! Folder scanner.
 //!
-//! 实现定期扫描本地文件夹变更的功能
+//! Detects local folder changes through periodic full scans and watcher-
+//! driven incremental scans.
+//!
+//! See "docs/design/ADR-20261105-scanner-incremental-paths.md".
 
 mod rename;
 pub(crate) use rename::detect_and_reorder_renames;
@@ -17,11 +20,12 @@ use syncthing_core::types::{BlockInfo, FileInfo, FileInfoBase, FileType, Folder,
 use tokio::fs;
 use tracing::{debug, error, info, trace};
 
-/// 块大小（128KB，与 Syncthing 默认一致）
+/// Block size (128 KiB, matching the Syncthing default).
 const DEFAULT_BLOCK_SIZE: i32 = syncthing_core::constants::DEFAULT_BLOCK_SIZE;
 
-/// Scanner 默认排除的文件/目录名（与 Go Syncthing 对齐）
-/// 这些条目在 .stignore 加载前生效，防止元数据被索引和同步。
+/// Names always excluded by the scanner (aligned with Go Syncthing). These
+/// take effect before `.stignore` is loaded, preventing sync metadata from
+/// being indexed and synchronized.
 const DEFAULT_IGNORED_NAMES: &[&str] = &[
     ".stfolder",
     ".stversions",
@@ -34,25 +38,32 @@ const DEFAULT_IGNORED_NAMES: &[&str] = &[
     "logs",
 ];
 
-/// Scanner 默认排除的文件后缀模式
+/// Suffix patterns always excluded by the scanner (temporary files).
 const DEFAULT_IGNORED_SUFFIXES: &[&str] = &[".syncthing.tmp", "~syncthing~"];
 
-/// 相对路径的任一组成部分是否为默认排除的元数据名（.stversions/.sttrash 等）。
-/// watcher 增量路径（scan_changed_file / mark_deleted_subtree / sub-scan 根）
-/// 都必须过这道拦截，否则元数据会进入索引并同步，形成归档↔同步反馈循环。
+/// Returns `true` when any component of the relative path is default-excluded
+/// metadata (`.stversions`/`.sttrash`/etc.). Every watcher incremental path
+/// (`scan_changed_file` / `mark_deleted_subtree` / sub-scan root) must pass
+/// this check, otherwise metadata enters the index and gets synchronized,
+/// forming an archive↔sync feedback loop. See
+/// "docs/design/ADR-20261105-scanner-incremental-paths.md".
 fn is_default_ignored_path(relative_path: &str) -> bool {
     relative_path
         .split(['/', '\\'])
         .any(|c| DEFAULT_IGNORED_NAMES.contains(&c))
 }
 
-/// 判断相对路径自身或其任一祖先目录是否命中 ignore 规则。
+/// Returns `true` when the relative path itself or any ancestor directory
+/// matches an ignore rule.
 ///
-/// `IgnoreMatcher::matches` 对目录规则（`dir/`）仅在 `is_dir=true` 时生效，而
-/// watcher 增量路径传入的往往是**文件**路径；只判断文件本身会让被忽略目录内新增/
-/// 修改的文件仍被索引并同步给对端（历史缺陷，见 docs/KNOWN_ISSUES.md §23）。
-/// 因此 `is_dir` 由调用方按语义传入（文件变更传 `false`，子扫描根传 `true`），
-/// 祖先目录一律按目录判断。
+/// `IgnoreMatcher::matches` only applies directory rules (`dir/`) when
+/// `is_dir = true`, but watcher incremental paths are usually **file** paths;
+/// checking only the file itself lets new/modified files inside ignored
+/// directories be indexed and synchronized (historical defect, see
+/// `docs/KNOWN_ISSUES.md` §23). Callers therefore pass `is_dir` semantically
+/// (`false` for file changes, `true` for sub-scan roots) and ancestors are
+/// always checked as directories. See
+/// "docs/design/ADR-20261105-scanner-incremental-paths.md".
 fn is_ignored_with_ancestors(matcher: &IgnoreMatcher, relative_path: &str, is_dir: bool) -> bool {
     let normalized = relative_path.replace('\\', "/");
     if matcher.matches(&normalized, is_dir) {
@@ -63,7 +74,8 @@ fn is_ignored_with_ancestors(matcher: &IgnoreMatcher, relative_path: &str, is_di
     let mut segments = normalized.split('/').peekable();
     while let Some(segment) = segments.next() {
         if segments.peek().is_none() {
-            break; // 最后一段是路径自身，已在上方判断
+            // The last segment is the path itself, already checked above.
+            break;
         }
         if !prefix.is_empty() {
             prefix.push('/');
@@ -76,17 +88,18 @@ fn is_ignored_with_ancestors(matcher: &IgnoreMatcher, relative_path: &str, is_di
     false
 }
 
-/// 文件夹扫描器
+/// Scans a folder's contents and produces `FileInfo` updates.
 pub struct Scanner {
     db: Arc<dyn LocalDatabase>,
     events: EventPublisher,
-    /// 本地设备的版本向量计数器 ID（来自真实设备 ID，禁止硬编码为 1，
-    /// 否则双端离线并发修改会被误判为线性历史，删除方静默覆盖对端修改）
+    /// Local version-vector counter ID (derived from the real device ID;
+    /// hardcoding it would misclassify concurrent offline edits as linear
+    /// history, silently letting the deleter overwrite the peer's changes).
     local_counter_id: u64,
 }
 
 impl Scanner {
-    /// 创建新的扫描器
+    /// Creates a new scanner.
     pub fn new(db: Arc<dyn LocalDatabase>, events: EventPublisher, local_counter_id: u64) -> Self {
         Self {
             db,
@@ -95,21 +108,29 @@ impl Scanner {
         }
     }
 
-    /// 扫描单个文件夹
+    /// Scans a whole folder and returns the changed file entries.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SyncError`] when the folder path is missing/not a directory
+    /// or a filesystem/database operation fails.
     pub async fn scan_folder(&self, folder: &Folder) -> Result<Vec<FileInfo>> {
         self.scan_folder_at(folder, None).await
     }
 
-    /// 扫描文件夹中的子目录
+    /// Scans a subdirectory of a folder (watcher incremental path).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SyncError`] when a filesystem/database operation fails.
     pub async fn scan_folder_sub(&self, folder: &Folder, sub: &str) -> Result<Vec<FileInfo>> {
         self.scan_folder_at(folder, Some(sub)).await
     }
 
     async fn scan_folder_at(&self, folder: &Folder, sub: Option<&str>) -> Result<Vec<FileInfo>> {
-        // watcher 增量路径会把变动所在子目录作为扫描根传入；若扫描根本身落在
-        // 默认排除的元数据目录内（典型：versioner 写 .stversions 触发 watcher），
-        // 逐条目按文件名过滤无法拦截（归档文件名不含被排除名），必须在入口拒绝，
-        // 否则归档文件会被索引并同步，形成归档↔同步反馈循环。
+        // Reject sub-scan roots inside default-excluded metadata directories
+        // at the entry point (per-entry name filtering cannot catch them, see
+        // the module-level ADR pointer).
         if let Some(s) = sub {
             if is_default_ignored_path(s) {
                 debug!(folder_id = %folder.id, sub = %s, "Sub-scan root is default-ignored metadata, skipping");
@@ -142,12 +163,10 @@ impl Scanner {
         let mut changed_files = Vec::new();
         let mut visited_paths = std::collections::HashSet::new();
 
-        // 加载 .stignore（如果存在）—— 始终以 folder 根目录为基准
         let ignore_path = path.join(".stignore");
         let mut matcher = IgnoreMatcher::load(&ignore_path);
         let file_rule_count = matcher.len();
 
-        // 同时加载配置中的 ignore_patterns（D-2 修复：此前完全未使用）
         for pattern in &folder.ignore_patterns {
             matcher.add_line(pattern);
         }
@@ -161,8 +180,8 @@ impl Scanner {
             "Loaded ignore patterns"
         );
 
-        // sub-scan 根（watcher 传入的变动子目录）也要过 ignore 规则：否则被忽略
-        // 目录内的一次变更会触发整棵子树的扫描并被索引出去（§23）。
+        // Sub-scan roots must pass ignore rules too (§23, see the
+        // module-level ADR pointer).
         if let Some(s) = sub {
             if is_ignored_with_ancestors(&matcher, s, true) {
                 debug!(
@@ -174,10 +193,8 @@ impl Scanner {
             }
         }
 
-        // 递归扫描目录。
-        // watcher 增量扫描时 sub 为变动子目录，scan_root = folder.path/sub，但索引名必须
-        // 以 folder 根为基准；因此 relative_prefix 要传入 sub，否则子目录下文件会被记录成
-        // 根级文件名（如 subdir/hello.md → hello.md），导致对端按错误路径请求块而报 InvalidFile。
+        // Index names must stay relative to the folder root even when the
+        // scan root is a subdirectory (W16; see the module-level ADR pointer).
         let relative_prefix = match sub {
             Some(s) => Path::new(s),
             None => Path::new(""),
@@ -194,13 +211,11 @@ impl Scanner {
             .await
         {
             Ok(files) => {
-                // 仅全量扫描时检查已删除的文件
                 if sub.is_none() {
                     let db_files = self.db.get_folder_files(&folder.id).await?;
                     for db_file in db_files {
                         let full_path = path.join(&db_file.name);
                         if !full_path.exists() && !db_file.is_deleted() {
-                            // 检查是否正在下载中（临时文件存在）
                             let temp_path = temp_path_for(&full_path);
                             if temp_path.exists() {
                                 debug!(file = %db_file.name, "File is being downloaded, skipping deleted check");
@@ -209,7 +224,8 @@ impl Scanner {
                             debug!(file = %db_file.name, "File was deleted");
                             let mut deleted_info = db_file.clone();
                             deleted_info.deleted = Some(true);
-                            // NOTE: 暂时保留 blocks 用于重命名检测，检测后再清空
+                            // Blocks are kept here for rename detection and
+                            // cleared below (see the module-level ADR pointer).
                             deleted_info.size = 0;
                             deleted_info.sequence = self.db.increment_sequence(&folder.id).await?;
                             deleted_info.version.increment(self.local_counter_id);
@@ -218,7 +234,6 @@ impl Scanner {
                     }
                 }
 
-                // 检查变更的文件
                 let scanned_count = files.len();
                 let mut new_count = 0u64;
                 let mut modified_count = 0u64;
@@ -232,7 +247,6 @@ impl Scanner {
                                 new_info.sequence = self.db.increment_sequence(&folder.id).await?;
                                 new_info.version = existing.version.clone();
                                 new_info.version.increment(self.local_counter_id);
-                                // 保留上一次全局一致的 base 版本
                                 new_info.base_version = existing.base_version.clone();
                                 changed_files.push(new_info);
                             }
@@ -256,12 +270,11 @@ impl Scanner {
                     "Scan file comparison complete"
                 );
 
-                // P1: 重命名检测——新文件与最近删除的文件块哈希相同
                 if sub.is_none() {
                     changed_files = detect_and_reorder_renames(changed_files);
                 }
 
-                // 清空已删除文件的 blocks（BEP 协议要求）
+                // Deleted entries must carry empty block lists (BEP requirement).
                 for file in &mut changed_files {
                     if file.is_deleted() {
                         file.blocks.clear();
@@ -278,7 +291,6 @@ impl Scanner {
             }
         }
 
-        // 更新数据库
         for file in &changed_files {
             let file_clone: syncthing_core::types::FileInfo = file.clone();
             self.db.update_file(&folder.id, file_clone).await?;
@@ -298,9 +310,11 @@ impl Scanner {
         Ok(changed_files)
     }
 
-    /// 递归扫描目录
+    /// Recursively scans a directory.
     ///
-    /// `relative_prefix` 随递归逐层累加，彻底避免 `Path::strip_prefix` 在 Windows UNC/混合分隔符下的平台差异。
+    /// `relative_prefix` accumulates per recursion level, completely avoiding
+    /// the platform differences of `Path::strip_prefix` on Windows UNC /
+    /// mixed-separator paths.
     #[async_recursion::async_recursion]
     async fn scan_directory(
         &self,
@@ -329,14 +343,12 @@ impl Scanner {
             })?;
             let path = entry.path();
 
-            // 跳过隐藏文件和特殊文件
             let file_name_os = match path.file_name() {
                 Some(name) => name,
                 None => continue,
             };
             let name = file_name_os.to_string_lossy();
 
-            // 默认排除 syncthing 元数据（D-1 修复）
             if DEFAULT_IGNORED_NAMES.iter().any(|&ignored| name == ignored) {
                 trace!(path = %path.display(), "Skipping default ignored syncthing metadata");
                 continue;
@@ -353,7 +365,6 @@ impl Scanner {
                 trace!(path = %path.display(), "Skipping hidden/temp file");
                 continue;
             }
-            // 跳过 Syncthing 冲突文件
             if name.contains(".sync-conflict-") {
                 trace!(path = %path.display(), "Skipping conflict file");
                 continue;
@@ -366,7 +377,6 @@ impl Scanner {
                 )
             })?;
 
-            // 随递归逐层构建相对路径，避免平台相关的 strip_prefix
             let relative_path = if relative_prefix.as_os_str().is_empty() {
                 name.replace('\\', "/")
             } else {
@@ -377,7 +387,6 @@ impl Scanner {
                 )
             };
 
-            // 应用 .stignore 规则
             let is_dir = metadata.is_dir();
             if matcher.matches(&relative_path, is_dir) {
                 trace!(path = %relative_path, "Ignoring path via .stignore");
@@ -390,7 +399,6 @@ impl Scanner {
             visited.insert(path.clone());
 
             if is_dir {
-                // 递归扫描子目录
                 let mut next_prefix = relative_prefix.to_path_buf();
                 next_prefix.push(file_name_os);
                 let sub_files = self
@@ -398,7 +406,6 @@ impl Scanner {
                     .await?;
                 files.extend(sub_files);
 
-                // 添加目录条目
                 let modified = metadata
                     .modified()
                     .unwrap_or(std::time::SystemTime::UNIX_EPOCH);
@@ -436,13 +443,11 @@ impl Scanner {
                     }),
                 });
             } else if metadata.is_file() {
-                // 计算文件哈希和块信息
                 let file_info = self
                     .scan_file(&path, &relative_path, &metadata, folder_id)
                     .await?;
                 files.push(file_info);
             } else if metadata.is_symlink() {
-                // 处理符号链接
                 let target = fs::read_link(&path).await.map_err(|e| {
                     SyncError::scan(
                         folder_id.to_string(),
@@ -488,7 +493,7 @@ impl Scanner {
         Ok(files)
     }
 
-    /// 扫描单个文件
+    /// Scans a single file: computes block hashes and the whole-content hash.
     async fn scan_file(
         &self,
         path: &Path,
@@ -511,14 +516,12 @@ impl Scanner {
 
         let permissions = 0o644;
 
-        // 计算块信息，同时计算整体内容哈希
         let mut blocks = Vec::new();
         let mut content_hasher = Sha256::new();
         if size > 0 {
             let block_size = DEFAULT_BLOCK_SIZE;
             let num_blocks = ((size + block_size as i64 - 1) / block_size as i64) as usize;
 
-            // 对于大文件，异步读取并计算哈希
             let file = tokio::fs::File::open(path).await.map_err(|e| {
                 SyncError::scan(folder_id.to_string(), format!("Failed to open file: {}", e))
             })?;
@@ -559,8 +562,8 @@ impl Scanner {
                 }
             }
         } else {
-            // BEP 兼容：零字节文件也必须有一个 block，hash 为 SHA256("")
-            // 否则 Syncthing-Fork 等客户端会报 "file with empty block list" 并 Close。
+            // Zero-byte files must still carry one empty block for BEP
+            // compatibility (see the module-level ADR pointer).
             let empty_hash = Sha256::new().finalize().to_vec();
             blocks.push(BlockInfo {
                 size: 0,
@@ -596,14 +599,14 @@ impl Scanner {
         })
     }
 
-    /// 检查文件是否变更
+    /// Returns `true` when the file content changed between the old and new entries.
+    ///
+    /// Content hashes take precedence: identical block lists mean "unchanged"
+    /// regardless of mtime/permission noise, preventing infinite
+    /// version ping-pong across platforms. Purely metadata-only changes
+    /// (mtime/permissions) are currently not propagated; see
+    /// "docs/design/ADR-20261105-scanner-change-detection.md".
     fn has_file_changed(old: &FileInfo, new: &FileInfo) -> bool {
-        // 内容哈希优先：块列表一致即视为未变更，不再比较 mtime/权限。
-        // 跨平台同步时 mtime 精度（ns vs FILETIME 100ns）和权限位（0o660 vs
-        // OS 默认）必然有噪声，先比元数据会造成"扫描→版本递增→对端回拉→
-        // 再扫描"的无限版本乒乓（两边内容相同却互相覆盖，还会吞掉真实编辑）。
-        // ponytail: mtime/权限的纯元数据变更暂不传播；升级路径是按 Go
-        // Syncthing 的平台规则显式处理 metadata-only 更新。
         if old.blocks.len() == new.blocks.len()
             && old
                 .blocks
@@ -614,17 +617,14 @@ impl Scanner {
             return false;
         }
 
-        // 检查大小
         if old.size != new.size {
             return true;
         }
 
-        // 检查修改时间
         if old.modified_s != new.modified_s || old.modified_ns != new.modified_ns {
             return true;
         }
 
-        // 检查权限
         if old.permissions != new.permissions {
             return true;
         }
@@ -632,22 +632,27 @@ impl Scanner {
         true
     }
 
-    /// 检查两个文件的块哈希列表是否完全相同（用于重命名检测）
-    /// 扫描单个相对路径（用于增量扫描）。
-    /// 返回变更的 FileInfo；如果文件未变更或不存在，返回 None。
+    /// Scans a single relative path (incremental scan).
+    ///
+    /// Returns the changed `FileInfo`, or `None` when the file is unchanged,
+    /// missing, excluded, or ignored.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SyncError`] when metadata cannot be read or a database
+    /// operation fails.
     pub async fn scan_changed_file(
         &self,
         folder: &Folder,
         relative_path: &str,
     ) -> Result<Option<FileInfo>> {
-        // 元数据目录（.stversions/.sttrash 等）内的变更不进入索引
         if is_default_ignored_path(relative_path) {
             trace!(path = %relative_path, "Skipping default-ignored metadata path");
             return Ok(None);
         }
 
-        // `.stignore` 与配置 ignore 规则必须同样作用于 watcher 增量路径，
-        // 否则被忽略目录内新增/修改的文件会被索引并同步出去（§23）。
+        // Config ignore rules must apply to incremental paths as well (§23,
+        // see the module-level ADR pointer).
         let ignore_path = Path::new(&folder.path).join(".stignore");
         let mut matcher = IgnoreMatcher::load(&ignore_path);
         for pattern in &folder.ignore_patterns {
@@ -694,7 +699,12 @@ impl Scanner {
         }
     }
 
-    /// 将单个相对路径标记为已删除（如果它存在于 DB 中且尚未删除）。
+    /// Marks a single relative path as deleted (when known to the DB and not
+    /// already deleted).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SyncError`] when the database lookup fails.
     pub async fn mark_deleted(
         &self,
         folder: &Folder,
@@ -714,13 +724,19 @@ impl Scanner {
         }
     }
 
-    /// 将某个子树内已不存在的 DB 文件标记为已删除（用于增量扫描发现子树内删除）。
+    /// Marks DB files under a subtree as deleted when they no longer exist on
+    /// disk (used by incremental scans to discover subtree deletions).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SyncError`] when the database lookup fails.
     pub async fn mark_deleted_subtree(
         &self,
         folder: &Folder,
         relative_prefix: &str,
     ) -> Result<Vec<FileInfo>> {
-        // 元数据目录下的"删除"不广播（从未被索引，且传播会让对端跟着删 .sttrash）
+        // Deletions under metadata directories are never broadcast (they were
+        // never indexed; propagating them would delete `.sttrash` on peers).
         if is_default_ignored_path(relative_prefix) {
             return Ok(Vec::new());
         }
@@ -738,8 +754,9 @@ impl Scanner {
                 continue;
             }
             if db_file.name == relative_prefix || db_file.name.starts_with(&prefix_with_slash) {
-                // 只标记磁盘上确实已消失的文件；盲目删除会把子树内所有文件都标删除，
-                // 导致同步后文件被移入 .sttrash（W16 根因之二）。
+                // Only mark files that actually vanished from disk; blind
+                // deletion would move the whole subtree into `.sttrash`
+                // (W16 root cause #2, see the module-level ADR pointer).
                 let full_path = base_path.join(&db_file.name);
                 if full_path.exists() {
                     continue;
@@ -756,7 +773,11 @@ impl Scanner {
         Ok(deleted)
     }
 
-    /// 快速扫描（仅检查修改时间）
+    /// Quick scan (mtime-only check against the DB).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SyncError`] when the database lookup fails.
     pub async fn quick_scan(&self, folder: &Folder) -> Result<Vec<FileInfo>> {
         debug!(folder_id = %folder.id, "Starting quick scan");
 
@@ -791,7 +812,6 @@ impl Scanner {
                     }
                 }
                 Err(_) => {
-                    // 文件已被删除（但检查是否正在下载中）
                     let temp_path = temp_path_for(&full_path);
                     if temp_path.exists() {
                         debug!(file = %db_file.name, "File is being downloaded, skipping deleted check");

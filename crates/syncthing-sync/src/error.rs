@@ -1,70 +1,70 @@
-//! 同步错误处理
+//! Error types for the sync engine.
 
 use std::io;
 use std::path::PathBuf;
 
-/// 同步错误类型
+/// Top-level error type for sync operations.
 #[derive(Debug, thiserror::Error)]
 pub enum SyncError {
-    /// I/O 错误
+    /// Underlying I/O failure.
     #[error("IO error: {0}")]
     Io(#[from] io::Error),
 
-    /// 核心错误
+    /// Error propagated from `syncthing-core`.
     #[error("Core error: {0}")]
     Core(#[from] syncthing_core::SyncthingError),
 
-    /// 扫描错误
+    /// Failure while scanning a folder.
     #[error("Scan error in folder '{folder}': {message}")]
     Scan { folder: String, message: String },
 
-    /// 拉取错误
+    /// Failure while pulling an item.
     #[error("Pull error for '{path}': {message}")]
     Pull { path: String, message: String },
 
-    /// 数据库错误
+    /// Database operation failure.
     #[error("Database error: {0}")]
     Database(String),
 
-    /// 文件夹不存在
+    /// Referenced folder does not exist.
     #[error("Folder not found: {0}")]
     FolderNotFound(String),
 
-    /// 文件不存在
+    /// Referenced file does not exist.
     #[error("File not found: {0}")]
     FileNotFound(PathBuf),
 
-    /// 索引错误
+    /// Index processing failure.
     #[error("Index error: {0}")]
     Index(String),
 
-    /// 冲突错误
+    /// Conflict handling failure.
     #[error("Conflict error for '{path}': {message}")]
     Conflict { path: String, message: String },
 
-    /// 校验和错误
+    /// Block checksum did not match the expected value.
     #[error("Checksum mismatch for block at offset {offset}")]
     ChecksumMismatch { offset: i64 },
 
-    /// 超时错误
+    /// Operation exceeded its deadline.
     #[error("Operation timeout: {context}")]
     Timeout { context: String },
 
-    /// 取消错误
+    /// Operation was cancelled.
     #[error("Operation cancelled")]
     Cancelled,
 
-    /// 配置错误
+    /// Invalid configuration.
     #[error("Configuration error: {0}")]
     Config(String),
 
-    /// 其他错误
+    /// Any other error, described by the contained message.
     #[error("{0}")]
     Other(String),
 }
 
 impl SyncError {
-    /// 创建扫描错误
+    /// Creates a [`SyncError::Scan`] variant.
     pub fn scan<S: Into<String>>(folder: S, message: S) -> Self {
         Self::Scan {
             folder: folder.into(),
@@ -72,7 +72,7 @@ impl SyncError {
         }
     }
 
-    /// 创建拉取错误
+    /// Creates a [`SyncError::Pull`] variant.
     pub fn pull<S: Into<String>>(path: S, message: S) -> Self {
         Self::Pull {
             path: path.into(),
@@ -80,17 +80,17 @@ impl SyncError {
         }
     }
 
-    /// 创建数据库错误
+    /// Creates a [`SyncError::Database`] variant.
     pub fn database<S: Into<String>>(message: S) -> Self {
         Self::Database(message.into())
     }
 
-    /// 创建索引错误
+    /// Creates a [`SyncError::Index`] variant.
     pub fn index<S: Into<String>>(message: S) -> Self {
         Self::Index(message.into())
     }
 
-    /// 创建冲突错误
+    /// Creates a [`SyncError::Conflict`] variant.
     pub fn conflict<S: Into<String>>(path: S, message: S) -> Self {
         Self::Conflict {
             path: path.into(),
@@ -98,14 +98,14 @@ impl SyncError {
         }
     }
 
-    /// 创建超时错误
+    /// Creates a [`SyncError::Timeout`] variant.
     pub fn timeout<S: Into<String>>(context: S) -> Self {
         Self::Timeout {
             context: context.into(),
         }
     }
 
-    /// 检查是否为暂时性错误
+    /// Returns `true` if the error is transient and the operation may succeed on retry.
     pub fn is_temporary(&self) -> bool {
         matches!(
             self,
@@ -114,5 +114,5 @@ impl SyncError {
     }
 }
 
-/// 结果类型别名
+/// Result alias using [`SyncError`] as the error type.
 pub type Result<T> = std::result::Result<T, SyncError>;

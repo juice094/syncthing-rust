@@ -1,39 +1,40 @@
-//! 文本文件三路合并
+//! Three-way text merge.
 //!
-//! 提供基于 base / local / remote 的真正三路合并，不依赖 git。
-//! 不重叠的修改自动合并，重叠修改插入 git 风格冲突标记。
+//! Provides a true base/local/remote three-way merge without depending on
+//! git. Non-overlapping edits are merged automatically; overlapping edits
+//! produce git-style conflict markers.
 
 use similar::TextDiff;
 
-/// 合并结果
+/// Result of a three-way merge.
 #[derive(Debug, Clone)]
 pub struct MergeResult {
-    /// 合并后的内容
+    /// Merged content.
     pub content: String,
-    /// 是否存在冲突标记
+    /// Whether the output contains conflict markers.
     pub has_conflicts: bool,
-    /// 冲突区域数量
+    /// Number of conflict regions.
     pub conflict_count: usize,
 }
 
-/// 将字符串按行分割，保留每行末尾的换行符
+/// Splits a string into lines, keeping the trailing newline of each line.
 fn split_lines(s: &str) -> Vec<String> {
     s.split_inclusive('\n').map(|s| s.to_string()).collect()
 }
 
-/// 表示 base 中的一个编辑区间
+/// An edited region of the base content on one side of the merge.
 #[derive(Debug, Clone)]
 struct Edit {
-    /// 在 base 中的起始行（包含）
+    /// Start line in base (inclusive).
     start: usize,
-    /// 在 base 中的结束行（不包含）
+    /// End line in base (exclusive).
     end: usize,
-    /// 替换后的行（带换行符）
+    /// Replacement lines, each with its trailing newline.
     lines: Vec<String>,
 }
 
 impl Edit {
-    /// 从 diff 构建编辑列表
+    /// Builds the edit list for one side from a base-vs-side diff.
     fn from_diff(diff: &TextDiff<'_, '_, '_, str>, side: &str) -> Vec<Self> {
         let side_lines = split_lines(side);
         let mut edits = Vec::new();
@@ -54,18 +55,19 @@ impl Edit {
     }
 }
 
-/// 找出 local 与 remote 编辑的重叠区域，并扩展为冲突区域
+/// Finds overlapping local/remote edit regions and extends them to conflict regions.
+///
+/// Overlap of half-open ranges `[a, b)` and `[c, d)` is `a < d && c < b`;
+/// overlapping pairs are then merged into maximal contiguous regions.
 fn find_conflict_regions(local_edits: &[Edit], remote_edits: &[Edit]) -> Vec<(usize, usize)> {
     let mut regions = Vec::new();
     for le in local_edits {
         for re in remote_edits {
-            // 区间重叠判断：[a,b) 与 [c,d) 重叠当且仅当 a < d && c < b
             if le.start < re.end && re.start < le.end {
                 regions.push((le.start.min(re.start), le.end.max(re.end)));
             }
         }
     }
-    // 合并重叠的冲突区域
     regions.sort_by_key(|r| r.0);
     let mut merged: Vec<(usize, usize)> = Vec::new();
     for (start, end) in regions {
@@ -80,9 +82,9 @@ fn find_conflict_regions(local_edits: &[Edit], remote_edits: &[Edit]) -> Vec<(us
     merged
 }
 
-/// 为冲突区域构建一侧的输出
+/// Builds the output for one side of a conflict region.
 ///
-/// 如果该侧在冲突区域内有编辑，应用编辑；否则使用 base 内容。
+/// Applies the side's edit if it covers the region; otherwise uses the base content.
 fn build_side(base_lines: &[String], edits: &[Edit], start: usize, end: usize) -> String {
     if let Some(edit) = edits.iter().find(|e| e.start >= start && e.start < end) {
         let mut s = String::new();
@@ -101,17 +103,19 @@ fn build_side(base_lines: &[String], edits: &[Edit], start: usize, end: usize) -
     }
 }
 
-/// 对文本内容执行真正的三路合并
+/// Performs a true three-way merge of text content.
 ///
-/// 策略：
-/// 1. local == remote → 直接返回。
-/// 2. 只有一侧发生变化 → 采用变化侧。
-/// 3. 两侧都发生变化：
-///    - 计算 base→local 和 base→remote 的编辑。
-///    - 非重叠编辑自动顺序应用。
-///    - 重叠编辑生成 git 风格冲突标记。
+/// Strategy:
+/// 1. `local == remote` → return as-is.
+/// 2. Only one side changed → take the changed side.
+/// 3. Both sides changed:
+///    - compute the base→local and base→remote edits;
+///    - apply non-overlapping edits in order;
+///    - emit git-style conflict markers for overlapping edits.
+///
+/// Insert edits have `start == end` and consume no base lines, so the output
+/// position is left unchanged for them.
 pub fn three_way_merge(base: &str, local: &str, remote: &str, _item_name: &str) -> MergeResult {
-    // 完全相同 → 无需合并
     if local == remote {
         return MergeResult {
             content: local.to_string(),
@@ -120,7 +124,6 @@ pub fn three_way_merge(base: &str, local: &str, remote: &str, _item_name: &str) 
         };
     }
 
-    // 只有一侧发生变化
     if local == base {
         return MergeResult {
             content: remote.to_string(),
@@ -157,7 +160,6 @@ pub fn three_way_merge(base: &str, local: &str, remote: &str, _item_name: &str) 
     let mut ci = 0usize;
 
     while pos < base_len || li < local_edits.len() || ri < remote_edits.len() {
-        // 当前位置是否在一个冲突区域内？
         if let Some(&(cstart, cend)) = conflicts.get(ci) {
             if cstart == pos {
                 let local_side = build_side(&base_lines, &local_edits, cstart, cend);
@@ -171,7 +173,7 @@ pub fn three_way_merge(base: &str, local: &str, remote: &str, _item_name: &str) 
                 conflict_count += 1;
                 pos = cend;
                 ci += 1;
-                // 跳过被冲突区域覆盖的 edit
+                // Skip edits covered by the conflict region.
                 while li < local_edits.len() && local_edits[li].end <= pos {
                     li += 1;
                 }
@@ -182,13 +184,11 @@ pub fn three_way_merge(base: &str, local: &str, remote: &str, _item_name: &str) 
             }
         }
 
-        // 当前位置是否有 local edit？
         if let Some(edit) = local_edits.get(li) {
             if edit.start == pos {
                 for line in &edit.lines {
                     merged.push_str(line);
                 }
-                // Insert 操作 edit.start == edit.end，不消耗 base 行，保持 pos 不变
                 if edit.start != edit.end {
                     pos = edit.end;
                 }
@@ -197,7 +197,6 @@ pub fn three_way_merge(base: &str, local: &str, remote: &str, _item_name: &str) 
             }
         }
 
-        // 当前位置是否有 remote edit？
         if let Some(edit) = remote_edits.get(ri) {
             if edit.start == pos {
                 for line in &edit.lines {
@@ -211,7 +210,6 @@ pub fn three_way_merge(base: &str, local: &str, remote: &str, _item_name: &str) 
             }
         }
 
-        // 找到下一个事件位置
         let next_conflict_start = conflicts.get(ci).map(|c| c.0);
         let next_local_start = local_edits.get(li).map(|e| e.start);
         let next_remote_start = remote_edits.get(ri).map(|e| e.start);
@@ -236,15 +234,16 @@ pub fn three_way_merge(base: &str, local: &str, remote: &str, _item_name: &str) 
     }
 }
 
-/// 对文本内容执行简化三路合并（无 base 版本）
+/// Performs a simplified two-way merge (no base version).
 ///
-/// 兼容旧接口：当没有 base 时，把 local 同时作为 base，退化为双路 diff。
-/// 这种情况下的冲突判断较粗糙，建议调用方优先使用 `three_way_merge`。
+/// Backward-compatible fallback for callers without a base revision: uses
+/// `local` as the base, degrading to a two-way diff. Conflict detection is
+/// coarse in this mode; prefer `three_way_merge` when a base is available.
 pub fn merge_text(local: &str, remote: &str, _item_name: &str) -> MergeResult {
     three_way_merge(local, local, remote, _item_name)
 }
 
-/// 判断文件是否为可合并的文本类型
+/// Returns `true` when the path looks like a mergeable text file.
 pub fn is_mergeable_text(path: &str) -> bool {
     path.ends_with(".md")
         || path.ends_with(".txt")

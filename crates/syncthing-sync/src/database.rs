@@ -1,6 +1,8 @@
-//! 本地数据库接口
+//! Local database interface.
 //!
-//! 提供文件元数据的本地存储和查询
+//! Provides local storage and querying of file metadata.
+//!
+//! See "docs/design/ADR-20261105-local-database-cache.md".
 
 use crate::error::{Result, SyncError};
 use dashmap::DashMap;
@@ -10,52 +12,53 @@ use std::sync::Arc;
 use syncthing_core::types::{FileInfo, Folder, IndexID};
 use tokio::sync::Mutex;
 
-/// 本地数据库 trait
+/// Abstraction over per-folder file metadata storage.
 #[async_trait::async_trait]
 pub trait LocalDatabase: Send + Sync {
-    /// 获取文件夹中的文件
+    /// Returns a single file's metadata, if known.
     async fn get_file(&self, folder: &str, name: &str) -> Result<Option<FileInfo>>;
 
-    /// 获取文件夹中的所有文件
+    /// Returns all file metadata known for a folder.
     async fn get_folder_files(&self, folder: &str) -> Result<Vec<FileInfo>>;
 
-    /// 更新文件信息
+    /// Inserts or updates one file's metadata.
     async fn update_file(&self, folder: &str, info: FileInfo) -> Result<()>;
 
-    /// 批量更新文件
+    /// Inserts or updates a batch of file metadata.
     async fn update_files(&self, folder: &str, files: Vec<FileInfo>) -> Result<()>;
 
-    /// 删除文件记录
+    /// Removes a file's metadata.
     async fn delete_file(&self, folder: &str, name: &str) -> Result<()>;
 
-    /// 检查文件是否存在
+    /// Returns `true` when the file is known locally.
     async fn has_file(&self, folder: &str, name: &str) -> Result<bool>;
 
-    /// 获取文件夹配置
+    /// Returns a folder's configuration, if stored.
     async fn get_folder(&self, folder_id: &str) -> Result<Option<Folder>>;
 
-    /// 更新文件夹配置
+    /// Stores a folder's configuration.
     async fn update_folder(&self, folder: Folder) -> Result<()>;
 
-    /// 获取需要同步的文件列表
+    /// Returns files whose sequence number is greater than `since`.
     async fn get_needed_files(&self, folder: &str, since: u64) -> Result<Vec<FileInfo>>;
 
-    /// 获取全局版本（检查全局状态）
+    /// Returns all known versions of a file (global state check).
     async fn check_globals(&self, folder: &str, name: &str) -> Result<Vec<FileInfo>>;
 
-    /// 记录序列号
+    /// Returns the current per-folder sequence number.
     async fn get_sequence(&self, folder: &str) -> Result<u64>;
 
-    /// 增加序列号
+    /// Increments and returns the per-folder sequence number.
     async fn increment_sequence(&self, folder: &str) -> Result<u64>;
 
-    /// 重置序列号为 0（重大变更/重建索引时使用）
+    /// Resets the per-folder sequence number to 0 (used on major changes /
+    /// index rebuilds).
     async fn reset_sequence(&self, folder: &str) -> Result<()>;
 
-    /// 获取文件夹索引元数据
+    /// Returns the folder's index metadata `(index_id, max_sequence)`, if stored.
     async fn get_folder_index_meta(&self, folder: &str) -> Result<Option<(IndexID, u64)>>;
 
-    /// 更新文件夹索引元数据
+    /// Stores the folder's index metadata.
     async fn update_folder_index_meta(
         &self,
         folder: &str,
@@ -64,7 +67,7 @@ pub trait LocalDatabase: Send + Sync {
     ) -> Result<()>;
 }
 
-/// 内存数据库实现（用于测试）
+/// In-memory database implementation (intended for tests).
 #[derive(Debug, Default)]
 pub struct MemoryDatabase {
     files: DashMap<String, Vec<FileInfo>>,
@@ -74,6 +77,7 @@ pub struct MemoryDatabase {
 }
 
 impl MemoryDatabase {
+    /// Creates a new shared in-memory database.
     pub fn new() -> Arc<Self> {
         Arc::new(Self::default())
     }
@@ -144,8 +148,8 @@ impl LocalDatabase for MemoryDatabase {
     }
 
     async fn check_globals(&self, folder: &str, name: &str) -> Result<Vec<FileInfo>> {
-        // 简化的全局检查：返回该文件的所有版本记录
-        // 实际实现应该从全局数据库查询
+        // Simplified global check: returns all locally known versions of the
+        // file. A full implementation would query the global database.
         if let Some(file) = self.get_file(folder, name).await? {
             Ok(vec![file])
         } else {
@@ -184,9 +188,10 @@ impl LocalDatabase for MemoryDatabase {
     }
 }
 
-/// 文件系统数据库（实际持久化实现）
+/// Filesystem-backed database (the real persistent implementation).
 ///
-/// T-C3: 内存缓存带软上限（默认 100K 文件），超限后随机驱逐整 folder。
+/// See "docs/design/ADR-20261105-local-database-cache.md" for the in-memory
+/// cache soft cap, batch flush, and sequence-locking design.
 #[derive(Clone)]
 pub struct FileSystemDatabase {
     base_path: std::path::PathBuf,
@@ -200,6 +205,7 @@ pub struct FileSystemDatabase {
 }
 
 impl FileSystemDatabase {
+    /// Creates a new filesystem database rooted at `base_path`.
     pub fn new(base_path: impl AsRef<Path>) -> Arc<Self> {
         Arc::new(Self {
             base_path: base_path.as_ref().to_path_buf(),
@@ -217,7 +223,7 @@ impl FileSystemDatabase {
             .clone()
     }
 
-    /// 随机驱逐一个 folder 的缓存，返回驱逐的文件数
+    /// Randomly evicts one folder's cache entry and returns the evicted file count.
     fn evict_one_folder(&self) -> usize {
         if let Some(entry) = self.cache.iter().next() {
             let key = entry.key().clone();
@@ -244,14 +250,12 @@ impl FileSystemDatabase {
 #[async_trait::async_trait]
 impl LocalDatabase for FileSystemDatabase {
     async fn get_file(&self, folder: &str, name: &str) -> Result<Option<FileInfo>> {
-        // 先检查缓存
         if let Some(files) = self.cache.get(folder) {
             if let Some(file) = files.iter().find(|f| f.name == name) {
                 return Ok(Some(file.clone()));
             }
         }
 
-        // 从磁盘加载
         let path = self.file_path(folder, name);
         if !path.exists() {
             return Ok(None);
@@ -296,7 +300,6 @@ impl LocalDatabase for FileSystemDatabase {
 
         tokio::fs::write(&path, content).await?;
 
-        // 更新缓存（T-C3: 带上限驱逐）
         let mut cache = self.cache.entry(folder.to_string()).or_default();
         let is_new = if let Some(idx) = cache.iter().position(|f| f.name == info.name) {
             cache[idx] = info;
@@ -316,7 +319,6 @@ impl LocalDatabase for FileSystemDatabase {
     }
 
     async fn update_files(&self, folder: &str, files: Vec<FileInfo>) -> Result<()> {
-        // T-C2: 并发落盘，减少 O(N) 串行 syscall
         let mut set = tokio::task::JoinSet::new();
         for file in files {
             let this = self.clone();
@@ -335,7 +337,7 @@ impl LocalDatabase for FileSystemDatabase {
             tokio::fs::remove_file(&path).await?;
         }
 
-        // 更新缓存（T-C3: 递减计数）
+        // Keep the cache size counter in sync when entries are removed.
         if let Some(mut cache) = self.cache.get_mut(folder) {
             let before = cache.len();
             cache.retain(|f| f.name != name);
@@ -383,7 +385,7 @@ impl LocalDatabase for FileSystemDatabase {
     }
 
     async fn check_globals(&self, folder: &str, name: &str) -> Result<Vec<FileInfo>> {
-        // 实际实现应该从全局数据库查询
+        // A full implementation would query the global database.
         if let Some(file) = self.get_file(folder, name).await? {
             Ok(vec![file])
         } else {

@@ -1,6 +1,8 @@
-//! 索引处理器
+//! Index handler.
 //!
-//! 处理接收到的远程索引和索引更新消息
+//! Processes received remote index and index-update messages.
+//!
+//! See "docs/design/ADR-20261105-remote-deletion-guards.md".
 
 use crate::block_server::validate_remote_name;
 use crate::conflict_resolver::{ConflictResolver, VersionComparison};
@@ -12,19 +14,21 @@ use std::sync::Arc;
 use syncthing_core::types::{FileInfo, Folder, Index, IndexUpdate};
 use tracing::{debug, info, trace, warn};
 
-/// 索引处理器
+/// Processes incoming remote index data for one sync service instance.
 pub struct IndexHandler {
     db: Arc<dyn LocalDatabase>,
     events: EventPublisher,
     conflict_resolver: ConflictResolver,
 }
 
-/// 安全阈值：对端 Index 文件数低于本地 DB 的此比例时，
-/// 拒绝将差异解释为"对端已删除"，防止 §15 级联删除。
+/// Safety threshold: when the peer's index contains fewer files than this
+/// ratio of the local DB, the difference is not interpreted as "peer
+/// deleted them" (prevents the §15 cascade deletion). See
+/// "docs/design/ADR-20261105-remote-deletion-guards.md".
 const MASS_DELETION_SAFETY_RATIO: f64 = 0.5;
 
 impl IndexHandler {
-    /// 创建新的索引处理器
+    /// Creates a new index handler.
     pub fn new(db: Arc<dyn LocalDatabase>, events: EventPublisher) -> Self {
         let conflict_resolver = ConflictResolver::new(db.clone(), events.clone());
         Self {
@@ -34,12 +38,20 @@ impl IndexHandler {
         }
     }
 
-    /// 注入本地设备 ID（冲突文件命名的来源标识）
+    /// Injects the local device ID (used as the origin tag in conflict file names).
     pub fn set_local_device_id(&self, id: syncthing_core::DeviceId) {
         self.conflict_resolver.set_local_device_id(id);
     }
 
-    /// 处理完整索引
+    /// Handles a full index from a remote device.
+    ///
+    /// Applies the mass-deletion safety threshold before interpreting the
+    /// index as authoritative (see the module-level ADR pointer).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SyncError`] when the folder ID mismatches or a database
+    /// operation fails.
     pub async fn handle_index(
         &self,
         folder: &Folder,
@@ -61,8 +73,9 @@ impl IndexHandler {
             )));
         }
 
-        // §15 安全阈值：若对端 Index 文件数远少于本地 DB，拒绝全量索引语义
-        // (防止格式化/重装对端导致本侧大量文件被误删)
+        // Mass-deletion safety threshold (see the module-level ADR pointer):
+        // a far smaller remote index is treated as partial, not as
+        // authoritative deletions.
         let effective_full_index = if remote_count > 0 {
             let local_count = self.db.get_folder_files(&folder.id).await?.len();
             let ratio = remote_count as f64 / local_count.max(1) as f64;
@@ -83,7 +96,6 @@ impl IndexHandler {
                 true
             }
         } else {
-            // 对端发送空 Index — 危险信号
             let local_count = self.db.get_folder_files(&folder.id).await?.len();
             if local_count > 10 {
                 warn!(
@@ -104,7 +116,12 @@ impl IndexHandler {
             .await
     }
 
-    /// 处理索引更新
+    /// Handles an incremental index update from a remote device.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SyncError`] when the folder ID mismatches or a database
+    /// operation fails.
     pub async fn handle_index_update(
         &self,
         folder: &Folder,
@@ -125,12 +142,10 @@ impl IndexHandler {
             )));
         }
 
-        // 处理更新的文件
         let needed = self
             .process_files(folder, device, &update.files, false)
             .await?;
 
-        // 发布事件
         self.events.publish(SyncEvent::RemoteIndexReceived {
             folder: folder.id.clone(),
             device,
@@ -140,7 +155,9 @@ impl IndexHandler {
         Ok(needed)
     }
 
-    /// 处理文件列表
+    /// Processes a list of remote files, updating the DB and collecting needed files.
+    ///
+    /// Malicious entries are skipped without aborting the whole batch.
     async fn process_files(
         &self,
         folder: &Folder,
@@ -151,26 +168,24 @@ impl IndexHandler {
         let mut needed_files = Vec::new();
 
         for remote_file in files {
-            // SAFETY: 防御路径穿越 — 拒绝来自远程对端的恶意文件名
+            // Path-traversal defense: reject malicious names from the peer.
             if let Err(e) = validate_remote_name(&remote_file.name) {
                 warn!(
                     file = %remote_file.name,
                     error = %e,
                     "Rejected remote file with invalid name (path traversal attempt?)"
                 );
-                continue; // 跳过恶意条目，不中断整个索引处理
+                continue;
             }
 
             trace!(file = %remote_file.name, "Processing remote file info");
 
             match self.db.get_file(&folder.id, &remote_file.name).await? {
                 Some(local_file) => {
-                    // 检查是否需要更新
                     match self.needs_update(&local_file, remote_file).await? {
                         UpdateDecision::Update => {
                             debug!(file = %remote_file.name, "File needs update");
 
-                            // 检查冲突
                             if self.conflict_resolver.is_conflict(&local_file, remote_file) {
                                 let folder_path = Path::new(&folder.path);
                                 let resolution = self
@@ -182,16 +197,16 @@ impl IndexHandler {
                                         folder_path,
                                     )
                                     .await?;
-                                // 如果冲突解决后采用 remote 版本，需要下载
                                 if resolution == crate::events::ConflictResolution::UseRemote
                                     && !remote_file.is_deleted()
                                 {
                                     needed_files.push(remote_file.clone());
                                 }
                             } else {
-                                // 无冲突，直接更新
                                 if remote_file.is_deleted() {
-                                    // 删除审计：远程删除被接受时必须可溯源（2026-07-20 事故教训）
+                                    // Deletion audit: accepted remote deletions
+                                    // must be traceable (see the module-level
+                                    // ADR pointer).
                                     info!(
                                         file = %remote_file.name,
                                         device = %device.short_id(),
@@ -202,7 +217,6 @@ impl IndexHandler {
                                 }
                                 self.db.update_file(&folder.id, remote_file.clone()).await?;
 
-                                // 检查是否需要下载
                                 if !remote_file.is_deleted() {
                                     needed_files.push(remote_file.clone());
                                 }
@@ -227,22 +241,22 @@ impl IndexHandler {
                     }
                 }
                 None => {
-                    // 本地没有此文件
                     if !remote_file.is_deleted() {
                         debug!(file = %remote_file.name, "New file from remote");
                         self.db.update_file(&folder.id, remote_file.clone()).await?;
                         needed_files.push(remote_file.clone());
                     } else {
-                        // 远程删除，但本地从未有过此文件：不写入 DB。
-                        // 写入删除标记会导致本地 scanner 将此条目视为"本地文件被删除"，
-                        // 并向上游（包括发送该删除的对端）推送 IndexUpdate，触发 §15 级联删除。
+                        // Remote deletion for a file we never had: do not
+                        // persist a deletion marker, otherwise the local
+                        // scanner treats it as a locally deleted file and
+                        // pushes an IndexUpdate upstream, triggering the §15
+                        // cascade deletion (see the module-level ADR pointer).
                         trace!(file = %remote_file.name, "Remote deletion for unknown file, ignoring");
                     }
                 }
             }
         }
 
-        // 如果是完整索引，检查本地是否有远程不存在的文件
         if is_full_index {
             let local_files = self.db.get_folder_files(&folder.id).await?;
             let mut unpushed: Vec<FileInfo> = Vec::new();
@@ -267,41 +281,33 @@ impl IndexHandler {
         Ok(needed_files)
     }
 
-    /// 判断是否需要更新
+    /// Decides whether the remote version should replace the local one.
     async fn needs_update(&self, local: &FileInfo, remote: &FileInfo) -> Result<UpdateDecision> {
-        // 比较版本向量
         match self
             .conflict_resolver
             .compare_versions(&local.version, &remote.version)
         {
             VersionComparison::Equal => {
-                // 版本相同，检查其他属性
                 if local.size != remote.size
                     || local.modified_s != remote.modified_s
                     || local.modified_ns != remote.modified_ns
                 {
-                    // 版本相同但属性不同，可能是冲突
                     Ok(UpdateDecision::Conflict)
                 } else {
                     Ok(UpdateDecision::Ignore)
                 }
             }
-            VersionComparison::Greater => {
-                // 本地版本更新
-                Ok(UpdateDecision::Ignore)
-            }
-            VersionComparison::Less => {
-                // 远程版本更新
-                Ok(UpdateDecision::Update)
-            }
-            VersionComparison::Conflict => {
-                // 版本向量不可比较
-                Ok(UpdateDecision::Conflict)
-            }
+            VersionComparison::Greater => Ok(UpdateDecision::Ignore),
+            VersionComparison::Less => Ok(UpdateDecision::Update),
+            VersionComparison::Conflict => Ok(UpdateDecision::Conflict),
         }
     }
 
-    /// 计算索引差异
+    /// Computes the diff between the local DB and a remote file list.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SyncError`] when a database lookup fails.
     pub async fn calculate_diff(
         &self,
         folder: &str,
@@ -311,23 +317,19 @@ impl IndexHandler {
             self.db.get_folder_files(folder).await?;
         let mut diff = IndexDiff::default();
 
-        // 检查远程有哪些本地没有的或更新的文件
         for remote in remote_files {
             match local_files.iter().find(|l| l.name == remote.name) {
-                Some(local) => {
-                    match self.needs_update(local, remote).await? {
-                        UpdateDecision::Update => {
-                            diff.to_download.push(remote.clone());
-                        }
-                        UpdateDecision::Conflict => {
-                            diff.conflicts.push((local.clone(), remote.clone()));
-                        }
-                        UpdateDecision::Ignore => {
-                            // 本地更新，可能需要上传
-                            diff.to_upload.push(local.clone());
-                        }
+                Some(local) => match self.needs_update(local, remote).await? {
+                    UpdateDecision::Update => {
+                        diff.to_download.push(remote.clone());
                     }
-                }
+                    UpdateDecision::Conflict => {
+                        diff.conflicts.push((local.clone(), remote.clone()));
+                    }
+                    UpdateDecision::Ignore => {
+                        diff.to_upload.push(local.clone());
+                    }
+                },
                 None => {
                     if !remote.is_deleted() {
                         diff.to_download.push(remote.clone());
@@ -336,7 +338,6 @@ impl IndexHandler {
             }
         }
 
-        // 检查本地有哪些远程没有的
         for local in local_files {
             if !remote_files.iter().any(|r| r.name == local.name) && !local.is_deleted() {
                 diff.to_upload.push(local);
@@ -346,7 +347,11 @@ impl IndexHandler {
         Ok(diff)
     }
 
-    /// 生成本地索引更新
+    /// Generates the local index update for entries newer than `since_sequence`.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SyncError`] when the database lookup fails.
     pub async fn generate_index_update(
         &self,
         folder: &str,
@@ -356,12 +361,16 @@ impl IndexHandler {
         Ok(needed_files)
     }
 
-    /// 检查全局状态
+    /// Returns all known versions of a file (global state check).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SyncError`] when the database lookup fails.
     pub async fn check_globals(&self, folder: &str, name: &str) -> Result<Vec<FileInfo>> {
         self.db.check_globals(folder, name).await
     }
 
-    /// 合并索引（用于处理多个设备的索引）
+    /// Merges indexes from multiple devices, keeping the newest version per file.
     pub fn merge_indexes(&self, indexes: Vec<Index>) -> Index {
         if indexes.is_empty() {
             return Index {
@@ -375,7 +384,6 @@ impl IndexHandler {
 
         for index in indexes {
             for file in index.files {
-                // 对于每个文件，选择版本最新的
                 match file_map.get(&file.name) {
                     Some(existing) => {
                         if self.conflict_resolver.select_winner(existing, &file) == &file {
@@ -396,7 +404,7 @@ impl IndexHandler {
     }
 }
 
-/// 更新决策
+/// Decision derived from comparing local and remote version vectors.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum UpdateDecision {
     Update,
@@ -404,15 +412,18 @@ enum UpdateDecision {
     Conflict,
 }
 
-/// 索引差异
+/// Diff between the local DB and a remote index.
 #[derive(Debug, Clone, Default)]
 pub struct IndexDiff {
+    /// Files that need to be downloaded from the peer.
     pub to_download: Vec<FileInfo>,
+    /// Files that exist only locally and may need to be uploaded.
     pub to_upload: Vec<FileInfo>,
+    /// Pairs of concurrent local/remote versions requiring conflict resolution.
     pub conflicts: Vec<(FileInfo, FileInfo)>,
 }
 
-/// 版本向量摘要格式化（删除审计日志用）：`{1:10,2:6}` 形式
+/// Formats a version vector summary for deletion audit logs: `{1:10,2:6}`.
 fn format_vector(v: &syncthing_core::types::Vector) -> String {
     let mut pairs: Vec<String> = v
         .counters

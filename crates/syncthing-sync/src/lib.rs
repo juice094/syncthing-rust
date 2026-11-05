@@ -1,10 +1,10 @@
-//! Syncthing 同步状态机
+//! Sync state machine.
 //!
-//! 实现完整的文件同步逻辑，包括：
-//! - 扫描循环 (scan_loop): 定期检测本地文件变更
-//! - 拉取循环 (pull_loop): 从远程设备同步文件
-//! - 索引处理 (index_handler): 处理接收到的索引更新
-//! - 冲突解决: 处理版本冲突
+//! Implements the full file-synchronization logic:
+//! - scan loop (`scanner`): periodic detection of local file changes
+//! - pull loop (`puller`): synchronizing files from remote devices
+//! - index handling (`index_handler`): processing received index updates
+//! - conflict resolution (`conflict_resolver`, `merge`)
 
 pub mod block_server;
 pub mod conflict_resolver;

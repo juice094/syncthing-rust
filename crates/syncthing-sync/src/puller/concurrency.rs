@@ -1,37 +1,39 @@
-//! 并发策略
+//! Concurrency policy.
 //!
-//! 根据连接质量（RTT、直连/中继）动态调整 Puller 并发度。
+//! Dynamically adjusts Puller concurrency based on link quality (RTT,
+//! direct/relay).
 
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
-/// 共享并发策略引用
+/// Shared reference to a concurrency policy.
 pub type ConcurrencyPolicyRef = Arc<ConcurrencyPolicy>;
 
-/// 默认低并发配置：保守默认值，高延迟/中继链路友好
+/// Default low-concurrency profile (conservative, friendly to high-latency / relay links).
 const DEFAULT_DOWNLOADS: usize = 2;
 const DEFAULT_BLOCKS: usize = 4;
 
-/// 低质量连接配置：>300ms 或未知 RTT
+/// Low-quality link profile: >300 ms or unknown RTT.
 const LOW_DOWNLOADS: usize = 2;
 const LOW_BLOCKS: usize = 4;
 
-/// 中等质量连接配置：50-300ms
+/// Medium-quality link profile: 50-300 ms.
 const MEDIUM_DOWNLOADS: usize = 4;
 const MEDIUM_BLOCKS: usize = 8;
 
-/// 高质量连接配置：1-50ms
+/// High-quality link profile: 1-50 ms.
 const HIGH_DOWNLOADS: usize = 8;
 const HIGH_BLOCKS: usize = 16;
 
-/// 直连链路配置
+/// Direct-link profile.
 const DIRECT_DOWNLOADS: usize = 6;
 const DIRECT_BLOCKS: usize = 12;
 
-/// Puller 并发策略
+/// Puller concurrency policy.
 ///
-/// 内部使用 `AtomicUsize`，读取为 lock-free，适合高频 pull 路径。
+/// Internally uses `AtomicUsize` so reads are lock-free, suitable for the
+/// high-frequency pull path.
 #[derive(Debug, Default)]
 pub struct ConcurrencyPolicy {
     downloads: AtomicUsize,
@@ -39,12 +41,12 @@ pub struct ConcurrencyPolicy {
 }
 
 impl ConcurrencyPolicy {
-    /// 创建策略，初始为默认低并发（2 文件 / 4 块）
+    /// Creates a policy with the default low concurrency (2 files / 4 blocks).
     pub fn new() -> Self {
         Self::with_defaults(DEFAULT_DOWNLOADS, DEFAULT_BLOCKS)
     }
 
-    /// 使用指定默认值创建策略
+    /// Creates a policy with the given default limits.
     pub fn with_defaults(downloads: usize, blocks: usize) -> Self {
         Self {
             downloads: AtomicUsize::new(downloads.max(1)),
@@ -52,28 +54,28 @@ impl ConcurrencyPolicy {
         }
     }
 
-    /// 当前最大并发下载文件数
+    /// Returns the current max concurrent file downloads.
     pub fn downloads(&self) -> usize {
         self.downloads.load(Ordering::Relaxed)
     }
 
-    /// 当前单文件最大并发块请求数
+    /// Returns the current max concurrent block requests per file.
     pub fn blocks(&self) -> usize {
         self.blocks.load(Ordering::Relaxed)
     }
 
-    /// 同时设置文件级与块级并发上限
+    /// Sets both file-level and block-level concurrency limits.
     fn set(&self, downloads: usize, blocks: usize) {
         self.downloads.store(downloads.max(1), Ordering::Relaxed);
         self.blocks.store(blocks.max(1), Ordering::Relaxed);
     }
 
-    /// 根据 RTT（毫秒）设置并发档位
+    /// Sets the concurrency tier from the RTT in milliseconds.
     ///
-    /// - 0 ms        → 2 文件 / 4 块（保守默认值）
-    /// - 1-50 ms     → 8 文件 / 16 块
-    /// - 51-300 ms   → 4 文件 / 8 块
-    /// - >300 ms 或未知 → 2 文件 / 4 块
+    /// - 0 ms           → 2 files / 4 blocks (conservative default)
+    /// - 1-50 ms        → 8 files / 16 blocks
+    /// - 51-300 ms      → 4 files / 8 blocks
+    /// - >300 ms or unknown → 2 files / 4 blocks
     pub fn set_for_rtt(&self, rtt_ms: u64) {
         match rtt_ms {
             0 => self.set(LOW_DOWNLOADS, LOW_BLOCKS),
@@ -83,37 +85,39 @@ impl ConcurrencyPolicy {
         }
     }
 
-    /// 设置为直连链路的高并发档位（6 文件 / 12 块）
+    /// Sets the high-concurrency direct-link tier (6 files / 12 blocks).
     pub fn set_for_direct(&self) {
         self.set(DIRECT_DOWNLOADS, DIRECT_BLOCKS);
     }
 
-    /// 设置为中继链路的保守档位（2 文件 / 4 块）
+    /// Sets the conservative relay-link tier (2 files / 4 blocks).
     pub fn set_for_relay(&self) {
         self.set(LOW_DOWNLOADS, LOW_BLOCKS);
     }
 }
 
-/// 共享 RTT 跟踪器
+/// Shared RTT tracker.
 ///
-/// 维护一个指数移动平均 RTT（毫秒），供 `ConcurrencyPolicy` 周期性读取。
+/// Maintains an exponentially moving average RTT (milliseconds) that
+/// `ConcurrencyPolicy` reads periodically.
 #[derive(Debug, Default)]
 pub struct RttTracker {
     rtt_ms: AtomicU64,
 }
 
 impl RttTracker {
-    /// 创建新的 RTT 跟踪器，初始未知
+    /// Creates a new tracker; the RTT starts out unknown.
     pub fn new() -> Arc<Self> {
         Arc::new(Self {
-            // 未知 RTT 用 u64::MAX 表示，策略会回退到最低档位
+            // An unknown RTT is represented as u64::MAX; the policy then
+            // falls back to the lowest tier.
             rtt_ms: AtomicU64::new(u64::MAX),
         })
     }
 
-    /// 记录一次 RTT 样本，并更新指数移动平均
+    /// Records an RTT sample and updates the exponential moving average.
     ///
-    /// 使用 `avg = (avg * 7 + sample) / 8` 平滑突发波动。
+    /// Uses `avg = (avg * 7 + sample) / 8` to smooth out bursts.
     pub fn sample(&self, rtt: Duration) {
         let sample_ms = rtt.as_millis() as u64;
         let old = self.rtt_ms.load(Ordering::Relaxed);
@@ -125,7 +129,7 @@ impl RttTracker {
         self.rtt_ms.store(new, Ordering::Relaxed);
     }
 
-    /// 获取当前平均 RTT（毫秒），未知时返回 `u64::MAX`
+    /// Returns the current average RTT in milliseconds (`u64::MAX` when unknown).
     pub fn rtt_ms(&self) -> u64 {
         self.rtt_ms.load(Ordering::Relaxed)
     }

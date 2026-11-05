@@ -1,6 +1,6 @@
-//! Puller 辅助操作
+//! Puller helper operations.
 //!
-//! 内容恢复、本地复制源查找、内容哈希计算。
+//! Base-content recovery, local copy-source lookup, content hashing.
 
 use crate::database::LocalDatabase;
 use crate::error::Result;
@@ -11,15 +11,16 @@ use syncthing_versioner::Versioner;
 use tokio::fs;
 use tracing::{debug, trace, warn};
 
-/// 计算字节数组的内容哈希 (SHA-256)
+/// Computes the SHA-256 content hash of a byte slice.
 pub(crate) fn content_hash(data: &[u8]) -> Vec<u8> {
     sha2::Sha256::digest(data).to_vec()
 }
 
-/// 从 versioner 归档中恢复 base 版本内容
+/// Recovers the base-version content from the versioner archive.
 ///
-/// 通过 content_hash 匹配，而不是文件修改时间，因为归档文件的 mtime
-/// 通常由 archive 时刻决定，不一定与原始 base 版本相同。
+/// Matches by `content_hash` rather than modification time, because an
+/// archived file's mtime is set at archive time and need not match the
+/// original base version.
 pub(crate) async fn recover_base_content(
     versioner: &dyn Versioner,
     file_path: &Path,
@@ -38,7 +39,7 @@ pub(crate) async fn recover_base_content(
             size = version.size,
             "Checking version candidate"
         );
-        // 使用临时目录 restore，避免覆盖本地文件
+        // Restore into a temp directory to avoid overwriting the local file.
         let tmp_dir = std::env::temp_dir().join(format!(
             "syncthing-base-{}-{:x}",
             std::process::id(),
@@ -78,10 +79,10 @@ pub(crate) async fn recover_base_content(
     None
 }
 
-/// 查找本地具有相同块哈希的文件（重命名优化）
+/// Finds a local file with identical block hashes (rename optimization).
 ///
-/// 如果本地已有与目标文件块哈希相同的文件，可以作为复制源，
-/// 避免从远程重新下载整个文件。
+/// When a local file has the same block hashes as the target, it can serve
+/// as a copy source, avoiding a full re-download from the remote peer.
 pub(crate) async fn find_local_copy_source(
     folder_path: &Path,
     file_info: &FileInfo,
