@@ -1,7 +1,7 @@
-//! BEP (Block Exchange Protocol) Protocol Implementation
+//! BEP (Block Exchange Protocol) implementation.
 //!
-//! 实现Syncthing BEP协议的Rust版本
-//! 参考: syncthing/lib/protocol/*.go
+//! Rust implementation of the Syncthing BEP protocol; reference:
+//! syncthing/lib/protocol/*.go.
 
 pub mod connection;
 pub mod handshake;
@@ -16,5 +16,5 @@ pub use messages::{
 
 use syncthing_core::{Result, SyncthingError};
 
-/// Re-export error types
+/// Re-exported error types.
 pub use syncthing_core::{Result as BepResult, SyncthingError as BepError};

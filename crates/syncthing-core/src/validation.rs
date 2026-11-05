@@ -1,10 +1,15 @@
-//! 配置验证模块
+//! Configuration validation.
 //!
-//! 提供设备、文件夹、路径等配置的统一验证逻辑，供 REST API 和 TUI 共享。
+//! Shared validation logic for devices, folders, and paths, used by both the
+//! REST API and the TUI.
 
 use crate::SyncthingError;
 
-/// 验证文件夹 ID
+/// Validates a folder ID.
+///
+/// # Errors
+/// Returns `Validation` if the ID is empty, longer than 64 characters, or
+/// contains characters other than alphanumerics, hyphens, and underscores.
 pub fn validate_folder_id(id: &str) -> Result<(), SyncthingError> {
     if id.is_empty() {
         return Err(SyncthingError::Validation(
@@ -28,7 +33,11 @@ pub fn validate_folder_id(id: &str) -> Result<(), SyncthingError> {
     Ok(())
 }
 
-/// 验证设备 ID 字符串格式
+/// Validates a device ID string.
+///
+/// # Errors
+/// Returns `Validation` if the string is empty or is not a parseable
+/// [`crate::DeviceId`].
 pub fn validate_device_id(id: &str) -> Result<(), SyncthingError> {
     if id.is_empty() {
         return Err(SyncthingError::Validation(
@@ -44,7 +53,11 @@ pub fn validate_device_id(id: &str) -> Result<(), SyncthingError> {
     Ok(())
 }
 
-/// 验证路径字符串
+/// Validates a path string.
+///
+/// # Errors
+/// Returns `Validation` if the path is empty or contains `..` (parent
+/// directory references).
 pub fn validate_path(path: &str) -> Result<(), SyncthingError> {
     if path.is_empty() {
         return Err(SyncthingError::Validation(
@@ -59,7 +72,10 @@ pub fn validate_path(path: &str) -> Result<(), SyncthingError> {
     Ok(())
 }
 
-/// 验证设备 ID 不是本机设备 ID
+/// Validates that a device ID string is not the local device ID.
+///
+/// # Errors
+/// Returns `Validation` if the parsed ID equals `local`.
 pub fn validate_device_id_not_local(
     id: &str,
     local: &crate::DeviceId,
@@ -74,7 +90,11 @@ pub fn validate_device_id_not_local(
     Ok(())
 }
 
-/// 验证文件夹路径不重复
+/// Validates that a folder path is not already used by another folder.
+///
+/// # Errors
+/// Returns `Validation` naming the conflicting folder if `new_path` equals
+/// the path of any folder except the one identified by `excluding_id`.
 pub fn validate_no_duplicate_folder_paths(
     folders: &[crate::types::Folder],
     new_path: &str,

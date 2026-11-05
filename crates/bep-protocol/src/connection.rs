@@ -1,6 +1,7 @@
-//! BEP Connection Implementation
+//! BEP connection implementation.
 //!
-//! 实现BEP协议的连接层，包含完整的Hello消息交换
+//! Owns the connection layer of the BEP protocol, including the Hello
+//! message exchange.
 
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -19,42 +20,45 @@ use syncthing_core::{
 use crate::handshake::{exchange_hello, exchange_hello_server};
 use crate::messages::Hello;
 
-/// 默认消息超时
+/// Default message timeout.
 pub const DEFAULT_MESSAGE_TIMEOUT: Duration = Duration::from_secs(60);
 
-/// 心跳间隔
+/// Heartbeat interval.
 pub const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(90);
 
-/// BEP连接结构
-///
-/// 封装底层TCP连接，提供BEP协议支持
+/// A raw BEP connection over an underlying TCP stream.
 pub struct BepRawConnection {
-    /// 连接ID
+    /// Connection ID.
     id: uuid::Uuid,
-    /// 底层流
+    /// Underlying stream.
     stream: Arc<Mutex<TcpStream>>,
-    /// 连接状态
+    /// Connection state.
     state: RwLock<ConnectionState>,
-    /// 连接统计
+    /// Connection statistics.
     stats: RwLock<ConnectionStats>,
-    /// 远程地址
+    /// Remote address.
     remote_addr: SocketAddr,
-    /// 本地地址
+    /// Local address.
     local_addr: SocketAddr,
-    /// 连接类型（传入/传出）
+    /// Connection direction (incoming/outgoing).
     conn_type: ConnectionType,
-    /// 关联的设备ID
+    /// Associated device ID, once known.
     device_id: RwLock<Option<DeviceId>>,
-    /// 对端的Hello信息
+    /// Peer's Hello message.
     remote_hello: RwLock<Option<Hello>>,
-    /// 最后活动时间
+    /// Time of last activity.
     last_activity: RwLock<Instant>,
 }
 
 impl BepRawConnection {
-    /// 从TCP流创建新连接（客户端模式 - 先发Hello）
+    /// Creates a connection from a TCP stream in client mode (sends Hello
+    /// first); used for outgoing (dialed) connections.
     ///
-    /// 用于传出连接（拨号）
+    /// Returns the connection together with the peer's Hello message.
+    ///
+    /// # Errors
+    /// Returns a connection error if the local or peer address cannot be
+    /// determined, or a protocol error if the Hello exchange fails.
     pub async fn connect(
         stream: TcpStream,
         device_name: &str,
@@ -87,7 +91,6 @@ impl BepRawConnection {
             last_activity: RwLock::new(Instant::now()),
         });
 
-        // 执行Hello交换（客户端模式：先发后收）
         let remote_hello = conn
             .perform_hello(device_name, client_name, client_version)
             .await?;
@@ -95,9 +98,14 @@ impl BepRawConnection {
         Ok((conn, remote_hello))
     }
 
-    /// 从TCP流接受新连接（服务端模式 - 先收Hello）
+    /// Creates a connection from a TCP stream in server mode (receives
+    /// Hello first); used for incoming (listened) connections.
     ///
-    /// 用于传入连接（监听）
+    /// Returns the connection together with the peer's Hello message.
+    ///
+    /// # Errors
+    /// Returns a connection error if the local or peer address cannot be
+    /// determined, or a protocol error if the Hello exchange fails.
     pub async fn accept(
         stream: TcpStream,
         device_name: &str,
@@ -130,7 +138,6 @@ impl BepRawConnection {
             last_activity: RwLock::new(Instant::now()),
         });
 
-        // 执行Hello交换（服务端模式：先收后发）
         let remote_hello = conn
             .perform_hello_server(device_name, client_name, client_version)
             .await?;
@@ -138,7 +145,7 @@ impl BepRawConnection {
         Ok((conn, remote_hello))
     }
 
-    /// 创建新的Hello消息
+    /// Creates a new Hello message.
     fn create_hello(device_name: &str, client_name: &str, client_version: &str) -> Hello {
         Hello {
             device_name: device_name.to_string(),
@@ -152,9 +159,7 @@ impl BepRawConnection {
         }
     }
 
-    /// 执行Hello交换（客户端模式）
-    ///
-    /// 发送我们的Hello，然后接收对方的Hello
+    /// Runs the Hello exchange in client mode (sends ours, then receives theirs).
     async fn perform_hello(
         &self,
         device_name: &str,
@@ -174,7 +179,6 @@ impl BepRawConnection {
         let remote_hello = exchange_hello(&mut *stream, &our_hello).await?;
         drop(stream);
 
-        // 保存远程Hello信息
         *self.remote_hello.write() = Some(remote_hello.clone());
         self.set_state(ConnectionState::ProtocolHandshakeComplete);
         *self.last_activity.write() = Instant::now();
@@ -184,7 +188,6 @@ impl BepRawConnection {
             remote_hello.device_name, remote_hello.client_name, remote_hello.client_version
         );
 
-        // 更新统计
         self.update_stats(|s| {
             s.messages_sent += 1;
             s.messages_received += 1;
@@ -193,9 +196,7 @@ impl BepRawConnection {
         Ok(remote_hello)
     }
 
-    /// 执行Hello交换（服务端模式）
-    ///
-    /// 先接收对方的Hello，然后发送我们的Hello
+    /// Runs the Hello exchange in server mode (receives theirs, then sends ours).
     async fn perform_hello_server(
         &self,
         device_name: &str,
@@ -210,7 +211,6 @@ impl BepRawConnection {
         let remote_hello = exchange_hello_server(&mut *stream, &our_hello).await?;
         drop(stream);
 
-        // 保存远程Hello信息
         *self.remote_hello.write() = Some(remote_hello.clone());
         self.set_state(ConnectionState::ProtocolHandshakeComplete);
         *self.last_activity.write() = Instant::now();
@@ -220,7 +220,6 @@ impl BepRawConnection {
             remote_hello.device_name, remote_hello.client_name, remote_hello.client_version
         );
 
-        // 更新统计
         self.update_stats(|s| {
             s.messages_sent += 1;
             s.messages_received += 1;
@@ -229,57 +228,57 @@ impl BepRawConnection {
         Ok(remote_hello)
     }
 
-    /// 获取连接ID
+    /// Returns the connection ID.
     pub fn id(&self) -> uuid::Uuid {
         self.id
     }
 
-    /// 获取远程地址
+    /// Returns the remote address.
     pub fn remote_addr(&self) -> SocketAddr {
         self.remote_addr
     }
 
-    /// 获取本地地址
+    /// Returns the local address.
     pub fn local_addr(&self) -> SocketAddr {
         self.local_addr
     }
 
-    /// 获取当前状态
+    /// Returns the current connection state.
     pub fn state(&self) -> ConnectionState {
         *self.state.read()
     }
 
-    /// 设置状态
+    /// Sets the connection state.
     fn set_state(&self, state: ConnectionState) {
         *self.state.write() = state;
     }
 
-    /// 获取设备ID
+    /// Returns the associated device ID, if known.
     pub fn device_id(&self) -> Option<DeviceId> {
         *self.device_id.read()
     }
 
-    /// 设置设备ID
+    /// Associates a device ID with this connection.
     pub fn set_device_id(&self, device_id: DeviceId) {
         *self.device_id.write() = Some(device_id);
     }
 
-    /// 获取远程Hello信息
+    /// Returns the peer's Hello message.
     pub fn remote_hello(&self) -> Option<Hello> {
         self.remote_hello.read().clone()
     }
 
-    /// 获取连接类型
+    /// Returns the connection direction.
     pub fn connection_type(&self) -> ConnectionType {
         self.conn_type
     }
 
-    /// 获取统计信息
+    /// Returns the connection statistics.
     pub fn stats(&self) -> ConnectionStats {
         self.stats.read().clone()
     }
 
-    /// 更新统计信息
+    /// Applies a mutation to the connection statistics.
     fn update_stats<F>(&self, f: F)
     where
         F: FnOnce(&mut ConnectionStats),
@@ -288,7 +287,7 @@ impl BepRawConnection {
         f(&mut stats);
     }
 
-    /// 检查连接是否活跃
+    /// Returns whether the connection is alive.
     pub fn is_alive(&self) -> bool {
         matches!(
             self.state(),
@@ -299,7 +298,7 @@ impl BepRawConnection {
         )
     }
 
-    /// 检查Hello交换是否完成
+    /// Returns whether the Hello exchange has completed.
     pub fn is_hello_complete(&self) -> bool {
         matches!(
             self.state(),
@@ -307,13 +306,12 @@ impl BepRawConnection {
         )
     }
 
-    /// 关闭连接
+    /// Closes the connection gracefully.
     pub async fn close(&self) -> Result<()> {
         info!("Closing connection {}", self.id());
 
         self.set_state(ConnectionState::Disconnecting);
 
-        // 关闭底层流
         let mut stream = self.stream.lock().await;
         let _ = stream.shutdown().await;
         drop(stream);

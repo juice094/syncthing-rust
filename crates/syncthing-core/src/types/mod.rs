@@ -1,4 +1,4 @@
-//! 核心类型定义
+//! Core type definitions.
 
 use rand::RngExt;
 use serde::{Deserialize, Serialize};
@@ -12,69 +12,64 @@ pub use connection::*;
 mod folder;
 pub use folder::*;
 
-// ============================================
-// 同步相关类型定义
-// ============================================
-
-/// 文件类型
+/// File type.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum FileType {
-    /// 普通文件
+    /// Regular file.
     File,
-    /// 目录
+    /// Directory.
     Directory,
-    /// 符号链接
+    /// Symbolic link.
     Symlink,
 }
 
-/// 块信息
+/// Block information.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct BlockInfo {
-    /// 块大小
+    /// Block size.
     pub size: i32,
-    /// 块哈希（SHA-256）
+    /// Block hash (SHA-256).
     pub hash: Vec<u8>,
-    /// 块在文件中的偏移量
+    /// Offset within the file.
     pub offset: i64,
 }
 
-/// 版本向量 - 用于冲突检测和解决
+/// Version vector, used for conflict detection and resolution.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Vector {
-    /// 设备ID到计数器的映射
+    /// Maps a device counter ID to its counter value.
     pub counters: HashMap<u64, u64>,
 }
 
 impl Vector {
-    /// 创建新的空版本向量
+    /// Creates a new empty version vector.
     pub fn new() -> Self {
         Self {
             counters: HashMap::new(),
         }
     }
 
-    /// 添加/更新设备计数器
+    /// Adds or updates the counter for a device.
     pub fn with_counter(mut self, device_id: u64, counter: u64) -> Self {
         self.counters.insert(device_id, counter);
         self
     }
 
-    /// 递增指定设备的计数器
+    /// Increments the counter for the given device.
     pub fn increment(&mut self, device_id: u64) {
         *self.counters.entry(device_id).or_insert(0) += 1;
     }
 
-    /// 获取指定设备的计数器值
+    /// Returns the counter value for the given device (0 if absent).
     pub fn get(&self, device_id: u64) -> u64 {
         self.counters.get(&device_id).copied().unwrap_or(0)
     }
 
-    /// 比较两个版本向量
+    /// Compares two version vectors.
     pub fn compare(&self, other: &Vector) -> VersionComparison {
         let mut has_greater = false;
         let mut has_less = false;
 
-        // 检查所有设备
         let all_devices: std::collections::HashSet<_> =
             self.counters.keys().chain(other.counters.keys()).collect();
 
@@ -97,10 +92,9 @@ impl Vector {
         }
     }
 
-    /// 检查此版本是否支配（dominates）另一个版本
-    /// 如果对于所有设备，此版本的计数器都 >= 另一个版本的计数器，则支配
+    /// Returns whether this version dominates `other` (every counter is
+    /// greater than or equal to the other's).
     pub fn dominates(&self, other: &Vector) -> bool {
-        // 检查所有设备
         let all_devices: std::collections::HashSet<_> =
             self.counters.keys().chain(other.counters.keys()).collect();
 
@@ -117,31 +111,40 @@ impl Vector {
     }
 }
 
-/// 版本比较结果
+/// Result of comparing two version vectors.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum VersionComparison {
+    /// The vectors are equal.
     Equal,
+    /// This vector is greater (dominates without conflict).
     Greater,
+    /// This vector is less (is dominated).
     Less,
+    /// The vectors are concurrent (both have higher counters somewhere).
     Conflict,
 }
 
-/// 并发方向（冲突决胜 tiebreak 用，对齐 Go `Vector.Compare` 的
-/// ConcurrentGreater / ConcurrentLesser 语义：并发时首个分歧计数器的方向）
+/// Concurrent direction, used as the conflict-resolution tiebreak (aligned
+/// with Go `Vector.Compare`'s ConcurrentGreater / ConcurrentLesser
+/// semantics: the direction of the first diverging counter).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ConcurrentOrder {
-    /// 首个分歧点本侧计数更大（Go ConcurrentGreater）
+    /// The first diverging counter is greater on this side (Go ConcurrentGreater).
     SelfGreater,
-    /// 首个分歧点对侧计数更大（Go ConcurrentLesser）
+    /// The first diverging counter is greater on the other side (Go ConcurrentLesser).
     OtherGreater,
 }
 
 impl Vector {
-    /// 带方向的并发判定（对齐 Go lib/protocol/vector.go `Compare`）。
+    /// Returns the directed concurrent ordering (aligned with Go
+    /// `lib/protocol/vector.go` `Compare`).
     ///
-    /// 仅当两向量真正并发（双方各有更高的计数器）时返回 `Some(方向)`，
-    /// 方向为**首个分歧计数器**的大小关系；支配或相等关系返回 `None`。
-    /// 该方向是确定性的，双端独立计算结果一致，用于冲突决胜 tiebreak。
+    /// Returns `Some(direction)` only when the two vectors are truly
+    /// concurrent (each side has a higher counter somewhere); the direction
+    /// is the relation of the first diverging counter, and a direction flip
+    /// between counters signals concurrency. Returns `None` for dominance or
+    /// equality. The direction is deterministic and identical on both ends,
+    /// which makes it usable as the conflict-resolution tiebreak.
     pub fn concurrent_order(&self, other: &Vector) -> Option<ConcurrentOrder> {
         let mut ids: std::collections::BTreeSet<u64> = self.counters.keys().copied().collect();
         ids.extend(other.counters.keys().copied());
@@ -158,32 +161,32 @@ impl Vector {
             };
             match first {
                 None => first = Some(dir),
-                Some(d) if d != dir => return first, // 方向翻转 → 并发
+                Some(d) if d != dir => return first,
                 _ => {}
             }
         }
-        None // 无翻转 → 支配或相等，非并发
+        None
     }
 }
 
-/// 索引ID（8字节随机值）
+/// Index ID (8 random bytes).
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
 pub struct IndexID(pub [u8; 8]);
 
 impl IndexID {
-    /// 生成新的随机IndexID
+    /// Generates a new random index ID.
     pub fn random() -> Self {
         let mut bytes = [0u8; 8];
         rand::rng().fill(&mut bytes);
         Self(bytes)
     }
 
-    /// 从u64创建IndexID
+    /// Creates an index ID from a u64.
     pub fn from_u64(value: u64) -> Self {
         Self(value.to_be_bytes())
     }
 
-    /// 转换为u64
+    /// Converts the index ID to a u64.
     pub fn as_u64(&self) -> u64 {
         u64::from_be_bytes(self.0)
     }
@@ -195,77 +198,75 @@ impl fmt::Debug for IndexID {
     }
 }
 
-/// 索引增量
+/// Index delta.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct IndexDelta {
-    /// 文件夹ID
+    /// Folder ID.
     pub folder: String,
-    /// 索引ID
+    /// Index ID.
     pub index_id: IndexID,
-    /// 起始序列号
+    /// Starting sequence number.
     pub start_sequence: u64,
-    /// 文件列表
+    /// File list.
     pub files: Vec<FileInfo>,
 }
 
-/// 文件 base 版本信息
-///
-/// 记录上一次全局一致版本的内容标识，用于三路合并。
-/// 不保存完整 blocks，避免 DB 膨胀。
+/// Base version of a file at last global consensus, used for three-way merge.
+/// Full blocks are not stored, to avoid DB bloat.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct FileInfoBase {
-    /// 文件大小
+    /// File size.
     pub size: i64,
-    /// 修改时间（秒）
+    /// Modification time (seconds).
     pub modified_s: i64,
-    /// 修改时间（纳秒部分）
+    /// Modification time (nanoseconds part).
     pub modified_ns: i32,
-    /// 块列表哈希（如果原始 FileInfo 有）
+    /// Block-list hash (if the original FileInfo had one).
     pub blocks_hash: Option<Vec<u8>>,
-    /// 整体内容哈希（备用标识）
+    /// Whole-content hash (fallback identity).
     pub content_hash: Option<Vec<u8>>,
 }
 
-/// 文件信息
+/// File information.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct FileInfo {
-    /// 文件名（相对路径）
+    /// File name (relative path).
     pub name: String,
-    /// 文件类型
+    /// File type.
     pub file_type: FileType,
-    /// 文件大小
+    /// File size.
     pub size: i64,
-    /// 文件权限（Unix模式）
+    /// File permissions (Unix mode).
     pub permissions: u32,
-    /// 修改时间（秒）
+    /// Modification time (seconds).
     pub modified_s: i64,
-    /// 修改时间（纳秒部分）
+    /// Modification time (nanoseconds part).
     pub modified_ns: i32,
-    /// 版本向量
+    /// Version vector.
     pub version: Vector,
-    /// 序列号（用于索引排序）
+    /// Sequence number (for index ordering).
     pub sequence: u64,
-    /// 块大小
+    /// Block size.
     pub block_size: i32,
-    /// 块列表
+    /// Block list.
     pub blocks: Vec<BlockInfo>,
-    /// 符号链接目标（如果是符号链接）
+    /// Symlink target (if a symlink).
     pub symlink_target: Option<String>,
-    /// 删除标记
+    /// Deletion marker.
     pub deleted: Option<bool>,
-    /// 最后修改者设备短 ID（BEP 兼容字段）
+    /// Short ID of the device that last modified the file (BEP compatibility field).
     pub modified_by: Option<u64>,
-    /// 块列表哈希（用于快速比较块变化）
+    /// Block-list hash for quick change comparison.
     pub blocks_hash: Option<Vec<u8>>,
-    /// 无权限标记（BEP 兼容字段）
+    /// No-permissions flag (BEP compatibility field).
     pub no_permissions: Option<bool>,
-    /// 上一次全局一致的 base 版本（用于三路合并）
+    /// Last globally consistent base version (used for three-way merge).
     #[serde(default)]
     pub base_version: Option<FileInfoBase>,
 }
 
 impl FileInfo {
-    /// 创建新的 FileInfo（仅设置文件名，其余为默认值）
+    /// Creates a new FileInfo with only the name set; everything else defaults.
     pub fn new(name: impl Into<String>) -> Self {
         Self {
             name: name.into(),
@@ -287,46 +288,59 @@ impl FileInfo {
         }
     }
 
-    /// 检查文件是否被删除
+    /// Returns whether the file is deleted.
     pub fn is_deleted(&self) -> bool {
         self.deleted.unwrap_or(false)
     }
 
-    /// 标记文件为已删除
+    /// Marks the file as deleted.
     pub fn mark_deleted(&mut self) {
         self.deleted = Some(true);
     }
 }
 
-/// API 设备配置
+/// Device configuration (API view).
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct DeviceConfig {
+    /// Device ID.
     pub id: String,
+    /// Device name.
     pub name: String,
+    /// Device addresses.
     pub addresses: Vec<String>,
+    /// Whether the device is paused.
     pub paused: bool,
+    /// Whether the device is an introducer.
     pub introducer: bool,
 }
 
-/// API 文件夹配置
+/// Folder configuration (API view).
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct FolderConfig {
+    /// Folder ID.
     pub id: String,
+    /// Folder label.
     pub label: String,
+    /// Folder path.
     pub path: String,
+    /// Devices sharing this folder.
     pub devices: Vec<String>,
+    /// Rescan interval (seconds).
     pub rescan_interval_secs: u32,
+    /// Versioning configuration.
     pub versioning: VersioningConfig,
 }
 
-/// GUI 配置
+/// GUI (REST API) configuration.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GuiConfig {
+    /// Whether the GUI is enabled.
     pub enabled: bool,
+    /// GUI listen address.
     pub address: String,
-    /// 管理员 API key（完全访问）
+    /// Admin API key (full access).
     pub api_key: String,
-    /// 只读 API key（仅允许 GET/HEAD，拒绝 POST/PUT/DELETE）
+    /// Read-only API key (GET/HEAD only; POST/PUT/DELETE are rejected).
     #[serde(default)]
     pub ro_api_key: String,
 }
@@ -342,72 +356,83 @@ impl Default for GuiConfig {
     }
 }
 
-/// 选项配置
+/// Global options.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct Options {
+    /// Listen addresses.
     pub listen_addresses: Vec<String>,
+    /// Whether global announcement is enabled.
     pub global_announce_enabled: bool,
+    /// Whether local announcement is enabled.
     pub local_announce_enabled: bool,
+    /// Whether relays are enabled.
     pub relays_enabled: bool,
-    /// 启用的传输层列表，如 ["tcp", "websocket", "relay"]
+    /// Enabled transports, e.g. ["tcp", "websocket", "relay"].
     #[serde(default = "default_transports")]
     pub transports: Vec<String>,
 }
 
-/// 版本控制配置
+/// Versioning configuration.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type")]
 #[derive(Default)]
 pub enum VersioningConfig {
+    /// Versioning disabled.
     #[default]
     None,
+    /// Simple versioning.
     Simple {
+        /// Strategy parameters.
         params: HashMap<String, String>,
     },
+    /// Staggered versioning.
     Staggered {
+        /// Strategy parameters.
         params: HashMap<String, String>,
     },
+    /// External versioning command.
     External {
+        /// Strategy parameters.
         params: HashMap<String, String>,
     },
 }
 
-/// 设备配置
+/// Device configuration.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Device {
-    /// 设备ID
+    /// Device ID.
     pub id: crate::DeviceId,
-    /// 设备名称
+    /// Device name.
     pub name: Option<String>,
-    /// 设备地址列表
+    /// Device addresses.
     pub addresses: Vec<AddressType>,
-    /// 是否暂停
+    /// Whether the device is paused.
     pub paused: bool,
-    /// 是否 introducer
+    /// Whether the device is an introducer.
     pub introducer: bool,
 }
 
-/// 配置
+/// Top-level configuration.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config {
-    /// 版本
+    /// Config version.
     pub version: i32,
-    /// 监听地址
+    /// Listen address.
     #[serde(default = "default_listen")]
     pub listen_addr: String,
-    /// 设备名称
+    /// Device name.
     #[serde(default = "default_device_name")]
     pub device_name: String,
-    /// 文件夹列表
+    /// Folders.
     pub folders: Vec<Folder>,
-    /// 设备列表
+    /// Devices.
     pub devices: Vec<Device>,
-    /// 本地设备ID
+    /// Local device ID.
     pub local_device_id: Option<crate::DeviceId>,
-    /// GUI 配置
+    /// GUI configuration.
     #[serde(default)]
     pub gui: GuiConfig,
-    /// 选项配置
+    /// Options.
     #[serde(default)]
     pub options: Options,
 }
@@ -423,7 +448,7 @@ fn default_device_name() -> String {
 }
 
 impl Config {
-    /// 创建新的空配置
+    /// Creates a new empty configuration.
     pub fn new() -> Self {
         Self {
             version: 1,
@@ -444,21 +469,21 @@ impl Default for Config {
     }
 }
 
-/// 完整索引消息
+/// Full index message.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Index {
-    /// 文件夹ID
+    /// Folder ID.
     pub folder: String,
-    /// 文件列表
+    /// File list.
     pub files: Vec<FileInfo>,
 }
 
-/// 索引更新消息
+/// Index update message.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct IndexUpdate {
-    /// 文件夹ID
+    /// Folder ID.
     pub folder: String,
-    /// 更新的文件列表
+    /// Updated file list.
     pub files: Vec<FileInfo>,
 }
 

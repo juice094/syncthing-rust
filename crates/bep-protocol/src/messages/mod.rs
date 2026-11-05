@@ -1,16 +1,17 @@
-//! BEP Protocol Messages
+//! BEP protocol messages.
 //!
-//! 定义BEP协议的消息结构，使用Protobuf编码。
-//! 所有 `prost::Message` 结构体的字段 tag 均与 Go 端 `internal/gen/bep/bep.pb.go`
-//! 严格对齐（2026-04-11 验证通过，参见 VERIFICATION_REPORT_BEP_2026-04-11.md）。
+//! Protobuf-encoded BEP message structures. Field tags of every
+//! `prost::Message` struct match Go's `internal/gen/bep/bep.pb.go` exactly
+//! (verified 2026-04-11, see VERIFICATION_REPORT_BEP_2026-04-11.md).
 
 pub use prost::Message;
 
-/// Hello消息结构
+/// BEP v1 Hello message.
 ///
-/// 对应Go版本中的Hello消息（BEP v1），字段 tag 与 Go `internal/gen/bep/bep.pb.go` 严格对齐。
+/// Corresponds to the Go Hello message; field tags match Go
+/// `internal/gen/bep/bep.pb.go` exactly.
 ///
-/// Protobuf定义:
+/// Protobuf definition:
 /// ```protobuf
 /// message Hello {
 ///     string device_name = 1;
@@ -35,6 +36,8 @@ pub struct Hello {
 }
 
 impl Hello {
+    /// Creates a Hello message with the given names, the current timestamp,
+    /// and `num_connections = 1`.
     pub fn new(
         device_name: impl Into<String>,
         client_name: impl Into<String>,
@@ -52,7 +55,7 @@ impl Hello {
         }
     }
 
-    /// Default Hello for tests and placeholder use
+    /// Default Hello for tests and placeholder use.
     pub fn default_rust_client() -> Self {
         Self {
             device_name: String::new(),
@@ -64,10 +67,7 @@ impl Hello {
     }
 }
 
-// ============================================
-// BEP message framing types
-// ============================================
-
+/// BEP message type discriminator (`Header.type`).
 #[derive(Clone, Copy, PartialEq, Eq, Debug, prost::Enumeration)]
 pub enum MessageType {
     ClusterConfig = 0,
@@ -80,12 +80,14 @@ pub enum MessageType {
     Close = 7,
 }
 
+/// Compression flag for a BEP message.
 #[derive(Clone, Copy, PartialEq, Eq, Debug, prost::Enumeration)]
 pub enum MessageCompression {
     None = 0,
     Lz4 = 1,
 }
 
+/// BEP message header.
 #[derive(Clone, PartialEq, prost::Message)]
 pub struct Header {
     #[prost(enumeration = "MessageType", tag = "1")]
@@ -94,16 +96,14 @@ pub struct Header {
     pub compression: i32,
 }
 
-// ============================================
-// Prost-derived BEP wire types
-// ============================================
-
+/// Wire form of a version vector.
 #[derive(Clone, PartialEq, prost::Message)]
 pub struct WireVector {
     #[prost(message, repeated, tag = "1")]
     pub counters: Vec<WireCounter>,
 }
 
+/// One counter entry of a wire version vector.
 #[derive(Clone, PartialEq, prost::Message)]
 pub struct WireCounter {
     #[prost(uint64, tag = "1")]
@@ -112,6 +112,7 @@ pub struct WireCounter {
     pub value: u64,
 }
 
+/// Wire form of a block entry.
 #[derive(Clone, PartialEq, prost::Message)]
 pub struct WireBlockInfo {
     #[prost(int64, tag = "1")]
@@ -122,6 +123,7 @@ pub struct WireBlockInfo {
     pub hash: Vec<u8>,
 }
 
+/// Wire file-type enumeration (matches Go FileInfoType).
 #[derive(Clone, Copy, PartialEq, Eq, Debug, prost::Enumeration)]
 pub enum FileInfoType {
     File = 0,
@@ -131,6 +133,7 @@ pub enum FileInfoType {
     Symlink = 4,
 }
 
+/// Wire form of FileInfo.
 #[derive(Clone, PartialEq, prost::Message)]
 pub struct WireFileInfo {
     #[prost(string, tag = "1")]
@@ -173,6 +176,7 @@ pub struct WireFileInfo {
     pub previous_blocks_hash: Vec<u8>,
 }
 
+/// Per-platform metadata container.
 #[derive(Clone, PartialEq, prost::Message)]
 pub struct PlatformData {
     #[prost(message, optional, tag = "1")]
@@ -189,6 +193,7 @@ pub struct PlatformData {
     pub netbsd: Option<XattrData>,
 }
 
+/// Unix ownership metadata.
 #[derive(Clone, PartialEq, prost::Message)]
 pub struct UnixData {
     #[prost(string, tag = "1")]
@@ -201,6 +206,7 @@ pub struct UnixData {
     pub gid: i32,
 }
 
+/// Windows ownership metadata.
 #[derive(Clone, PartialEq, prost::Message)]
 pub struct WindowsData {
     #[prost(string, tag = "1")]
@@ -209,12 +215,14 @@ pub struct WindowsData {
     pub owner_is_group: bool,
 }
 
+/// Extended-attribute container.
 #[derive(Clone, PartialEq, prost::Message)]
 pub struct XattrData {
     #[prost(message, repeated, tag = "1")]
     pub xattrs: Vec<Xattr>,
 }
 
+/// One extended attribute (name/value pair).
 #[derive(Clone, PartialEq, prost::Message)]
 pub struct Xattr {
     #[prost(string, tag = "1")]
@@ -223,6 +231,7 @@ pub struct Xattr {
     pub value: Vec<u8>,
 }
 
+/// Block request message.
 #[derive(Clone, PartialEq, prost::Message)]
 pub struct Request {
     #[prost(int32, tag = "1")]
@@ -243,6 +252,7 @@ pub struct Request {
     pub block_no: i32,
 }
 
+/// BEP response error codes.
 #[derive(Clone, Copy, PartialEq, Eq, Debug, prost::Enumeration)]
 pub enum ErrorCode {
     NoError = 0,
@@ -251,6 +261,7 @@ pub enum ErrorCode {
     InvalidFile = 3,
 }
 
+/// Block response message.
 #[derive(Clone, PartialEq, prost::Message)]
 pub struct Response {
     #[prost(int32, tag = "1")]
@@ -261,6 +272,7 @@ pub struct Response {
     pub code: i32,
 }
 
+/// Full index message (wire form).
 #[derive(Clone, PartialEq, prost::Message)]
 pub struct Index {
     #[prost(string, tag = "1")]
@@ -271,6 +283,7 @@ pub struct Index {
     pub last_sequence: i64,
 }
 
+/// Index delta message (wire form).
 #[derive(Clone, PartialEq, prost::Message)]
 pub struct IndexUpdate {
     #[prost(string, tag = "1")]
@@ -283,6 +296,7 @@ pub struct IndexUpdate {
     pub prev_sequence: i64,
 }
 
+/// ClusterConfig message.
 #[derive(Clone, PartialEq, prost::Message)]
 pub struct ClusterConfig {
     #[prost(message, repeated, tag = "1")]
@@ -291,6 +305,7 @@ pub struct ClusterConfig {
     pub secondary: bool,
 }
 
+/// Device entry inside ClusterConfig.
 #[derive(Clone, PartialEq, prost::Message)]
 pub struct WireDevice {
     #[prost(bytes, tag = "1")]
@@ -315,6 +330,7 @@ pub struct WireDevice {
     pub encryption_password_token: Vec<u8>,
 }
 
+/// Compression negotiation values.
 #[derive(Clone, Copy, PartialEq, Eq, Debug, prost::Enumeration)]
 pub enum Compression {
     Metadata = 0,
@@ -322,6 +338,7 @@ pub enum Compression {
     Always = 2,
 }
 
+/// Folder entry inside ClusterConfig.
 #[derive(Clone, PartialEq, prost::Message)]
 pub struct WireFolder {
     #[prost(string, tag = "1")]
@@ -336,6 +353,7 @@ pub struct WireFolder {
     pub devices: Vec<WireDevice>,
 }
 
+/// Folder type enumeration (wire form).
 #[derive(Clone, Copy, PartialEq, Eq, Debug, prost::Enumeration)]
 pub enum FolderType {
     SendReceive = 0,
@@ -344,16 +362,17 @@ pub enum FolderType {
     ReceiveEncrypted = 3,
 }
 
+/// Folder stop-reason enumeration (wire form).
 #[derive(Clone, Copy, PartialEq, Eq, Debug, prost::Enumeration)]
 pub enum FolderStopReason {
     Running = 0,
     Paused = 1,
 }
 
-// ============================================
-// Encode / decode helpers
-// ============================================
-
+/// Encodes a prost message to bytes.
+///
+/// # Errors
+/// Returns a protocol error if encoding fails.
 pub fn encode_message<M: prost::Message>(msg: &M) -> crate::Result<bytes::Bytes> {
     let len = msg.encoded_len();
     let mut buf = bytes::BytesMut::with_capacity(len);
@@ -362,6 +381,10 @@ pub fn encode_message<M: prost::Message>(msg: &M) -> crate::Result<bytes::Bytes>
     Ok(buf.freeze())
 }
 
+/// Decodes a prost message from bytes.
+///
+/// # Errors
+/// Returns a protocol error if decoding fails.
 pub fn decode_message<M: prost::Message + Default>(buf: &[u8]) -> crate::Result<M> {
     M::decode(buf).map_err(|e| crate::SyncthingError::protocol(format!("decode failed: {}", e)))
 }

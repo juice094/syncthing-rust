@@ -2,6 +2,8 @@
 //!
 //! All hardcoded defaults must live here. No magic numbers in CLI parsing,
 //! config defaults, or test assertions.
+//!
+//! See "docs/design/ADR-20261105-pull-delete-quota.md".
 
 /// Default BEP listen port.
 ///
@@ -20,8 +22,9 @@ pub const DEFAULT_API_ADDR: &str = "127.0.0.1:8385";
 
 /// Default GUI (REST API) listen address.
 ///
-/// 本地优先：默认仅绑定 127.0.0.1，避免未授权远程访问。
-/// 如需远程访问，用户应显式配置或启动时传入 `--allow-remote`。
+/// Local-first: binds 127.0.0.1 only to prevent unauthorized remote access.
+/// For remote access the user must configure it explicitly or pass
+/// `--allow-remote` at startup.
 pub const DEFAULT_GUI_ADDR: &str = "127.0.0.1:8385";
 
 /// Maximum concurrent dial attempts per device.
@@ -39,26 +42,31 @@ pub const DEFAULT_WIZARD_SCAN_INTERVAL_SECS: u64 = 10;
 /// Default file block size for hashing and transfer.
 pub const DEFAULT_BLOCK_SIZE: i32 = 128 * 1024;
 
-/// 单次 pull 删除配额下限：一次 pull 循环允许应用的远程删除数至少放行此值，
-/// 避免小文件夹（如共 10 个文件）因比例配额误伤正常删除。
+/// Floor for the per-pull delete quota: at least this many remote deletions
+/// are always permitted, so small folders are not falsely flagged by the
+/// ratio quota.
 pub const PULL_DELETE_QUOTA_MIN: usize = 20;
 
-/// 单次 pull 删除配额比例：删除数超过 `max(PULL_DELETE_QUOTA_MIN, 本地文件数 * 比例)`
-/// 时判定为异常批量删除并拒绝整个删除批次（下载/修改动作不受影响）。
-/// 防止陈旧/损坏的对端索引静默清空本地（2026-07-20 事故，114 文件被删）。
+/// Ratio leg of the per-pull delete quota. A pull whose remote deletion count
+/// exceeds `max(PULL_DELETE_QUOTA_MIN, local_file_count * ratio)` is rejected
+/// as an anomalous mass deletion (downloads/updates are unaffected).
 pub const PULL_DELETE_QUOTA_RATIO: f64 = 0.25;
 
-/// 陈旧索引告警阈值：单次 pull 中 BEP error code 2（NO_SUCH_FILE）响应数超过此值时，
-/// 判定对端索引可能陈旧/损坏并输出健康告警（2026-07-20 事故前兆）。
+/// Health-warning threshold for a stale peer index: more BEP error code 2
+/// (NO_SUCH_FILE) responses than this in one pull triggers a health warning.
 pub const STALE_INDEX_WARN_THRESHOLD: usize = 10;
 
-/// 文件夹拉取循环周期（秒）：在没有远程索引通知时的兜底触发间隔。
-pub const PULL_INTERVAL_SECS: u64 = 10;
-
-/// 拉取失败后的首次重试退避（毫秒）。块请求超时等瞬时失败通常可在亚秒级恢复，
-/// 无需等到下一个周期 tick（见 `docs/KNOWN_ISSUES.md` §23 残留事项）。
+/// First retry backoff after a pull failure (milliseconds). Transient
+/// failures such as block request timeouts usually recover sub-second, so
+/// there is no need to wait for the next periodic tick (see
+/// `docs/KNOWN_ISSUES.md` §23).
 pub const PULL_RETRY_BACKOFF_INIT_MS: u64 = 500;
 
-/// 拉取失败重试退避上限（毫秒）。与周期 tick 对齐，保证稳态重试节奏不高于
-/// 引入退避之前的行为（即最差仍是每 `PULL_INTERVAL_SECS` 秒一次）。
+/// Upper bound of the pull retry backoff (milliseconds). Aligned with the
+/// periodic tick so steady-state retries never exceed one attempt per
+/// `PULL_INTERVAL_SECS`.
 pub const PULL_RETRY_BACKOFF_MAX_MS: u64 = PULL_INTERVAL_SECS * 1000;
+
+/// Folder pull loop period (seconds): fallback trigger interval when no
+/// remote index notification arrives.
+pub const PULL_INTERVAL_SECS: u64 = 10;

@@ -1,7 +1,6 @@
-//! 文件夹（Folder）相关类型
+//! Folder-related types.
 //!
-//! 2026-05-13 (T1.2)：从 `types/mod.rs` 抽离，避免单文件超过 600 行。
-//! 包含 `FolderType` / `FolderStatus` / `Compression` / `Folder` / `FolderId` / `FolderSummary`。
+//! `FolderType` / `FolderStatus` / `Compression` / `Folder` / `FolderId` / `FolderSummary`.
 
 use serde::{Deserialize, Serialize};
 use std::fmt;
@@ -9,26 +8,26 @@ use std::fmt;
 use super::VersioningConfig;
 use crate::DeviceId;
 
-/// 文件夹类型
+/// Folder type.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum FolderType {
-    /// 发送接收（双向同步）
+    /// Send-receive (bidirectional sync).
     SendReceive,
-    /// 仅发送
+    /// Send-only.
     SendOnly,
-    /// 仅接收
+    /// Receive-only.
     ReceiveOnly,
-    /// 接收加密
+    /// Receive-encrypted.
     ReceiveEncrypted,
 }
 
 impl FolderType {
-    /// 是否可以发送变更
+    /// Returns whether local changes can be sent to peers.
     pub fn can_send(&self) -> bool {
         matches!(self, FolderType::SendReceive | FolderType::SendOnly)
     }
 
-    /// 是否可以接收变更
+    /// Returns whether remote changes are applied locally.
     pub fn can_sync(&self) -> bool {
         matches!(
             self,
@@ -37,30 +36,30 @@ impl FolderType {
     }
 }
 
-/// 文件夹状态
+/// Folder status.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum FolderStatus {
-    /// 空闲
+    /// Idle.
     Idle,
-    /// 等待扫描
+    /// Waiting to scan.
     ScanWaiting,
-    /// 正在扫描
+    /// Scanning.
     Scanning,
-    /// 等待同步
+    /// Waiting to sync.
     SyncWaiting,
-    /// 正在同步（拉取）
+    /// Syncing (pulling).
     Pulling,
-    /// 正在同步（推送）
+    /// Syncing (pushing).
     Pushing,
-    /// 同步完成
+    /// Sync complete.
     Synced,
-    /// 暂停
+    /// Paused.
     Paused,
-    /// 错误
+    /// Error.
     Error,
 }
 
-/// 压缩模式
+/// Compression mode.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub enum Compression {
     #[default]
@@ -69,31 +68,31 @@ pub enum Compression {
     Never,
 }
 
-/// 文件夹配置
+/// Folder configuration.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Folder {
-    /// 文件夹ID
+    /// Folder ID.
     pub id: String,
-    /// 文件夹路径
+    /// Folder path.
     pub path: String,
-    /// 文件夹标签（可选）
+    /// Folder label (optional).
     pub label: Option<String>,
-    /// 文件夹类型
+    /// Folder type.
     pub folder_type: FolderType,
-    /// 是否暂停
+    /// Whether the folder is paused.
     pub paused: bool,
-    /// 重新扫描间隔（秒）
+    /// Rescan interval (seconds).
     pub rescan_interval_secs: i32,
-    /// 设备列表（哪些设备共享此文件夹）
+    /// Devices sharing this folder.
     pub devices: Vec<DeviceId>,
-    /// 忽略模式
+    /// Ignore patterns.
     pub ignore_patterns: Vec<String>,
-    /// 版本控制配置
+    /// Versioning configuration.
     pub versioning: Option<VersioningConfig>,
 }
 
 impl Folder {
-    /// 创建新的文件夹配置
+    /// Creates a new folder configuration with default values.
     pub fn new(id: impl Into<String>, path: impl Into<String>) -> Self {
         Self {
             id: id.into(),
@@ -101,7 +100,7 @@ impl Folder {
             label: None,
             folder_type: FolderType::SendReceive,
             paused: false,
-            rescan_interval_secs: 3600, // 默认1小时
+            rescan_interval_secs: 3600,
             devices: Vec::new(),
             ignore_patterns: Vec::new(),
             versioning: None,
@@ -109,7 +108,7 @@ impl Folder {
     }
 }
 
-/// Folder identifier
+/// Folder identifier.
 #[derive(Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct FolderId(String);
 

@@ -1,37 +1,38 @@
-//! 连接相关类型定义
+//! Connection-related types.
 //!
-//! 包括连接状态、地址类型、统计信息、优先级、连接方向、重试配置等。
+//! Connection state, address types, statistics, priority, direction, and
+//! retry configuration.
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
-/// 连接状态
+/// Connection state.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub enum ConnectionState {
-    /// 初始状态
+    /// Initial state.
     #[default]
     Initial,
-    /// 连接中
+    /// Connecting.
     Connecting,
-    /// 已连接
+    /// Connected.
     Connected,
-    /// TLS握手完成
+    /// TLS handshake complete.
     TlsHandshakeComplete,
-    /// 协议握手完成（Hello交换）
+    /// Protocol handshake complete (Hello exchanged).
     ProtocolHandshakeComplete,
-    /// 集群配置交换完成
+    /// ClusterConfig exchange complete.
     ClusterConfigComplete,
-    /// 正在断开
+    /// Disconnecting.
     Disconnecting,
-    /// 已断开
+    /// Disconnected.
     Disconnected,
-    /// 错误状态
+    /// Error state.
     Error,
 }
 
 impl ConnectionState {
-    /// 是否处于活跃状态（可用于传输数据）
+    /// Returns whether the connection is active (can carry data).
     pub fn is_active(&self) -> bool {
         matches!(
             self,
@@ -42,7 +43,7 @@ impl ConnectionState {
         )
     }
 
-    /// 是否可以发送消息
+    /// Returns whether messages can be sent on this connection.
     pub fn can_send(&self) -> bool {
         matches!(
             self,
@@ -50,35 +51,31 @@ impl ConnectionState {
         )
     }
 
-    /// 是否已终止
+    /// Returns whether the connection has terminated.
     pub fn is_terminated(&self) -> bool {
         matches!(self, ConnectionState::Disconnected | ConnectionState::Error)
     }
 }
 
-/// 地址类型
+/// Address type for a connection path.
 ///
-/// C-UX-2: 序列化格式从 tagged enum 升级为人类可读的 URL 字符串：
-/// - `tcp://host:port`
-/// - `quic://host:port`
-/// - `relay://url`
-/// - `dynamic`
-///
-/// 反序列化同时兼容旧格式（`{"Tcp": "..."}` / `"Dynamic"`）和新格式。
+/// Serializes as a human-readable URL string (`tcp://host:port`,
+/// `quic://host:port`, `relay://url`, or `dynamic`). Deserialization also
+/// accepts the legacy tagged-enum form (`{"Tcp": "..."}` / `"Dynamic"`).
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum AddressType {
-    /// TCP地址
+    /// TCP address.
     Tcp(String),
-    /// QUIC地址
+    /// QUIC address.
     Quic(String),
-    /// Relay地址
+    /// Relay address.
     Relay(String),
-    /// 动态发现
+    /// Discovered dynamically.
     Dynamic,
 }
 
 impl AddressType {
-    /// 获取地址字符串（不含 scheme）
+    /// Returns the address string without the scheme.
     pub fn as_str(&self) -> &str {
         match self {
             AddressType::Tcp(addr) => addr,
@@ -187,60 +184,60 @@ fn parse_address_str(s: &str) -> Result<AddressType, String> {
     }
 }
 
-/// 连接统计信息
+/// Connection statistics.
 #[derive(Debug, Clone, Default)]
 pub struct ConnectionStats {
-    /// 连接建立时间
+    /// Time the connection was established.
     pub connected_at: Option<DateTime<Utc>>,
-    /// 最后活动时间
+    /// Time of last activity.
     pub last_activity: Option<DateTime<Utc>>,
-    /// 发送的字节数
+    /// Bytes sent.
     pub bytes_sent: u64,
-    /// 接收的字节数
+    /// Bytes received.
     pub bytes_received: u64,
-    /// 发送的消息数
+    /// Messages sent.
     pub messages_sent: u64,
-    /// 接收的消息数
+    /// Messages received.
     pub messages_received: u64,
-    /// 重试次数
+    /// Number of retries.
     pub retry_count: u32,
 }
 
-/// 连接优先级
+/// Connection priority.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
 pub enum ConnectionPriority {
-    /// 最低优先级
+    /// Lowest priority.
     Lowest = 0,
-    /// 低优先级
+    /// Low priority.
     Low = 1,
-    /// 正常优先级
+    /// Normal priority.
     #[default]
     Normal = 2,
-    /// 高优先级
+    /// High priority.
     High = 3,
-    /// 最高优先级
+    /// Highest priority.
     Highest = 4,
 }
 
-/// 连接类型
+/// Connection direction.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ConnectionType {
-    /// 传入连接
+    /// Incoming connection.
     Incoming,
-    /// 传出连接（拨号）
+    /// Outgoing (dialed) connection.
     Outgoing,
 }
 
-/// 重试策略配置
+/// Retry policy configuration.
 #[derive(Debug, Clone)]
 pub struct RetryConfig {
-    /// 最大重试次数
+    /// Maximum number of retries.
     pub max_retries: u32,
-    /// 初始退避时间（毫秒）
+    /// Initial backoff (milliseconds).
     pub initial_backoff_ms: u64,
-    /// 最大退避时间（毫秒）
+    /// Maximum backoff (milliseconds).
     pub max_backoff_ms: u64,
-    /// 退避乘数
+    /// Backoff multiplier.
     pub backoff_multiplier: f64,
 }
 
@@ -249,14 +246,14 @@ impl Default for RetryConfig {
         Self {
             max_retries: 10,
             initial_backoff_ms: 1000,
-            max_backoff_ms: 300000, // 5分钟
+            max_backoff_ms: 300000,
             backoff_multiplier: 2.0,
         }
     }
 }
 
 impl RetryConfig {
-    /// 计算第n次重试的退避时间
+    /// Computes the backoff duration for the given attempt, adding ±25% jitter.
     pub fn backoff_duration(&self, attempt: u32) -> std::time::Duration {
         if attempt == 0 {
             return std::time::Duration::from_millis(self.initial_backoff_ms);
@@ -266,7 +263,6 @@ impl RetryConfig {
         let backoff_ms = (self.initial_backoff_ms as f64 * multiplier) as u64;
         let backoff_ms = backoff_ms.min(self.max_backoff_ms);
 
-        // 添加抖动（±25%）
         let jitter = rand::random::<f64>() * 0.5 - 0.25;
         let jittered_ms = (backoff_ms as f64 * (1.0 + jitter)) as u64;
 

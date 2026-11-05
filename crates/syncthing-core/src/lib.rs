@@ -1,6 +1,7 @@
-//! Syncthing Core Library
+//! Syncthing core library.
 //!
-//! 提供核心的错误类型、设备ID定义和基础工具
+//! Provides the core error types, device ID definitions, and the shared
+//! traits and types used by all other crates.
 
 pub mod constants;
 pub mod device_id;

@@ -130,7 +130,8 @@ impl From<syncthing_core::types::Index> for Index {
     }
 }
 
-// 引用版本：避免 send_index() 中的 .clone() + .into() 双重分配
+/// Reference-based conversion, avoiding the double allocation (`.clone()` +
+/// `.into()`) in `send_index()`.
 impl From<&syncthing_core::types::Index> for Index {
     fn from(idx: &syncthing_core::types::Index) -> Self {
         let last_sequence = idx
@@ -176,7 +177,8 @@ impl From<syncthing_core::types::IndexUpdate> for IndexUpdate {
     }
 }
 
-// 引用版本：避免 send_index_update() 中的 .clone() + .into() 双重分配
+/// Reference-based conversion, avoiding the double allocation (`.clone()` +
+/// `.into()`) in `send_index_update()`.
 impl From<&syncthing_core::types::IndexUpdate> for IndexUpdate {
     fn from(upd: &syncthing_core::types::IndexUpdate) -> Self {
         let sequences: Vec<u64> = upd.files.iter().map(|f| f.sequence).collect();

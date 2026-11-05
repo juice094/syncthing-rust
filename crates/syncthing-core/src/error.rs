@@ -1,149 +1,149 @@
-//! 错误处理模块
+//! Error handling.
 //!
-//! 基于Go版本的错误处理模式，提供统一的错误类型
+//! Unified error type modeled on the Go version's error handling patterns.
 
 use std::io;
 
-/// Syncthing 错误类型
+/// Unified error type for syncthing-rust.
 #[derive(Debug, thiserror::Error)]
 pub enum SyncthingError {
-    /// I/O 错误
+    /// I/O error.
     #[error("IO error: {0}")]
     Io(#[from] io::Error),
 
-    /// TLS 错误
+    /// TLS error.
     #[error("TLS error: {0}")]
     Tls(String),
 
-    /// Rustls 错误
+    /// rustls error.
     #[error("Rustls error: {0}")]
     Rustls(String),
 
-    /// 连接错误
+    /// Connection error.
     #[error("Connection error: {message}")]
     Connection { message: String },
 
-    /// 握手错误
+    /// Handshake error.
     #[error("Handshake error: {message}")]
     Handshake { message: String },
 
-    /// 协议错误
+    /// Protocol error.
     #[error("Protocol error: {message}")]
     Protocol { message: String },
 
-    /// 配置错误
+    /// Configuration error.
     #[error("Configuration error: {message}")]
     Config { message: String },
 
-    /// 设备ID错误
+    /// Device ID error.
     #[error("Device ID error: {message}")]
     DeviceId { message: String },
 
-    /// 消息序列化错误
+    /// Message serialization error.
     #[error("Message serialization error: {0}")]
     Serialization(String),
 
-    /// 消息解析错误
+    /// Message parse error.
     #[error("Message parse error: {0}")]
     Parse(String),
 
-    /// 超时错误
+    /// Timeout error.
     #[error("Timeout: {context}")]
     Timeout { context: String },
 
-    /// 未找到设备
+    /// Device not found.
     #[error("Device not found: {device_id}")]
     DeviceNotFound { device_id: String },
 
-    /// 连接已关闭
+    /// Connection closed.
     #[error("Connection closed")]
     ConnectionClosed,
 
-    /// 存储错误
+    /// Storage error.
     #[error("Storage error: {0}")]
     Storage(String),
 
-    /// 内部错误
+    /// Internal error.
     #[error("Internal error: {0}")]
     Internal(String),
 
-    /// 网络错误
+    /// Network error.
     #[error("Network error: {0}")]
     Network(String),
 
-    /// 验证错误
+    /// Validation error.
     #[error("Validation error: {0}")]
     Validation(String),
 
-    /// 其他错误
+    /// Any other error.
     #[error("{0}")]
     Other(String),
 }
 
 impl SyncthingError {
-    /// 创建连接错误
+    /// Creates a connection error.
     pub fn connection<S: Into<String>>(message: S) -> Self {
         Self::Connection {
             message: message.into(),
         }
     }
 
-    /// 创建握手错误
+    /// Creates a handshake error.
     pub fn handshake<S: Into<String>>(message: S) -> Self {
         Self::Handshake {
             message: message.into(),
         }
     }
 
-    /// 创建协议错误
+    /// Creates a protocol error.
     pub fn protocol<S: Into<String>>(message: S) -> Self {
         Self::Protocol {
             message: message.into(),
         }
     }
 
-    /// 创建配置错误
+    /// Creates a configuration error.
     pub fn config<S: Into<String>>(message: S) -> Self {
         Self::Config {
             message: message.into(),
         }
     }
 
-    /// 创建设备ID错误
+    /// Creates a device ID error.
     pub fn device_id<S: Into<String>>(message: S) -> Self {
         Self::DeviceId {
             message: message.into(),
         }
     }
 
-    /// 创建 I/O 错误（从字符串描述）
+    /// Creates an I/O error from a string description.
     pub fn io<S: Into<String>>(message: S) -> Self {
         Self::Io(io::Error::other(message.into()))
     }
 
-    /// 创建存储错误
+    /// Creates a storage error.
     pub fn storage<S: Into<String>>(message: S) -> Self {
         Self::Storage(message.into())
     }
 
-    /// 创建内部错误
+    /// Creates an internal error.
     pub fn internal<S: Into<String>>(message: S) -> Self {
         Self::Internal(message.into())
     }
 
-    /// 创建网络错误
+    /// Creates a network error.
     pub fn network<S: Into<String>>(message: S) -> Self {
         Self::Network(message.into())
     }
 
-    /// 创建超时错误
+    /// Creates a timeout error.
     pub fn timeout<S: Into<String>>(context: S) -> Self {
         Self::Timeout {
             context: context.into(),
         }
     }
 
-    /// 检查是否为暂时性错误（适合重试）
+    /// Returns whether the error is transient (the operation is worth retrying).
     pub fn is_temporary(&self) -> bool {
         matches!(
             self,
@@ -154,13 +154,13 @@ impl SyncthingError {
         )
     }
 
-    /// 检查是否为致命错误（不应重试）
+    /// Returns whether the error is fatal (the operation should not be retried).
     pub fn is_fatal(&self) -> bool {
         !self.is_temporary()
     }
 }
 
-/// 结果类型别名
+/// Result alias used throughout syncthing-rust.
 pub type Result<T> = std::result::Result<T, SyncthingError>;
 
 #[cfg(test)]

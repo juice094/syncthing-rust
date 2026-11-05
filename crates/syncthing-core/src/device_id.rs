@@ -1,21 +1,26 @@
-//! 设备ID处理
+//! Device ID handling.
 //!
-//! 实现 Syncthing 设备ID的生成、解析和验证
-//! 使用 Base32 (RFC4648) + Luhn-32 校验位
+//! Implements generation, parsing, and validation of Syncthing device IDs
+//! (Base32 per RFC 4648 plus Luhn-32 check characters).
+//!
+//! See "docs/design/ADR-20261105-device-id-format.md".
 
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::fmt;
 use std::str::FromStr;
 
-/// Base32 字符集 (RFC4648)
+/// Base32 alphabet (RFC 4648, no padding).
 const BASE32_ALPHABET: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
 
-/// 设备ID (SHA-256 哈希的 32 字节)
+/// Device ID (32-byte SHA-256 hash of the device certificate).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub struct DeviceId(pub [u8; 32]);
 
 impl DeviceId {
-    /// 从字节数组创建
+    /// Creates a device ID from a byte slice.
+    ///
+    /// # Errors
+    /// Returns a device ID error unless `bytes` is exactly 32 bytes long.
     pub fn from_bytes(bytes: &[u8]) -> crate::Result<Self> {
         if bytes.len() != 32 {
             return Err(crate::SyncthingError::device_id("Invalid device ID length"));
@@ -25,12 +30,12 @@ impl DeviceId {
         Ok(Self(arr))
     }
 
-    /// 从32字节数组创建（简化方法）
+    /// Creates a device ID from a 32-byte array.
     pub const fn from_bytes_array(bytes: [u8; 32]) -> Self {
         Self(bytes)
     }
 
-    /// 生成随机设备ID（用于测试）
+    /// Generates a random device ID (for testing).
     pub fn random() -> Self {
         use rand::RngExt;
         let mut bytes = [0u8; 32];
@@ -38,51 +43,51 @@ impl DeviceId {
         Self(bytes)
     }
 
-    /// 获取原始字节
+    /// Returns the raw 32-byte identifier.
     pub fn as_bytes(&self) -> &[u8; 32] {
         &self.0
     }
 
-    /// 转换为短ID (前8字节，用hex编码)
+    /// Returns the short ID (first 8 bytes, hex-encoded).
     pub fn short_id(&self) -> String {
         hex::encode(&self.0[..8])
     }
 
-    /// 版本向量计数器 ID（前 8 字节大端 u64）。
+    /// Returns the version-vector counter ID (first 8 bytes as big-endian u64).
     ///
-    /// 每个设备在版本向量中必须使用唯一 ID，否则两端各自的修改会被误判为
-    /// 线性历史而非并发，导致删除方"支配"并静默覆盖对端的离线修改。
-    /// 与 Go Syncthing 的 ShortID 语义一致。
+    /// Every device must use a unique counter ID in version vectors; otherwise
+    /// concurrent edits on both ends are misread as linear history and the
+    /// deleter's version "dominates", silently overwriting the peer's offline
+    /// changes. Matches Go Syncthing's `ShortID` semantics.
     pub fn counter_id(&self) -> u64 {
         u64::from_be_bytes(self.0[..8].try_into().expect("first 8 bytes of 32"))
     }
 
-    /// 转换为字符串表示（旧版hex格式，保留用于兼容）
+    /// Returns the string representation (kept for compatibility with the
+    /// legacy hex-format API).
     pub fn to_string_formatted(&self) -> String {
         self.to_string()
     }
 
-    /// 验证设备ID（检查校验和）
+    /// Validates the device ID's string form, including Luhn-32 check characters.
     pub fn is_valid(&self) -> bool {
         let id_str = self.to_string();
         let cleaned: String = id_str.chars().filter(|c| c.is_alphanumeric()).collect();
 
-        // 验证长度
         if cleaned.len() != 56 {
             return false;
         }
 
-        // 验证校验位
         Self::verify_luhn32_checksum(&cleaned)
     }
 
-    /// 验证 Luhn-32 校验位
+    /// Verifies the Luhn-32 check characters (4 groups of 14: 13 data chars
+    /// + 1 check char each).
     fn verify_luhn32_checksum(s: &str) -> bool {
         if s.len() != 56 {
             return false;
         }
 
-        // 分成4组，每组14字符（13数据 + 1校验位）
         for i in 0..4 {
             let start = i * 14;
             let end = start + 13;
@@ -103,20 +108,16 @@ impl DeviceId {
 
 impl fmt::Display for DeviceId {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        // 1. Base32 编码32字节
         let base32 = to_base32(&self.0);
 
-        // 2. 截断到52字符（如果更长）或填充（如果更短）
         let data = if base32.len() >= 52 {
             base32[..52].to_string()
         } else {
-            format!("{:0<52}", base32) // 右填充0（即'A'在Base32中）
+            format!("{:0<52}", base32) // right-pad with '0' (i.e. 'A' in Base32)
         };
 
-        // 3. 添加 Luhn-32 校验位（4个）
         let with_luhn = luhnify(&data);
 
-        // 4. 格式化为 XXXXXXX-XXXXXXX-... 格式（8组×7字符）
         let parts: Vec<&str> = with_luhn
             .as_bytes()
             .chunks(7)
@@ -132,18 +133,14 @@ impl FromStr for DeviceId {
     type Err = crate::SyncthingError;
 
     fn from_str(s: &str) -> crate::Result<Self> {
-        // 移除分隔符和空白
         let cleaned: String = s.chars().filter(|c| c.is_alphanumeric()).collect();
 
         if cleaned.len() == 64 {
-            // 旧格式：hex编码
             let bytes = hex::decode(cleaned).map_err(|e| {
                 crate::SyncthingError::device_id(format!("Invalid hex encoding: {}", e))
             })?;
             Self::from_bytes(&bytes)
         } else if cleaned.len() == 56 {
-            // 新格式：Base32 + Luhn-32
-            // 移除校验位（每14字符中的第14位），得到52字符的Base32
             let mut base32_data = String::with_capacity(52);
             for i in 0..4 {
                 let start = i * 14;
@@ -151,12 +148,10 @@ impl FromStr for DeviceId {
                 base32_data.push_str(&cleaned[start..end]);
             }
 
-            // 验证校验位
             if !DeviceId::verify_luhn32_checksum(&cleaned) {
                 return Err(crate::SyncthingError::device_id("Invalid Luhn-32 checksum"));
             }
 
-            // Base32解码
             let bytes = from_base32(&base32_data)?;
             Self::from_bytes(&bytes)
         } else {
@@ -186,7 +181,7 @@ impl<'de> Deserialize<'de> for DeviceId {
     }
 }
 
-/// 字节数组转 Base32（无填充）
+/// Encodes bytes as unpadded Base32.
 fn to_base32(bytes: &[u8]) -> String {
     let mut result = String::new();
     let mut buffer = 0u32;
@@ -203,7 +198,6 @@ fn to_base32(bytes: &[u8]) -> String {
         }
     }
 
-    // 处理剩余位
     if bits_left > 0 {
         let index = ((buffer << (5 - bits_left)) & 0x1F) as usize;
         result.push(BASE32_ALPHABET[index] as char);
@@ -212,7 +206,7 @@ fn to_base32(bytes: &[u8]) -> String {
     result
 }
 
-/// Base32 解码
+/// Decodes unpadded Base32.
 fn from_base32(s: &str) -> crate::Result<Vec<u8>> {
     let mut result = Vec::new();
     let mut buffer = 0u32;
@@ -239,8 +233,7 @@ fn from_base32(s: &str) -> crate::Result<Vec<u8>> {
     Ok(result)
 }
 
-/// Luhn-32 校验位计算 - 返回校验字符
-/// 与 Go Syncthing 的 luhn32 算法保持一致
+/// Computes the Luhn-32 check character, matching Go Syncthing's luhn32 algorithm.
 fn luhn32_char(s: &str) -> char {
     let n = 32u32;
     let mut factor = 1u32;
@@ -259,7 +252,7 @@ fn luhn32_char(s: &str) -> char {
     BASE32_ALPHABET[check as usize] as char
 }
 
-/// 将 Base32 字符转换为数值
+/// Maps a Base32 character to its numeric value.
 fn base32_char_to_value(c: char) -> u32 {
     let c = c.to_ascii_uppercase();
     BASE32_ALPHABET
@@ -269,12 +262,13 @@ fn base32_char_to_value(c: char) -> u32 {
         .unwrap_or(0)
 }
 
-/// 添加 Luhn-32 校验位
-/// 将52个字符分成4组，每组13个，每组计算 Luhn-32 校验位并追加
+/// Appends Luhn-32 check characters to a 52-char Base32 string (4 groups of 13).
+///
+/// Groups are processed in reverse so that inserting a check character does
+/// not shift the offsets of earlier groups.
 fn luhnify(s: &str) -> String {
     let mut result = s.to_string();
 
-    // 从后往前处理，确保插入位置正确
     for i in (0..4).rev() {
         let start = i * 13;
         let end = start + 13;

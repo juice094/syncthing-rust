@@ -1,7 +1,7 @@
-//! BEP Protocol Handshake
+//! BEP protocol handshake.
 //!
-//! 实现BEP协议的Hello消息交换
-//! 参考: syncthing/lib/protocol/bep_hello.go
+//! Implements the BEP Hello message exchange; reference:
+//! syncthing/lib/protocol/bep_hello.go.
 
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tracing::{debug, info};
@@ -10,26 +10,30 @@ use crate::messages::Hello;
 use crate::{Result, SyncthingError};
 use prost::Message;
 
-/// Hello Magic Number (4 bytes, big-endian)
+/// Hello Magic Number (4 bytes, big-endian).
 pub const HELLO_MAGIC: u32 = 0x2EA7D90B;
 
-/// 最大Hello消息大小 (1KB)
+/// Maximum Hello message size (1 KiB).
 pub const MAX_HELLO_SIZE: usize = 1024;
 
-/// 旧版本协议Magic Number（用于错误检测）
+/// Legacy protocol magic numbers (used only to detect and reject older
+/// protocol versions).
 const OLD_MAGIC_1: u32 = 0x00010000;
 const OLD_MAGIC_2: u32 = 0x00010001;
 
-/// 发送Hello消息
+/// Sends a Hello message.
 ///
-/// 消息格式:
+/// Wire format:
 /// ```text
 /// [4 bytes]  Magic: 0x2EA7D90B
 /// [2 bytes]  Length (big-endian)
-/// [N bytes]  Protobuf encoded Hello message
+/// [N bytes]  Protobuf-encoded Hello message
 /// ```
+///
+/// # Errors
+/// Returns a protocol error if the encoded Hello exceeds `MAX_HELLO_SIZE`,
+/// or an I/O error if the write fails.
 pub async fn send_hello<W: AsyncWrite + Unpin>(writer: &mut W, hello: &Hello) -> Result<()> {
-    // 编码Hello消息
     let msg_bytes = hello.encode_to_vec();
 
     if msg_bytes.len() > MAX_HELLO_SIZE {
@@ -45,16 +49,9 @@ pub async fn send_hello<W: AsyncWrite + Unpin>(writer: &mut W, hello: &Hello) ->
         hello.device_name, hello.client_name, hello.client_version
     );
 
-    // 写入Magic (4 bytes, big-endian)
     writer.write_u32(HELLO_MAGIC).await?;
-
-    // 写入长度 (2 bytes, big-endian)
     writer.write_u16(msg_bytes.len() as u16).await?;
-
-    // 写入消息
     writer.write_all(&msg_bytes).await?;
-
-    // 刷新
     writer.flush().await?;
 
     info!(
@@ -65,11 +62,13 @@ pub async fn send_hello<W: AsyncWrite + Unpin>(writer: &mut W, hello: &Hello) ->
     Ok(())
 }
 
-/// 接收Hello消息
+/// Receives and decodes the peer's Hello message.
 ///
-/// 读取并解码对端发送的Hello消息
+/// # Errors
+/// Returns a protocol error if the magic number is unknown or names an older
+/// protocol version, if the announced length exceeds `MAX_HELLO_SIZE`, or if
+/// the body cannot be decoded as a Hello.
 pub async fn recv_hello<R: AsyncRead + Unpin>(reader: &mut R) -> Result<Hello> {
-    // 读取Magic (4 bytes, big-endian)
     let magic = reader.read_u32().await?;
 
     if magic != HELLO_MAGIC {
@@ -84,7 +83,6 @@ pub async fn recv_hello<R: AsyncRead + Unpin>(reader: &mut R) -> Result<Hello> {
         )));
     }
 
-    // 读取长度 (2 bytes, big-endian)
     let len = reader.read_u16().await? as usize;
 
     if len > MAX_HELLO_SIZE {
@@ -94,11 +92,9 @@ pub async fn recv_hello<R: AsyncRead + Unpin>(reader: &mut R) -> Result<Hello> {
         )));
     }
 
-    // 读取消息体
     let mut buf = vec![0u8; len];
     reader.read_exact(&mut buf).await?;
 
-    // 解码Hello消息
     let hello = Hello::decode(&buf[..])
         .map_err(|e| SyncthingError::protocol(format!("hello decode: {}", e)))?;
 
@@ -114,17 +110,13 @@ pub async fn recv_hello<R: AsyncRead + Unpin>(reader: &mut R) -> Result<Hello> {
     Ok(hello)
 }
 
-/// 交换Hello消息
-///
-/// 发送我们的Hello并接收对方的Hello
+/// Exchanges Hello messages (sends ours, then receives theirs).
 pub async fn exchange_hello<S: AsyncRead + AsyncWrite + Unpin>(
     stream: &mut S,
     our_hello: &Hello,
 ) -> Result<Hello> {
-    // 发送我们的Hello
     send_hello(stream, our_hello).await?;
 
-    // 接收对方的Hello
     let their_hello = recv_hello(stream).await?;
 
     info!(
@@ -135,17 +127,14 @@ pub async fn exchange_hello<S: AsyncRead + AsyncWrite + Unpin>(
     Ok(their_hello)
 }
 
-/// 作为服务端交换Hello消息（先接收后发送）
-///
-/// 对于传入连接，我们需要先接收客户端的Hello，然后发送我们的响应
+/// Exchanges Hello messages as the server side (receives first, then sends),
+/// as required for incoming connections.
 pub async fn exchange_hello_server<S: AsyncRead + AsyncWrite + Unpin>(
     stream: &mut S,
     our_hello: &Hello,
 ) -> Result<Hello> {
-    // 先接收客户端的Hello
     let their_hello = recv_hello(stream).await?;
 
-    // 然后发送我们的Hello
     send_hello(stream, our_hello).await?;
 
     info!(

@@ -1,52 +1,45 @@
-//! 设备身份抽象
+//! Device identity abstraction.
 //!
-//! `Identity` trait 将设备标识与具体的密码学方案（TLS、WireGuard、PSK 等）解耦。
-//! 这是 syncthing-rust 从"文件同步工具"演进为"多传输安全网络层"的基础。
+//! The `Identity` trait decouples device identification from concrete
+//! cryptography schemes (TLS, WireGuard, PSK, ...).
 //!
-//! 设计原则：
-//! - 最小接口：只定义"我是谁"，不涉及握手细节（握手属于传输层）
-//! - 零依赖：不引入 tokio_rustls、wireguard 等具体库
-//! - 可扩展：具体实现（如 `TlsIdentity`）位于上层 crate（如 `syncthing-net`）
+//! See "docs/design/ADR-20261105-identity-abstraction.md".
 
 use crate::DeviceId;
 use std::fmt::Debug;
 
-/// 设备身份的抽象。
+/// Abstraction over a device's identity, independent of the concrete
+/// cryptography scheme.
 ///
-/// 不依赖具体的密码学方案。具体实现（如 `TlsIdentity`、`WireGuardIdentity`）
-/// 由上层 crate 提供。
-///
-/// # 设计说明
-///
-/// `Identity` 只负责"标识"，不负责"握手"。握手逻辑属于传输层：
-/// - `TcpTransport` 使用 `TlsIdentity` 做 TLS 握手
-/// - `QuicTransport` 使用内置 TLS 1.3 或 `WireGuardIdentity`
-/// - `WebSocketTransport` 使用 `TlsIdentity` 做 WSS 握手
-///
-/// 这种分层让同一设备可以同时拥有多种身份（如 TLS + WireGuard 双栈），
-/// 不同传输可以选择最适合的身份方案。
+/// Concrete implementations (e.g. `TlsIdentity`, `WireGuardIdentity`) are
+/// provided by upper-layer crates. `Identity` identifies only; the handshake
+/// belongs to the transport layer, so one device can hold several identities
+/// at once and each transport picks the scheme that fits it best.
 pub trait Identity: Send + Sync + Debug {
-    /// 获取本设备的唯一标识符。
+    /// Returns the device's unique identifier.
     ///
-    /// 对于所有实现，`device_id` 都应该是 32 字节的固定长度标识符，
-    /// 与底层密码学方案无关。
+    /// For every implementation this is a fixed 32-byte identifier,
+    /// independent of the underlying cryptography scheme.
     fn device_id(&self) -> DeviceId;
 
-    /// 身份方案名称。
+    /// Returns the identity scheme name.
     ///
-    /// 示例值：`"tls"`、`"wireguard"`、`"psk"`、`"noise"`
+    /// Example values: `"tls"`, `"wireguard"`, `"psk"`, `"noise"`.
     fn scheme(&self) -> &'static str;
 }
 
-/// 最简单的身份实现：直接持有 DeviceId，无额外密码学材料。
+/// Simplest identity implementation: holds only a DeviceId, with no
+/// additional cryptographic material.
 ///
-/// 用于测试、内存管道场景，或调用方尚未迁移到具体身份方案时的过渡。
+/// Used in tests, in-memory pipe scenarios, or as a transitional type for
+/// callers not yet migrated to a concrete identity scheme.
 #[derive(Debug, Clone)]
 pub struct DeviceIdentity {
     id: DeviceId,
 }
 
 impl DeviceIdentity {
+    /// Creates a device identity that holds only a device ID.
     pub fn new(id: DeviceId) -> Self {
         Self { id }
     }
@@ -62,7 +55,7 @@ impl Identity for DeviceIdentity {
     }
 }
 
-/// 为 `Arc<dyn Identity>` 提供便捷的 `device_id` 访问。
+/// Provides convenient `device_id` access for `Arc<dyn Identity>`.
 impl Identity for std::sync::Arc<dyn Identity> {
     fn device_id(&self) -> DeviceId {
         (**self).device_id()
