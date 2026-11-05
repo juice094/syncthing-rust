@@ -1,8 +1,9 @@
-//! DERP Pipe：将 DERP 消息转发包装为 `ReliablePipe` 字节流。
+//! DERP Pipe: wraps DERP message forwarding as a `ReliablePipe` byte stream.
 //!
-//! DERP 本质上是基于消息的转发协议（SendPacket / RecvPacket）。
-//! 为了适配 BEP 协议（需要可靠字节流），我们将 DERP 帧的 payload
-//! 拼接为连续字节流，写入时自动分片为 SendPacket 发送。
+//! DERP is a message-based forwarding protocol (SendPacket / RecvPacket).
+//! To adapt it to BEP (which needs a reliable byte stream), received frame
+//! payloads are concatenated into a continuous byte stream, and writes are
+//! automatically chunked into SendPacket frames.
 
 use std::io;
 use std::net::SocketAddr;
@@ -22,7 +23,7 @@ use syncthing_core::{PathQuality, ReliablePipe, TransportType};
 
 use super::protocol::Frame;
 
-/// 内部发送任务：从 channel 接收已编码的帧数据，写入 TCP stream
+/// Internal send task: writes encoded frame data from the channel to the TCP stream.
 async fn send_task(mut write_half: OwnedWriteHalf, mut rx: mpsc::Receiver<Vec<u8>>) {
     while let Some(data) = rx.recv().await {
         trace!("DERP send_task writing {} bytes", data.len());
@@ -37,7 +38,8 @@ async fn send_task(mut write_half: OwnedWriteHalf, mut rx: mpsc::Receiver<Vec<u8
     debug!("DERP send_task exited");
 }
 
-/// 内部接收任务：从 TCP stream 读取帧，将 RecvPacket 的 payload 传给读端
+/// Internal receive task: reads frames from the TCP stream and forwards
+/// RecvPacket payloads to the read end.
 async fn recv_task(mut read_half: OwnedReadHalf, read_tx: mpsc::Sender<Bytes>) {
     let mut len_buf = [0u8; 4];
     loop {
@@ -70,7 +72,6 @@ async fn recv_task(mut read_half: OwnedReadHalf, read_tx: mpsc::Sender<Bytes>) {
                                 }
                             },
                             Ok(None) => {
-                                // 不应该发生，因为我们已经读取了完整长度
                                 warn!("DERP recv_task: incomplete frame after exact read");
                             }
                             Err(e) => {
@@ -102,37 +103,37 @@ async fn recv_task(mut read_half: OwnedReadHalf, read_tx: mpsc::Sender<Bytes>) {
     debug!("DERP recv_task exited");
 }
 
-/// 通过 DERP 中继传输的可靠字节管道。
+/// Reliable byte pipe over a DERP relay.
 ///
-/// 将上层连续字节流切分为 DERP `SendPacket` 帧发送，
-/// 并将收到的 `RecvPacket` 帧 payload 拼接为连续字节流供上层读取。
+/// Chunks the upper-layer byte stream into DERP `SendPacket` frames on write
+/// and concatenates received `RecvPacket` payloads into a continuous byte
+/// stream on read.
 #[derive(Debug)]
 pub struct DerpPipe {
-    /// 目标设备 ID（用于 SendPacket 路由）
+    /// Target device ID (SendPacket routing target).
     target: DeviceId,
-    /// 本地设备 ID
+    /// Local device ID.
     local_device_id: DeviceId,
-    /// 发送任务句柄
+    /// Send task handle.
     send_handle: Option<tokio::task::JoinHandle<()>>,
-    /// 写入帧数据的 channel（shutdown 时替换为 closed channel）
+    /// Channel for frame data written by `poll_write` (swapped with a closed
+    /// channel on shutdown).
     write_tx: mpsc::Sender<Vec<u8>>,
-    /// 从 recv_task 接收数据的 channel
+    /// Channel receiving data from recv_task.
     read_rx: mpsc::Receiver<Bytes>,
-    /// 当前读取缓冲区（从 read_rx 收到的 Bytes 的剩余部分）
+    /// Current read buffer (remainder of the last Bytes from read_rx).
     read_buffer: Bytes,
-    /// 本地地址
+    /// Local address.
     local_addr: Option<SocketAddr>,
-    /// 对端地址
+    /// Peer address.
     peer_addr: Option<SocketAddr>,
 }
 
 impl DerpPipe {
-    /// 创建新的 DerpPipe。
+    /// Creates a new DerpPipe over a TCP stream already connected to a DERP server.
     ///
-    /// # Arguments
-    /// * `stream` - 已连接到 DERP 服务器的 TCP stream
-    /// * `target` - 目标设备 ID（SendPacket 的路由目标）
-    /// * `local_device_id` - 本地设备 ID
+    /// * `target` - target device ID (SendPacket routing target)
+    /// * `local_device_id` - local device ID
     pub fn new(stream: tokio::net::TcpStream, target: DeviceId, local_device_id: DeviceId) -> Self {
         let local_addr = stream.local_addr().ok();
         let peer_addr = stream.peer_addr().ok();
@@ -143,10 +144,6 @@ impl DerpPipe {
 
         let _recv_handle = tokio::spawn(recv_task(read_half, read_tx));
         let send_handle = tokio::spawn(send_task(write_half, write_rx));
-
-        // 当 DerpPipe drop 时，我们需要关闭 send_handle 和 recv_handle
-        // 这里我们保留 send_handle 以便在 drop 时 abort
-        // recv_handle 不需要保留，因为它会在 read_tx 被 drop 后自动退出
 
         Self {
             target,
@@ -160,12 +157,12 @@ impl DerpPipe {
         }
     }
 
-    /// 获取目标设备 ID
+    /// Returns the target device ID.
     pub fn target(&self) -> &DeviceId {
         &self.target
     }
 
-    /// 获取本地设备 ID
+    /// Returns the local device ID.
     pub fn local_device_id(&self) -> &DeviceId {
         &self.local_device_id
     }
@@ -177,7 +174,6 @@ impl AsyncRead for DerpPipe {
         cx: &mut Context<'_>,
         buf: &mut ReadBuf<'_>,
     ) -> Poll<io::Result<()>> {
-        // 1. 先消耗 read_buffer 中的剩余数据
         if !self.read_buffer.is_empty() {
             let to_copy = std::cmp::min(buf.remaining(), self.read_buffer.len());
             buf.put_slice(&self.read_buffer[..to_copy]);
@@ -185,7 +181,6 @@ impl AsyncRead for DerpPipe {
             return Poll::Ready(Ok(()));
         }
 
-        // 2. 从 read_rx 接收下一个数据块
         match self.read_rx.poll_recv(cx) {
             Poll::Ready(Some(mut bytes)) => {
                 let to_copy = std::cmp::min(buf.remaining(), bytes.len());
@@ -195,10 +190,7 @@ impl AsyncRead for DerpPipe {
                 }
                 Poll::Ready(Ok(()))
             }
-            Poll::Ready(None) => {
-                // Channel 已关闭，返回 EOF
-                Poll::Ready(Ok(()))
-            }
+            Poll::Ready(None) => Poll::Ready(Ok(())),
             Poll::Pending => Poll::Pending,
         }
     }
@@ -212,7 +204,6 @@ impl AsyncWrite for DerpPipe {
     ) -> Poll<io::Result<usize>> {
         let this = self.get_mut();
 
-        // 将 buf 编码为 SendPacket 帧
         let frame = Frame::SendPacket {
             target: this.target,
             payload: buf.to_vec(),
@@ -229,13 +220,13 @@ impl AsyncWrite for DerpPipe {
     }
 
     fn poll_flush(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<io::Result<()>> {
-        // 数据已发送到 channel，flush 由 send_task 负责
+        // Data is handed to the channel; flushing is send_task's job.
         Poll::Ready(Ok(()))
     }
 
     fn poll_shutdown(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<io::Result<()>> {
         let this = self.get_mut();
-        // 关闭 write_tx，这会触发 send_task 退出
+        // Closing write_tx makes send_task exit.
         let (closed_tx, _) = mpsc::channel::<Vec<u8>>(1);
         let _ = std::mem::replace(&mut this.write_tx, closed_tx);
         Poll::Ready(Ok(()))
@@ -256,7 +247,7 @@ impl ReliablePipe for DerpPipe {
     }
 
     fn path_quality(&self) -> PathQuality {
-        // DERP relay 的路径质量通常比直接连接差
+        // A DERP relay path is typically worse than a direct connection.
         PathQuality {
             rtt: std::time::Duration::from_millis(150),
             packet_loss: 0.0,
@@ -268,10 +259,10 @@ impl ReliablePipe for DerpPipe {
 
 impl Drop for DerpPipe {
     fn drop(&mut self) {
-        // 关闭 channel，让后台任务退出
+        // Close the channel so background tasks exit; recv_task also exits
+        // when read_tx is dropped.
         let (closed_tx, _) = mpsc::channel::<Vec<u8>>(1);
         let _ = std::mem::replace(&mut self.write_tx, closed_tx);
-        // abort send_task
         if let Some(handle) = self.send_handle.take() {
             handle.abort();
         }

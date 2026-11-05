@@ -1,7 +1,7 @@
-//! TCP 传输实现
+//! TCP transport implementation.
 //!
-//! 实现TCP监听器和拨号器
-//! 参考: syncthing/lib/connections/tcp_listen.go, tcp_dial.go
+//! Implements the TCP listener and dialer
+//! (reference: syncthing/lib/connections/tcp_listen.go, tcp_dial.go).
 
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -19,42 +19,42 @@ use crate::manager::ConnectionManagerHandle;
 use crate::metrics;
 use crate::tls::SyncthingTlsConfig;
 
-/// 默认TCP端口
+/// Default TCP port for BEP connections.
 pub const DEFAULT_TCP_PORT: u16 = syncthing_core::constants::DEFAULT_BEP_PORT;
 
-/// TCP连接超时
+/// Timeout for establishing a TCP connection.
 pub const TCP_CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 
-/// TLS握手超时
+/// Timeout for the TLS handshake.
 pub const TLS_HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(10);
 
-/// 协议握手超时
+/// Timeout for the BEP protocol handshake.
 pub const PROTOCOL_HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(30);
 
-/// TCP 监听器
+/// TCP listener accepting incoming BEP connections.
 pub struct SyncthingTcpListener {
-    /// 绑定地址
+    /// Configured bind address.
     // TODO: expose actual bound SocketAddr (currently only stores configured addr)
     #[allow(dead_code)]
     bind_addr: SocketAddr,
-    /// 底层TCP监听器
+    /// Underlying TCP listener (present after `bind`).
     inner: Option<TokioTcpListener>,
-    /// 连接管理器句柄
+    /// Connection manager handle.
     manager: ConnectionManagerHandle,
-    /// 本地设备ID（用于Hello消息）
+    /// Local device ID (used in the BEP Hello).
     local_device_id: syncthing_core::DeviceId,
-    /// 设备名称
+    /// Device name advertised in the Hello.
     device_name: String,
-    /// TLS 配置
+    /// TLS configuration.
     tls_config: Arc<SyncthingTlsConfig>,
-    /// 运行标志
+    /// Whether the accept loop is running.
     running: bool,
-    /// 关闭信号发送端
+    /// Shutdown signal sender.
     shutdown_tx: Option<tokio::sync::mpsc::Sender<()>>,
 }
 
 impl SyncthingTcpListener {
-    /// 创建新的TCP监听器
+    /// Creates a new TCP listener (not yet bound).
     pub fn new(
         bind_addr: SocketAddr,
         manager: ConnectionManagerHandle,
@@ -74,7 +74,11 @@ impl SyncthingTcpListener {
         }
     }
 
-    /// 绑定并开始监听
+    /// Binds the listener and returns the actual local address.
+    ///
+    /// # Errors
+    /// Returns an error if the bind fails or the actual local address cannot
+    /// be queried.
     pub async fn bind(&mut self) -> Result<SocketAddr> {
         let listener = TokioTcpListener::bind(self.bind_addr).await.map_err(|e| {
             SyncthingError::connection(format!("failed to bind to {}: {}", self.bind_addr, e))
@@ -92,7 +96,11 @@ impl SyncthingTcpListener {
         Ok(actual_addr)
     }
 
-    /// 启动接受循环
+    /// Runs the accept loop until `stop` is called.
+    ///
+    /// # Errors
+    /// Returns an error if the listener was not bound first. Per-connection
+    /// failures are logged and do not stop the loop.
     pub async fn run(mut self) -> Result<()> {
         let listener = self
             .inner
@@ -102,11 +110,9 @@ impl SyncthingTcpListener {
         self.running = true;
         info!("TCP listener started on {}", self.bind_addr);
 
-        // 创建关闭通道
         let (shutdown_tx, mut shutdown_rx) = tokio::sync::mpsc::channel::<()>(1);
         self.shutdown_tx = Some(shutdown_tx);
 
-        // 监听循环（使用 tokio::select! 支持 graceful shutdown）
         loop {
             tokio::select! {
                 _ = shutdown_rx.recv() => {
@@ -118,7 +124,6 @@ impl SyncthingTcpListener {
                         Ok((stream, peer_addr)) => {
                             debug!("Incoming TCP connection from {}", peer_addr);
 
-                            // 连接限流：达到 max_connections 上限时拒绝新连接
                             if !self.manager.can_accept_connection() {
                                 warn!(
                                     "Connection limit reached, rejecting incoming from {}",
@@ -127,7 +132,6 @@ impl SyncthingTcpListener {
                                 continue;
                             }
 
-                            // 处理新连接
                             let manager = self.manager.clone();
                             let local_device_id = self.local_device_id;
                             let device_name = self.device_name.clone();
@@ -148,7 +152,7 @@ impl SyncthingTcpListener {
                         }
                         Err(e) => {
                             error!("TCP accept error: {}", e);
-                            // 短暂暂停以避免CPU飙升
+                            // Brief pause to avoid CPU spinning on repeated accept errors.
                             tokio::time::sleep(Duration::from_millis(100)).await;
                         }
                     }
@@ -160,7 +164,7 @@ impl SyncthingTcpListener {
         Ok(())
     }
 
-    /// 停止监听器
+    /// Stops the listener.
     pub fn stop(&mut self) {
         self.running = false;
         if let Some(tx) = self.shutdown_tx.take() {
@@ -169,7 +173,8 @@ impl SyncthingTcpListener {
         info!("TCP listener stopping...");
     }
 
-    /// 处理传入连接
+    /// Handles an accepted incoming connection: TLS + BEP handshake, then
+    /// registration with the connection manager.
     async fn handle_incoming(
         stream: TcpStream,
         _peer_addr: SocketAddr,
@@ -178,10 +183,8 @@ impl SyncthingTcpListener {
         device_name: String,
         tls_config: Arc<SyncthingTlsConfig>,
     ) -> Result<()> {
-        // 设置TCP选项
         Self::configure_stream(&stream)?;
 
-        // 服务端 TLS 握手
         let tls_start = std::time::Instant::now();
         let (tls_stream, device_id) = crate::tls::accept_tls_stream(stream, &tls_config).await?;
         metrics::global().record_tls_handshake(tls_start.elapsed());
@@ -191,7 +194,6 @@ impl SyncthingTcpListener {
             device_id
         );
 
-        // 在 BEP Hello 前解决连接竞争，避免无效的双向握手。
         let _handshake_guard = manager
             .begin_handshake(device_id, ConnectionType::Incoming)
             .map_err(|e| {
@@ -202,15 +204,11 @@ impl SyncthingTcpListener {
                 e
             })?;
 
-        // BEP Hello 交换
         let mut tls_stream = tls_stream;
         let _remote_hello =
             crate::handshaker::BepHandshaker::server_handshake(&mut tls_stream, &device_name)
                 .await?;
 
-        // 创建BEP连接 — 连接生命周期事件通过 ConnectionManager::register_connection
-        // 上报，此 per-connection channel 用于缓冲区；消费端有意丢弃事件。
-        // 容量设为 8 以减少内存占用，同时防止发送端在 burst 时阻塞。
         let (event_tx, mut event_rx) = tokio::sync::mpsc::channel(8);
         tokio::spawn(async move { while event_rx.recv().await.is_some() {} });
 
@@ -221,10 +219,8 @@ impl SyncthingTcpListener {
         )
         .await?;
 
-        // 获取连接ID
         let conn_id = conn.id();
 
-        // 设置设备ID并注册到管理器
         conn.set_device_id(device_id);
         conn.set_state(syncthing_core::ConnectionState::ProtocolHandshakeComplete);
         manager.register_connection(device_id, conn).await?;
@@ -234,7 +230,7 @@ impl SyncthingTcpListener {
         Ok(())
     }
 
-    /// 配置TCP流选项
+    /// Applies TCP options (TCP_NODELAY, keepalive) to a stream.
     fn configure_stream(stream: &TcpStream) -> Result<()> {
         stream
             .set_nodelay(true)
@@ -248,18 +244,20 @@ impl SyncthingTcpListener {
     }
 }
 
-/// 验证出站地址是否安全可拨号（SSRF防护）
+/// Validates that an outbound address is safe to dial (SSRF protection).
 ///
-/// 拒绝以下地址类别以防止 SSRF：
+/// Rejects the following address classes to prevent SSRF:
 /// - Multicast (224.0.0.0/4, ff00::/8)
 /// - Unspecified (0.0.0.0, ::)
-/// - Link-local (169.254.0.0/16, fe80::/10) — 仅在非 relay 路径中
+/// - Link-local (169.254.0.0/16, fe80::/10)
 ///
-/// NOTE: Loopback (127.0.0.0/8, ::1) **不**被拒绝 — 同主机上的
-/// syncthing 实例是合法使用场景。私有地址 (10.0.0.0/8, 172.16.0.0/12,
-/// 192.168.0.0/16, fc00::/7) 在政企内网场景中是合法的。
+/// NOTE: Loopback (127.0.0.0/8, ::1) is **not** rejected — multiple Syncthing
+/// instances on the same host are a legitimate use case. Private addresses
+/// (10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, fc00::/7) are legitimate in
+/// enterprise intranets.
 ///
-/// 此函数应在**不可信地址来源**（discovery、relay、外部配置）的入口处调用。
+/// Call this at the entry point of any **untrusted address source**
+/// (discovery, relay, external configuration).
 pub(crate) fn validate_outbound_addr(addr: &SocketAddr) -> Result<()> {
     let ip = addr.ip();
     if ip.is_multicast() {
@@ -274,7 +272,7 @@ pub(crate) fn validate_outbound_addr(addr: &SocketAddr) -> Result<()> {
             addr
         )));
     }
-    // 检查 link-local（IpAddr::is_link_local 尚未稳定，按地址族分派）
+    // IpAddr::is_link_local is not yet stable; dispatch per address family instead.
     let is_link_local = match ip {
         std::net::IpAddr::V4(v4) => v4.is_link_local(),
         std::net::IpAddr::V6(v6) => {
@@ -291,7 +289,11 @@ pub(crate) fn validate_outbound_addr(addr: &SocketAddr) -> Result<()> {
     Ok(())
 }
 
-/// 建立单个TCP连接并完成BEP握手
+/// Establishes a single TCP connection and completes the TLS + BEP handshake.
+///
+/// # Errors
+/// Returns an error on TCP connect timeout/failure, TLS handshake
+/// timeout/failure, or BEP Hello exchange failure.
 pub async fn connect_bep(
     addr: SocketAddr,
     target_device: syncthing_core::DeviceId,
@@ -301,11 +303,8 @@ pub async fn connect_bep(
 ) -> Result<Arc<BepConnection>> {
     trace!("Dialing {} for device {}", addr, target_device);
 
-    // 若本端 device ID 较小，在发起 TLS ClientHello 前短暂退让，
-    // 降低两端同时发送 ClientHello 的概率。
     crate::manager::handshake::pre_handshake_yield(local_device_id, target_device).await;
 
-    // 建立TCP连接
     let stream = timeout(TCP_CONNECT_TIMEOUT, TcpStream::connect(addr))
         .await
         .map_err(|_| SyncthingError::timeout("TCP connect timeout"))?
@@ -313,10 +312,8 @@ pub async fn connect_bep(
 
     debug!("TCP connected to {}", addr);
 
-    // 配置TCP选项
     SyncthingTcpListener::configure_stream(&stream)?;
 
-    // 客户端 TLS 握手
     let tls_start = std::time::Instant::now();
     let client_config = tls_config
         .client_config()
@@ -335,12 +332,10 @@ pub async fn connect_bep(
 
     debug!("Client TLS handshake completed");
 
-    // BEP Hello 交换
     let mut tls_stream = tls_stream;
     let _remote_hello =
         crate::handshaker::BepHandshaker::client_handshake(&mut tls_stream, device_name).await?;
 
-    // 创建BEP连接
     let (event_tx, mut event_rx) = tokio::sync::mpsc::channel(256);
     tokio::spawn(async move { while event_rx.recv().await.is_some() {} });
 
@@ -351,10 +346,8 @@ pub async fn connect_bep(
     )
     .await?;
 
-    // 设置目标设备ID
     conn.set_device_id(target_device);
 
-    // 更新状态
     conn.set_state(syncthing_core::ConnectionState::ProtocolHandshakeComplete);
 
     info!("Connection {} established to {}", conn.id(), addr);
@@ -362,22 +355,22 @@ pub async fn connect_bep(
     Ok(conn)
 }
 
-/// TCP 拨号器
+/// TCP dialer with retry support.
 pub struct TcpDialer {
-    /// 连接管理器句柄
+    /// Connection manager handle.
     manager: ConnectionManagerHandle,
-    /// 本地设备ID
+    /// Local device ID.
     local_device_id: syncthing_core::DeviceId,
-    /// 设备名称
+    /// Device name advertised in the Hello.
     device_name: String,
-    /// 重试配置
+    /// Retry configuration.
     retry_config: RetryConfig,
-    /// TLS 配置
+    /// TLS configuration.
     tls_config: Arc<SyncthingTlsConfig>,
 }
 
 impl TcpDialer {
-    /// 创建新的TCP拨号器
+    /// Creates a new TCP dialer with default retry configuration.
     pub fn new(
         manager: ConnectionManagerHandle,
         local_device_id: syncthing_core::DeviceId,
@@ -393,13 +386,16 @@ impl TcpDialer {
         }
     }
 
-    /// 设置重试配置
+    /// Overrides the retry configuration.
     pub fn with_retry_config(mut self, config: RetryConfig) -> Self {
         self.retry_config = config;
         self
     }
 
-    /// 拨号到指定地址
+    /// Dials the given address with retries according to the retry configuration.
+    ///
+    /// # Errors
+    /// Returns the last dial error after all attempts are exhausted.
     pub async fn dial(
         &self,
         addr: SocketAddr,
@@ -432,7 +428,7 @@ impl TcpDialer {
         Err(last_error.unwrap_or_else(|| SyncthingError::connection("all dial attempts failed")))
     }
 
-    /// 单次拨号尝试
+    /// Single dial attempt without retries.
     async fn dial_once(
         &self,
         addr: SocketAddr,
@@ -448,7 +444,11 @@ impl TcpDialer {
         .await
     }
 
-    /// 拨号并注册到管理器
+    /// Dials the given address and registers the connection with the manager.
+    ///
+    /// # Errors
+    /// Returns an error if dialing fails after all retries, or if the manager
+    /// rejects the registration.
     pub async fn dial_and_register(
         &self,
         addr: SocketAddr,
@@ -456,7 +456,6 @@ impl TcpDialer {
     ) -> Result<()> {
         let conn = self.dial(addr, target_device).await?;
 
-        // 注册到管理器
         self.manager
             .register_connection(target_device, conn)
             .await?;
@@ -465,20 +464,20 @@ impl TcpDialer {
     }
 }
 
-/// TCP 传输层（组合监听和拨号）
+/// TCP transport combining listener and dialer.
 pub struct TcpTransport {
-    /// 监听器
+    /// Listener (taken when the accept loop starts).
     listener: Option<SyncthingTcpListener>,
-    /// 拨号器
+    /// Dialer.
     dialer: TcpDialer,
-    /// 绑定地址
+    /// Bind address.
     // TODO: expose actual bound SocketAddr (currently only stores configured addr)
     #[allow(dead_code)]
     bind_addr: SocketAddr,
 }
 
 impl TcpTransport {
-    /// 创建新的TCP传输层
+    /// Creates a new TCP transport (not yet started).
     pub fn new(
         bind_addr: SocketAddr,
         manager: ConnectionManagerHandle,
@@ -503,9 +502,11 @@ impl TcpTransport {
         }
     }
 
-    /// 启动传输层
+    /// Binds the listener and spawns the accept loop, returning the bound address.
+    ///
+    /// # Errors
+    /// Returns an error if the transport was already started or the bind fails.
     pub async fn start(&mut self) -> Result<SocketAddr> {
-        // 绑定监听器
         let addr = self
             .listener
             .as_mut()
@@ -513,7 +514,6 @@ impl TcpTransport {
             .bind()
             .await?;
 
-        // 启动监听循环
         let listener = self
             .listener
             .take()
@@ -527,12 +527,15 @@ impl TcpTransport {
         Ok(addr)
     }
 
-    /// 获取拨号器引用
+    /// Returns a reference to the dialer.
     pub fn dialer(&self) -> &TcpDialer {
         &self.dialer
     }
 
-    /// 创建到指定设备的连接
+    /// Dials the given device at the given address.
+    ///
+    /// # Errors
+    /// Returns an error if dialing fails after all retries.
     pub async fn connect(
         &self,
         addr: SocketAddr,
@@ -542,28 +545,34 @@ impl TcpTransport {
     }
 }
 
-/// 地址解析工具
+/// Address parsing utilities.
 pub mod addr {
     use super::*;
 
-    /// 解析地址字符串
+    /// Parses an address string into a `SocketAddr`.
+    ///
+    /// # Errors
+    /// Returns an error if the string is not a valid socket address.
     pub fn parse_addr(addr_str: &str) -> Result<SocketAddr> {
         addr_str
             .parse()
             .map_err(|e| SyncthingError::config(format!("invalid address '{}': {}", addr_str, e)))
     }
 
-    /// 解析多个地址
+    /// Parses multiple address strings.
+    ///
+    /// # Errors
+    /// Returns an error if any entry is not a valid socket address.
     pub fn parse_addrs(addr_strs: &[&str]) -> Result<Vec<SocketAddr>> {
         addr_strs.iter().map(|s| parse_addr(s)).collect()
     }
 
-    /// 构建默认监听地址
+    /// Builds the default listen address (all interfaces).
     pub fn default_listen_addr() -> SocketAddr {
         SocketAddr::from(([0, 0, 0, 0], DEFAULT_TCP_PORT))
     }
 
-    /// 构建本地监听地址（仅本地）
+    /// Builds a localhost-only listen address.
     pub fn localhost_listen_addr() -> SocketAddr {
         SocketAddr::from(([127, 0, 0, 1], DEFAULT_TCP_PORT))
     }

@@ -1,10 +1,6 @@
-//! NAT 端口映射客户端 (Portmapper)
+//! NAT port mapping client (Portmapper).
 //!
-//! 参考来源: Tailscale net/portmapper/
-//! - portmapper.go
-//! - upnp.go
-//! - pmp.go
-//! - pcp.go
+//! (reference: Tailscale net/portmapper/ — portmapper.go, upnp.go, pmp.go, pcp.go)
 
 use std::net::{Ipv4Addr, SocketAddr};
 use std::time::{Duration, Instant};
@@ -16,11 +12,10 @@ pub mod pcp;
 pub mod pmp;
 pub mod upnp;
 
-/// 默认端口映射持续时间（秒）
-/// RFC 推荐 2 小时
+/// Default port mapping lifetime in seconds (RFC-recommended 2 hours).
 pub(crate) const PORT_MAP_LIFETIME_SEC: u32 = 7200;
 
-/// 通过 netdev 发现默认网关的 IPv4 地址
+/// Discovers the default gateway's IPv4 address via netdev.
 async fn discover_gateway() -> Option<Ipv4Addr> {
     tokio::task::spawn_blocking(|| match netdev::get_default_gateway() {
         Ok(gw) => gw.ipv4.into_iter().next(),
@@ -31,7 +26,7 @@ async fn discover_gateway() -> Option<Ipv4Addr> {
     .flatten()
 }
 
-/// 端口映射结果
+/// Port mapping result.
 #[derive(Debug, Clone)]
 pub struct Mapping {
     external: SocketAddr,
@@ -49,22 +44,25 @@ enum MappingInner {
 }
 
 impl Mapping {
-    /// 外部地址
+    /// Returns the external address.
     pub fn external_addr(&self) -> SocketAddr {
         self.external
     }
 
-    /// 映射有效期
+    /// Returns when the mapping expires.
     pub fn good_until(&self) -> Instant {
         self.good_until
     }
 
-    /// 建议续约时间
+    /// Returns the recommended renewal time.
     pub fn renew_after(&self) -> Instant {
         self.renew_after
     }
 
-    /// 释放映射
+    /// Releases the mapping.
+    ///
+    /// # Errors
+    /// Returns an error if the release packet cannot be sent.
     pub async fn release(&self) -> Result<()> {
         match &self.inner {
             MappingInner::Upnp(state) => upnp::release_mapping(state).await,
@@ -74,7 +72,7 @@ impl Mapping {
     }
 }
 
-/// 释放 PMP 映射（发送 lifetime=0 的 UDP 请求）
+/// Releases a PMP mapping (sends a lifetime=0 UDP request).
 async fn release_pmp_mapping(state: &pmp::PmpMappingState) -> Result<()> {
     let pkt = pmp::build_pmp_request_mapping_packet(state.internal_port, state.external_port, 0);
     let socket = tokio::net::UdpSocket::bind("0.0.0.0:0")
@@ -88,7 +86,7 @@ async fn release_pmp_mapping(state: &pmp::PmpMappingState) -> Result<()> {
     Ok(())
 }
 
-/// 释放 PCP 映射（发送 lifetime=0 的 UDP 请求）
+/// Releases a PCP mapping (sends a lifetime=0 UDP request).
 async fn release_pcp_mapping(state: &pcp::PcpMappingState) -> Result<()> {
     let pkt = pcp::build_pcp_request_mapping_packet(
         state.my_ip,
@@ -108,18 +106,18 @@ async fn release_pcp_mapping(state: &pcp::PcpMappingState) -> Result<()> {
     Ok(())
 }
 
-/// 端口映射客户端
+/// Port mapping client.
 ///
-/// 按 PCP -> NAT-PMP -> UPnP 的顺序尝试获取端口映射
+/// Tries to obtain a port mapping in PCP -> NAT-PMP -> UPnP order.
 #[derive(Debug)]
 pub struct PortMapper {
     local_addr: SocketAddr,
-    /// 上次成功获取的映射缓存，用于续约或释放
+    /// Cache of the last successful mapping, for renewal or release.
     last_mapping: Option<Mapping>,
 }
 
 impl PortMapper {
-    /// 创建新的端口映射客户端
+    /// Creates a new port mapping client.
     pub fn new() -> Self {
         Self {
             local_addr: SocketAddr::from(([0, 0, 0, 0], 0)),
@@ -127,20 +125,20 @@ impl PortMapper {
         }
     }
 
-    /// 设置本地地址
+    /// Sets the local address.
     pub fn with_local_addr(mut self, addr: SocketAddr) -> Self {
         self.local_addr = addr;
         self
     }
 
-    /// 分配端口映射
+    /// Allocates a port mapping, trying PCP -> NAT-PMP -> UPnP in order.
     ///
-    /// 按 PCP -> NAT-PMP -> UPnP 的顺序尝试获取端口映射。
+    /// # Errors
+    /// Returns the UPnP error when all methods fail.
     pub async fn allocate_port(&mut self, local_port: u16) -> Result<Mapping> {
         let gateway = discover_gateway().await;
         let my_ip = self.local_ipv4().await;
 
-        // 1. 尝试 PCP
         if let (Some(gw), Some(ip)) = (gateway, my_ip) {
             let pcp_gw = SocketAddr::from((gw, pcp::PCP_DEFAULT_PORT));
             if pcp::probe_gateway(pcp_gw, ip).await {
@@ -163,7 +161,6 @@ impl PortMapper {
             }
         }
 
-        // 2. 尝试 NAT-PMP
         if let Some(gw) = gateway {
             let pmp_gw = SocketAddr::from((gw, pmp::PMP_DEFAULT_PORT));
             if pmp::probe_gateway(pmp_gw).await {
@@ -189,7 +186,6 @@ impl PortMapper {
             }
         }
 
-        // 3. 回退到 UPnP
         self.allocate_upnp(local_port).await
     }
 
@@ -211,15 +207,13 @@ impl PortMapper {
         Ok(mapping)
     }
 
-    /// 获取本地 IPv4 地址（用于 PCP 请求中的 Client IP）
+    /// Returns the local IPv4 address (used as the Client IP in PCP requests).
     async fn local_ipv4(&self) -> Option<Ipv4Addr> {
-        // 如果 local_addr 是具体的 IPv4，直接使用
         if let std::net::IpAddr::V4(ip) = self.local_addr.ip() {
             if !ip.is_unspecified() {
                 return Some(ip);
             }
         }
-        // 否则通过 netdev 获取默认接口的 IPv4
         tokio::task::spawn_blocking(|| match netdev::get_default_interface() {
             Ok(iface) => iface.ipv4_addrs().into_iter().next(),
             Err(_) => None,
@@ -229,7 +223,7 @@ impl PortMapper {
         .flatten()
     }
 
-    /// 强制重新发现：清除缓存的映射信息
+    /// Forces rediscovery by dropping the cached mapping information.
     pub fn invalidate(&mut self) {
         self.last_mapping = None;
     }

@@ -23,10 +23,6 @@ pub const LOCAL_DISCOVERY_INTERVAL: Duration = Duration::from_secs(30);
 /// Cache entry TTL (3 × interval).
 pub const LOCAL_DISCOVERY_CACHE_TTL: Duration = Duration::from_secs(90);
 
-// ---------------------------------------------------------------------------
-// Protobuf Announce message
-// ---------------------------------------------------------------------------
-
 /// Local discovery Announce message.
 ///
 /// Wire format (protobuf):
@@ -39,13 +35,20 @@ pub const LOCAL_DISCOVERY_CACHE_TTL: Duration = Duration::from_secs(90);
 /// ```
 #[derive(Clone, Debug, PartialEq)]
 pub struct Announce {
+    /// Device ID bytes.
     pub id: Vec<u8>,
+    /// Advertised addresses.
     pub addresses: Vec<String>,
+    /// Instance ID distinguishing concurrent runs of the same device.
     pub instance_id: i64,
 }
 
 impl Announce {
-    /// Encode to protobuf bytes.
+    /// Encodes the announce to protobuf bytes.
+    ///
+    /// # Errors
+    /// This function does not perform fallible operations; the `Result` is
+    /// reserved for future use.
     pub fn encode(&self) -> Result<Vec<u8>> {
         let mut buf = Vec::new();
 
@@ -74,7 +77,10 @@ impl Announce {
         Ok(buf)
     }
 
-    /// Decode from protobuf bytes.
+    /// Decodes an announce from protobuf bytes.
+    ///
+    /// # Errors
+    /// Returns an error on invalid UTF-8 in an address field.
     pub fn decode(data: &[u8]) -> Result<Self> {
         let mut announce = Self {
             id: Vec::new(),
@@ -91,7 +97,6 @@ impl Announce {
 
             match (field_num, wire_type) {
                 (1, 2) => {
-                    // bytes
                     if i >= data.len() {
                         break;
                     }
@@ -104,7 +109,6 @@ impl Announce {
                     i += len;
                 }
                 (2, 2) => {
-                    // string
                     if i >= data.len() {
                         break;
                     }
@@ -119,7 +123,6 @@ impl Announce {
                     i += len;
                 }
                 (3, 0) => {
-                    // int64 varint
                     if i >= data.len() {
                         break;
                     }
@@ -127,10 +130,7 @@ impl Announce {
                     announce.instance_id = val as i64;
                     i += consumed;
                 }
-                _ => {
-                    // Unknown field — for our simple 3-field message we can stop.
-                    break;
-                }
+                _ => break,
             }
         }
 
@@ -162,10 +162,6 @@ fn decode_varint(data: &[u8]) -> (u64, usize) {
     }
     (val, i)
 }
-
-// ---------------------------------------------------------------------------
-// LocalDiscovery service
-// ---------------------------------------------------------------------------
 
 /// UDP broadcast / multicast discovery service.
 pub struct LocalDiscovery {
@@ -256,7 +252,6 @@ impl LocalDiscovery {
         packet.extend_from_slice(&LOCAL_DISCOVERY_MAGIC.to_be_bytes());
         packet.extend_from_slice(&payload);
 
-        // IPv4 socket for broadcast
         let v4_socket = UdpSocket::bind("0.0.0.0:0")
             .await
             .map_err(|e| SyncthingError::network(format!("v4 bind failed: {}", e)))?;
@@ -264,10 +259,9 @@ impl LocalDiscovery {
             .set_broadcast(true)
             .map_err(|e| SyncthingError::network(format!("set_broadcast failed: {}", e)))?;
 
-        // IPv6 socket for multicast
         let v6_socket = match UdpSocket::bind("[::]:0").await {
             Ok(s) => {
-                // Default IPV6_MULTICAST_HOPS is already 1 (link-local), no need to set
+                // Default IPV6_MULTICAST_HOPS is already 1 (link-local), no need to set.
                 Some(s)
             }
             Err(e) => {
@@ -337,17 +331,14 @@ impl LocalDiscovery {
         let broadcast_interval = tokio::time::interval(LOCAL_DISCOVERY_INTERVAL);
         tokio::pin!(broadcast_interval);
 
-        // IPv4 listen socket
         let v4_bind = SocketAddr::from(([0, 0, 0, 0], self.port));
         let v4_socket = UdpSocket::bind(v4_bind)
             .await
             .map_err(|e| SyncthingError::network(format!("v4 listen bind failed: {}", e)))?;
 
-        // IPv6 listen socket (optional)
         let v6_socket =
             match UdpSocket::bind(SocketAddr::from(([0, 0, 0, 0, 0, 0, 0, 0], self.port))).await {
                 Ok(s) => {
-                    // Join the multicast group on all IPv6-capable interfaces
                     if let Err(e) = s.join_multicast_v6(&LOCAL_DISCOVERY_V6_MULTICAST, 0) {
                         tracing::warn!("Failed to join IPv6 multicast group: {}", e);
                     }
@@ -402,31 +393,27 @@ impl LocalDiscovery {
                     return;
                 }
                 match Announce::decode(&buf[4..len]) {
-                    Ok(announce) => {
-                        match DeviceId::from_bytes(&announce.id) {
-                            Ok(device_id) if device_id != *self_device_id => {
-                                tracing::info!(
-                                    "Local discovery: {} at {:?} (from {})",
+                    Ok(announce) => match DeviceId::from_bytes(&announce.id) {
+                        Ok(device_id) if device_id != *self_device_id => {
+                            tracing::info!(
+                                "Local discovery: {} at {:?} (from {})",
+                                device_id,
+                                announce.addresses,
+                                addr
+                            );
+                            let _ = event_tx
+                                .send(super::events::DiscoveryEvent::DeviceDiscovered {
                                     device_id,
-                                    announce.addresses,
-                                    addr
-                                );
-                                let _ = event_tx
-                                    .send(super::events::DiscoveryEvent::DeviceDiscovered {
-                                        device_id,
-                                        addresses: announce.addresses,
-                                        source: super::events::DiscoverySource::Local,
-                                    })
-                                    .await;
-                            }
-                            Ok(_) => {
-                                // Own announce, ignore
-                            }
-                            Err(e) => {
-                                tracing::debug!("Bad device id in announce: {}", e);
-                            }
+                                    addresses: announce.addresses,
+                                    source: super::events::DiscoverySource::Local,
+                                })
+                                .await;
                         }
-                    }
+                        Ok(_) => {}
+                        Err(e) => {
+                            tracing::debug!("Bad device id in announce: {}", e);
+                        }
+                    },
                     Err(e) => {
                         tracing::debug!("Bad announce from {}: {}", addr, e);
                     }
@@ -438,10 +425,6 @@ impl LocalDiscovery {
         }
     }
 }
-
-// ---------------------------------------------------------------------------
-// Tests
-// ---------------------------------------------------------------------------
 
 #[cfg(test)]
 mod tests {

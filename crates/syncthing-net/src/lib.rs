@@ -1,7 +1,7 @@
-//! Syncthing 网络层库 (简化版)
+//! Network layer library for the Syncthing implementation.
 //!
-//! 提供TCP连接、TLS握手、BEP协议实现的简化接口
-//! 以及 NAT 穿透功能（STUN/UPnP）
+//! Provides TCP connections, TLS handshaking, BEP protocol helpers,
+//! and NAT traversal (STUN / UPnP / port mapping).
 
 pub mod connection;
 #[doc(hidden)]
@@ -49,12 +49,12 @@ pub use tcp_transport::{TcpDialer, TcpTransport, DEFAULT_TCP_PORT};
 pub use tls::{accept_tls, connect_tls, generate_certificate, SyncthingTlsConfig};
 pub use upnp::{discover_upnp, UpnpClient, UpnpMappingManager, DEFAULT_MAPPING_DURATION};
 
-/// TLS 相关常量
+/// TLS-related constants.
 pub mod tls_constants {
     pub use super::tls::{CERT_FILE_NAME, KEY_FILE_NAME};
 }
 
-/// 版本信息
+/// Crate version.
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 #[cfg(test)]

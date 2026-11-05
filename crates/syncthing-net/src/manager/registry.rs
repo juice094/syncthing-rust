@@ -8,20 +8,25 @@ use crate::connection::{BepConnection, ConnectionEvent};
 
 use super::{ConnectionEntry, ConnectionManager};
 
-/// register_connection 内部动作枚举：在释放 DashMap 锁后根据此枚举执行 .await 操作
+/// Internal action for `register_connection`: decided while holding the
+/// DashMap lock, executed after it is released (all `.await` points happen
+/// outside the lock; see "docs/design/ADR-20261105-connection-race.md").
 enum RegisterAction {
-    /// 替换旧连接（关闭旧连接后插入新连接）
+    /// Replace the old connection (close it, then insert the new one).
     Replace,
-    /// 拒绝新连接（关闭新连接，保留旧连接）
+    /// Reject the new connection (close it, keep the old one).
     RejectNew,
-    /// 插入到现有的 nested DashMap
+    /// Insert into the existing nested DashMap.
     InsertExisting,
-    /// 创建新的 nested DashMap
+    /// Create a new nested DashMap.
     CreateNew,
 }
 
 impl ConnectionManager {
-    /// 注册新连接
+    /// Registers a new connection, resolving any simultaneous-dial race.
+    ///
+    /// # Errors
+    /// This function currently always returns `Ok`.
     pub(crate) async fn register_connection(
         &self,
         device_id: DeviceId,
@@ -32,15 +37,9 @@ impl ConnectionManager {
         let conn_id = conn.id();
         let new_conn_type = conn.connection_type();
 
-        // 连接竞争解决（Connection Race Resolution）
-        // 当双方同时建立连接时，各自会有 incoming + outgoing 两条连接。
-        // Syncthing 规则：device ID 较小的设备保留 incoming，关闭 outgoing；
-        //                 device ID 较大的设备保留 outgoing，关闭 incoming。
-        // 这样双方保留的是同一个物理连接。
-        //
-        // T-F1 FIX: 必须在 .await 前释放 DashMap 锁，否则会与其他试图获取同 shard 的
-        //          任务死锁（DashMap 内部使用 parking_lot::RwLock，跨 .await 持锁
-        //          导致 tokio worker 阻塞，连接风暴时可能耗尽所有 worker）。
+        // Decide under the lock, act after releasing it: holding a DashMap
+        // (parking_lot) lock across .await can deadlock sibling tasks and
+        // exhaust tokio workers during connection storms.
         let (action, old_conn_to_close) = {
             if let Some(nested) = self.connections.get(&device_id) {
                 if let Some(existing) = nested.iter().next() {
@@ -49,22 +48,12 @@ impl ConnectionManager {
                     let old_conn_arc = Arc::clone(&existing.value().conn);
 
                     let should_replace = if old_conn_type == new_conn_type {
-                        // 同类型连接：保留旧的，避免频繁切换
                         false
                     } else {
-                        // 不同类型：根据 device ID 竞争解决
                         let local_smaller = self.local_device_id.0 < device_id.0;
                         match (old_conn_type, new_conn_type) {
-                            (ConnectionType::Outgoing, ConnectionType::Incoming) => {
-                                // 旧 outgoing，新 incoming
-                                // local_smaller → 保留 incoming（新）
-                                local_smaller
-                            }
-                            (ConnectionType::Incoming, ConnectionType::Outgoing) => {
-                                // 旧 incoming，新 outgoing
-                                // local_larger → 保留 outgoing（新）
-                                !local_smaller
-                            }
+                            (ConnectionType::Outgoing, ConnectionType::Incoming) => local_smaller,
+                            (ConnectionType::Incoming, ConnectionType::Outgoing) => !local_smaller,
                             _ => {
                                 warn!(
                                     "Unexpected connection type combination in race resolution: old={:?}, new={:?}",
@@ -92,21 +81,18 @@ impl ConnectionManager {
             } else {
                 (RegisterAction::CreateNew, None)
             }
-        }; // ← DashMap 锁在此 drop
+        };
 
-        // 现在可以安全 .await
         if let Some(old_conn) = old_conn_to_close {
             old_conn.close().await.ok();
         }
 
         match action {
             RegisterAction::Replace => {
-                // 重新获取锁并替换
                 if let Some(nested) = self.connections.get_mut(&device_id) {
                     nested.clear();
                     nested.insert(conn_id, ConnectionEntry::new(Arc::clone(&conn)));
                 } else {
-                    // 极少情况：在我们 close 时被其他任务删除了，直接重建
                     let nested = dashmap::DashMap::new();
                     nested.insert(conn_id, ConnectionEntry::new(Arc::clone(&conn)));
                     self.connections.insert(device_id, nested);
@@ -134,7 +120,6 @@ impl ConnectionManager {
 
         self.conn_id_index.insert(conn_id, device_id);
 
-        // 清除 pending 状态并重置重试计数（连接成功）
         {
             let mut pending = self.pending_connections.write().await;
             if pending.remove(&device_id).is_some() {
@@ -149,10 +134,8 @@ impl ConnectionManager {
             retries.remove(&device_id);
         }
 
-        // 设置连接的设备ID
         conn.set_device_id(device_id);
 
-        // 从待连接列表中移除
         self.pending_connections.write().await.remove(&device_id);
 
         info!(
@@ -160,12 +143,10 @@ impl ConnectionManager {
             device_id, conn_id, new_conn_type
         );
 
-        // 触发回调
         if let Some(callback) = self.on_connected.read().as_ref() {
             callback(device_id);
         }
 
-        // 发送事件
         let _ = self
             .event_tx
             .send(ConnectionEvent::Connected { device_id })
@@ -174,7 +155,10 @@ impl ConnectionManager {
         Ok(())
     }
 
-    /// 注册传入连接（设备ID已知时直接注册）
+    /// Registers an incoming connection (registers directly when the device ID is known).
+    ///
+    /// # Errors
+    /// Returns an error if the connection has no device ID.
     pub(crate) async fn register_incoming(
         &self,
         conn: Arc<BepConnection>,
@@ -194,7 +178,10 @@ impl ConnectionManager {
         }
     }
 
-    /// 断开与设备的连接
+    /// Disconnects all connections to the device and schedules a reconnect when applicable.
+    ///
+    /// # Errors
+    /// This function currently always returns `Ok`.
     pub(crate) async fn disconnect(
         &self,
         device_id: &DeviceId,
@@ -209,13 +196,11 @@ impl ConnectionManager {
                 self.conn_id_index.remove(&conn_id);
             }
 
-            // 触发回调
             if let Some(callback) = self.on_disconnected.read().as_ref() {
                 callback(*device_id, reason.to_string());
             }
         }
 
-        // 触发重连（如果适用）
         if self.should_reconnect(device_id, reason) {
             self.schedule_reconnect(*device_id).await;
         }
@@ -223,7 +208,10 @@ impl ConnectionManager {
         Ok(())
     }
 
-    /// 断开指定连接
+    /// Disconnects the connection with the given ID.
+    ///
+    /// # Errors
+    /// This function currently always returns `Ok`.
     pub(crate) async fn disconnect_connection(
         &self,
         conn_id: &uuid::Uuid,
@@ -242,11 +230,9 @@ impl ConnectionManager {
 
         if !device_has_other_conns {
             self.connections.remove(&device_id);
-            // 触发重连（如果适用）
             if self.should_reconnect(&device_id, reason) {
                 self.schedule_reconnect(device_id).await;
             }
-            // 触发回调
             if let Some(callback) = self.on_disconnected.read().as_ref() {
                 callback(device_id, reason.to_string());
             }
@@ -255,7 +241,7 @@ impl ConnectionManager {
         Ok(())
     }
 
-    /// 断开所有连接
+    /// Disconnects all connections with the given reason.
     pub(crate) async fn disconnect_all(&self, reason: &str) {
         let devices: Vec<DeviceId> = self.connections.iter().map(|e| *e.key()).collect();
 

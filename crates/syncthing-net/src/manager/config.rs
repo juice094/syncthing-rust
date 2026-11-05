@@ -5,18 +5,18 @@ use syncthing_core::RetryConfig;
 
 use crate::tcp_transport::DEFAULT_TCP_PORT;
 
-/// 连接管理器配置
+/// Connection manager configuration.
 #[derive(Debug, Clone)]
 pub struct ConnectionManagerConfig {
-    /// 监听地址
+    /// Listen address.
     pub listen_addr: SocketAddr,
-    /// 重试配置
+    /// Retry configuration.
     pub retry_config: RetryConfig,
-    /// 心跳间隔
+    /// Heartbeat interval.
     pub heartbeat_interval: Duration,
-    /// 连接超时
+    /// Idle connection timeout.
     pub connection_timeout: Duration,
-    /// 最大并发连接数
+    /// Maximum concurrent connections (enforced at accept time).
     pub max_connections: usize,
 }
 

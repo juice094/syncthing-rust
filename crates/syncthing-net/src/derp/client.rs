@@ -1,12 +1,12 @@
-//! DERP 客户端
+//! DERP client.
 //!
-//! 负责连接到 DERP 中继服务器，注册本地 device_id，
-//! 并发送/接收被中继的数据包。
+//! Connects to a DERP relay server, registers the local device_id, and
+//! sends/receives relayed packets.
 //!
-//! 未来扩展：
-//! - 自动选择最优 DERP 服务器（基于 RTT）
-//! - DERP 服务器链式转发（Client → Relay A → Relay B → Peer）
-//! - 与 `TransportRegistry` 集成，将 DERP 作为 `Transport` 实现
+//! Future extensions:
+//! - Automatic selection of the best DERP server (by RTT)
+//! - DERP server chaining (Client -> Relay A -> Relay B -> Peer)
+//! - Integration with `TransportRegistry` as a `Transport` implementation
 
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -22,16 +22,16 @@ use syncthing_core::{DeviceId, Result, SyncthingError};
 
 use crate::derp::protocol::{Frame, PROTOCOL_VERSION};
 
-/// DERP 客户端配置
+/// DERP client configuration.
 #[derive(Debug, Clone)]
 pub struct DerpClientConfig {
-    /// DERP 服务器地址
+    /// DERP server address.
     pub server_addr: SocketAddr,
-    /// 本地 device_id
+    /// Local device ID.
     pub device_id: DeviceId,
-    /// 心跳间隔
+    /// Keepalive interval.
     pub keep_alive_interval: Duration,
-    /// 连接超时
+    /// Connect timeout.
     pub connect_timeout: Duration,
 }
 
@@ -46,31 +46,35 @@ impl Default for DerpClientConfig {
     }
 }
 
-/// DERP 客户端状态
+/// DERP client state.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DerpClientState {
+    /// Not connected.
     Disconnected,
+    /// Connection handshake in progress.
     Connecting,
+    /// Connected and registered.
     Connected,
 }
 
 /// Type alias for the inbound packet channel.
 type PacketRx = mpsc::Receiver<(DeviceId, Vec<u8>)>;
 
-/// DERP 客户端
+/// DERP client.
 ///
-/// 通过 TCP 连接到 DERP 服务器，维护长连接并转发数据包。
+/// Connects to the DERP server over TCP and maintains a long-lived connection
+/// for packet forwarding.
 pub struct DerpClient {
     config: DerpClientConfig,
     state: Arc<Mutex<DerpClientState>>,
-    /// 出站数据包发送通道（应用层 → DERP 客户端）
+    /// Outbound packet channel (app layer -> DERP client).
     packet_tx: mpsc::Sender<(DeviceId, Vec<u8>)>,
-    /// 入站数据包接收通道（DERP 客户端 → 应用层）
+    /// Inbound packet channel (DERP client -> app layer).
     packet_rx: Arc<Mutex<PacketRx>>,
 }
 
 impl DerpClient {
-    /// 创建新的 DERP 客户端（不立即连接）
+    /// Creates a new DERP client (does not connect yet).
     pub fn new(config: DerpClientConfig) -> Self {
         let (packet_tx, packet_rx) = mpsc::channel(256);
         Self {
@@ -81,12 +85,16 @@ impl DerpClient {
         }
     }
 
-    /// 获取出站数据包发送通道
+    /// Returns the outbound packet sender channel.
     pub fn packet_sender(&self) -> mpsc::Sender<(DeviceId, Vec<u8>)> {
         self.packet_tx.clone()
     }
 
-    /// 连接到 DERP 服务器并启动事件循环
+    /// Connects to the DERP server and starts the event loop.
+    ///
+    /// # Errors
+    /// Returns an error if already connecting/connected, the TCP connect
+    /// fails or times out, or the handshake frame exchange fails.
     pub async fn connect(&self) -> Result<()> {
         let mut state = self.state.lock().await;
         if *state != DerpClientState::Disconnected {
@@ -113,7 +121,6 @@ impl DerpClient {
 
         let (mut read_half, mut write_half) = stream.into_split();
 
-        // 发送 ClientInfo
         let client_info = Frame::ClientInfo {
             device_id: self.config.device_id,
             version: PROTOCOL_VERSION,
@@ -123,7 +130,6 @@ impl DerpClient {
             SyncthingError::connection(format!("DERP ClientInfo send failed: {}", e))
         })?;
 
-        // 读取 ServerInfo
         let mut len_buf = [0u8; 4];
         read_half.read_exact(&mut len_buf).await.map_err(|e| {
             SyncthingError::connection(format!("DERP ServerInfo read failed: {}", e))
@@ -154,7 +160,6 @@ impl DerpClient {
 
         *self.state.lock().await = DerpClientState::Connected;
 
-        // 启动读写任务
         let packet_rx = Arc::clone(&self.packet_rx);
         let packet_tx = self.packet_tx.clone();
         let keep_alive_interval = self.config.keep_alive_interval;
@@ -181,7 +186,6 @@ impl DerpClient {
                     combined.extend_from_slice(&payload_buf);
                     match crate::derp::protocol::Frame::decode(&mut combined) {
                         Ok(Some((Frame::RecvPacket { from, payload }, _))) => {
-                            // 将收到的数据包转发给应用层
                             if let Err(e) = packet_tx.send((from, payload)).await {
                                 warn!("DERP failed to forward packet to app layer: {}", e);
                             }
@@ -213,8 +217,8 @@ impl DerpClient {
                                 break;
                             }
                         }
-                        // 实际生产代码：从 packet_rx 接收数据并发送
-                        // 当前 stub：仅保活
+                        // Outbound packet forwarding (packet_rx -> wire) is not
+                        // implemented yet; the write task only sends keepalives.
                     }
                 }
             };
@@ -230,6 +234,7 @@ impl DerpClient {
         Ok(())
     }
 
+    /// Returns the current client state.
     pub async fn state(&self) -> DerpClientState {
         *self.state.lock().await
     }

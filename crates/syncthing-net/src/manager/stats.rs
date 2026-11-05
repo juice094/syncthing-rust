@@ -4,23 +4,29 @@ use tokio::time::sleep;
 
 use syncthing_core::{DeviceId, RetryConfig};
 
-/// 管理器统计信息
+/// Aggregated manager statistics.
 #[derive(Debug, Clone)]
 pub struct ManagerStats {
+    /// Number of currently active connections.
     pub active_connections: usize,
+    /// Number of connected devices.
     pub connected_devices: usize,
+    /// Number of pending connection attempts.
     pub pending_connections: usize,
+    /// Total bytes sent across all connections.
     pub total_bytes_sent: u64,
+    /// Total bytes received across all connections.
     pub total_bytes_received: u64,
 }
 
-/// 重连调度器
+/// Reconnect scheduler with per-device backoff.
 pub struct ReconnectScheduler {
     config: RetryConfig,
     pending: DashMap<DeviceId, JoinHandle<()>>,
 }
 
 impl ReconnectScheduler {
+    /// Creates a scheduler using the given retry configuration.
     pub fn new(config: RetryConfig) -> Self {
         Self {
             config,
@@ -28,11 +34,12 @@ impl ReconnectScheduler {
         }
     }
 
+    /// Schedules a reconnect task for the device after backoff, replacing any
+    /// existing scheduled task for the same device.
     pub fn schedule<F>(&self, device_id: DeviceId, attempt: u32, task: F)
     where
         F: std::future::Future<Output = ()> + Send + 'static,
     {
-        // 取消现有的重连任务
         if let Some((_, handle)) = self.pending.remove(&device_id) {
             handle.abort();
         }
@@ -46,6 +53,7 @@ impl ReconnectScheduler {
         self.pending.insert(device_id, handle);
     }
 
+    /// Cancels the scheduled reconnect task for the device, if any.
     pub fn cancel(&self, device_id: &DeviceId) {
         if let Some((_, handle)) = self.pending.remove(device_id) {
             handle.abort();

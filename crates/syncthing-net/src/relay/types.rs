@@ -1,17 +1,17 @@
-//! Relay 协议类型定义与错误类型
+//! Relay protocol type definitions and error types.
 
-/// Relay 客户端错误
+/// Relay client error.
 #[derive(Debug)]
 pub enum RelayError {
-    /// 协议级错误（编解码、非法消息等）
+    /// Protocol-level error (codec, illegal message, etc.).
     Protocol(String),
-    /// 连接已关闭
+    /// Connection closed.
     ConnectionClosed,
-    /// 服务器拒绝
+    /// Rejected by the server.
     Rejected(String),
-    /// 中继已满
+    /// Relay is full.
     RelayFull,
-    /// 对端设备未在中继上注册
+    /// Peer device is not registered on the relay.
     PeerNotFound,
 }
 
@@ -35,5 +35,5 @@ impl From<RelayError> for syncthing_core::SyncthingError {
     }
 }
 
-/// Relay 操作结果
+/// Result of a relay operation.
 pub type Result<T> = std::result::Result<T, RelayError>;

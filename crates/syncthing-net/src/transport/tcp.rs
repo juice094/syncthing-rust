@@ -1,7 +1,7 @@
-//! 原始 TCP 传输实现
+//! Raw TCP transport implementation.
 //!
-//! `RawTcpTransport` 是 `Transport` trait 的 TCP 实现，
-//! 只负责建立原始 TCP 连接，不做 TLS 握手，不做 BEP Hello。
+//! `RawTcpTransport` is the TCP implementation of the `Transport` trait; it
+//! only establishes the raw TCP connection — no TLS handshake, no BEP Hello.
 
 use std::net::SocketAddr;
 use tokio::net::{TcpListener, TcpStream};
@@ -14,14 +14,16 @@ use syncthing_core::{
 
 use super::keepalive::apply_tcp_keepalive;
 
-/// 原始 TCP 传输（不做 TLS，不做 BEP Hello）。
+/// Raw TCP transport (no TLS, no BEP Hello).
 ///
-/// 这是 `Transport` trait 的 TCP 实现，只负责建立原始 TCP 连接。
-/// TLS 握手和 BEP Hello 由上层（`ConnectionManager` / `BepSession`）统一处理。
+/// This is the TCP implementation of the `Transport` trait; it only
+/// establishes the raw TCP connection. TLS handshake and BEP Hello are handled
+/// uniformly by the upper layer (`ConnectionManager` / `BepSession`).
 #[derive(Debug)]
 pub struct RawTcpTransport;
 
 impl RawTcpTransport {
+    /// Creates a new raw TCP transport.
     pub fn new() -> Self {
         Self
     }
@@ -70,7 +72,7 @@ impl Transport for RawTcpTransport {
     }
 }
 
-/// 原始 TCP 监听器
+/// Raw TCP listener.
 #[derive(Debug)]
 pub struct RawTcpListener {
     listener: TcpListener,
@@ -98,7 +100,7 @@ impl TransportListener for RawTcpListener {
     }
 }
 
-/// 原始 TCP 流，实现 ReliablePipe
+/// Raw TCP stream implementing `ReliablePipe`.
 #[derive(Debug)]
 pub struct RawTcpStream {
     stream: TcpStream,

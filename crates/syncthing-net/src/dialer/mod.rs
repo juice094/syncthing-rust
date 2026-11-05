@@ -1,6 +1,7 @@
-//! 并行拨号器
+//! Parallel dialer.
 //!
-//! 实现多地址并发拨号、地址质量评分和最优连接选择
+//! Implements concurrent dialing over multiple addresses, per-address quality
+//! scoring, and best-connection selection.
 
 use std::cmp::Reverse;
 use std::net::SocketAddr;
@@ -24,64 +25,59 @@ use crate::tls::SyncthingTlsConfig;
 /// Result type for a dial task.
 pub type DialResult = Result<(Arc<BepConnection>, SocketAddr, Duration), SyncthingError>;
 
-/// 地址类型偏好（影响评分排序）
+/// Address type preference (affects scoring order).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum AddressTypePreference {
-    /// 中继地址（优先级最低）
+    /// Relay address (lowest priority).
     Relay,
-    /// 公网地址
+    /// Public (WAN) address.
     Wan,
-    /// 局域网地址（优先级最高）
+    /// LAN address (highest priority).
     Lan,
 }
 
-/// 地址评分记录
+/// Per-address quality score record.
 #[derive(Debug, Clone)]
 pub struct AddressScore {
-    /// 目标地址
+    /// Target address.
     pub address: SocketAddr,
-    /// 最近握手RTT
+    /// Most recent handshake RTT.
     pub rtt: Option<Duration>,
-    /// 成功次数
+    /// Success count.
     pub success_count: u32,
-    /// 失败次数
+    /// Failure count.
     pub failure_count: u32,
-    /// 上次成功时间
+    /// Time of last success.
     pub last_success: Option<Instant>,
-    /// 地址类型偏好
+    /// Address type preference.
     pub address_type: AddressTypePreference,
 }
 
 impl AddressScore {
-    /// 计算该地址的当前得分
+    /// Computes the current score for this address.
     ///
-    /// 得分规则：
-    /// - LAN 基础分 > WAN 基础分 > Relay 基础分
-    /// - RTT 越低加分越多（上限 400ms）
-    /// - 每次成功 +10_000
-    /// - 最近 1 小时内有成功额外加分
-    /// - 每次失败 -50_000
+    /// Scoring rules:
+    /// - Base: LAN > WAN > Relay.
+    /// - Lower RTT scores higher (capped at 400 ms).
+    /// - +10_000 per success; extra credit for successes within the last hour.
+    /// - -50_000 per failure.
     pub fn score(&self) -> u64 {
         let mut score: u64 = 0;
 
-        // 类型基础分
         match self.address_type {
             AddressTypePreference::Lan => score += 1_000_000,
             AddressTypePreference::Wan => score += 500_000,
             AddressTypePreference::Relay => score += 100_000,
         }
 
-        // RTT 奖励：越低越好
         if let Some(rtt) = self.rtt {
             let rtt_ms = rtt.as_millis() as u64;
             let rtt_bonus = 400_u64.saturating_sub(rtt_ms);
             score += rtt_bonus * 100;
         }
 
-        // 成功次数奖励
         score += self.success_count as u64 * 10_000;
 
-        // 最近成功奖励（1 小时内递减）
         if let Some(last) = self.last_success {
             let elapsed_secs = last.elapsed().as_secs();
             if elapsed_secs < 3600 {
@@ -89,17 +85,16 @@ impl AddressScore {
             }
         }
 
-        // 失败惩罚
         score = score.saturating_sub(self.failure_count as u64 * 50_000);
 
         score
     }
 }
 
-/// 拨号连接器抽象（便于测试替换）
+/// Dial connector abstraction (allows test doubles).
 #[async_trait::async_trait]
 pub trait DialConnector: Send + Sync {
-    /// 对单个地址执行 TCP + BEP 握手
+    /// Performs the TCP + BEP handshake against a single address.
     async fn connect(
         &self,
         addr: SocketAddr,
@@ -110,7 +105,7 @@ pub trait DialConnector: Send + Sync {
     ) -> Result<Arc<BepConnection>, SyncthingError>;
 }
 
-/// 基于真实 TCP 传输的连接器
+/// Connector backed by the real TCP transport.
 pub struct TcpBepConnector;
 
 #[async_trait::async_trait]
@@ -127,10 +122,10 @@ impl DialConnector for TcpBepConnector {
     }
 }
 
-/// Relay 拨号连接器抽象
+/// Relay dial connector abstraction.
 #[async_trait::async_trait]
 pub trait RelayDialConnector: Send + Sync {
-    /// 通过 relay 服务器建立 BEP 连接
+    /// Establishes a BEP connection through a relay server.
     async fn connect_via_relay(
         &self,
         relay_url: &str,
@@ -141,7 +136,7 @@ pub trait RelayDialConnector: Send + Sync {
     ) -> Result<Arc<BepConnection>, SyncthingError>;
 }
 
-/// 基于真实 Relay 协议的连接器
+/// Connector backed by the real Relay protocol.
 pub struct RelayBepConnector;
 
 #[async_trait::async_trait]
@@ -154,7 +149,6 @@ impl RelayDialConnector for RelayBepConnector {
         device_name: &str,
         tls_config: &Arc<SyncthingTlsConfig>,
     ) -> Result<Arc<BepConnection>, SyncthingError> {
-        // 若本端 device ID 较小，在 relay 握手前短暂退让。
         crate::manager::handshake::pre_handshake_yield(local_device_id, target_device_id).await;
 
         crate::relay::connect_bep_via_relay(relay_url, target_device_id, device_name, tls_config)
@@ -162,28 +156,29 @@ impl RelayDialConnector for RelayBepConnector {
     }
 }
 
-/// 并行拨号器
+/// Parallel dialer.
 ///
-/// 维护每地址的历史评分，支持对多个候选地址并发拨号并返回最先成功的连接。
+/// Maintains per-address history scores and concurrently dials multiple
+/// candidate addresses, returning the first successful connection.
 pub struct ParallelDialer {
-    /// 每地址评分表
+    /// Per-address score table.
     scores: DashMap<SocketAddr, AddressScore>,
-    /// 每设备地址评分（冗余备份，便于管理器快速查询）
+    /// Per-device address scores (redundant cache for fast manager lookups).
     device_scores: DashMap<DeviceId, Vec<AddressScore>>,
-    /// 本地设备ID
+    /// Local device ID.
     local_device_id: DeviceId,
-    /// 设备名称（用于 Hello）
+    /// Device name (used in the Hello).
     device_name: String,
-    /// 默认连接器（向后兼容）
+    /// Default connector (backward compatible).
     connector: RwLock<Arc<dyn DialConnector>>,
-    /// Scheme → 连接器映射（支持多传输路由）
+    /// Scheme → connector map (multi-transport routing).
     connectors: DashMap<String, Arc<dyn DialConnector>>,
-    /// Relay 连接器（可选）
+    /// Optional relay connector.
     relay_connector: Option<Arc<dyn RelayDialConnector>>,
 }
 
 impl ParallelDialer {
-    /// 使用自定义连接器创建
+    /// Creates a dialer with a custom default connector.
     pub fn new(
         local_device_id: DeviceId,
         device_name: String,
@@ -200,36 +195,36 @@ impl ParallelDialer {
         }
     }
 
-    /// 使用默认 TCP 连接器创建
+    /// Creates a dialer with the default TCP connector and a relay connector.
     pub fn with_tcp_connector(local_device_id: DeviceId, device_name: String) -> Self {
         let mut dialer = Self::new(local_device_id, device_name, Arc::new(TcpBepConnector));
         dialer.relay_connector = Some(Arc::new(RelayBepConnector));
         dialer
     }
 
-    /// 设置 Relay 连接器
+    /// Sets the relay connector.
     pub fn set_relay_connector(&mut self, connector: Arc<dyn RelayDialConnector>) {
         self.relay_connector = Some(connector);
     }
 
-    /// 更换底层连接器（用于 Transport 注册后切换）
+    /// Replaces the default connector (used when transports register).
     pub fn set_connector(&self, connector: Arc<dyn DialConnector>) {
         *self.connector.write() = connector;
     }
 
-    /// 注册 scheme-specific 连接器
+    /// Registers a scheme-specific connector.
     pub fn register_connector(&self, scheme: impl Into<String>, connector: Arc<dyn DialConnector>) {
         let scheme = scheme.into();
         debug!("Registering dial connector for scheme: {}", scheme);
         self.connectors.insert(scheme, connector);
     }
 
-    /// 获取已注册的 scheme 列表
+    /// Returns the list of registered schemes.
     pub fn registered_schemes(&self) -> Vec<String> {
         self.connectors.iter().map(|e| e.key().clone()).collect()
     }
 
-    /// 获取或初始化某地址的评分记录
+    /// Returns the score record for an address, initializing it if absent.
     pub fn get_or_create_score(&self, addr: SocketAddr) -> AddressScore {
         self.scores
             .entry(addr)
@@ -244,7 +239,7 @@ impl ParallelDialer {
             .clone()
     }
 
-    /// 记录某地址拨号成功
+    /// Records a successful dial to an address.
     pub fn record_success(&self, addr: SocketAddr, rtt: Duration) {
         if let Some(mut score) = self.scores.get_mut(&addr) {
             score.rtt = Some(rtt);
@@ -253,17 +248,20 @@ impl ParallelDialer {
         }
     }
 
-    /// 记录某地址拨号失败
+    /// Records a failed dial to an address.
     pub fn record_failure(&self, addr: SocketAddr) {
         if let Some(mut score) = self.scores.get_mut(&addr) {
             score.failure_count += 1;
         }
     }
 
-    /// 并发拨号（向后兼容包装）
+    /// Concurrent dial (backward-compatible wrapper).
     ///
-    /// 调用 `dial_with_schemes` 并传入 `None` 作为 scheme 列表，
-    /// 所有 direct 地址使用默认连接器。
+    /// Calls `dial_with_schemes` with `None` as the scheme list, so all direct
+    /// addresses use the default connector.
+    ///
+    /// # Errors
+    /// Returns an error if no candidates exist or all dial attempts fail.
     pub async fn dial(
         &self,
         device_id: DeviceId,
@@ -283,12 +281,15 @@ impl ParallelDialer {
         .await
     }
 
-    /// 并发拨号（支持 scheme-aware 路由）
+    /// Concurrent dial with scheme-aware routing.
     ///
-    /// 1. 按历史评分对地址排序（direct 与 relay 共同参与排序）
-    /// 2. 取前 3 个候选并发拨号
-    /// 3. 第一个成功握手者胜出，其余任务立即取消
-    /// 4. 更新该地址的评分统计
+    /// 1. Sorts direct and relay candidates by historical score.
+    /// 2. Dials the top 3 candidates concurrently.
+    /// 3. The first successful handshake wins; remaining tasks are aborted.
+    /// 4. Score statistics are updated for the winner and the losers.
+    ///
+    /// # Errors
+    /// Returns an error if no candidates exist or all dial attempts fail.
     pub async fn dial_with_schemes(
         &self,
         device_id: DeviceId,
@@ -302,11 +303,9 @@ impl ParallelDialer {
             return Err(SyncthingError::connection("no addresses to dial"));
         }
 
-        // 构造候选列表：(is_relay, socket_addr, optional_relay_url, score, scheme)
         let mut candidates: Vec<(bool, SocketAddr, Option<String>, AddressScore, String)> =
             Vec::new();
 
-        // Direct candidates
         for (i, addr) in addresses.iter().enumerate() {
             let scheme = address_schemes
                 .as_ref()
@@ -315,7 +314,6 @@ impl ParallelDialer {
             candidates.push((false, *addr, None, self.get_or_create_score(*addr), scheme));
         }
 
-        // Relay candidates
         for url in &relay_urls {
             if let Ok((relay_addr, _)) = parse_relay_url(url) {
                 let score = self
@@ -340,10 +338,8 @@ impl ParallelDialer {
             }
         }
 
-        // 按评分降序排序
         candidates.sort_by_key(|(_, _, _, s, _)| Reverse(s.score()));
 
-        // 最多并发 3 个
         let top: Vec<(bool, SocketAddr, Option<String>, AddressScore, String)> =
             candidates.into_iter().take(3).collect();
 
@@ -357,7 +353,6 @@ impl ParallelDialer {
                 .collect::<Vec<_>>()
         );
 
-        // 启动并发拨号任务
         let mut tasks: FuturesUnordered<JoinHandle<DialResult>> = FuturesUnordered::new();
 
         for (is_relay, addr, relay_url, _score, scheme) in &top {
@@ -367,7 +362,7 @@ impl ParallelDialer {
                     Some(c) => Arc::clone(c),
                     None => continue,
                 };
-                // T-F2: is_relay=true 由构造方保证 relay_url 一定为 Some
+                // INVARIANT (T-F2): is_relay=true candidates always carry a relay URL.
                 let Some(url) = relay_url.as_ref().cloned() else {
                     debug!("Relay candidate missing URL, skipping");
                     continue;
@@ -442,7 +437,6 @@ impl ParallelDialer {
         while let Some(result) = tasks.next().await {
             match result {
                 Ok(Ok((conn, addr, rtt))) => {
-                    // 成功：取消剩余任务
                     for task in tasks {
                         task.abort();
                     }
@@ -470,7 +464,6 @@ impl ParallelDialer {
             }
         }
 
-        // 全部失败：为每个参与的地址记录失败（若尚未记录）
         for (_, addr, _, _, _) in &top {
             self.record_failure(*addr);
         }
@@ -479,23 +472,23 @@ impl ParallelDialer {
             .unwrap_or_else(|| SyncthingError::connection("all parallel dial attempts failed")))
     }
 
-    /// 获取内部评分表引用（供管理器查询）
+    /// Returns a reference to the internal score table (for manager queries).
     pub fn address_scores(&self) -> &DashMap<SocketAddr, AddressScore> {
         &self.scores
     }
 
-    /// 获取某设备的所有地址评分
+    /// Returns all address scores cached for a device.
     pub fn device_address_scores(&self, device_id: &DeviceId) -> Option<Vec<AddressScore>> {
         self.device_scores.get(device_id).map(|e| e.clone())
     }
 
-    /// 批量更新某设备的地址评分缓存
+    /// Replaces the cached address score list for a device.
     pub fn update_device_scores(&self, device_id: DeviceId, scores: Vec<AddressScore>) {
         self.device_scores.insert(device_id, scores);
     }
 }
 
-/// 根据 IP 特征推断地址类型偏好
+/// Infers the address type preference from IP characteristics.
 fn infer_address_type(addr: SocketAddr) -> AddressTypePreference {
     use std::net::IpAddr;
 

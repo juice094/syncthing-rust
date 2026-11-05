@@ -1,13 +1,13 @@
-//! 代理传输层
+//! Proxy transport layer.
 //!
-//! 支持通过 HTTP CONNECT 和 SOCKS5 代理建立出站连接，
-//! 用于突破企业/校园网的出站限制。
+//! Supports establishing outbound connections through HTTP CONNECT and SOCKS5
+//! proxies, for networks with restricted egress (enterprise/campus).
 //!
-//! 代理配置优先从环境变量读取：
+//! Proxy configuration is read from environment variables first:
 //! - `HTTP_PROXY` / `http_proxy`
 //! - `SOCKS5_PROXY` / `socks5_proxy` / `ALL_PROXY`
 //!
-//! 未来扩展：SOCKS5 用户名/密码认证、代理链。
+//! Future extensions: SOCKS5 username/password auth, proxy chains.
 
 use std::net::SocketAddr;
 use std::pin::Pin;
@@ -22,33 +22,39 @@ use syncthing_core::{
     BoxedPipe, Result, SyncthingError, Transport, TransportListener, TransportType,
 };
 
-/// 代理配置
+/// Proxy configuration.
 #[derive(Debug, Clone)]
 pub struct ProxyConfig {
-    /// 代理类型
+    /// Proxy type.
     pub proxy_type: ProxyType,
-    /// 代理服务器地址
+    /// Proxy server address.
     pub addr: SocketAddr,
-    /// 认证信息（可选）
+    /// Optional authentication.
     pub auth: Option<ProxyAuth>,
 }
 
+/// Proxy type.
 #[derive(Debug, Clone)]
 pub enum ProxyType {
+    /// HTTP CONNECT tunneling.
     HttpConnect,
+    /// SOCKS5.
     Socks5,
 }
 
+/// Proxy authentication credentials.
 #[derive(Debug, Clone)]
 pub struct ProxyAuth {
+    /// Username.
     pub username: String,
+    /// Password.
     pub password: String,
 }
 
 impl ProxyConfig {
-    /// 从环境变量读取代理配置
+    /// Reads proxy configuration from environment variables.
     ///
-    /// 优先级：SOCKS5_PROXY > ALL_PROXY > HTTP_PROXY
+    /// Priority: SOCKS5_PROXY > ALL_PROXY > HTTP_PROXY.
     pub fn from_env() -> Option<Self> {
         let socks = std::env::var("SOCKS5_PROXY")
             .or_else(|_| std::env::var("socks5_proxy"))
@@ -73,7 +79,7 @@ impl ProxyConfig {
     }
 
     fn parse_socks_url(url: &str) -> Option<Self> {
-        // 简单解析：socks5://host:port 或 host:port
+        // Minimal parsing: socks5://host:port or host:port.
         let addr_str = url.strip_prefix("socks5://").unwrap_or(url);
         addr_str.parse().ok().map(|addr| Self {
             proxy_type: ProxyType::Socks5,
@@ -83,7 +89,7 @@ impl ProxyConfig {
     }
 
     fn parse_http_url(url: &str) -> Option<Self> {
-        // 简单解析：http://host:port 或 host:port
+        // Minimal parsing: http://host:port or host:port.
         let addr_str = url.strip_prefix("http://").unwrap_or(url);
         addr_str.parse().ok().map(|addr| Self {
             proxy_type: ProxyType::HttpConnect,
@@ -93,20 +99,22 @@ impl ProxyConfig {
     }
 }
 
-/// 代理传输层。
+/// Proxy transport layer.
 ///
-/// 包装底层 TCP 连接，通过代理服务器建立到目标的隧道。
-/// 当前支持 HTTP CONNECT 和 SOCKS5（无认证）。
+/// Wraps the underlying TCP connection, tunneling to the target through a
+/// proxy server. Currently supports HTTP CONNECT and SOCKS5 (no auth).
 #[derive(Debug)]
 pub struct ProxiedTransport {
     config: ProxyConfig,
 }
 
 impl ProxiedTransport {
+    /// Creates a transport with the given proxy configuration.
     pub fn new(config: ProxyConfig) -> Self {
         Self { config }
     }
 
+    /// Creates a transport from environment variables, or `None` if unconfigured.
     pub fn from_env() -> Option<Self> {
         ProxyConfig::from_env().map(Self::new)
     }
@@ -133,12 +141,10 @@ impl Transport for ProxiedTransport {
             target, self.config.proxy_type, self.config.addr
         );
 
-        // 1. 连接到代理服务器
         let proxy_stream = TcpStream::connect(self.config.addr)
             .await
             .map_err(|e| SyncthingError::connection(format!("proxy connect failed: {}", e)))?;
 
-        // 2. 根据代理类型建立隧道
         match self.config.proxy_type {
             ProxyType::HttpConnect => {
                 let stream = http_connect_handshake(proxy_stream, target).await?;
@@ -160,7 +166,7 @@ impl Transport for ProxiedTransport {
     }
 }
 
-/// HTTP CONNECT 握手
+/// HTTP CONNECT handshake.
 async fn http_connect_handshake(mut stream: TcpStream, target: SocketAddr) -> Result<TcpStream> {
     let request = format!("CONNECT {} HTTP/1.1\r\nHost: {}\r\n\r\n", target, target);
 
@@ -169,7 +175,6 @@ async fn http_connect_handshake(mut stream: TcpStream, target: SocketAddr) -> Re
         .await
         .map_err(|e| SyncthingError::connection(format!("proxy write failed: {}", e)))?;
 
-    // 读取响应（简单解析，期待 200）
     let mut buf = vec![0u8; 1024];
     let n = tokio::io::AsyncReadExt::read(&mut stream, &mut buf)
         .await
@@ -189,11 +194,12 @@ async fn http_connect_handshake(mut stream: TcpStream, target: SocketAddr) -> Re
     Ok(stream)
 }
 
-/// SOCKS5 握手（RFC 1928）
+/// SOCKS5 handshake (RFC 1928).
 ///
-/// 仅实现无认证（0x00）方式，不支持用户名/密码或 GSSAPI。
+/// Only the no-auth (0x00) method is implemented; username/password and
+/// GSSAPI are not supported.
 async fn socks5_handshake(mut stream: TcpStream, target: SocketAddr) -> Result<TcpStream> {
-    // 1. 认证协商：VER=5, NMETHODS=1, METHOD=0x00 (no auth)
+    // 1. Auth negotiation: VER=5, NMETHODS=1, METHOD=0x00 (no auth).
     let auth_request = [0x05u8, 0x01, 0x00];
     tokio::io::AsyncWriteExt::write_all(&mut stream, &auth_request)
         .await
@@ -217,8 +223,8 @@ async fn socks5_handshake(mut stream: TcpStream, target: SocketAddr) -> Result<T
         )));
     }
 
-    // 2. CONNECT 请求
-    let mut request = vec![0x05u8, 0x01, 0x00]; // VER, CMD=CONNECT, RSV
+    // 2. CONNECT request: VER, CMD=CONNECT, RSV.
+    let mut request = vec![0x05u8, 0x01, 0x00];
 
     match target {
         SocketAddr::V4(addr) => {
@@ -237,7 +243,7 @@ async fn socks5_handshake(mut stream: TcpStream, target: SocketAddr) -> Result<T
         .await
         .map_err(|e| SyncthingError::connection(format!("socks5 connect write failed: {}", e)))?;
 
-    // 3. 读取响应头（4 bytes: VER, REP, RSV, ATYP）
+    // 3. Read the response header (4 bytes: VER, REP, RSV, ATYP).
     let mut response_header = [0u8; 4];
     tokio::io::AsyncReadExt::read_exact(&mut stream, &mut response_header)
         .await
@@ -255,7 +261,7 @@ async fn socks5_handshake(mut stream: TcpStream, target: SocketAddr) -> Result<T
         )));
     }
 
-    // 4. 读取 BND.ADDR + BND.PORT（隧道建立后丢弃）
+    // 4. Read BND.ADDR + BND.PORT (discarded once the tunnel is up).
     match response_header[3] {
         0x01 => {
             // IPv4: 4 bytes addr + 2 bytes port
@@ -302,7 +308,7 @@ async fn socks5_handshake(mut stream: TcpStream, target: SocketAddr) -> Result<T
     Ok(stream)
 }
 
-/// 代理管道（底层就是 TcpStream，隧道已建立）
+/// Proxy pipe (the tunnel is already established over a TcpStream).
 struct ProxyPipe {
     stream: TcpStream,
     local_addr: Option<SocketAddr>,

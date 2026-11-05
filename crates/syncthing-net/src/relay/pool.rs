@@ -1,6 +1,7 @@
-//! Relay Pool 客户端
+//! Relay Pool client.
 //!
-//! 从 Syncthing 官方 relay pool (`relays.syncthing.net/endpoint`) 获取可用中继服务器列表。
+//! Fetches the list of available relay servers from the official Syncthing
+//! relay pool (`relays.syncthing.net/endpoint`).
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -9,26 +10,29 @@ use tracing::{debug, warn};
 
 use syncthing_core::{Result, SyncthingError};
 
-/// 默认 relay pool endpoint
+/// Default relay pool endpoint.
 pub const DEFAULT_RELAY_POOL_URL: &str = "https://relays.syncthing.net/endpoint";
 
-/// Relay pool 响应中的单条记录
+/// Single entry in a relay pool response.
 #[derive(Debug, serde::Deserialize)]
 struct RelayInfo {
     url: String,
 }
 
-/// Relay pool 响应根结构
+/// Root structure of a relay pool response.
 #[derive(Debug, serde::Deserialize)]
 struct RelayPoolResponse {
     relays: Vec<RelayInfo>,
 }
 
-/// 从官方 relay pool 获取可用 relay 地址列表
+/// Fetches the list of available relay addresses from the official relay pool.
 ///
-/// # 返回
-/// `relay://host:port/?id=...` 格式的 URL 列表。
-/// 若请求失败或解析失败，返回错误（调用方应优雅降级）。
+/// Returns URLs in `relay://host:port/?id=...` format. On request or parse
+/// failure returns an error (callers should degrade gracefully).
+///
+/// # Errors
+/// Returns an error if the HTTP client cannot be built, the request fails,
+/// or the response is not successful/valid JSON.
 pub async fn fetch_relay_pool(endpoint: Option<&str>) -> Result<Vec<String>> {
     let url = endpoint.unwrap_or(DEFAULT_RELAY_POOL_URL);
     let client = reqwest::Client::builder()
@@ -60,9 +64,10 @@ pub async fn fetch_relay_pool(endpoint: Option<&str>) -> Result<Vec<String>> {
     Ok(urls)
 }
 
-/// 获取单个默认 relay 地址（从 pool 中取第一个）
+/// Fetches a single default relay address (first entry of the pool).
 ///
-/// 适合快速启动场景：若 pool 获取失败，返回 `None`，调用方可回退到配置中的硬编码地址。
+/// For quick-start scenarios: returns `None` when the pool fetch fails, so the
+/// caller can fall back to a hardcoded address from configuration.
 pub async fn fetch_default_relay() -> Option<String> {
     match fetch_relay_pool(None).await {
         Ok(mut urls) if !urls.is_empty() => urls.pop(),
@@ -77,10 +82,10 @@ pub async fn fetch_default_relay() -> Option<String> {
     }
 }
 
-/// 对 relay 地址列表进行 TCP 健康检查，返回可达的子集
+/// TCP-level health check over a relay address list, returning the reachable subset.
 ///
-/// 每个地址尝试 TCP connect，超时 `timeout_secs` 秒。
-/// 仅检查 TCP 层连通性，不完成 TLS 握手，避免过重开销。
+/// Each address gets a TCP connect attempt with a `timeout_secs` timeout. TLS is
+/// not attempted, keeping the check lightweight.
 pub async fn filter_healthy_relays(urls: Vec<String>, timeout_secs: u64) -> Vec<String> {
     use super::dial::parse_relay_url;
 
@@ -114,13 +119,12 @@ pub async fn filter_healthy_relays(urls: Vec<String>, timeout_secs: u64) -> Vec<
     healthy
 }
 
-/// 对 relay 地址列表进行 TLS 级健康检查，返回可达的子集
+/// TLS-level health check over a relay address list, returning the reachable subset.
 ///
-/// 每个地址尝试：解析 URL → TCP connect → TLS 握手（ALPN = `bep-relay`）→
-/// 发送 `JoinRelayRequest` → 接收 `ResponseSuccess` → 断开连接。
-/// 超时 `timeout_secs` 秒。
-///
-/// 当 `need` > 0 时，收集到 `need` 个健康 relay 后立即停止，减少 startup latency。
+/// Per address: parse URL -> TCP connect -> TLS handshake (ALPN = `bep-relay`)
+/// -> send `JoinRelayRequest` -> receive success response -> disconnect, all
+/// within `timeout_secs`. When `need` > 0, stops after collecting `need`
+/// healthy relays to reduce startup latency.
 pub async fn filter_healthy_relays_tls(
     urls: Vec<String>,
     timeout_secs: u64,
@@ -151,7 +155,6 @@ pub async fn filter_healthy_relays_tls(
             }
         };
 
-        // TCP + TLS 握手
         let mut client = match tokio::time::timeout(
             Duration::from_secs(timeout_secs),
             RelayProtocolClient::connect(addr, &rustls_config),
@@ -169,12 +172,11 @@ pub async fn filter_healthy_relays_tls(
             }
         };
 
-        // JoinRelay，验证 relay 接受连接
         let join_result =
             tokio::time::timeout(Duration::from_secs(timeout_secs), client.join_relay()).await;
 
-        // 无论 join_relay 成败，立即显式关闭 protocol 连接，
-        // 避免 relay 服务器因状态残留而拒绝后续 listener 注册。
+        // Close the protocol connection explicitly so the relay server does
+        // not refuse later listener registrations due to leftover state.
         drop(client);
 
         match join_result {

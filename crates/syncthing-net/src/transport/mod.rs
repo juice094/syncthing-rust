@@ -1,14 +1,15 @@
-//! 传输层实现
+//! Transport layer implementations.
 //!
-//! 提供 Transport trait 的具体实现：
-//! - `RawTcpTransport`: 原始 TCP（不做 TLS，不做 BEP Hello）
-//! - 未来: `WebSocketTransport`, `QuicTransport`, `ProxiedTransport`
+//! Concrete implementations of the `Transport` trait:
+//! - `RawTcpTransport`: raw TCP (no TLS, no BEP Hello)
+//! - Future: `WebSocketTransport`, `QuicTransport`, `ProxiedTransport`
 //!
-//! 设计原则：每个 Transport 只负责建立原始字节管道，
-//! TLS/BEP 由上层统一处理。
+//! Design principle: each Transport only establishes the raw byte pipe;
+//! TLS/BEP are handled uniformly by the upper layer.
 //!
-//! **注意**：`Transport` trait 本身定义在 `syncthing_core::traits` 中，
-//! 本模块只提供具体实现和注册表工具。
+//! **Note**: the `Transport` trait itself is defined in
+//! `syncthing_core::traits`; this module only provides concrete
+//! implementations and the registry.
 
 pub mod bep_adapter;
 pub mod keepalive;
@@ -21,27 +22,29 @@ pub mod websocket;
 use std::sync::Arc;
 use syncthing_core::Transport;
 
-/// 传输层注册表，支持多传输共存与最优路径选择。
+/// Transport registry supporting coexistence of multiple transports and
+/// best-path selection.
 ///
-/// 未来扩展：根据 RTT、丢包率、带宽估计等 `PathQuality` 指标动态选择最优传输。
+/// Future extension: dynamically select the best transport by `PathQuality`
+/// metrics (RTT, packet loss, bandwidth estimate).
 pub struct TransportRegistry {
     transports: Vec<Arc<dyn Transport>>,
 }
 
 impl TransportRegistry {
-    /// 创建空注册表
+    /// Creates an empty registry.
     pub fn new() -> Self {
         Self {
             transports: Vec::new(),
         }
     }
 
-    /// 注册一个传输层实现
+    /// Registers a transport implementation.
     pub fn register(&mut self, transport: Arc<dyn Transport>) {
         self.transports.push(transport);
     }
 
-    /// 根据 scheme 查找传输层
+    /// Looks up a transport by scheme.
     pub fn get(&self, scheme: &str) -> Option<Arc<dyn Transport>> {
         self.transports
             .iter()
@@ -49,12 +52,12 @@ impl TransportRegistry {
             .cloned()
     }
 
-    /// 返回所有已注册的 scheme 列表
+    /// Returns all registered schemes.
     pub fn schemes(&self) -> Vec<&'static str> {
         self.transports.iter().map(|t| t.scheme()).collect()
     }
 
-    /// 选择默认传输（目前返回第一个注册的）
+    /// Selects the default transport (currently the first registered one).
     pub fn default_transport(&self) -> Option<Arc<dyn Transport>> {
         self.transports.first().cloned()
     }

@@ -18,7 +18,7 @@ use syncthing_core::{Result, SyncthingError};
 use super::{DEFAULT_MESSAGE_TIMEOUT, MAX_BEP_HEADER_SIZE, MAX_BEP_MESSAGE_SIZE};
 
 impl BepConnection {
-    /// 启动读取任务
+    /// Spawns the read task decoding incoming BEP frames.
     pub(crate) fn spawn_read_task(&self) -> tokio::task::JoinHandle<Result<()>> {
         let read_half = Arc::clone(&self.read_half);
         let event_tx = self.event_tx.clone();
@@ -31,13 +31,10 @@ impl BepConnection {
                 .await
                 .take()
                 .expect("INVARIANT: start_reader called only once per connection");
-            // 空闲超时计数器 — 当 header length read 连续超时 3 次后，
-            // 判定连接已死，避免在僵尸连接上无限自旋。
             let mut idle_timeouts: u32 = 0;
             const MAX_IDLE_TIMEOUTS: u32 = 3;
 
             loop {
-                // 读取 2 字节 header length
                 let mut hdr_len_buf = [0u8; 2];
                 match timeout(
                     DEFAULT_MESSAGE_TIMEOUT,
@@ -46,7 +43,7 @@ impl BepConnection {
                 .await
                 {
                     Ok(Ok(_)) => {
-                        idle_timeouts = 0; // 有数据到达，重置计数器
+                        idle_timeouts = 0;
                     }
                     Ok(Err(e)) => return Err(SyncthingError::Io(e)),
                     Err(_elapsed) => {
@@ -72,7 +69,6 @@ impl BepConnection {
                     )));
                 }
 
-                // 读取 header 字节
                 let mut hdr_buf = vec![0u8; hdr_len];
                 match timeout(DEFAULT_MESSAGE_TIMEOUT, read_half.read_exact(&mut hdr_buf)).await {
                     Ok(Ok(_)) => {}
@@ -80,7 +76,6 @@ impl BepConnection {
                     Err(_) => return Err(SyncthingError::timeout("header read timeout")),
                 }
 
-                // 读取 4 字节 message length
                 let mut msg_len_buf = [0u8; 4];
                 match timeout(
                     DEFAULT_MESSAGE_TIMEOUT,
@@ -100,7 +95,6 @@ impl BepConnection {
                     )));
                 }
 
-                // 读取 message 字节
                 let mut msg_buf = vec![0u8; msg_len];
                 match timeout(DEFAULT_MESSAGE_TIMEOUT, read_half.read_exact(&mut msg_buf)).await {
                     Ok(Ok(_)) => {}
@@ -115,12 +109,9 @@ impl BepConnection {
                 stats.messages_received += 1;
                 drop(stats);
 
-                // 任何收到的消息都是对端存活证据：心跳检查器（spawn_heartbeat_task）
-                // 依据 last_pong 判活，此前该字段初始化后从未更新，导致连接固定
-                // 在 3×heartbeat_interval（默认 90s）后被误杀。
+                // Any received message is liveness evidence for the heartbeat checker.
                 *inner.last_pong.write() = std::time::Instant::now();
 
-                // 解码 BEP Header
                 let bep_header = match <bep_protocol::messages::Header as prost::Message>::decode(
                     &hdr_buf[..],
                 ) {
@@ -140,7 +131,6 @@ impl BepConnection {
                     )));
                 };
 
-                // 处理 LZ4 压缩
                 let msg_buf = if header.compressed {
                     if msg_buf.len() < 4 {
                         return Err(SyncthingError::protocol(
@@ -181,7 +171,7 @@ impl BepConnection {
         })
     }
 
-    /// 启动写入任务
+    /// Spawns the write task encoding and sending outgoing BEP frames.
     pub(crate) fn spawn_write_task(
         &self,
         message_rx: Arc<Mutex<mpsc::Receiver<Message>>>,
@@ -208,7 +198,6 @@ impl BepConnection {
                 }
                 let hdr_len = hdr_buf.len();
 
-                // LZ4 compress payload if header requests it
                 let (payload, msg_len) = if msg.header.compressed && !msg.payload.is_empty() {
                     let uncompressed = msg.payload.as_ref();
                     let compressed =
@@ -225,19 +214,15 @@ impl BepConnection {
                     (msg.payload.to_vec(), msg.payload.len())
                 };
 
-                // header length (2 bytes)
                 if let Err(e) = write_half.write_all(&(hdr_len as u16).to_be_bytes()).await {
                     return Err(SyncthingError::Io(e));
                 }
-                // header
                 if let Err(e) = write_half.write_all(&hdr_buf).await {
                     return Err(SyncthingError::Io(e));
                 }
-                // message length (4 bytes)
                 if let Err(e) = write_half.write_all(&(msg_len as u32).to_be_bytes()).await {
                     return Err(SyncthingError::Io(e));
                 }
-                // payload
                 if !payload.is_empty() {
                     if let Err(e) = write_half.write_all(&payload).await {
                         return Err(SyncthingError::Io(e));
@@ -257,7 +242,7 @@ impl BepConnection {
         })
     }
 
-    /// 启动心跳任务
+    /// Spawns the heartbeat task closing the connection after 3 missed intervals.
     pub(crate) fn spawn_heartbeat_task(&self) -> tokio::task::JoinHandle<()> {
         let inner = Arc::clone(&self.inner);
         let heartbeat_interval = inner.heartbeat_interval;
@@ -270,7 +255,6 @@ impl BepConnection {
 
                 let last_pong = *inner.last_pong.read();
                 if last_pong.elapsed() > heartbeat_interval * 3 {
-                    // 心跳超时，应该断开连接
                     warn!(
                         "Heartbeat timeout (interval={:?}), closing connection",
                         heartbeat_interval

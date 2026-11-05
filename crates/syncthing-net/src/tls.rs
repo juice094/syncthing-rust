@@ -1,6 +1,7 @@
-//! TLS 配置和握手
+//! TLS configuration and handshaking.
 //!
-//! Syncthing使用自定义的TLS配置进行设备认证
+//! Syncthing uses a custom TLS setup where device authentication happens at
+//! the BEP protocol layer, not the TLS layer; see "docs/design/ADR-20261105-tls-device-auth.md".
 
 use std::path::Path;
 use std::sync::{Arc, Once};
@@ -29,29 +30,32 @@ use tracing::{debug, info, warn};
 
 use syncthing_core::{DeviceId, Result, SyncthingError};
 
-/// TLS握手超时
+/// Timeout for the TLS handshake.
 pub const TLS_HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(10);
 
-/// 默认证书文件名
+/// Default certificate file name.
 pub const CERT_FILE_NAME: &str = "cert.pem";
-/// 默认私钥文件名
+/// Default private key file name.
 pub const KEY_FILE_NAME: &str = "key.pem";
 
-/// Syncthing TLS配置
+/// Syncthing TLS configuration.
 #[derive(Debug)]
 pub struct SyncthingTlsConfig {
-    /// 设备证书
+    /// Device certificate chain.
     pub cert_chain: Vec<CertificateDer<'static>>,
-    /// 设备私钥
+    /// Device private key.
     pub private_key: PrivateKeyDer<'static>,
-    /// 设备ID（从证书派生）
+    /// Device ID derived from the certificate.
     pub device_id: DeviceId,
 }
 
 impl SyncthingTlsConfig {
-    /// 从PEM文件加载证书和私钥
+    /// Loads the certificate chain and private key from PEM data.
+    ///
+    /// # Errors
+    /// Returns an error if no certificate or no private key is present, or the
+    /// private key is invalid.
     pub fn from_pem(cert_pem: &[u8], key_pem: &[u8]) -> Result<Self> {
-        // 解析证书
         let cert_chain: Vec<CertificateDer<'static>> = CertificateDer::pem_slice_iter(cert_pem)
             .filter_map(|r| r.ok())
             .collect();
@@ -60,13 +64,11 @@ impl SyncthingTlsConfig {
             return Err(SyncthingError::Tls("no certificates found".to_string()));
         }
 
-        // 解析私钥
         let private_key = PrivateKeyDer::pem_slice_iter(key_pem)
             .next()
             .ok_or_else(|| SyncthingError::Tls("no private key found".to_string()))?
             .map_err(|e| SyncthingError::Tls(format!("invalid private key: {}", e)))?;
 
-        // 计算设备ID（从证书公钥的SHA-256）
         let device_id = Self::derive_device_id(&cert_chain[0])?;
 
         Ok(Self {
@@ -76,24 +78,28 @@ impl SyncthingTlsConfig {
         })
     }
 
-    /// 从证书派生设备ID
+    /// Derives the device ID from a certificate (SHA-256 of the certificate DER).
+    ///
+    /// # Errors
+    /// Returns an error if the device ID cannot be constructed from the hash.
     pub fn derive_device_id(cert: &CertificateDer) -> Result<DeviceId> {
         use sha2::{Digest, Sha256};
 
-        // 计算证书DER编码的SHA-256
         let hash = Sha256::digest(cert);
 
         DeviceId::from_bytes(&hash)
     }
 
-    /// 加载或生成证书
+    /// Loads an existing certificate from the config directory, or generates
+    /// and persists a new one if absent or unreadable.
     ///
-    /// 如果证书文件已存在，则加载现有证书；否则生成新证书并保存
+    /// # Errors
+    /// Returns an error if the directory cannot be created, existing files
+    /// cannot be read, or the new certificate cannot be written.
     pub async fn load_or_generate(config_dir: &Path) -> Result<Self> {
         let cert_path = config_dir.join(CERT_FILE_NAME);
         let key_path = config_dir.join(KEY_FILE_NAME);
 
-        // 确保证书目录存在
         if !config_dir.exists() {
             fs::create_dir_all(config_dir).await.map_err(|e| {
                 SyncthingError::config(format!("failed to create config directory: {}", e))
@@ -101,7 +107,6 @@ impl SyncthingTlsConfig {
         }
 
         if cert_path.exists() && key_path.exists() {
-            // 加载现有证书
             info!("Loading existing certificate from {:?}", cert_path);
 
             let cert_pem = fs::read(&cert_path)
@@ -124,16 +129,13 @@ impl SyncthingTlsConfig {
                         "Failed to load existing certificate: {}. Generating new one...",
                         e
                     );
-                    // 继续生成新证书
                 }
             }
         }
 
-        // 生成新证书
         info!("Generating new certificate...");
         let (cert_pem, key_pem) = generate_self_signed_cert()?;
 
-        // 保存证书
         fs::write(&cert_path, &cert_pem)
             .await
             .map_err(|e| SyncthingError::Tls(format!("failed to write cert file: {}", e)))?;
@@ -141,7 +143,7 @@ impl SyncthingTlsConfig {
             .await
             .map_err(|e| SyncthingError::Tls(format!("failed to write key file: {}", e)))?;
 
-        // SAFETY: 加固私钥文件权限，防止多用户系统上其他用户读取
+        // SAFETY: Harden private key file permissions against other users on multi-user systems.
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
@@ -153,17 +155,19 @@ impl SyncthingTlsConfig {
                     "Failed to set restrictive permissions on private key file"
                 );
             }
-            // 证书文件也限制为仅所有者读写（不含公钥敏感信息，但保守处理）
+            // Restrict the certificate file to owner read/write as well (conservative).
             let _ = tokio::fs::set_permissions(&cert_path, mode_0600).await;
         }
 
         info!("New certificate saved to {:?}", cert_path);
 
-        // 加载刚保存的证书
         Self::from_pem(&cert_pem, &key_pem)
     }
 
-    /// 创建服务器配置
+    /// Builds the server configuration (ALPN = `bep/1.0`).
+    ///
+    /// # Errors
+    /// Returns a rustls error if the configuration is invalid.
     pub fn server_config(&self) -> std::result::Result<ServerConfig, rustls::Error> {
         let mut config = ServerConfig::builder()
             .with_client_cert_verifier(Arc::new(SyncthingClientCertVerifier))
@@ -172,7 +176,10 @@ impl SyncthingTlsConfig {
         Ok(config)
     }
 
-    /// 创建客户端配置
+    /// Builds the client configuration (ALPN = `bep/1.0`).
+    ///
+    /// # Errors
+    /// Returns a rustls error if the configuration is invalid.
     pub fn client_config(&self) -> std::result::Result<ClientConfig, rustls::Error> {
         let mut config = ClientConfig::builder()
             .dangerous()
@@ -182,7 +189,10 @@ impl SyncthingTlsConfig {
         Ok(config)
     }
 
-    /// Relay Protocol 服务端配置（ALPN = `bep-relay`）
+    /// Builds the Relay Protocol server configuration (ALPN = `bep-relay`).
+    ///
+    /// # Errors
+    /// Returns a rustls error if the configuration is invalid.
     pub fn relay_server_config(&self) -> std::result::Result<ServerConfig, rustls::Error> {
         let mut config = ServerConfig::builder()
             .with_client_cert_verifier(Arc::new(SyncthingClientCertVerifier))
@@ -191,7 +201,10 @@ impl SyncthingTlsConfig {
         Ok(config)
     }
 
-    /// 获取 Relay Protocol 用的 TLS 客户端配置（ALPN = `bep-relay`）
+    /// Builds the Relay Protocol client configuration (ALPN = `bep-relay`).
+    ///
+    /// # Errors
+    /// Returns a rustls error if the configuration is invalid.
     pub fn relay_client_config(&self) -> std::result::Result<ClientConfig, rustls::Error> {
         let mut config = ClientConfig::builder()
             .dangerous()
@@ -201,21 +214,19 @@ impl SyncthingTlsConfig {
         Ok(config)
     }
 
-    /// 获取设备ID
+    /// Returns the device ID.
     pub fn device_id(&self) -> DeviceId {
         self.device_id
     }
 
-    /// 获取证书PEM内容
+    /// Returns the certificate chain re-encoded as PEM.
     pub fn cert_pem(&self) -> Vec<u8> {
         use base64::{engine::general_purpose::STANDARD, Engine as _};
 
-        // 将证书链转换为PEM格式
         let mut pem = Vec::new();
         for cert in &self.cert_chain {
             pem.extend_from_slice(b"-----BEGIN CERTIFICATE-----\n");
             let base64_cert = STANDARD.encode(cert);
-            // 每64字符一行
             for chunk in base64_cert.as_bytes().chunks(64) {
                 pem.extend_from_slice(chunk);
                 pem.push(b'\n');
@@ -225,11 +236,10 @@ impl SyncthingTlsConfig {
         pem
     }
 
-    /// 获取私钥PEM内容
+    /// Returns the private key re-encoded as PKCS#8 PEM (empty if not PKCS#8).
     pub fn key_pem(&self) -> Vec<u8> {
         use base64::{engine::general_purpose::STANDARD, Engine as _};
 
-        // 将私钥转换为PKCS8 PEM格式
         match &self.private_key {
             PrivateKeyDer::Pkcs8(pkcs8) => {
                 let mut pem = Vec::new();
@@ -247,10 +257,11 @@ impl SyncthingTlsConfig {
     }
 }
 
-/// Syncthing服务器端客户端证书验证器
+/// Server-side client-certificate verifier.
 ///
-/// 接受任何客户端证书，使TLS层仅作为加密隧道，
-/// 设备认证在BEP协议层完成。
+/// Accepts any client certificate: the TLS layer acts only as an encrypted
+/// tunnel, and device authentication happens at the BEP protocol layer.
+/// See "docs/design/ADR-20261105-tls-device-auth.md".
 #[derive(Debug)]
 struct SyncthingClientCertVerifier;
 
@@ -301,11 +312,14 @@ impl rustls::server::danger::ClientCertVerifier for SyncthingClientCertVerifier 
     }
 }
 
-/// Syncthing证书验证器
+/// Client-side server-certificate verifier.
 ///
-/// Syncthing使用自定义的证书验证逻辑：
-/// 1. 不验证证书链
-/// 2. 验证证书公钥与已知的设备ID匹配
+/// Custom Syncthing verification logic:
+/// 1. No certificate-chain validation.
+/// 2. The certificate public key is checked against the known device ID at the
+///    protocol layer instead.
+///
+/// See "docs/design/ADR-20261105-tls-device-auth.md".
 #[derive(Debug)]
 struct SyncthingCertVerifier;
 
@@ -318,8 +332,7 @@ impl rustls::client::danger::ServerCertVerifier for SyncthingCertVerifier {
         _ocsp_response: &[u8],
         _now: rustls::pki_types::UnixTime,
     ) -> std::result::Result<rustls::client::danger::ServerCertVerified, rustls::Error> {
-        // Syncthing在协议层进行设备验证
-        // TLS层接受任何证书
+        // Device verification happens at the BEP protocol layer; TLS accepts any certificate.
         Ok(rustls::client::danger::ServerCertVerified::assertion())
     }
 
@@ -356,41 +369,37 @@ impl rustls::client::danger::ServerCertVerifier for SyncthingCertVerifier {
     }
 }
 
-/// 生成自签名证书
-///
-/// 使用rcgen库生成与Syncthing兼容的自签名证书
+/// Generates a self-signed certificate compatible with Syncthing using rcgen.
 fn generate_self_signed_cert() -> Result<(Vec<u8>, Vec<u8>)> {
     use chrono::Datelike;
     use rcgen::{CertificateParams, KeyPair};
 
-    // 生成密钥对（使用系统默认算法）
     let key_pair = KeyPair::generate()
         .map_err(|e| SyncthingError::Tls(format!("failed to generate key pair: {}", e)))?;
 
-    // 创建证书参数
     let mut params = CertificateParams::new(vec!["syncthing".to_string()])
         .map_err(|e| SyncthingError::Tls(format!("failed to create cert params: {}", e)))?;
 
-    // 设置证书有效期（约20年，与Syncthing默认相同）
+    // ~20 year validity, matching the Syncthing default.
     let now = chrono::Utc::now();
-    // 使用 rcgen 的时间格式
     params.not_before = rcgen::date_time_ymd(now.year(), now.month() as u8, now.day() as u8);
     let end = now + chrono::Duration::days(365 * 20);
     params.not_after = rcgen::date_time_ymd(end.year(), end.month() as u8, end.day() as u8);
 
-    // 使用密钥对生成证书
     let cert = params
         .self_signed(&key_pair)
         .map_err(|e| SyncthingError::Tls(format!("failed to create certificate: {}", e)))?;
 
-    // 导出PEM格式
     let cert_pem = cert.pem();
     let key_pem = key_pair.serialize_pem();
 
     Ok((cert_pem.into_bytes(), key_pem.into_bytes()))
 }
 
-/// 服务器端TLS握手
+/// Performs the server-side TLS handshake over a TCP stream.
+///
+/// # Errors
+/// Returns an error on handshake timeout or TLS failure.
 pub async fn accept_tls(
     stream: TcpStream,
     config: ServerConfig,
@@ -409,7 +418,11 @@ pub async fn accept_tls(
     Ok(tls_stream)
 }
 
-/// 客户端端TLS握手
+/// Performs the client-side TLS handshake over a TCP stream.
+///
+/// # Errors
+/// Returns an error if the server name is invalid, or on handshake timeout or
+/// TLS failure.
 pub async fn connect_tls(
     stream: TcpStream,
     config: ClientConfig,
@@ -435,7 +448,10 @@ pub async fn connect_tls(
     Ok(tls_stream)
 }
 
-/// 从TLS流中提取对端设备ID
+/// Extracts the peer device ID from a server-side TLS stream.
+///
+/// # Errors
+/// Returns an error if the peer presented no certificate.
 fn peer_device_id_from_stream<S>(
     tls_stream: &tokio_rustls::server::TlsStream<S>,
 ) -> Result<DeviceId> {
@@ -452,6 +468,10 @@ fn peer_device_id_from_stream<S>(
     SyncthingTlsConfig::derive_device_id(peer_cert)
 }
 
+/// Extracts the peer device ID from a client-side TLS stream.
+///
+/// # Errors
+/// Returns an error if the peer presented no certificate.
 fn peer_device_id_from_client_stream<S>(
     tls_stream: &tokio_rustls::client::TlsStream<S>,
 ) -> Result<DeviceId> {
@@ -468,7 +488,12 @@ fn peer_device_id_from_client_stream<S>(
     SyncthingTlsConfig::derive_device_id(peer_cert)
 }
 
-/// 服务器端TLS握手（泛型流，用于iroh）
+/// Performs the server-side TLS handshake over a generic stream, returning the
+/// TLS stream and the authenticated peer device ID.
+///
+/// # Errors
+/// Returns an error if the server config cannot be built, or on handshake
+/// timeout, TLS failure, or missing peer certificate.
 pub async fn accept_tls_stream<S>(
     stream: S,
     config: &SyncthingTlsConfig,
@@ -499,7 +524,15 @@ where
     Ok((tls_stream, device_id))
 }
 
-/// 客户端端TLS握手（泛型流，用于iroh）
+/// Performs the client-side TLS handshake over a generic stream, returning the
+/// TLS stream and the authenticated peer device ID.
+///
+/// When `remote_device` is `Some`, the peer device ID is checked against it.
+///
+/// # Errors
+/// Returns an error if the client config cannot be built, on handshake timeout
+/// or TLS failure, on missing peer certificate, or when the peer device ID
+/// does not match `remote_device`.
 pub async fn connect_tls_stream<S>(
     stream: S,
     config: &SyncthingTlsConfig,
@@ -546,7 +579,10 @@ where
     Ok((tls_stream, device_id))
 }
 
-/// 生成自签名证书和设备密钥（简化版本）
+/// Generates a self-signed certificate and private key PEM pair (simplified API).
+///
+/// # Errors
+/// Returns an error if key generation or certificate creation fails.
 pub fn generate_certificate(_device_name: &str) -> Result<(Vec<u8>, Vec<u8>)> {
     generate_self_signed_cert()
 }

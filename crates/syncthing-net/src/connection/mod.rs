@@ -1,9 +1,12 @@
-//! BEP 连接实现
+//! BEP connection implementation.
 //!
-//! 实现 Syncthing BEP 协议的连接层，支持 TLS 握手、Hello 交换、标准 BEP 帧编解码、
-//! LZ4 解压以及独立的读写半流（tokio::io::split）。
-//! 参考: syncthing/lib/connections/*.go
-//! 2026-04-11 已验证与 Go BEP 实现跨网络互通（参见 VERIFICATION_REPORT_BEP_2026-04-11.md）。
+//! Implements the connection layer of the Syncthing BEP protocol: TLS handshake,
+//! Hello exchange, standard BEP frame encoding/decoding, LZ4 decompression,
+//! and independent read/write half-streams (tokio::io::split).
+//! (reference: syncthing/lib/connections/*.go;
+//! 2026-04-11 verified wire interoperability with the Go BEP implementation,
+//! see VERIFICATION_REPORT_BEP_2026-04-11.md).
+//! Heartbeat and size-limit tuning rationale: see "docs/design/ADR-20261105-connection-tuning.md".
 
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::sync::Arc;
@@ -19,70 +22,70 @@ use syncthing_core::{
     ConnectionState, ConnectionStats, ConnectionType, DeviceId, Result, SyncthingError,
 };
 
-/// 默认消息超时
+/// Default message timeout.
 pub const DEFAULT_MESSAGE_TIMEOUT: Duration = Duration::from_secs(60);
 
-/// 默认心跳间隔（未通过配置覆盖时）
+/// Default heartbeat interval (when not overridden by configuration).
 pub const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(90);
 
-/// 全局默认心跳间隔，由 `ConnectionManager::new` 从配置注入。
-/// 允许外部通过配置覆盖默认 90s，同时仍按路径类型保留上限。
+/// Global default heartbeat interval, injected by `ConnectionManager::new`
+/// from configuration. Allows overriding the 90 s default while keeping
+/// per-path-type caps.
 static DEFAULT_HEARTBEAT_INTERVAL: std::sync::OnceLock<Duration> = std::sync::OnceLock::new();
 
-/// 设置全局默认心跳间隔。
+/// Sets the global default heartbeat interval.
 pub fn set_default_heartbeat_interval(interval: Duration) {
     let _ = DEFAULT_HEARTBEAT_INTERVAL.set(interval);
 }
 
-/// BEP header 最大大小 (64 KiB)
+/// Maximum BEP header size (64 KiB).
 pub const MAX_BEP_HEADER_SIZE: usize = 64 * 1024;
 
-/// BEP message 最大大小 (64 MiB)
+/// Maximum BEP message size (64 MiB).
 ///
-/// 2026-05-11 (TUNING_PLAN T-D4)：从 128 MiB 收紧到 64 MiB。
-/// 理由：Syncthing 实际 Index 上限约 30 MiB（参考 Go 实现）；过宽放给攻击者太大空间。
+/// Tightened from 128 MiB on 2026-05-11; rationale: see "docs/design/ADR-20261105-connection-tuning.md".
 pub const MAX_BEP_MESSAGE_SIZE: usize = 64 * 1024 * 1024;
 
-/// 连接事件
+/// Connection event.
 #[derive(Debug, Clone)]
 pub enum ConnectionEvent {
-    /// 连接已建立
+    /// Connection established.
     Connected { device_id: DeviceId },
-    /// 握手完成
+    /// Handshake completed.
     HandshakeComplete { device_id: DeviceId },
-    /// 消息收到
+    /// Message received.
     MessageReceived {
         device_id: DeviceId,
         msg_type: MessageType,
     },
-    /// 连接断开
+    /// Connection closed.
     Disconnected { reason: String },
-    /// 错误
+    /// Error occurred.
     Error { error: String },
 }
 
-/// 连接内部状态
+/// Internal connection state.
 pub(super) struct ConnectionInner {
-    /// 连接ID
+    /// Connection ID.
     pub id: uuid::Uuid,
-    /// 远程地址
+    /// Remote address.
     pub remote_addr: SocketAddr,
-    /// 本地地址
+    /// Local address.
     pub local_addr: SocketAddr,
-    /// 连接状态
+    /// Connection state.
     pub state: RwLock<ConnectionState>,
-    /// 连接统计
+    /// Connection statistics.
     pub stats: RwLock<ConnectionStats>,
-    /// 连接类型
+    /// Connection type.
     pub conn_type: ConnectionType,
-    /// 关联的设备ID
+    /// Associated device ID.
     pub device_id: RwLock<Option<DeviceId>>,
-    /// 最后ping时间
+    /// Last ping time.
     #[allow(dead_code)]
     pub last_ping: RwLock<Instant>,
-    /// 最后pong时间
+    /// Last pong time.
     pub last_pong: RwLock<Instant>,
-    /// 本连接的心跳间隔（按路径类型调优）
+    /// Per-connection heartbeat interval (tuned by path type).
     pub heartbeat_interval: Duration,
 }
 
@@ -90,31 +93,31 @@ mod tcp_pipe;
 pub use tcp_pipe::TcpBiStream;
 mod io;
 
-/// BEP 连接包装器
+/// BEP connection wrapper.
 ///
-/// 封装底层的TCP连接，处理BEP协议细节
+/// Wraps the underlying byte pipe and handles BEP protocol details.
 pub struct BepConnection {
-    /// 内部状态
+    /// Internal state.
     pub(super) inner: Arc<ConnectionInner>,
-    /// 读取端
+    /// Read half.
     pub(super) read_half:
         Arc<Mutex<Option<tokio::io::ReadHalf<syncthing_core::traits::BoxedPipe>>>>,
-    /// 写入端
+    /// Write half.
     pub(super) write_half:
         Arc<Mutex<Option<tokio::io::WriteHalf<syncthing_core::traits::BoxedPipe>>>>,
-    /// 消息发送通道
+    /// Outgoing message channel.
     message_tx: mpsc::Sender<Message>,
-    /// 事件发送器
+    /// Event sender.
     pub(super) event_tx: mpsc::Sender<ConnectionEvent>,
-    /// 关闭信号
+    /// Shutdown signal.
     shutdown_tx: RwLock<Option<oneshot::Sender<()>>>,
-    /// 接收消息通道发送端（供读取任务使用）
+    /// Incoming message channel sender (used by the read task).
     pub(super) incoming_tx: mpsc::Sender<(MessageType, Bytes)>,
-    /// 接收消息通道接收端
+    /// Incoming message channel receiver.
     incoming_rx: Arc<Mutex<mpsc::Receiver<(MessageType, Bytes)>>>,
 }
 
-/// 内部消息结构
+/// Internal message structure.
 #[derive(Debug)]
 pub(super) struct Message {
     pub header: MessageHeader,
@@ -122,7 +125,13 @@ pub(super) struct Message {
 }
 
 impl BepConnection {
-    /// 从可靠字节管道创建新连接
+    /// Creates a new connection from a reliable byte pipe.
+    ///
+    /// Spawns the connection run task before returning.
+    ///
+    /// # Errors
+    /// Currently always returns `Ok`; the `Result` is reserved for future
+    /// fallible setup steps.
     pub async fn new(
         pipe: syncthing_core::traits::BoxedPipe,
         conn_type: ConnectionType,
@@ -136,8 +145,6 @@ impl BepConnection {
             .unwrap_or_else(|| SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), 0));
         let transport_type = pipe.transport_type();
 
-        // 按路径类型选择心跳间隔：中间 relay/proxy/websocket/derp 使用更短心跳防止被掐断。
-        // 全局默认心跳可由配置覆盖，relay 路径最多不超过 30s。
         let base_interval = DEFAULT_HEARTBEAT_INTERVAL
             .get()
             .copied()
@@ -181,7 +188,6 @@ impl BepConnection {
             incoming_rx: Arc::new(Mutex::new(incoming_rx)),
         });
 
-        // 启动连接处理任务
         let conn_clone = Arc::clone(&conn);
         let message_rx = Arc::new(Mutex::new(message_rx));
         tokio::spawn(async move {
@@ -193,57 +199,56 @@ impl BepConnection {
         Ok(conn)
     }
 
-    /// 获取连接ID
+    /// Returns the connection ID.
     pub fn id(&self) -> uuid::Uuid {
         self.inner.id
     }
 
-    /// 获取远程地址
+    /// Returns the remote address.
     pub fn remote_addr(&self) -> SocketAddr {
         self.inner.remote_addr
     }
 
-    /// 获取本地地址
+    /// Returns the local address.
     pub fn local_addr(&self) -> SocketAddr {
         self.inner.local_addr
     }
 
-    /// 获取当前状态
+    /// Returns the current connection state.
     pub fn state(&self) -> ConnectionState {
         *self.inner.state.read()
     }
 
-    /// 设置状态
+    /// Sets the connection state.
     pub fn set_state(&self, state: ConnectionState) {
         *self.inner.state.write() = state;
     }
 
-    /// 获取设备ID
+    /// Returns the associated device ID, if set.
     pub fn device_id(&self) -> Option<DeviceId> {
         *self.inner.device_id.read()
     }
 
-    /// 设置设备ID
+    /// Associates a device ID with this connection and emits `Connected`.
     pub fn set_device_id(&self, device_id: DeviceId) {
         *self.inner.device_id.write() = Some(device_id);
 
-        // 通知连接建立
         let _ = self
             .event_tx
             .try_send(ConnectionEvent::Connected { device_id });
     }
 
-    /// 获取连接类型
+    /// Returns the connection type (incoming/outgoing).
     pub fn connection_type(&self) -> ConnectionType {
         self.inner.conn_type
     }
 
-    /// 获取统计信息
+    /// Returns a snapshot of the connection statistics.
     pub fn stats(&self) -> ConnectionStats {
         self.inner.stats.read().clone()
     }
 
-    /// 返回自上次收发消息以来的时长
+    /// Returns the time elapsed since the last send/receive activity.
     pub fn last_activity_age(&self) -> Option<Duration> {
         let stats = self.inner.stats.read();
         stats.last_activity.map(|t| {
@@ -253,7 +258,7 @@ impl BepConnection {
         })
     }
 
-    /// 更新统计信息
+    /// Updates the connection statistics.
     fn update_stats<F>(&self, f: F)
     where
         F: FnOnce(&mut ConnectionStats),
@@ -262,7 +267,11 @@ impl BepConnection {
         f(&mut stats);
     }
 
-    /// 发送消息
+    /// Sends a message with the given type and payload.
+    ///
+    /// # Errors
+    /// Returns `SyncthingError::ConnectionClosed` if the connection task has
+    /// terminated.
     pub async fn send_message(&self, msg_type: MessageType, payload: Bytes) -> Result<()> {
         let header = MessageHeader {
             message_type: msg_type,
@@ -284,16 +293,30 @@ impl BepConnection {
         Ok(())
     }
 
-    /// 发送Ping（BEP keepalive，单向消息，无 Pong；收到 Ping 不应回复）
+    /// Sends a Ping (BEP keepalive; one-way, no Pong exists in BEP — receiving
+    /// a Ping must not be answered).
+    ///
+    /// # Errors
+    /// Returns `SyncthingError::ConnectionClosed` if the connection task has
+    /// terminated.
     pub async fn send_ping(&self) -> Result<()> {
         self.send_message(MessageType::Ping, Bytes::new()).await
     }
 
-    /// 发送Pong（兼容旧调用，实际发送 Ping；注意 BEP 无 Pong，不要用于回复 Ping）
+    /// Sends a keepalive frame (legacy alias of `send_ping`; BEP has no Pong,
+    /// so never use this to answer a Ping).
+    ///
+    /// # Errors
+    /// Returns `SyncthingError::ConnectionClosed` if the connection task has
+    /// terminated.
     pub async fn send_pong(&self) -> Result<()> {
         self.send_message(MessageType::Ping, Bytes::new()).await
     }
 
+    /// Encodes and sends a ClusterConfig message.
+    ///
+    /// # Errors
+    /// Returns an error if encoding fails or the connection task has terminated.
     pub async fn send_cluster_config(
         &self,
         cc: &bep_protocol::messages::ClusterConfig,
@@ -303,14 +326,21 @@ impl BepConnection {
         self.send_message(MessageType::ClusterConfig, payload).await
     }
 
+    /// Encodes and sends an Index message.
+    ///
+    /// # Errors
+    /// Returns an error if encoding fails or the connection task has terminated.
     pub async fn send_index(&self, index: &syncthing_core::Index) -> Result<()> {
-        // 使用 From<&Index> 避免 .clone() + .into() 双重分配
         let wire: bep_protocol::messages::Index = index.into();
         let payload = bep_protocol::messages::encode_message(&wire)
             .map_err(|e| SyncthingError::Serialization(e.to_string()))?;
         self.send_message(MessageType::Index, payload).await
     }
 
+    /// Encodes and sends an IndexUpdate message.
+    ///
+    /// # Errors
+    /// Returns an error if encoding fails or the connection task has terminated.
     pub async fn send_index_update(&self, update: &syncthing_core::IndexUpdate) -> Result<()> {
         let wire: bep_protocol::messages::IndexUpdate = update.into();
         let payload = bep_protocol::messages::encode_message(&wire)
@@ -318,20 +348,18 @@ impl BepConnection {
         self.send_message(MessageType::IndexUpdate, payload).await
     }
 
-    /// 关闭连接
+    /// Closes the connection.
     pub async fn close(&self) -> Result<()> {
         info!("Closing connection {}", self.id());
 
         self.set_state(ConnectionState::Disconnecting);
 
-        // 触发关闭信号
         if let Some(tx) = self.shutdown_tx.write().take() {
             let _ = tx.send(());
         }
 
         self.set_state(ConnectionState::Disconnected);
 
-        // 发送断开事件
         let _ = self.event_tx.try_send(ConnectionEvent::Disconnected {
             reason: "connection closed".to_string(),
         });
@@ -339,7 +367,12 @@ impl BepConnection {
         Ok(())
     }
 
-    /// 接收 BEP 消息（带超时，避免连接断开后永远卡住）
+    /// Receives the next BEP message, with a timeout so a dead connection
+    /// does not block forever.
+    ///
+    /// # Errors
+    /// Returns `SyncthingError::ConnectionClosed` if the channel is closed, or
+    /// a timeout error after 120 seconds without a message.
     pub async fn recv_message(&self) -> Result<(MessageType, Bytes)> {
         let mut rx = self.incoming_rx.lock().await;
         match tokio::time::timeout(Duration::from_secs(120), rx.recv()).await {
@@ -349,22 +382,18 @@ impl BepConnection {
         }
     }
 
-    /// 主运行循环
+    /// Main run loop coordinating the read, write, and heartbeat tasks.
     async fn run(
         &self,
         mut shutdown_rx: oneshot::Receiver<()>,
         message_rx: Arc<Mutex<mpsc::Receiver<Message>>>,
     ) -> Result<()> {
-        // 启动读取任务
         let read_handle = self.spawn_read_task();
 
-        // 启动写入任务
         let write_handle = self.spawn_write_task(message_rx);
 
-        // 启动心跳任务
         let heartbeat_handle = self.spawn_heartbeat_task();
 
-        // 等待关闭信号
         tokio::select! {
             _ = &mut shutdown_rx => {
                 debug!("Connection {} received shutdown signal", self.id());
@@ -386,7 +415,7 @@ impl BepConnection {
         Ok(())
     }
 
-    /// 检查连接是否活跃
+    /// Returns whether the connection is in a live state.
     pub fn is_alive(&self) -> bool {
         matches!(
             self.state(),
@@ -400,7 +429,6 @@ impl BepConnection {
 
 impl Drop for BepConnection {
     fn drop(&mut self) {
-        // 确保连接被关闭
         if self.is_alive() {
             let _ = self.event_tx.try_send(ConnectionEvent::Disconnected {
                 reason: "connection dropped".to_string(),

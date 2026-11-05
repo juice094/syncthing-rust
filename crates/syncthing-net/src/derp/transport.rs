@@ -1,12 +1,12 @@
-//! DERP Transport：将 DERP 中继协议实现为 `Transport` trait。
+//! DERP Transport: implements the DERP relay protocol as a `Transport`.
 //!
-//! 使 `ConnectionManager` 可以通过 DERP relay 建立 BEP 连接。
+//! Allows `ConnectionManager` to establish BEP connections through a DERP relay.
 //!
-//! ## 使用方式
+//! ## Usage
 //! ```rust,ignore
 //! let transport = DerpTransport::new(local_device_id);
 //! let pipe = transport.dial_device(derp_server_addr, &target_device_id).await?;
-//! // pipe 可直接用于 TLS + BEP 握手
+//! // pipe can be used directly for the TLS + BEP handshake
 //! ```
 
 use std::net::SocketAddr;
@@ -21,29 +21,29 @@ use super::pipe::DerpPipe;
 use super::protocol::{Frame, PROTOCOL_VERSION};
 use super::server::{DerpServer, DerpServerConfig};
 
-/// DERP 传输实现。
+/// DERP transport implementation.
 ///
-/// `dial_device(addr, device_id)` 连接到 DERP 服务器 `addr`，
-/// 注册本地设备后，后续写入的数据将自动路由到 `device_id`。
+/// `dial_device(addr, device_id)` connects to the DERP server at `addr`;
+/// after registering the local device, subsequent writes are routed to `device_id`.
 #[derive(Debug)]
 pub struct DerpTransport {
     local_device_id: DeviceId,
 }
 
 impl DerpTransport {
-    /// 创建新的 DERP 传输。
+    /// Creates a new DERP transport.
     pub fn new(local_device_id: DeviceId) -> Self {
         Self { local_device_id }
     }
 
-    /// 获取本地设备 ID。
+    /// Returns the local device ID.
     pub fn local_device_id(&self) -> &DeviceId {
         &self.local_device_id
     }
 
-    /// 连接到 DERP 服务器并完成握手。
+    /// Connects to the DERP server and completes the handshake.
     ///
-    /// 返回已握手的 TCP stream，供 DerpPipe 包装。
+    /// Returns the handshaken TCP stream for DerpPipe to wrap.
     async fn connect_server(&self, server_addr: SocketAddr) -> CoreResult<tokio::net::TcpStream> {
         debug!("DERP connecting to server at {}", server_addr);
 
@@ -51,7 +51,6 @@ impl DerpTransport {
             .await
             .map_err(|e| SyncthingError::connection(format!("DERP connect failed: {}", e)))?;
 
-        // 发送 ClientInfo
         let client_info = Frame::ClientInfo {
             device_id: self.local_device_id,
             version: PROTOCOL_VERSION,
@@ -61,7 +60,6 @@ impl DerpTransport {
             SyncthingError::connection(format!("DERP ClientInfo send failed: {}", e))
         })?;
 
-        // 读取 ServerInfo
         let mut len_buf = [0u8; 4];
         stream.read_exact(&mut len_buf).await.map_err(|e| {
             SyncthingError::connection(format!("DERP ServerInfo read failed: {}", e))
@@ -103,9 +101,8 @@ impl Transport for DerpTransport {
         "derp"
     }
 
-    /// 启动 DERP 服务器监听。
-    ///
-    /// 注意：这是用于测试或自建 relay 的场景。生产环境中通常连接到公共 DERP 服务器。
+    /// Starts a DERP server listener (for tests or self-hosted relays; production
+    /// clients usually connect to public DERP servers).
     async fn bind(&self, addr: SocketAddr) -> CoreResult<Box<dyn TransportListener>> {
         let mut server = DerpServer::new(DerpServerConfig {
             bind_addr: addr,
@@ -115,32 +112,28 @@ impl Transport for DerpTransport {
 
         info!("DERP server starting on {}", actual_addr);
 
-        // 在后台运行服务器
         tokio::spawn(async move {
             if let Err(e) = server.run().await {
                 warn!("DERP server exited with error: {}", e);
             }
         });
 
-        // 返回一个简化的 TransportListener
-        // 由于 DerpServer 内部自行 accept，这里返回一个 stub listener
-        // 实际生产中客户端不需要 bind DERP 服务器
+        // Stub listener: DerpServer runs its own accept loop, so this only
+        // carries the bound address.
         let listener = DerpTransportListener { addr: actual_addr };
         Ok(Box::new(listener))
     }
 
-    /// 普通拨号（不支持，因为需要 device_id）。
-    ///
-    /// 请使用 `dial_device`。
+    /// Plain dial is not supported because a target device ID is required; use `dial_device`.
     async fn dial(&self, _addr: SocketAddr) -> CoreResult<BoxedPipe> {
         Err(SyncthingError::config(
             "DerpTransport::dial() is not supported; use dial_device() instead",
         ))
     }
 
-    /// 向指定设备拨号，通过 DERP 中继。
+    /// Dials the target device through a DERP relay.
     ///
-    /// `addr` 是 DERP 服务器地址，`device_id` 是目标设备。
+    /// `addr` is the DERP server address; `device_id` is the target device.
     async fn dial_device(&self, addr: SocketAddr, device_id: &DeviceId) -> CoreResult<BoxedPipe> {
         let stream = self.connect_server(addr).await?;
         let pipe = DerpPipe::new(stream, *device_id, self.local_device_id);
@@ -148,10 +141,10 @@ impl Transport for DerpTransport {
     }
 }
 
-/// DERP TransportListener stub。
+/// Stub DERP TransportListener.
 ///
-/// 由于 DerpServer 内部自行处理 accept 循环，此 listener 仅提供地址信息。
-/// 实际的传入连接由 DerpServer 直接管理。
+/// DerpServer runs its own accept loop, so this listener only provides the
+/// bound address; incoming connections are managed directly by DerpServer.
 #[derive(Debug)]
 struct DerpTransportListener {
     addr: SocketAddr,
@@ -160,8 +153,8 @@ struct DerpTransportListener {
 #[async_trait::async_trait]
 impl TransportListener for DerpTransportListener {
     async fn accept(&self) -> CoreResult<(BoxedPipe, SocketAddr)> {
-        // DerpTransportListener 不支持传统 accept。
-        // 传入的 DERP 连接由 DerpServer 内部循环处理。
+        // Traditional accept is not supported; incoming DERP connections are
+        // handled by DerpServer's internal loop.
         Err(SyncthingError::config(
             "DerpTransportListener::accept() not supported; use DerpServer directly",
         ))

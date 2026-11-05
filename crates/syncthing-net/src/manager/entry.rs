@@ -7,19 +7,20 @@ use tokio::sync::oneshot;
 
 use crate::connection::BepConnection;
 
-/// 连接条目
+/// Connection pool entry.
 #[derive(Clone)]
 #[allow(dead_code)]
 pub(crate) struct ConnectionEntry {
-    /// 连接对象
+    /// The connection.
     pub(crate) conn: Arc<BepConnection>,
-    /// 连接建立时间
+    /// When the connection was established.
     pub(crate) connected_at: Instant,
-    /// 重试次数
+    /// Retry count at establishment time.
     pub(crate) retry_count: u32,
 }
 
 impl ConnectionEntry {
+    /// Creates a new entry for a freshly established connection.
     pub(crate) fn new(conn: Arc<BepConnection>) -> Self {
         Self {
             conn,
@@ -28,6 +29,7 @@ impl ConnectionEntry {
         }
     }
 
+    /// Returns whether the connection has no recent activity beyond `timeout`.
     pub(crate) fn is_stale(&self, timeout: std::time::Duration) -> bool {
         self.conn
             .last_activity_age()
@@ -35,7 +37,7 @@ impl ConnectionEntry {
     }
 }
 
-/// 待连接设备
+/// Device with a connection attempt in progress.
 #[allow(dead_code)]
 pub(crate) struct PendingConnection {
     pub(crate) device_id: DeviceId,
@@ -43,6 +45,6 @@ pub(crate) struct PendingConnection {
     pub(crate) relay_urls: Vec<String>,
     pub(crate) retry_count: u32,
     pub(crate) last_attempt: Option<Instant>,
-    // 重试任务的取消句柄
+    /// Cancellation handle for the retry task.
     pub(crate) _cancel_tx: Option<oneshot::Sender<()>>,
 }

@@ -1,7 +1,7 @@
-//! Global Discovery 客户端
+//! Global Discovery client.
 //!
-//! 与 Syncthing 官方发现服务器互通，支持 HTTPS + mTLS。
-//! 协议规范见 `docs/design/NETWORK_DISCOVERY_DESIGN.md` §4。
+//! Interoperates with the official Syncthing discovery servers over HTTPS + mTLS.
+//! Protocol spec: `docs/design/NETWORK_DISCOVERY_DESIGN.md` §4.
 
 use std::path::Path;
 use std::sync::Arc;
@@ -14,54 +14,54 @@ use tracing::{debug, error, info, warn};
 
 use syncthing_core::{DeviceId, Result, SyncthingError};
 
-/// 默认官方发现服务器
+/// Default official discovery server.
 pub const DEFAULT_DISCOVERY_SERVER: &str = "https://discovery.syncthing.net/v2/";
 
-/// Announce 间隔（30 分钟）
+/// Announce interval (30 minutes).
 pub const ANNOUNCE_INTERVAL: Duration = Duration::from_secs(1800);
 
-/// 失败重试间隔（5 分钟）
+/// Retry interval after failures (5 minutes).
 pub const RETRY_INTERVAL: Duration = Duration::from_secs(300);
 
-/// Global Discovery 客户端
+/// Global Discovery client.
 ///
-/// 负责向发现服务器注册本机地址，并查询其他设备的地址。
-/// mTLS 配置通过外部传入的 `reqwest::Client` 完成（daemon_runner 层配置）。
+/// Registers this device's addresses with the discovery server and queries
+/// other devices' addresses. mTLS is configured through the externally
+/// provided `reqwest::Client` (wired in the daemon_runner layer).
 #[derive(Debug, Clone)]
 pub struct GlobalDiscovery {
     server_url: String,
     device_id: DeviceId,
     client: Client,
-    /// 外部触发 re-announce 的通知器
+    /// Notifier for externally triggered re-announces.
     notify: Arc<Notify>,
-    /// 优雅退出信号发送端
+    /// Graceful shutdown signal sender.
     shutdown_tx: broadcast::Sender<()>,
 }
 
 impl GlobalDiscovery {
-    /// 使用默认官方发现服务器创建
+    /// Creates a client targeting the default official discovery server.
     pub fn new(device_id: DeviceId, client: Client) -> Self {
         Self::with_server(device_id, client, DEFAULT_DISCOVERY_SERVER.to_string())
     }
 
-    /// 触发优雅退出
+    /// Triggers graceful shutdown of the announce loop.
     pub fn shutdown(&self) {
         let _ = self.shutdown_tx.send(());
     }
 
-    /// 获取 shutdown 发送端（用于外部 Drop guard）
+    /// Returns the shutdown sender (for external drop guards).
     pub fn shutdown_sender(&self) -> broadcast::Sender<()> {
         self.shutdown_tx.clone()
     }
 
-    /// 获取通知器引用，用于外部触发 re-announce
+    /// Returns the notifier reference used to trigger re-announces.
     pub fn notifier(&self) -> Arc<Notify> {
         Arc::clone(&self.notify)
     }
 
-    /// 使用自定义发现服务器创建
+    /// Creates a client targeting a custom discovery server.
     pub fn with_server(device_id: DeviceId, client: Client, server_url: String) -> Self {
-        // 确保 URL 以 / 结尾
         let server_url = if server_url.ends_with('/') {
             server_url
         } else {
@@ -78,7 +78,11 @@ impl GlobalDiscovery {
         }
     }
 
-    /// 从证书文件创建 GlobalDiscovery 客户端（自动配置 mTLS）
+    /// Creates a GlobalDiscovery client from certificate files (configures mTLS).
+    ///
+    /// # Errors
+    /// Returns an error if the cert/key files cannot be read, the identity is
+    /// invalid, or the HTTP client cannot be built.
     pub async fn from_cert_files(
         device_id: DeviceId,
         cert_path: &Path,
@@ -115,15 +119,19 @@ impl GlobalDiscovery {
         })
     }
 
-    /// 触发一次立即 re-announce（外部调用，如 STUN/UPnP 发现新地址后）
+    /// Triggers an immediate re-announce (e.g. after STUN/UPnP learns new addresses).
     pub fn trigger_reannounce(&self) {
         self.notify.notify_one();
     }
 
-    /// 向发现服务器注册地址
+    /// Registers the given addresses with the discovery server.
     ///
-    /// # 参数
-    /// - `addresses`：本机可达地址列表，如 `["tcp://192.168.1.10:22001", "tcp://10.0.0.5:22001"]`
+    /// `addresses` is the list of reachable local addresses, e.g.
+    /// `["tcp://192.168.1.10:22001", "tcp://10.0.0.5:22001"]`.
+    ///
+    /// # Errors
+    /// Returns an error if the request fails or the server responds with a
+    /// non-success status.
     pub async fn announce(&self, addresses: &[String]) -> Result<()> {
         let url = format!("{}?device={}", self.server_url, self.device_id);
         let body = json!({ "addresses": addresses });
@@ -161,13 +169,15 @@ impl GlobalDiscovery {
         }
     }
 
-    /// 查询目标设备的地址
+    /// Queries the addresses of the target device.
     ///
-    /// # 参数
-    /// - `target`：要查询的设备 ID
+    /// Returns an address list like
+    /// `["tcp://203.0.113.5:22001", "relay://relay.syncthing.net:22067?id=..."]`,
+    /// or an empty list when the device is not registered (404).
     ///
-    /// # 返回
-    /// 地址列表，如 `["tcp://203.0.113.5:22001", "relay://relay.syncthing.net:22067?id=..."]`
+    /// # Errors
+    /// Returns an error if the request fails, the response is not JSON, or the
+    /// server responds with an error status other than 404.
     pub async fn query(&self, target: DeviceId) -> Result<Vec<String>> {
         let url = format!("{}?device={}", self.server_url, target);
 
@@ -200,7 +210,7 @@ impl GlobalDiscovery {
             );
             Ok(addresses)
         } else if status.as_u16() == 404 {
-            // 设备未注册，返回空列表而非错误
+            // Device not registered: an empty list is not an error.
             warn!(
                 "Global discovery query for {}: device not found (404)",
                 target
@@ -216,12 +226,12 @@ impl GlobalDiscovery {
         }
     }
 
-    /// 运行后台 announce 循环
+    /// Runs the background announce loop.
     ///
-    /// 立即首次 announce（通常只包含本地地址），
-    /// 之后每 `ANNOUNCE_INTERVAL` 向发现服务器注册一次。
-    /// 失败时等待 `RETRY_INTERVAL` 后重试。
-    /// 外部可通过 `trigger_reannounce()` 唤醒立即 announce（用于 STUN/UPnP 发现新地址后补发）。
+    /// Announces immediately (usually with local addresses only), then every
+    /// `ANNOUNCE_INTERVAL`. On failure, waits `RETRY_INTERVAL` before the next
+    /// attempt. `trigger_reannounce()` wakes the loop for an immediate
+    /// re-announce (e.g. after STUN/UPnP discovers new addresses).
     pub async fn run(&self, addresses: Arc<tokio::sync::Mutex<Vec<String>>>) {
         let mut shutdown_rx = self.shutdown_tx.subscribe();
         loop {
@@ -242,7 +252,6 @@ impl GlobalDiscovery {
                 }
             }
 
-            // 等待 ANNOUNCE_INTERVAL、外部唤醒或优雅退出信号
             tokio::select! {
                 _ = tokio::time::sleep(ANNOUNCE_INTERVAL) => {}
                 _ = self.notify.notified() => {

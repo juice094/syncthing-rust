@@ -1,13 +1,13 @@
-//! DERP 服务器
+//! DERP server.
 //!
-//! 极简的中继服务器，负责：
-//! 1. 接受客户端 TCP/WebSocket 连接
-//! 2. 按 device_id 注册客户端
-//! 3. 收到 SendPacket 时按 target device_id 转发 RecvPacket
-//! 4. 心跳检测与超时清理
+//! Minimal relay server responsible for:
+//! 1. Accepting client TCP/WebSocket connections
+//! 2. Registering clients by device_id
+//! 3. Forwarding SendPacket as RecvPacket to the target device_id
+//! 4. Keepalive detection and timeout cleanup
 //!
-//! 可伪装：通过 WebSocket over HTTPS 运行，流量看起来像普通网站。
-//! 可链式：支持 Relay A → Relay B 的级联转发。
+//! Camouflage: can run over WebSocket/HTTPS so traffic looks like normal web.
+//! Chaining: supports Relay A -> Relay B cascading.
 
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::sync::Arc;
@@ -23,14 +23,14 @@ use syncthing_core::{DeviceId, Result, SyncthingError};
 
 use crate::derp::protocol::{Frame, PROTOCOL_VERSION};
 
-/// DERP 服务器配置
+/// DERP server configuration.
 #[derive(Debug, Clone)]
 pub struct DerpServerConfig {
-    /// 监听地址
+    /// Bind address.
     pub bind_addr: SocketAddr,
-    /// 客户端超时（无心跳则断开）
+    /// Client timeout (disconnect when no keepalive).
     pub client_timeout: Duration,
-    /// 是否启用 WebSocket 升级（伪装为 HTTPS）
+    /// Whether to enable WebSocket upgrade (HTTPS camouflage).
     pub websocket_upgrade: bool,
 }
 
@@ -44,28 +44,29 @@ impl Default for DerpServerConfig {
     }
 }
 
-/// 客户端连接句柄
+/// Handle to a connected client.
 #[derive(Clone)]
 struct ClientHandle {
     #[allow(dead_code)]
     device_id: DeviceId,
     addr: SocketAddr,
     last_activity: Arc<RwLock<Instant>>,
-    /// 发送通道（服务器 → 客户端写任务）
+    /// Send channel (server -> client write task).
     tx: tokio::sync::mpsc::Sender<Frame>,
 }
 
-/// DERP 中继服务器
+/// DERP relay server.
 pub struct DerpServer {
     config: DerpServerConfig,
     listener: Option<Arc<TcpListener>>,
-    /// device_id → ClientHandle
+    /// device_id -> ClientHandle.
     clients: Arc<DashMap<DeviceId, ClientHandle>>,
-    /// addr → device_id（用于断开时清理）
+    /// addr -> device_id (used for cleanup on disconnect).
     addr_index: Arc<DashMap<SocketAddr, DeviceId>>,
 }
 
 impl DerpServer {
+    /// Creates a new server (call `bind` before `run`).
     pub fn new(config: DerpServerConfig) -> Self {
         Self {
             config,
@@ -75,7 +76,10 @@ impl DerpServer {
         }
     }
 
-    /// 绑定监听地址，返回实际绑定的地址
+    /// Binds the listen address and returns the actual bound address.
+    ///
+    /// # Errors
+    /// Returns an error if the bind or local address query fails.
     pub async fn bind(&mut self) -> Result<SocketAddr> {
         let listener = TcpListener::bind(self.config.bind_addr)
             .await
@@ -87,12 +91,15 @@ impl DerpServer {
         Ok(addr)
     }
 
-    /// 获取已绑定的本地地址
+    /// Returns the bound local address, if bound.
     pub fn local_addr(&self) -> Option<SocketAddr> {
         self.listener.as_ref().and_then(|l| l.local_addr().ok())
     }
 
-    /// 启动服务器（阻塞直到关闭）。必须先调用 `bind()`。
+    /// Runs the server (blocks until shutdown). `bind()` must be called first.
+    ///
+    /// # Errors
+    /// Returns an error if the server was not bound.
     pub async fn run(&self) -> Result<()> {
         let listener =
             Arc::clone(self.listener.as_ref().ok_or_else(|| {
@@ -105,7 +112,6 @@ impl DerpServer {
             self.config.websocket_upgrade
         );
 
-        // 启动超时清理任务
         let clients = Arc::clone(&self.clients);
         let addr_index = Arc::clone(&self.addr_index);
         let timeout = self.config.client_timeout;
@@ -131,7 +137,6 @@ impl DerpServer {
             }
         });
 
-        // 接受循环
         loop {
             match listener.accept().await {
                 Ok((stream, addr)) => {
@@ -163,7 +168,6 @@ impl DerpServer {
 
         let (mut read_half, mut write_half) = stream.into_split();
 
-        // 读取 ClientInfo
         let mut len_buf = [0u8; 4];
         read_half
             .read_exact(&mut len_buf)
@@ -200,7 +204,6 @@ impl DerpServer {
             }
         };
 
-        // 发送 ServerInfo
         let server_info = Frame::ServerInfo {
             version: PROTOCOL_VERSION,
         };
@@ -210,7 +213,6 @@ impl DerpServer {
             .await
             .map_err(|e| SyncthingError::connection(format!("ServerInfo send failed: {}", e)))?;
 
-        // 创建客户端通道
         let (tx, mut rx) = tokio::sync::mpsc::channel::<Frame>(1024);
         let last_activity = Arc::new(RwLock::new(Instant::now()));
 
@@ -221,7 +223,6 @@ impl DerpServer {
             tx: tx.clone(),
         };
 
-        // 注册客户端（覆盖旧连接）
         if let Some(old) = clients.insert(device_id, client) {
             warn!(
                 "DERP client {} reconnected from {}, dropping old connection from {}",
@@ -233,7 +234,6 @@ impl DerpServer {
 
         info!("DERP client {} connected from {}", device_id, addr);
 
-        // 写任务：从 rx 接收帧并发送到客户端
         let write_task = async {
             while let Some(frame) = rx.recv().await {
                 let encoded = frame.encode();
@@ -243,7 +243,6 @@ impl DerpServer {
             }
         };
 
-        // 读任务：读取客户端发来的帧并处理
         let read_task = async {
             let mut len_buf = [0u8; 4];
             loop {
@@ -260,7 +259,6 @@ impl DerpServer {
                     break;
                 }
 
-                // 更新活跃时间
                 *last_activity.write().await = Instant::now();
 
                 let mut combined = bytes::BytesMut::from(&len_buf[..]);
@@ -305,13 +303,12 @@ impl DerpServer {
             _ = read_task => {},
         }
 
-        // 清理
         if let Some((_, removed)) = clients.remove(&device_id) {
             if removed.addr == addr {
                 addr_index.remove(&addr);
                 info!("DERP client {} disconnected from {}", device_id, addr);
             } else {
-                // 被更新的连接覆盖，不要清理新连接
+                // Superseded by a newer connection; do not remove it.
                 clients.insert(device_id, removed);
             }
         }

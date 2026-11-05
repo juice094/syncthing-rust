@@ -1,7 +1,7 @@
-//! STUN 客户端实现
+//! STUN client implementation.
 //!
-//! 用于获取公网 IP:Port，支持 NAT 穿透。
-//! 部分逻辑参考了 Tailscale 的 STUN 实现：
+//! Used to discover the public IP:Port for NAT traversal.
+//! Some logic follows Tailscale's STUN implementation:
 //! <https://github.com/tailscale/tailscale/blob/main/net/stun/stun.go>
 
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
@@ -26,7 +26,7 @@ const MAGIC_COOKIE: [u8; 4] = [0x21, 0x12, 0xa4, 0x42];
 const HEADER_LEN: usize = 20;
 const LEN_FINGERPRINT: usize = 8;
 
-/// 默认 STUN 服务器列表
+/// Default STUN server list.
 pub const DEFAULT_STUN_SERVERS: &[&str] = &[
     "stun.l.google.com:19302",
     "stun.syncthing.net:3478",
@@ -36,36 +36,33 @@ pub const DEFAULT_STUN_SERVERS: &[&str] = &[
     "stun4.l.google.com:19302",
 ];
 
-/// STUN 请求超时时间
+/// STUN request timeout.
 const STUN_TIMEOUT: Duration = Duration::from_secs(5);
 
 const SOFTWARE: &str = "syncthing-rust";
 
-/// Transaction ID (12 bytes)
+/// Transaction ID (12 bytes).
 pub type TxId = [u8; 12];
 
-/// 生成随机 Transaction ID
+/// Generates a random transaction ID.
 pub fn new_tx_id() -> TxId {
     random()
 }
 
-/// 构建 STUN Binding Request（包含 SOFTWARE 与可选的 FINGERPRINT）
+/// Builds a STUN Binding Request (including SOFTWARE and FINGERPRINT attributes).
 pub fn build_binding_request(tx_id: TxId) -> Vec<u8> {
     let len_software = 4 + SOFTWARE.len();
     let mut b = Vec::with_capacity(HEADER_LEN + len_software + LEN_FINGERPRINT);
 
-    // Header
     b.extend_from_slice(&BINDING_REQUEST);
     b.extend_from_slice(&((len_software + LEN_FINGERPRINT) as u16).to_be_bytes());
     b.extend_from_slice(&MAGIC_COOKIE);
     b.extend_from_slice(&tx_id);
 
-    // SOFTWARE attribute
     b.extend_from_slice(&ATTR_SOFTWARE.to_be_bytes());
     b.extend_from_slice(&(SOFTWARE.len() as u16).to_be_bytes());
     b.extend_from_slice(SOFTWARE.as_bytes());
 
-    // FINGERPRINT attribute
     let fp = fingerprint(&b);
     b.extend_from_slice(&ATTR_FINGERPRINT.to_be_bytes());
     b.extend_from_slice(&4u16.to_be_bytes());
@@ -74,7 +71,7 @@ pub fn build_binding_request(tx_id: TxId) -> Vec<u8> {
     b
 }
 
-/// CRC-32/IEEE 查表（用于 FINGERPRINT）
+/// CRC-32/IEEE lookup table (used by FINGERPRINT).
 const CRC32_TABLE: [u32; 256] = {
     let mut table = [0u32; 256];
     let mut i: u32 = 0;
@@ -107,13 +104,17 @@ fn fingerprint(data: &[u8]) -> u32 {
     crc32_ieee(data) ^ 0x5354554e
 }
 
-/// 判断数据包是否为 STUN 消息
+/// Returns whether the data looks like a STUN message.
 pub fn is_stun_packet(data: &[u8]) -> bool {
     data.len() >= HEADER_LEN && data[0] & 0b11000000 == 0 && data[4..8] == MAGIC_COOKIE
 }
 
-/// 解析 STUN Binding Success Response，返回 Transaction ID 与映射地址。
-/// 优先读取 XOR-MAPPED-ADDRESS，不存在时回退到 MAPPED-ADDRESS。
+/// Parses a STUN Binding Success Response, returning the transaction ID and
+/// mapped address. Prefers XOR-MAPPED-ADDRESS and falls back to MAPPED-ADDRESS.
+///
+/// # Errors
+/// Returns an error if the packet is not a STUN success response or carries
+/// no mapped address.
 pub fn parse_response(data: &[u8]) -> Result<(TxId, SocketAddr)> {
     if !is_stun_packet(data) {
         return Err(SyncthingError::protocol("response is not a STUN packet"));
@@ -253,28 +254,28 @@ fn ip_from_bytes(b: &[u8]) -> Result<IpAddr> {
     }
 }
 
-/// NAT 类型
+/// NAT type.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum NatType {
-    /// 无 NAT 或 Full Cone — 映射稳定，任何外部地址可直接连接
+    /// No NAT or Full Cone — mapping is stable; any external address can connect.
     Open,
-    /// Restricted / Port Restricted Cone — 映射稳定，但需先向外发送包
+    /// Restricted / Port Restricted Cone — stable mapping, but outbound packets first.
     Restricted,
-    /// Symmetric NAT — 映射随目标地址变化，P2P 困难
+    /// Symmetric NAT — mapping varies by destination; P2P is hard.
     Symmetric,
-    /// UDP 完全不通
+    /// UDP is fully blocked.
     Blocked,
-    /// 无法判断（服务器不足或查询失败）
+    /// Undeterminable (not enough servers or queries failed).
     Unknown,
 }
 
 impl NatType {
-    /// 该 NAT 类型下 P2P 直连是否可行
+    /// Returns whether a direct P2P connection is feasible under this NAT type.
     pub fn is_p2p_feasible(self) -> bool {
         matches!(self, NatType::Open | NatType::Restricted)
     }
 
-    /// 是否应直接 fallback 到 Relay
+    /// Returns whether dialing should fall back to a relay directly.
     pub fn needs_relay(self) -> bool {
         matches!(
             self,
@@ -283,7 +284,7 @@ impl NatType {
     }
 }
 
-/// 使用已有 UDP socket 向指定 STUN 服务器查询
+/// Queries the given STUN server using an existing UDP socket.
 async fn query_with_socket(
     socket: &UdpSocket,
     stun_server: &str,
@@ -325,7 +326,11 @@ async fn query_with_socket(
     Ok(addr)
 }
 
-/// 向指定 STUN 服务器发送 Binding Request 并返回公网地址
+/// Sends a Binding Request to the given STUN server and returns the public address.
+///
+/// # Errors
+/// Returns an error if the socket cannot be bound, the server cannot be
+/// resolved, the request times out, or the response is malformed.
 pub async fn query(stun_server: &str, timeout_duration: Duration) -> Result<SocketAddr> {
     let bind_addr = SocketAddr::from(([0, 0, 0, 0], 0));
     let socket = UdpSocket::bind(bind_addr)
@@ -334,14 +339,14 @@ pub async fn query(stun_server: &str, timeout_duration: Duration) -> Result<Sock
     query_with_socket(&socket, stun_server, timeout_duration).await
 }
 
-/// STUN 客户端
+/// STUN client.
 #[derive(Debug, Clone)]
 pub struct StunClient {
-    /// STUN 服务器地址列表
+    /// STUN server list.
     servers: Vec<String>,
-    /// 本地绑定端口（0 表示随机）
+    /// Local bind port (0 = random).
     local_port: u16,
-    /// 请求超时时间
+    /// Request timeout.
     timeout: Duration,
 }
 
@@ -356,12 +361,12 @@ impl Default for StunClient {
 }
 
 impl StunClient {
-    /// 创建新的 STUN 客户端
+    /// Creates a new STUN client with the default server list.
     pub fn new() -> Self {
         Self::default()
     }
 
-    /// 使用指定服务器创建客户端
+    /// Creates a client with the given servers.
     pub fn with_servers(servers: Vec<String>) -> Self {
         Self {
             servers,
@@ -370,21 +375,22 @@ impl StunClient {
         }
     }
 
-    /// 设置本地绑定端口
+    /// Overrides the local bind port.
     pub fn with_local_port(mut self, port: u16) -> Self {
         self.local_port = port;
         self
     }
 
-    /// 设置超时时间
+    /// Overrides the request timeout.
     pub fn with_timeout(mut self, timeout: Duration) -> Self {
         self.timeout = timeout;
         self
     }
 
-    /// 获取公网地址
+    /// Returns the public address, trying all configured servers in order.
     ///
-    /// 尝试所有配置的 STUN 服务器，返回第一个成功的结果
+    /// # Errors
+    /// Returns an error if every server fails.
     pub async fn get_public_address(&self) -> Result<SocketAddr> {
         for server in &self.servers {
             match query(server, self.timeout).await {
@@ -401,12 +407,13 @@ impl StunClient {
         Err(SyncthingError::connection("all STUN servers failed"))
     }
 
-    /// 检测 NAT 类型
+    /// Detects the NAT type.
     ///
-    /// 使用同一个 UDP socket 向两个不同的 STUN 服务器查询，
-    /// 比较返回的映射地址来判断 NAT 类型。
+    /// Queries two different STUN servers through the same UDP socket and
+    /// compares the returned mappings. Returns `(NatType, preferred public address)`.
     ///
-    /// 返回 `(NatType, 首选公网地址)`。
+    /// # Errors
+    /// Returns an error only if the UDP socket cannot be bound.
     pub async fn detect_nat_type(&self) -> Result<(NatType, Option<SocketAddr>)> {
         if self.servers.len() < 2 {
             warn!(
@@ -438,13 +445,10 @@ impl StunClient {
         };
 
         let nat_type = if addr_a == addr_b {
-            // 两个服务器看到相同的 IP:Port → Cone NAT（或无 NAT）
             NatType::Open
         } else if addr_a.ip() == addr_b.ip() {
-            // IP 相同，端口不同 → Restricted Cone（端口受限）
             NatType::Restricted
         } else {
-            // IP 都不同 → Symmetric NAT
             NatType::Symmetric
         };
 
@@ -455,13 +459,13 @@ impl StunClient {
         Ok((nat_type, Some(addr_a)))
     }
 
-    /// 构建 STUN 绑定请求消息（保留用于测试兼容）
+    /// Builds a STUN binding request message (kept for test compatibility).
     #[allow(dead_code)]
     fn build_binding_request() -> Result<Vec<u8>> {
         Ok(build_binding_request(new_tx_id()))
     }
 
-    /// 验证地址是否是公网地址
+    /// Returns whether the address is a public (routable) address.
     pub fn is_public_address(addr: &SocketAddr) -> bool {
         match addr.ip() {
             IpAddr::V4(ipv4) => {
@@ -511,9 +515,9 @@ impl StunClient {
     }
 }
 
-/// STUN 地址刷新器
+/// STUN address refresher.
 ///
-/// 定期刷新公网地址，检测 NAT 映射变化
+/// Periodically refreshes the public address and detects NAT mapping changes.
 pub struct StunRefresher {
     client: StunClient,
     interval: Duration,
@@ -521,7 +525,7 @@ pub struct StunRefresher {
 }
 
 impl StunRefresher {
-    /// 创建新的刷新器
+    /// Creates a new refresher.
     pub fn new(client: StunClient, interval: Duration) -> Self {
         Self {
             client,
@@ -530,7 +534,8 @@ impl StunRefresher {
         }
     }
 
-    /// 启动定期刷新任务
+    /// Runs the periodic refresh loop, invoking `on_change` on address changes
+    /// (never returns).
     pub async fn start<F>(&self, mut on_change: F) -> Result<()>
     where
         F: FnMut(SocketAddr) + Send + 'static,
@@ -559,7 +564,7 @@ impl StunRefresher {
         }
     }
 
-    /// 获取最后已知的公网地址
+    /// Returns the last known public address.
     pub async fn last_address(&self) -> Option<SocketAddr> {
         *self.last_address.read().await
     }

@@ -11,34 +11,39 @@ use tokio::net::TcpStream;
 use tokio_rustls::client::TlsStream as ClientTlsStream;
 use tokio_rustls::server::TlsStream as ServerTlsStream;
 
-/// TCP 连接统一类型（支持明文 TCP 或 TLS）
+/// Unified TCP/TLS bi-directional stream (plain TCP or TLS).
 #[derive(Debug)]
 pub enum TcpBiStream {
-    /// 明文 TCP 流
+    /// Plain TCP stream.
     Plain(TcpStream, TransportType),
-    /// 客户端 TLS 流
+    /// Client-side TLS stream.
     Client(ClientTlsStream<TcpStream>, TransportType),
-    /// 服务端 TLS 流
+    /// Server-side TLS stream.
     Server(ServerTlsStream<TcpStream>, TransportType),
 }
 
 impl TcpBiStream {
+    /// Wraps a plain TCP stream.
     pub fn plain(stream: TcpStream) -> Self {
         Self::Plain(stream, TransportType::Tcp)
     }
 
+    /// Wraps a client-side TLS stream.
     pub fn client(stream: ClientTlsStream<TcpStream>) -> Self {
         Self::Client(stream, TransportType::Tcp)
     }
 
+    /// Wraps a server-side TLS stream.
     pub fn server(stream: ServerTlsStream<TcpStream>) -> Self {
         Self::Server(stream, TransportType::Tcp)
     }
 
+    /// Wraps a client-side TLS stream tunneled over a relay.
     pub fn relay_client(stream: ClientTlsStream<TcpStream>) -> Self {
         Self::Client(stream, TransportType::Relay)
     }
 
+    /// Wraps a server-side TLS stream tunneled over a relay.
     pub fn relay_server(stream: ServerTlsStream<TcpStream>) -> Self {
         Self::Server(stream, TransportType::Relay)
     }

@@ -1,36 +1,36 @@
-//! 基于 TLS 证书的设备身份实现
+//! TLS-certificate-based device identity.
 //!
-//! `TlsIdentity` 是 `syncthing_core::Identity` 的当前默认实现，
-//! 将设备标识与 TLS 证书绑定（SHA-256 证书哈希）。
-//!
-//! 未来可在此模块中添加 `WireGuardIdentity`、`PreSharedKeyIdentity` 等实现。
+//! `TlsIdentity` is the default implementation of `syncthing_core::Identity`,
+//! binding the device identifier to a TLS certificate (SHA-256 certificate
+//! hash). Future identity schemes (e.g. WireGuard or pre-shared keys) would
+//! implement the same `Identity` trait in this module.
 
 use std::sync::Arc;
 use syncthing_core::{DeviceId, Identity};
 
 use crate::tls::SyncthingTlsConfig;
 
-/// 基于 TLS 证书的设备身份。
+/// Device identity backed by a TLS certificate.
 ///
-/// 设备标识符 = 证书公钥的 SHA-256 哈希。
-/// 这是 Syncthing 经典方案，也是当前的默认身份方案。
+/// The device identifier is the SHA-256 hash of the certificate public key.
+/// This is the classic Syncthing scheme and the current default identity.
 #[derive(Debug, Clone)]
 pub struct TlsIdentity {
     tls_config: Arc<SyncthingTlsConfig>,
 }
 
 impl TlsIdentity {
-    /// 从 TLS 配置创建身份。
+    /// Creates an identity from a TLS configuration.
     pub fn new(tls_config: Arc<SyncthingTlsConfig>) -> Self {
         Self { tls_config }
     }
 
-    /// 获取底层 TLS 配置（供传输层握手使用）。
+    /// Returns the underlying TLS configuration (used by transport handshakes).
     pub fn tls_config(&self) -> &SyncthingTlsConfig {
         &self.tls_config
     }
 
-    /// 获取 TLS 配置的 `Arc` 引用（供需要 `Arc` 的调用方使用）。
+    /// Returns a clone of the `Arc` holding the TLS configuration.
     pub fn tls_config_arc(&self) -> Arc<SyncthingTlsConfig> {
         Arc::clone(&self.tls_config)
     }

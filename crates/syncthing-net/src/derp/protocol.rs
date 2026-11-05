@@ -1,7 +1,7 @@
-//! DERP（Detoured Encrypted Routing Protocol）协议定义
+//! DERP (Detoured Encrypted Routing Protocol) protocol definition.
 //!
-//! DERP 是 Tailscale 风格的中继协议，用于两台 NAT 后设备无法直连时的
-//! 数据包转发。协议极简，帧格式如下：
+//! DERP is a Tailscale-style relay protocol forwarding packets between two
+//! NATed devices that cannot connect directly. The protocol is minimal:
 //!
 //! ```text
 //! [4 bytes: payload length (big-endian)]
@@ -9,36 +9,37 @@
 //! [n bytes: payload]
 //! ```
 //!
-//! 参考: <https://tailscale.com/kb/1232/derp-servers>
+//! (reference: <https://tailscale.com/kb/1232/derp-servers>)
 
 use bytes::{Buf, BufMut, BytesMut};
 use syncthing_core::{DeviceId, Result, SyncthingError};
 
-/// 当前协议版本
+/// Current protocol version.
 pub const PROTOCOL_VERSION: u8 = 1;
 
-/// 最大帧大小（防止内存耗尽）
+/// Maximum frame size (prevents memory exhaustion).
 pub const MAX_FRAME_SIZE: u32 = 1_000_000; // 1 MB
 
-/// DERP 帧类型
+/// DERP frame type.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]
 pub enum FrameType {
-    /// 客户端注册信息
+    /// Client registration info.
     ClientInfo = 0x01,
-    /// 服务器响应信息
+    /// Server response info.
     ServerInfo = 0x02,
-    /// 客户端请求转发数据包
+    /// Client request to forward a packet.
     SendPacket = 0x03,
-    /// 服务器转发来的数据包
+    /// Packet forwarded by the server.
     RecvPacket = 0x04,
-    /// 心跳保活
+    /// Keepalive heartbeat.
     KeepAlive = 0x05,
-    /// 关闭与某对等端的连接（可选）
+    /// Close the connection to a peer (optional).
     ClosePeer = 0x06,
 }
 
 impl FrameType {
+    /// Converts a raw type byte to a `FrameType`, or `None` if unknown.
     pub fn from_u8(v: u8) -> Option<Self> {
         match v {
             0x01 => Some(FrameType::ClientInfo),
@@ -52,29 +53,28 @@ impl FrameType {
     }
 }
 
-/// DERP 帧
+/// DERP frame.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Frame {
-    /// 客户端注册
+    /// Client registration.
     ClientInfo { device_id: DeviceId, version: u8 },
-    /// 服务器信息
+    /// Server info.
     ServerInfo { version: u8 },
-    /// 发送数据包到目标设备
+    /// Send a packet to the target device.
     SendPacket { target: DeviceId, payload: Vec<u8> },
-    /// 收到来自某设备的数据包
+    /// Packet received from a device.
     RecvPacket { from: DeviceId, payload: Vec<u8> },
-    /// 心跳
+    /// Heartbeat.
     KeepAlive,
-    /// 关闭对等端
+    /// Close a peer.
     ClosePeer { target: DeviceId },
 }
 
 impl Frame {
-    /// 编码帧为字节（包含长度前缀）
+    /// Encodes the frame to bytes (including the length prefix).
     pub fn encode(&self) -> Vec<u8> {
         let mut buf = BytesMut::new();
 
-        // 先写入类型和 payload，再回填长度
         let type_byte = self.frame_type() as u8;
         buf.put_u8(type_byte);
 
@@ -102,8 +102,6 @@ impl Frame {
             }
         }
 
-        // 回填长度前缀（payload 长度 = buf.len() - 4，但因为我们在开头留了位置，
-        // 实际上需要先计算总长度再 put_u32）
         let payload_len = buf.len() as u32;
         let mut out = Vec::with_capacity(4 + buf.len());
         out.put_u32(payload_len);
@@ -111,16 +109,20 @@ impl Frame {
         out
     }
 
-    /// 从字节缓冲区解码帧。
+    /// Decodes a frame from the byte buffer.
     ///
-    /// `buf` 必须至少包含一个完整帧（长度前缀 + payload）。
-    /// 返回解码后的帧和消耗的原始字节数。
+    /// `buf` must contain at least one complete frame (length prefix + payload).
+    /// Returns the decoded frame and the number of raw bytes consumed, or `None`
+    /// when more data is needed.
+    ///
+    /// # Errors
+    /// Returns an error on oversized frames, unknown frame types, or malformed
+    /// payloads.
     pub fn decode(buf: &mut BytesMut) -> Result<Option<(Self, usize)>> {
         if buf.len() < 4 {
             return Ok(None);
         }
 
-        // Peek length without consuming bytes
         let payload_len = u32::from_be_bytes([buf[0], buf[1], buf[2], buf[3]]) as usize;
         if payload_len > MAX_FRAME_SIZE as usize {
             return Err(SyncthingError::protocol(format!(
@@ -134,7 +136,6 @@ impl Frame {
             return Ok(None);
         }
 
-        // 现在确认数据足够，消耗长度前缀
         buf.advance(4);
 
         if payload_len < 1 {

@@ -1,9 +1,10 @@
-//! Syncthing Relay Protocol v1 — 服务端实现
+//! Syncthing Relay Protocol v1 — server implementation.
 //!
-//! 实现 relay 协议的服务端：接受客户端连接、注册设备、配对会话、
-//! 双向转发数据。与 Go Syncthing relay 服务器完全互操作。
+//! Implements the relay protocol server: accepting client connections,
+//! registering devices, pairing sessions, and forwarding data in both
+//! directions. Fully interoperable with the Go Syncthing relay server.
 //!
-//! 协议规范: <https://docs.syncthing.net/specs/relay-v1.html>
+//! Protocol spec: <https://docs.syncthing.net/specs/relay-v1.html>
 
 use std::collections::HashMap;
 use std::net::SocketAddr;
@@ -27,69 +28,59 @@ use super::protocol::{
     Response, SessionInvitation,
 };
 
-// ── 常量 ──────────────────────────────────────────────────────
-
-/// 协议模式连接的超时
+/// Timeout for protocol-mode connections.
 const PROTOCOL_TIMEOUT: Duration = Duration::from_secs(30);
-/// Session 模式连接的超时
+/// Timeout for session-mode connections.
 const SESSION_TIMEOUT: Duration = Duration::from_secs(30);
-/// Ping 间隔
+/// Ping interval.
 const PING_INTERVAL: Duration = Duration::from_secs(30);
-/// Ping 超时
+/// Ping timeout.
 const PING_TIMEOUT: Duration = Duration::from_secs(10);
-/// 最大并发客户端数
+/// Maximum concurrent clients.
 const MAX_CLIENTS: usize = 1000;
-/// 会话密钥长度（随机生成）
+/// Session key length (randomly generated).
 const SESSION_KEY_LEN: usize = 32;
 
-// ── 内部类型 ──────────────────────────────────────────────────
-
-/// 已注册的 relay 客户端
+/// Registered relay client.
 #[allow(dead_code)]
 struct Client {
     device_id: DeviceId,
-    /// 协议模式 TLS 连接的写入端
+    /// Write half of the protocol-mode TLS connection.
     writer:
         Arc<tokio::sync::Mutex<tokio::io::WriteHalf<tokio_rustls::server::TlsStream<TcpStream>>>>,
-    /// 待处理的连接请求
+    /// Pending connection requests.
     pending_connect: HashMap<DeviceId, oneshot::Sender<()>>,
 }
 
-/// 待配对的 session
-///
-/// 配对协议：
-/// 1. 第一个 peer 到达 → 存储其 stream + 创建 oneshot tx（供第二个 peer 发 stream 过来），等待 rx
-/// 2. 第二个 peer 到达 → 取出存储的 stream + tx，通过 tx 发自己的 stream 给第一个 peer
-/// 3. 双方各自拿到对方的 stream，开始双向转发
+/// Session awaiting pairing (see `handle_session_connection` for the flow).
 #[allow(dead_code)]
 struct PendingSession {
     from: DeviceId,
     to: DeviceId,
     key: Vec<u8>,
-    /// (第一个到达方的 stream, oneshot tx → 第二个到达方通过此 tx 发送自己的 stream)
+    /// (First arriver's stream, oneshot tx through which the second arriver
+    /// sends its own stream.)
     first_arrived: Option<(TcpStream, oneshot::Sender<TcpStream>)>,
 }
 
-/// Relay 服务器
+/// Relay server.
 pub struct RelayServer {
-    /// 监听地址（协议模式 + 可选的 WebSocket）
+    /// Listen address (protocol mode + optional WebSocket).
     listen_addr: SocketAddr,
-    /// Session 模式监听地址
+    /// Session-mode listen address.
     session_addr: SocketAddr,
-    /// TLS 配置
+    /// TLS configuration.
     tls_config: Arc<crate::tls::SyncthingTlsConfig>,
-    /// 已注册客户端（device_id → Client）
+    /// Registered clients (device_id -> Client).
     clients: RwLock<HashMap<DeviceId, Arc<Client>>>,
-    /// 待配对的 session（key → PendingSession）
+    /// Sessions awaiting pairing (key -> PendingSession).
     pending_sessions: RwLock<HashMap<Vec<u8>, PendingSession>>,
-    /// 关闭信号
+    /// Shutdown signal.
     shutdown_tx: RwLock<Option<broadcast::Sender<()>>>,
 }
 
-// ── 公共 API ──────────────────────────────────────────────────
-
 impl RelayServer {
-    /// 创建新的 relay 服务器
+    /// Creates a new relay server.
     pub fn new(
         listen_addr: SocketAddr,
         session_addr: SocketAddr,
@@ -105,14 +96,17 @@ impl RelayServer {
         }
     }
 
-    /// 启动 relay 服务器
+    /// Starts the relay server (blocks until shutdown).
+    ///
+    /// # Errors
+    /// Returns an error if the TLS config is invalid or either listener fails
+    /// to bind.
     pub async fn run(self: Arc<Self>) -> Result<()> {
         let (shutdown_tx, _) = broadcast::channel::<()>(1);
         let mut shutdown_rx_protocol = shutdown_tx.subscribe();
         let mut shutdown_rx_session = shutdown_tx.subscribe();
         *self.shutdown_tx.write() = Some(shutdown_tx);
 
-        // 启动 TLS 协议模式监听器
         let server_config = self
             .tls_config
             .relay_server_config()
@@ -126,7 +120,6 @@ impl RelayServer {
             .map_err(|e| SyncthingError::connection(format!("relay protocol local_addr: {}", e)))?;
         info!("Relay protocol listener on {}", actual_protocol_addr);
 
-        // 启动 Session 模式监听器
         let session_listener = TcpListener::bind(self.session_addr).await.map_err(|e| {
             SyncthingError::connection(format!("relay session bind {}: {}", self.session_addr, e))
         })?;
@@ -139,7 +132,6 @@ impl RelayServer {
         let self_sessions = Arc::clone(&self);
         let acceptor_clone = acceptor.clone();
 
-        // 协议模式 accept 循环
         let protocol_task = tokio::spawn(async move {
             loop {
                 tokio::select! {
@@ -171,7 +163,6 @@ impl RelayServer {
             }
         });
 
-        // Session 模式 accept 循环
         let session_task = tokio::spawn(async move {
             loop {
                 tokio::select! {
@@ -202,21 +193,18 @@ impl RelayServer {
             }
         });
 
-        // 等待任务完成
         let _ = tokio::join!(protocol_task, session_task);
         info!("Relay server stopped");
         Ok(())
     }
 
-    /// 优雅关闭
+    /// Triggers graceful shutdown.
     pub fn shutdown(&self) {
         if let Some(tx) = self.shutdown_tx.write().take() {
             let _ = tx.send(());
         }
     }
 }
-
-// ── 协议模式处理 ──────────────────────────────────────────────
 
 impl RelayServer {
     async fn handle_protocol_connection(
@@ -225,13 +213,11 @@ impl RelayServer {
         stream: TcpStream,
         peer_addr: SocketAddr,
     ) -> Result<()> {
-        // TLS 握手
         let tls_stream = timeout(PROTOCOL_TIMEOUT, acceptor.accept(stream))
             .await
             .map_err(|_| SyncthingError::timeout("relay TLS accept timeout"))?
             .map_err(|e| SyncthingError::Tls(format!("relay TLS accept: {}", e)))?;
 
-        // 从 TLS 证书派生 device ID
         let certs = tls_stream.get_ref().1.peer_certificates();
         let device_id = certs
             .and_then(|certs| certs.first())
@@ -248,7 +234,7 @@ impl RelayServer {
             "Relay protocol client connected"
         );
 
-        // 注册客户端 — 先检查容量（无需持有锁跨越 await）
+        // Check capacity first (no lock held across await).
         let is_full = { server.clients.read().len() >= MAX_CLIENTS };
         if is_full {
             let msg = protocol::RelayFull.encode();
@@ -270,13 +256,11 @@ impl RelayServer {
         }
         info!(device = %device_id.short_id(), "Client registered (total: {})", server.clients.read().len());
 
-        // 标记离开时清理
         let _guard = ClientGuard {
             server: Arc::clone(server),
             device_id,
         };
 
-        // 启动 Ping 定时器
         let ping_writer = Arc::clone(&writer);
         let ping_device = device_id;
         let ping_server = Arc::clone(server);
@@ -296,7 +280,6 @@ impl RelayServer {
             }
         });
 
-        // 读取循环 — 处理 Protocol Mode 消息
         let mut buf = vec![0u8; 65536];
         loop {
             let n = match timeout(PROTOCOL_TIMEOUT, read_half.read(&mut buf)).await {
@@ -327,7 +310,7 @@ impl RelayServer {
                 }
                 let body_len = header.message_length.max(0) as usize;
                 if data.remaining() < body_len {
-                    break; // 等待更多数据
+                    break;
                 }
                 let body = data.split_to(body_len);
                 let mut body_buf = body;
@@ -343,7 +326,7 @@ impl RelayServer {
                         trace!(device = %device_id.short_id(), "Pong received");
                     }
                     MessageType::JoinRelayRequest => {
-                        let _req = JoinRelayRequest; // 已在上方注册，回复成功
+                        let _req = JoinRelayRequest;
                         let resp = Response::success().encode();
                         let mut w = writer.lock().await;
                         let _ = timeout(PROTOCOL_TIMEOUT, w.write_all(&resp)).await;
@@ -355,15 +338,13 @@ impl RelayServer {
                         }
                     }
                     MessageType::Response => {
-                        // 客户端不应该发 Response
                         trace!("Unexpected Response from client");
                     }
                     MessageType::SessionInvitation => {
-                        // 客户端不应该发 SessionInvitation
                         trace!("Unexpected SessionInvitation from client");
                     }
                     MessageType::JoinSessionRequest | MessageType::RelayFull => {
-                        // 这些消息只应在 Session Mode 出现
+                        // These messages only appear in session mode.
                         warn!(
                             device = %device_id.short_id(),
                             msg_type = ?header.message_type,
@@ -379,7 +360,7 @@ impl RelayServer {
         Ok(())
     }
 
-    /// 处理连接请求 — 检查目标是否已注册，发送 SessionInvitation
+    /// Handles a ConnectRequest: checks the target is registered and sends SessionInvitations.
     async fn handle_connect_request(
         server: &Arc<RelayServer>,
         from_device: DeviceId,
@@ -409,7 +390,6 @@ impl RelayServer {
             "ConnectRequest received"
         );
 
-        // 检查目标客户端是否已注册到此 relay
         let target_client = {
             let clients = server.clients.read();
             clients.get(&target_id).cloned()
@@ -426,11 +406,9 @@ impl RelayServer {
             }
         };
 
-        // 生成会话密钥
         let mut key = vec![0u8; SESSION_KEY_LEN];
         rand::rng().fill_bytes(&mut key);
 
-        // 注册 pending session（first_arrived 在第一个 session 连接到达时填充）
         {
             let mut sessions = server.pending_sessions.write();
             sessions.insert(
@@ -444,12 +422,14 @@ impl RelayServer {
             );
         }
 
-        // 向发起方发送 SessionInvitation（server_socket=true 连接后由发起方决定角色）
+        // Invitation for the initiator; the empty address means "the session
+        // port on the same relay IP" and port 0 is resolved by the client's
+        // resolve_session_addr.
         let inv_from = SessionInvitation {
             from: from_device.as_bytes().to_vec(),
             key: key.clone(),
-            address: vec![], // 空 = 使用同一 relay IP 的 session 端口
-            port: 0,         // 将由客户端的 resolve_session_addr 处理
+            address: vec![],
+            port: 0,
             server_socket: false,
         };
         {
@@ -457,7 +437,6 @@ impl RelayServer {
             let _ = timeout(PROTOCOL_TIMEOUT, w.write_all(&inv_from.encode())).await;
         }
 
-        // 向目标方发送 SessionInvitation（server_socket=true）
         let inv_to = SessionInvitation {
             from: from_device.as_bytes().to_vec(),
             key,
@@ -484,21 +463,18 @@ impl RelayServer {
     }
 }
 
-// ── Session 模式处理 ──────────────────────────────────────────
-
 impl RelayServer {
-    /// 处理 session 模式连接 — 两阶段配对
+    /// Handles a session-mode connection using two-phase pairing.
     ///
-    /// Phase 1（第一个到达方）：
-    ///   存储 stream + 创建 oneshot tx，等待第二个到达方通过 tx 发来 stream
-    /// Phase 2（第二个到达方）：
-    ///   取出存储的 stream + tx，通过 tx 发送自己的 stream，获取第一个 stream
+    /// Phase 1 (first arriver): stores its stream plus a oneshot tx, then
+    /// waits for the second arriver to send its stream through the tx.
+    /// Phase 2 (second arriver): takes the stored stream and tx, sends its own
+    /// stream through the tx, and obtains the first stream.
     async fn handle_session_connection(
         server: &Arc<RelayServer>,
         mut stream: TcpStream,
         peer_addr: SocketAddr,
     ) -> Result<()> {
-        // 读取 JoinSessionRequest
         let mut read_buf = vec![0u8; 8192];
         let n = timeout(SESSION_TIMEOUT, stream.read(&mut read_buf))
             .await
@@ -532,7 +508,7 @@ impl RelayServer {
         let key = join_req.key;
         debug!(peer = %peer_addr, key_len = key.len(), "Session join request");
 
-        // 两阶段配对：在锁内决定角色，锁外执行 I/O
+        // Decide the role under the lock; perform I/O outside it.
         enum SessionRole {
             Phase1(oneshot::Receiver<TcpStream>),
             Phase2(TcpStream, TcpStream), // (first_stream, my_stream)
@@ -549,15 +525,13 @@ impl RelayServer {
             };
 
             if let Some((first_stream, _tx_to_first)) = session.first_arrived.take() {
-                // Phase 2: 拥有双方 stream
                 SessionRole::Phase2(first_stream, stream)
             } else {
-                // Phase 1: 存储自己的 stream，等待 Phase 2
                 let (tx, rx) = oneshot::channel::<TcpStream>();
                 session.first_arrived = Some((stream, tx));
                 SessionRole::Phase1(rx)
             }
-        }; // sessions 锁在此释放
+        };
 
         match role {
             SessionRole::Phase1(rx) => {
@@ -594,13 +568,13 @@ impl RelayServer {
         }
     }
 
-    /// 启动双向数据转发：A→B 和 B→A。
-    /// 任一方向断开时，自动清理另一个方向。
+    /// Spawns bidirectional data forwarding (A->B and B->A).
+    ///
+    /// When either direction ends, the other is cleaned up.
     fn spawn_bidirectional_forward(a: TcpStream, b: TcpStream) {
         let (mut a_read, mut a_write) = tokio::io::split(a);
         let (mut b_read, mut b_write) = tokio::io::split(b);
 
-        // A → B
         let a_to_b = tokio::spawn(async move {
             let mut buf = vec![0u8; 65536];
             loop {
@@ -617,7 +591,6 @@ impl RelayServer {
             let _ = b_write.shutdown().await;
         });
 
-        // B → A
         let b_to_a = tokio::spawn(async move {
             let mut buf = vec![0u8; 65536];
             loop {
@@ -634,7 +607,6 @@ impl RelayServer {
             let _ = a_write.shutdown().await;
         });
 
-        // 任一方向断开时，清理
         tokio::spawn(async move {
             tokio::select! {
                 _ = a_to_b => {},
@@ -643,8 +615,6 @@ impl RelayServer {
         });
     }
 }
-
-// ── 客户端清理守卫 ────────────────────────────────────────────
 
 struct ClientGuard {
     server: Arc<RelayServer>,
@@ -656,8 +626,6 @@ impl Drop for ClientGuard {
         self.server.remove_client(&self.device_id);
     }
 }
-
-// ── 测试 ──────────────────────────────────────────────────────
 
 #[cfg(test)]
 mod tests {

@@ -1,6 +1,6 @@
-//! UPnP IGD 端口映射实现
+//! UPnP IGD port mapping implementation.
 //!
-//! 参考来源: Tailscale net/portmapper/upnp.go
+//! (reference: Tailscale net/portmapper/upnp.go)
 
 use std::net::SocketAddr;
 use std::time::Duration;
@@ -9,42 +9,47 @@ use igd::aio::search_gateway;
 use igd::{PortMappingProtocol, SearchOptions};
 use syncthing_core::{Result, SyncthingError};
 
-/// UPnP 发现端口
+/// UPnP discovery port.
 pub const UPNP_DISCOVERY_PORT: u16 = 1900;
 
-/// SSDP 多播地址
+/// SSDP multicast address.
 pub const SSDP_MULTICAST_ADDR: &str = "239.255.255.250:1900";
 
-/// SSDP M-SEARCH 请求包（查找 InternetGatewayDevice）
+/// SSDP M-SEARCH request packet (looking for InternetGatewayDevice).
 pub const SSDP_MSEARCH_IGD: &str = "M-SEARCH * HTTP/1.1\r\n\
 HOST: 239.255.255.250:1900\r\n\
 ST: urn:schemas-upnp-org:device:InternetGatewayDevice:1\r\n\
 MAN: \"ssdp:discover\"\r\n\
 MX: 2\r\n\r\n";
 
-/// SSDP M-SEARCH 请求包（ssdp:all）
+/// SSDP M-SEARCH request packet (ssdp:all).
 pub const SSDP_MSEARCH_ALL: &str = "M-SEARCH * HTTP/1.1\r\n\
 HOST: 239.255.255.250:1900\r\n\
 ST: ssdp:all\r\n\
 MAN: \"ssdp:discover\"\r\n\
 MX: 2\r\n\r\n";
 
-/// UPnP 发现响应
+/// UPnP discovery response.
 #[derive(Debug, Clone)]
 pub struct UpnpDiscoResponse {
+    /// Location URL of the device description.
     pub location: String,
+    /// Server header.
     pub server: String,
+    /// Unique service name.
     pub usn: String,
 }
 
-/// UPnP 映射状态
+/// UPnP mapping state.
 #[derive(Debug, Clone)]
 pub struct UpnpMappingState {
+    /// External port.
     pub external_port: u16,
+    /// Protocol ("TCP" or "UDP").
     pub protocol: String,
 }
 
-/// 解析 SSDP 发现响应
+/// Parses an SSDP discovery response.
 pub fn parse_upnp_disco_response(body: &[u8]) -> Option<UpnpDiscoResponse> {
     let text = String::from_utf8_lossy(body);
     let upper = text.to_uppercase();
@@ -93,7 +98,7 @@ pub fn parse_upnp_disco_response(body: &[u8]) -> Option<UpnpDiscoResponse> {
     })
 }
 
-/// 构建 AddPortMapping SOAP 请求体
+/// Builds an AddPortMapping SOAP request body.
 pub fn build_add_port_mapping_soap(
     external_port: u16,
     internal_port: u16,
@@ -121,7 +126,7 @@ pub fn build_add_port_mapping_soap(
     )
 }
 
-/// 构建 DeletePortMapping SOAP 请求体
+/// Builds a DeletePortMapping SOAP request body.
 pub fn build_delete_port_mapping_soap(external_port: u16, protocol: &str) -> String {
     format!(
         r#"<?xml version="1.0"?>
@@ -137,11 +142,15 @@ pub fn build_delete_port_mapping_soap(external_port: u16, protocol: &str) -> Str
     )
 }
 
-/// 分配 UPnP 端口映射
+/// Allocates a UPnP port mapping.
 ///
-/// 使用 `igd` 库进行网关发现 (SSDP) 和端口映射 (SOAP)。
-/// 原始 SSDP/SOAP 实现需要：UDP 多播、HTTP client、XML 解析。
-/// 当前 `igd` 库稳定可靠，替换收益/成本比低，保留作为长期方案。
+/// Uses the `igd` crate for gateway discovery (SSDP) and port mapping (SOAP).
+/// A hand-rolled SSDP/SOAP implementation would need UDP multicast, an HTTP
+/// client, and XML parsing; the stable `igd` crate keeps the cost/benefit
+/// ratio low, so it stays as the long-term solution.
+///
+/// # Errors
+/// Returns an error if gateway discovery or the SOAP exchanges fail, or on IPv6.
 pub(crate) async fn allocate_port(
     local_addr: SocketAddr,
     local_port: u16,
@@ -189,7 +198,10 @@ pub(crate) async fn allocate_port(
     Ok((external, state))
 }
 
-/// 释放 UPnP 端口映射
+/// Releases a UPnP port mapping.
+///
+/// # Errors
+/// Returns an error if the DeletePortMapping exchange fails.
 pub(crate) async fn release_mapping(state: &UpnpMappingState) -> Result<()> {
     let options = SearchOptions {
         timeout: Some(Duration::from_secs(3)),

@@ -1,6 +1,7 @@
-//! Relay 拨号辅助函数
+//! Relay dialing helpers.
 //!
-//! 将 Relay Protocol 与 BEP 连接层打通，提供 `connect_bep_via_relay`。
+//! Bridges the Relay Protocol with the BEP connection layer, providing
+//! `connect_bep_via_relay`.
 
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -18,33 +19,29 @@ use crate::relay::client::{join_session, RelayProtocolClient};
 use crate::relay::protocol::SessionInvitation;
 use crate::tls::{accept_tls_stream, connect_tls_stream, SyncthingTlsConfig};
 
-/// 通过 relay 服务器建立与目标设备的 BEP 连接
+/// Establishes a BEP connection to the target device through a relay server.
 ///
-/// 完整流程：
-/// 1. Protocol Mode TLS → relay 服务器（ALPN = `bep-relay`）
-/// 2. 发送 `ConnectRequest(target_device)`
-/// 3. 接收 `SessionInvitation`
-/// 4. Session Mode TCP → relay 的 session 端口
-/// 5. 发送 `JoinSessionRequest(key)`
-/// 6. 在 session stream 上启动 BEP TLS（client/server 由 `server_socket` 决定）
-/// 7. BEP Hello 交换
-/// 8. 创建 `BepConnection`
+/// Full flow:
+/// 1. Protocol Mode TLS to the relay server (ALPN = `bep-relay`)
+/// 2. Send `ConnectRequest(target_device)`
+/// 3. Receive `SessionInvitation`
+/// 4. Session Mode TCP to the relay's session port
+/// 5. Send `JoinSessionRequest(key)`
+/// 6. Start BEP TLS on the session stream (client/server decided by `server_socket`)
+/// 7. BEP Hello exchange
+/// 8. Create the `BepConnection`
 ///
-/// # 参数
-/// - `relay_url`: relay 地址，如 `relay://relay.syncthing.net:22067/?id=ITZRNXE-...`
-/// - `target_device`: 要连接的目标设备 ID
-/// - `device_name`: 本机设备名称（用于 BEP Hello）
-/// - `tls_config`: 本机 TLS 配置（含客户端证书）
+/// # Errors
+/// Returns an error on any step failing (see per-step timeouts), on device ID
+/// mismatch, or on SSRF prevention rejecting the session address.
 pub async fn connect_bep_via_relay(
     relay_url: &str,
     target_device: DeviceId,
     device_name: &str,
     tls_config: &Arc<SyncthingTlsConfig>,
 ) -> Result<Arc<BepConnection>> {
-    // 1. 解析 relay URL
     let (relay_addr, _relay_id) = parse_relay_url(relay_url)?;
 
-    // 2. 建立 Protocol Mode TLS 连接（ALPN = bep-relay）
     let rustls_config = tls_config
         .relay_client_config()
         .map_err(|e| SyncthingError::Tls(format!("relay client config: {}", e)))?;
@@ -59,7 +56,6 @@ pub async fn connect_bep_via_relay(
 
     debug!("Relay protocol mode connected to {}", relay_addr);
 
-    // 3. 发送 ConnectRequest，获取 SessionInvitation
     let invitation = timeout(
         Duration::from_secs(60),
         protocol_client.request_session(target_device),
@@ -67,8 +63,8 @@ pub async fn connect_bep_via_relay(
     .await
     .map_err(|_| SyncthingError::timeout("relay session request timeout"))??;
 
-    // 显式关闭 protocol 连接，避免与 listener 竞争 relay 槽位。
-    // dialer 只需临时查询 invitation，不需要长期占用 protocol mode。
+    // Close the protocol connection explicitly: the dialer only needs the
+    // invitation and should not hold a protocol-mode slot against the listener.
     drop(protocol_client);
 
     info!(
@@ -78,7 +74,6 @@ pub async fn connect_bep_via_relay(
         invitation.server_socket
     );
 
-    // 4. 建立 Session Mode 连接
     let session_addr = resolve_session_addr(relay_addr, &invitation)?;
     let session_stream = timeout(
         Duration::from_secs(30),
@@ -87,7 +82,6 @@ pub async fn connect_bep_via_relay(
     .await
     .map_err(|_| SyncthingError::timeout("relay session join timeout"))??;
 
-    // Relay 路径更容易被中间节点掐断，使用更积极的 TCP keepalive。
     crate::transport::keepalive::apply_tcp_keepalive(
         &session_stream,
         syncthing_core::TransportType::Relay,
@@ -95,13 +89,10 @@ pub async fn connect_bep_via_relay(
 
     debug!("Relay session mode connected to {}", session_addr);
 
-    // 5. 在 session stream 上启动 BEP TLS 握手 + Hello + 创建连接
     let (event_tx, mut event_rx) = tokio::sync::mpsc::channel(8);
-    // NOTE: 连接生命周期通过 ConnectionManager 上报；drain 仅防止 channel 阻塞。
     tokio::spawn(async move { while event_rx.recv().await.is_some() {} });
 
     let conn = if invitation.server_socket {
-        // 作为 TLS server
         let (mut tls_stream, peer_device) = timeout(
             Duration::from_secs(30),
             accept_tls_stream(session_stream, tls_config),
@@ -130,7 +121,6 @@ pub async fn connect_bep_via_relay(
         )
         .await?
     } else {
-        // 作为 TLS client
         let (mut tls_stream, peer_device) = timeout(
             Duration::from_secs(30),
             connect_tls_stream(session_stream, tls_config, Some(target_device)),
@@ -171,9 +161,11 @@ pub async fn connect_bep_via_relay(
     Ok(conn)
 }
 
-/// 解析 relay URL
+/// Parses a relay URL of the form `relay://host:port/?id=<device_id>`.
 ///
-/// 格式: `relay://host:port/?id=<device_id>`
+/// # Errors
+/// Returns an error on a missing `relay://` prefix, an invalid address, or an
+/// invalid device ID.
 pub fn parse_relay_url(url: &str) -> Result<(SocketAddr, DeviceId)> {
     let url = url
         .strip_prefix("relay://")
@@ -199,12 +191,12 @@ pub fn parse_relay_url(url: &str) -> Result<(SocketAddr, DeviceId)> {
     Ok((addr, relay_id))
 }
 
-/// 解析 session 地址
+/// Resolves the session address.
 ///
-/// 如果 invitation.address 为空，回退到 protocol mode 连接的同一 IP。
+/// Falls back to the protocol-mode connection's IP when invitation.address is empty.
 ///
-/// SAFETY: 验证 relay 提供的 session 地址，防止恶意 relay 将客户端
-/// 重定向到内网地址 (SSRF)。
+/// # Errors
+/// Returns an error on an unparsable address or SSRF prevention rejecting it.
 pub fn resolve_session_addr(
     protocol_addr: SocketAddr,
     invitation: &SessionInvitation,
@@ -220,7 +212,7 @@ pub fn resolve_session_addr(
         SocketAddr::new(ip, invitation.port as u16)
     };
 
-    // SAFETY: SSRF防护 — 拒绝 relay 将客户端重定向到危险地址
+    // SAFETY: SSRF protection — reject relays redirecting the client to unsafe addresses.
     if addr.ip().is_loopback() || addr.ip().is_multicast() || addr.ip().is_unspecified() {
         return Err(SyncthingError::network(format!(
             "SSRF prevention: relay attempted to redirect to unsafe address {}",

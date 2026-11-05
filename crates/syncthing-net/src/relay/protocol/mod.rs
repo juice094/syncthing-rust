@@ -1,12 +1,12 @@
-//! Syncthing Relay Protocol v1 消息定义与 XDR 编解码
+//! Syncthing Relay Protocol v1 message definitions and XDR codec.
 //!
-//! 协议规范: <https://docs.syncthing.net/specs/relay-v1.html>
+//! Protocol spec: <https://docs.syncthing.net/specs/relay-v1.html>
 //!
-//! 所有多字节整数采用大端序（XDR 标准）。
+//! All multi-byte integers are big-endian (XDR standard).
 
 use bytes::{Buf, BufMut, Bytes, BytesMut};
 
-/// Relay 协议魔数
+/// Relay protocol magic number.
 pub const MAGIC: u32 = 0x9E79BC40;
 
 /// 消息类型
@@ -32,7 +32,7 @@ pub enum MessageType {
 }
 
 impl MessageType {
-    /// 从 i32 解析消息类型
+    /// Parses a raw i32 into a message type.
     pub const fn from_i32(v: i32) -> Option<Self> {
         match v {
             0 => Some(Self::Ping),
@@ -48,29 +48,29 @@ impl MessageType {
     }
 }
 
-/// 消息头（12 字节）
+/// Message header (12 bytes).
 #[derive(Debug, Clone, Copy)]
 pub struct Header {
-    /// 魔数（应为 MAGIC）
+    /// Magic (expected to be MAGIC).
     pub magic: u32,
-    /// 消息类型
+    /// Message type.
     pub message_type: MessageType,
-    /// 消息体长度（不含头）
+    /// Body length (excluding the header).
     pub message_length: i32,
 }
 
 impl Header {
-    /// 头部长度（字节）
+    /// Header size in bytes.
     pub const SIZE: usize = 12;
 
-    /// 编码到 buf
+    /// Encodes the header into `buf`.
     pub fn encode(&self, buf: &mut BytesMut) {
         buf.put_u32(self.magic);
         buf.put_i32(self.message_type as i32);
         buf.put_i32(self.message_length);
     }
 
-    /// 从 buf 解码
+    /// Decodes a header from `buf`, or `None` when incomplete/unknown.
     pub fn decode(buf: &mut Bytes) -> Option<Self> {
         if buf.remaining() < Self::SIZE {
             return None;
@@ -86,12 +86,12 @@ impl Header {
     }
 }
 
-/// Ping 消息 (Type = 0)
+/// Ping message (Type = 0).
 #[derive(Debug, Clone)]
 pub struct Ping;
 
 impl Ping {
-    /// 编码为完整消息（含 header）
+    /// Encodes as a complete message (including the header).
     pub fn encode(&self) -> Bytes {
         let mut buf = BytesMut::with_capacity(Header::SIZE);
         Header {
@@ -104,12 +104,12 @@ impl Ping {
     }
 }
 
-/// Pong 消息 (Type = 1)
+/// Pong message (Type = 1).
 #[derive(Debug, Clone)]
 pub struct Pong;
 
 impl Pong {
-    /// 编码为完整消息（含 header）
+    /// Encodes as a complete message (including the header).
     pub fn encode(&self) -> Bytes {
         let mut buf = BytesMut::with_capacity(Header::SIZE);
         Header {
@@ -122,12 +122,12 @@ impl Pong {
     }
 }
 
-/// JoinRelayRequest 消息 (Type = 2)
+/// JoinRelayRequest message (Type = 2).
 #[derive(Debug, Clone)]
 pub struct JoinRelayRequest;
 
 impl JoinRelayRequest {
-    /// 编码为完整消息（含 header）
+    /// Encodes as a complete message (including the header).
     pub fn encode(&self) -> Bytes {
         let mut buf = BytesMut::with_capacity(Header::SIZE);
         Header {
@@ -140,15 +140,15 @@ impl JoinRelayRequest {
     }
 }
 
-/// JoinSessionRequest 消息 (Type = 3)
+/// JoinSessionRequest message (Type = 3).
 #[derive(Debug, Clone)]
 pub struct JoinSessionRequest {
-    /// 会话密钥
+    /// Session key.
     pub key: Vec<u8>,
 }
 
 impl JoinSessionRequest {
-    /// 编码为完整消息（含 header）
+    /// Encodes as a complete message (including the header).
     pub fn encode(&self) -> Bytes {
         let payload_len = 4 + padded_len(self.key.len());
         let mut buf = BytesMut::with_capacity(Header::SIZE + payload_len);
@@ -162,24 +162,24 @@ impl JoinSessionRequest {
         buf.freeze()
     }
 
-    /// 从消息体解码（不含 header）
+    /// Decodes from the message body (excluding the header).
     pub fn decode(body: &mut Bytes) -> Option<Self> {
         let key = decode_opaque(body)?;
         Some(Self { key })
     }
 }
 
-/// Response 消息 (Type = 4)
+/// Response message (Type = 4).
 #[derive(Debug, Clone)]
 pub struct Response {
-    /// 状态码（0=success, 1=not found, 2=already connected, 99=internal error, 100=unexpected message）
+    /// Status code (0=success, 1=not found, 2=already connected, 99=internal error, 100=unexpected message).
     pub code: i32,
-    /// 状态描述
+    /// Status description.
     pub message: String,
 }
 
 impl Response {
-    /// 编码为完整消息（含 header）
+    /// Encodes as a complete message (including the header).
     pub fn encode(&self) -> Bytes {
         let msg_bytes = self.message.as_bytes();
         let payload_len = 4 + 4 + padded_len(msg_bytes.len());
@@ -195,7 +195,7 @@ impl Response {
         buf.freeze()
     }
 
-    /// 从消息体解码（不含 header）
+    /// Decodes from the message body (excluding the header).
     pub fn decode(body: &mut Bytes) -> Option<Self> {
         if body.remaining() < 4 {
             return None;
@@ -205,7 +205,7 @@ impl Response {
         Some(Self { code, message })
     }
 
-    /// 构造成功响应
+    /// Builds a success response.
     pub fn success() -> Self {
         Self {
             code: 0,
@@ -213,7 +213,7 @@ impl Response {
         }
     }
 
-    /// 构造 not found 响应
+    /// Builds a not-found response.
     pub fn not_found() -> Self {
         Self {
             code: 1,
@@ -221,7 +221,7 @@ impl Response {
         }
     }
 
-    /// 构造 already connected 响应
+    /// Builds an already-connected response.
     pub fn already_connected() -> Self {
         Self {
             code: 2,
@@ -230,15 +230,15 @@ impl Response {
     }
 }
 
-/// ConnectRequest 消息 (Type = 5)
+/// ConnectRequest message (Type = 5).
 #[derive(Debug, Clone)]
 pub struct ConnectRequest {
-    /// 目标设备 ID（32 字节 raw bytes）
+    /// Target device ID (32 raw bytes).
     pub id: Vec<u8>,
 }
 
 impl ConnectRequest {
-    /// 编码为完整消息（含 header）
+    /// Encodes as a complete message (including the header).
     pub fn encode(&self) -> Bytes {
         let payload_len = 4 + padded_len(self.id.len());
         let mut buf = BytesMut::with_capacity(Header::SIZE + payload_len);
@@ -252,30 +252,30 @@ impl ConnectRequest {
         buf.freeze()
     }
 
-    /// 从消息体解码（不含 header）
+    /// Decodes from the message body (excluding the header).
     pub fn decode(body: &mut Bytes) -> Option<Self> {
         let id = decode_opaque(body)?;
         Some(Self { id })
     }
 }
 
-/// SessionInvitation 消息 (Type = 6)
+/// SessionInvitation message (Type = 6).
 #[derive(Debug, Clone)]
 pub struct SessionInvitation {
-    /// 来源设备 ID
+    /// Source device ID.
     pub from: Vec<u8>,
-    /// 会话密钥
+    /// Session key.
     pub key: Vec<u8>,
-    /// 期望连接的地址（空表示使用 protocol mode 连接的同一 relay IP）
+    /// Address to connect to (empty = same relay IP as the protocol-mode connection).
     pub address: Vec<u8>,
-    /// 期望连接的端口
+    /// Port to connect to.
     pub port: u32,
-    /// 本端应假设为 server socket（另一端为 client socket）
+    /// Whether this end should act as the server socket (the other end is client).
     pub server_socket: bool,
 }
 
 impl SessionInvitation {
-    /// 编码为完整消息（含 header）
+    /// Encodes as a complete message (including the header).
     pub fn encode(&self) -> Bytes {
         let payload_len = 4
             + padded_len(self.from.len())
@@ -300,7 +300,7 @@ impl SessionInvitation {
         buf.freeze()
     }
 
-    /// 从消息体解码（不含 header）
+    /// Decodes from the message body (excluding the header).
     pub fn decode(body: &mut Bytes) -> Option<Self> {
         let from = decode_opaque(body)?;
         let key = decode_opaque(body)?;
@@ -320,12 +320,12 @@ impl SessionInvitation {
     }
 }
 
-/// RelayFull 消息 (Type = 7)
+/// RelayFull message (Type = 7).
 #[derive(Debug, Clone)]
 pub struct RelayFull;
 
 impl RelayFull {
-    /// 编码为完整消息（含 header）
+    /// Encodes as a complete message (including the header).
     pub fn encode(&self) -> Bytes {
         let mut buf = BytesMut::with_capacity(Header::SIZE);
         Header {
@@ -338,7 +338,7 @@ impl RelayFull {
     }
 }
 
-/// 统一消息枚举
+/// Unified message enum.
 #[derive(Debug, Clone)]
 pub enum Message {
     /// Ping
@@ -360,7 +360,7 @@ pub enum Message {
 }
 
 impl Message {
-    /// 编码为字节（含 header）
+    /// Encodes to bytes (including the header).
     pub fn encode(&self) -> Bytes {
         match self {
             Self::Ping(m) => m.encode(),
@@ -375,9 +375,7 @@ impl Message {
     }
 }
 
-// --- XDR 辅助函数 ---
-
-/// 计算填充后的长度（4 字节对齐）
+/// Returns the 4-byte-aligned padded length.
 const fn padded_len(len: usize) -> usize {
     let rem = len % 4;
     if rem == 0 {
@@ -387,7 +385,7 @@ const fn padded_len(len: usize) -> usize {
     }
 }
 
-/// 编码变长 opaque 数据（XDR: [length: u32] [data] [padding]）
+/// Encodes variable-length opaque data (XDR: [length: u32] [data] [padding]).
 fn encode_opaque(buf: &mut BytesMut, data: &[u8]) {
     buf.put_u32(data.len() as u32);
     buf.extend_from_slice(data);
@@ -397,7 +395,7 @@ fn encode_opaque(buf: &mut BytesMut, data: &[u8]) {
     }
 }
 
-/// 解码变长 opaque 数据
+/// Decodes variable-length opaque data.
 fn decode_opaque(buf: &mut Bytes) -> Option<Vec<u8>> {
     if buf.remaining() < 4 {
         return None;
@@ -414,12 +412,12 @@ fn decode_opaque(buf: &mut Bytes) -> Option<Vec<u8>> {
     Some(data)
 }
 
-/// 编码字符串（XDR string = opaque bytes of UTF-8）
+/// Encodes a string (XDR string = opaque bytes of UTF-8).
 fn encode_string(buf: &mut BytesMut, s: &str) {
     encode_opaque(buf, s.as_bytes());
 }
 
-/// 解码字符串
+/// Decodes a string.
 fn decode_string(buf: &mut Bytes) -> Option<String> {
     let bytes = decode_opaque(buf)?;
     String::from_utf8(bytes).ok()

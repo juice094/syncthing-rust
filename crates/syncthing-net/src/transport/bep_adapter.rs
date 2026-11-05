@@ -1,8 +1,8 @@
-//! Transport → BEP 适配层
+//! Transport -> BEP adapter layer.
 //!
-//! 将原始 `Transport` 字节管道提升为完整的 BEP 连接。
-//! 负责在 `BoxedPipe` 之上执行 TLS 握手 + BEP Hello，
-//! 产出可供 `ConnectionManager` 直接使用的 `Arc<BepConnection>`。
+//! Promotes a raw `Transport` byte pipe into a full BEP connection:
+//! performs the TLS handshake + BEP Hello on top of `BoxedPipe` and produces
+//! an `Arc<BepConnection>` ready for `ConnectionManager`.
 
 use std::net::SocketAddr;
 use std::pin::Pin;
@@ -23,10 +23,10 @@ use crate::handshaker::BepHandshaker;
 use crate::tls::SyncthingTlsConfig;
 use syncthing_core::Transport;
 
-/// 包装任意 TLS 流为 `ReliablePipe`。
+/// Wraps any TLS stream as a `ReliablePipe`.
 ///
-/// 由于 orphan rule 限制，无法为 `tokio_rustls::TlsStream<BoxedPipe>` 直接 impl `ReliablePipe`，
-/// 因此引入此轻量 wrapper。
+/// The orphan rule prevents implementing `ReliablePipe` directly for
+/// `tokio_rustls::TlsStream<BoxedPipe>`, hence this lightweight wrapper.
 pub struct TlsPipe<S> {
     stream: S,
     local_addr: Option<SocketAddr>,
@@ -34,6 +34,7 @@ pub struct TlsPipe<S> {
 }
 
 impl<S> TlsPipe<S> {
+    /// Creates a wrapper around the stream with the given addresses.
     pub fn new(stream: S, local_addr: Option<SocketAddr>, peer_addr: Option<SocketAddr>) -> Self {
         Self {
             stream,
@@ -89,18 +90,19 @@ impl<S: AsyncRead + AsyncWrite + Send + Sync + Unpin> ReliablePipe for TlsPipe<S
     }
 }
 
-/// 基于 `Transport` trait 的 `DialConnector` 实现。
+/// `DialConnector` implementation on top of the `Transport` trait.
 ///
-/// 拨号流程：
-/// 1. `transport.dial(addr)` → `BoxedPipe`
-/// 2. `connect_tls_stream(pipe)` → `ClientTlsStream<BoxedPipe>`
-/// 3. `BepHandshaker::client_handshake` → BEP Hello 完成
-/// 4. 包装为 `BepConnection` 返回
+/// Dial flow:
+/// 1. `transport.dial(addr)` -> `BoxedPipe`
+/// 2. `connect_tls_stream(pipe)` -> `ClientTlsStream<BoxedPipe>`
+/// 3. `BepHandshaker::client_handshake` -> BEP Hello complete
+/// 4. Wrapped into a `BepConnection`
 pub struct TransportBepConnector {
     transport: Arc<dyn Transport>,
 }
 
 impl TransportBepConnector {
+    /// Creates a connector over the given transport.
     pub fn new(transport: Arc<dyn Transport>) -> Self {
         Self { transport }
     }
@@ -121,10 +123,9 @@ impl DialConnector for TransportBepConnector {
             addr, device_id
         );
 
-        // 若本端 device ID 较小，在发起 TLS ClientHello 前短暂退让。
         crate::manager::handshake::pre_handshake_yield(local_device_id, device_id).await;
 
-        // 1. 原始传输层拨号（优先使用 dial_device，支持 DERP 等中继传输）
+        // Prefer dial_device so relay transports (e.g. DERP) are supported.
         let pipe = self
             .transport
             .dial_device(addr, &device_id)
@@ -134,20 +135,15 @@ impl DialConnector for TransportBepConnector {
         let local_addr = pipe.local_addr();
         let peer_addr = pipe.peer_addr();
 
-        // 2. TLS 客户端握手
         let (tls_stream, _remote_device_id) =
             crate::tls::connect_tls_stream(pipe, tls_config, Some(device_id)).await?;
 
         debug!("TLS handshake completed with {}", addr);
 
-        // 3. BEP Hello 交换
         let mut tls_stream = tls_stream;
         let _remote_hello = BepHandshaker::client_handshake(&mut tls_stream, device_name).await?;
 
-        // 4. 创建 BEP 连接
         let (event_tx, mut event_rx) = tokio::sync::mpsc::channel(8);
-        // NOTE: 连接生命周期事件由 ConnectionManager::register_connection 上报；
-        // 此 drain task 仅防止 per-connection channel 在 burst 时阻塞发送端。
         tokio::spawn(async move { while event_rx.recv().await.is_some() {} });
         let tls_pipe = TlsPipe::new(tls_stream, local_addr, peer_addr);
         let conn =
@@ -164,20 +160,24 @@ impl DialConnector for TransportBepConnector {
     }
 }
 
-/// 基于 `TransportListener` 的通用 BEP 监听循环。
+/// Generic BEP listen loop on top of `TransportListener`.
 ///
-/// 监听流程：
-/// 1. `transport.listen(bind_addr)` → `Box<dyn TransportListener>`
-/// 2. `listener.accept()` → `BoxedPipe`
-/// 3. `accept_tls_stream(pipe)` → `ServerTlsStream<BoxedPipe>`
-/// 4. `BepHandshaker::server_handshake` → BEP Hello 完成
-/// 5. 注册到 `ConnectionManagerHandle`
+/// Listen flow:
+/// 1. `transport.listen(bind_addr)` -> `Box<dyn TransportListener>`
+/// 2. `listener.accept()` -> `BoxedPipe`
+/// 3. `accept_tls_stream(pipe)` -> `ServerTlsStream<BoxedPipe>`
+/// 4. `BepHandshaker::server_handshake` -> BEP Hello complete
+/// 5. Register with `ConnectionManagerHandle`
 pub struct BepTransportListener;
 
 impl BepTransportListener {
-    /// 启动监听循环。
+    /// Starts the listen loop.
     ///
-    /// 该函数会 spawn 一个后台任务，持续 accept 传入连接。
+    /// Spawns a background task that keeps accepting incoming connections.
+    ///
+    /// # Errors
+    /// Returns an error if the bind address is invalid or the transport fails
+    /// to bind.
     pub async fn start(
         transport: Arc<dyn Transport>,
         bind_addr: &str,
@@ -234,14 +234,12 @@ impl BepTransportListener {
         let local_addr = pipe.local_addr();
         let peer_addr = pipe.peer_addr();
 
-        // 服务端 TLS 握手
         let (tls_stream, device_id) = crate::tls::accept_tls_stream(pipe, &tls_config).await?;
         debug!(
             "Server TLS handshake completed: peer_device_id={}",
             device_id
         );
 
-        // 在 BEP Hello 前解决连接竞争。
         let _handshake_guard = manager
             .begin_handshake(device_id, ConnectionType::Incoming)
             .map_err(|e| {
@@ -252,14 +250,10 @@ impl BepTransportListener {
                 e
             })?;
 
-        // BEP Hello 交换
         let mut tls_stream = tls_stream;
         let _remote_hello = BepHandshaker::server_handshake(&mut tls_stream, device_name).await?;
 
-        // 创建 BEP 连接
         let (event_tx, mut event_rx) = tokio::sync::mpsc::channel(8);
-        // NOTE: 连接生命周期事件由 ConnectionManager::register_connection 上报；
-        // 此 drain task 仅防止 per-connection channel 在 burst 时阻塞发送端。
         tokio::spawn(async move { while event_rx.recv().await.is_some() {} });
         let tls_pipe = TlsPipe::new(tls_stream, local_addr, peer_addr);
         let conn =

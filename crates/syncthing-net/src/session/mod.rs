@@ -65,19 +65,31 @@ pub enum BepSessionEvent {
 /// Per-session counters for observability.
 #[derive(Debug, Default)]
 pub struct BepSessionMetrics {
+    /// BEP messages sent.
     pub messages_sent: AtomicU64,
+    /// BEP messages received.
     pub messages_recv: AtomicU64,
+    /// Bytes sent.
     pub bytes_sent: AtomicU64,
+    /// Bytes received.
     pub bytes_recv: AtomicU64,
+    /// Block requests received.
     pub blocks_requested: AtomicU64,
+    /// Blocks served.
     pub blocks_served: AtomicU64,
+    /// Heartbeat timeouts detected.
     pub heartbeat_timeouts: AtomicU64,
+    /// Session errors.
     pub errors: AtomicU64,
-    // T-D2: per-message-type counters
+    /// Full Indexes received.
     pub index_received: AtomicU64,
+    /// IndexUpdates received.
     pub index_update_received: AtomicU64,
+    /// Requests received.
     pub requests_received: AtomicU64,
+    /// Responses received.
     pub responses_received: AtomicU64,
+    /// Close messages received.
     pub closes_received: AtomicU64,
 }
 
@@ -124,23 +136,29 @@ pub trait BepSessionHandler: Send + Sync {
 
 /// BEP protocol session for a single connection.
 pub struct BepSession {
-    /// 远程设备身份（抽象层）
+    /// Remote device identity (abstraction layer).
     // TODO: identity verification / certificate rotation
     #[allow(dead_code)]
     pub(super) identity: Arc<dyn Identity>,
-    /// 远程设备ID（从 identity 缓存）
+    /// Remote device ID (cached from `identity`).
     pub(super) device_id: DeviceId,
+    /// Underlying BEP connection.
     pub(super) conn: Arc<BepConnection>,
+    /// Domain-specific event handler.
     pub(super) handler: Arc<dyn BepSessionHandler>,
+    /// Pending block request responses keyed by request ID.
     pub(super) pending_responses:
         Arc<DashMap<i32, tokio::sync::oneshot::Sender<bep_protocol::messages::Response>>>,
+    /// Optional event subscription channel.
     pub(super) event_tx: Option<tokio::sync::mpsc::Sender<BepSessionEvent>>,
+    /// Per-session metrics.
     pub(super) metrics: Arc<BepSessionMetrics>,
+    /// Folders shared by the remote peer (known after ClusterConfig).
     pub(super) remote_shared_folders: Option<Vec<String>>,
 }
 
 impl BepSession {
-    /// Create a new session.
+    /// Creates a new session without event subscription.
     pub fn new(
         identity: Arc<dyn Identity>,
         conn: Arc<BepConnection>,
@@ -162,7 +180,7 @@ impl BepSession {
         }
     }
 
-    /// Create a new session with event subscription.
+    /// Creates a new session with event subscription.
     pub fn with_events(
         identity: Arc<dyn Identity>,
         conn: Arc<BepConnection>,
@@ -185,6 +203,7 @@ impl BepSession {
         }
     }
 
+    /// Emits a session event to the subscriber, if any.
     pub(super) fn emit(&self, event: BepSessionEvent) {
         if let Some(ref tx) = self.event_tx {
             if let Err(e) = tx.try_send(event) {

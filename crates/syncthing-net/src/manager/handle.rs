@@ -7,17 +7,21 @@ use crate::connection::BepConnection;
 
 use super::{handshake::HandshakeGuard, ConnectionManager, ManagerStats};
 
-/// 连接管理器句柄（用于跨线程共享）
+/// Connection manager handle (for sharing across threads).
 #[derive(Clone)]
 pub struct ConnectionManagerHandle {
     pub(crate) inner: Arc<ConnectionManager>,
 }
 
 impl ConnectionManagerHandle {
-    /// 在 TLS 握手完成后、BEP Hello 前注册一个待完成的握手。
+    /// Registers a pending handshake after TLS, before the BEP Hello.
     ///
-    /// 如果根据 device ID 竞争规则本连接应当失败，则返回 `Err`，调用方应立即关闭
-    /// 已建立的 socket。
+    /// Returns `Err` when this connection should lose the device ID race; the
+    /// caller must close the socket immediately.
+    /// See "docs/design/ADR-20261105-connection-race.md".
+    ///
+    /// # Errors
+    /// Returns an error when the handshake loses the race.
     pub fn begin_handshake(
         &self,
         device_id: DeviceId,
@@ -26,7 +30,10 @@ impl ConnectionManagerHandle {
         self.inner.begin_handshake(device_id, conn_type)
     }
 
-    /// 注册新连接（由传输层调用）
+    /// Registers a new connection (called by the transport layer).
+    ///
+    /// # Errors
+    /// Returns an error if registration fails in the manager.
     pub async fn register_connection(
         &self,
         device_id: DeviceId,
@@ -35,22 +42,28 @@ impl ConnectionManagerHandle {
         self.inner.register_connection(device_id, conn).await
     }
 
-    /// 注册传入连接
+    /// Registers an incoming connection (device ID must already be set).
+    ///
+    /// # Errors
+    /// Returns an error if the connection has no device ID.
     pub async fn register_incoming(&self, conn: Arc<BepConnection>) -> syncthing_core::Result<()> {
         self.inner.register_incoming(conn).await
     }
 
-    /// 获取到指定设备的连接
+    /// Returns the first live connection to the given device.
     pub fn get_connection(&self, device_id: &DeviceId) -> Option<Arc<BepConnection>> {
         self.inner.get_connection(device_id)
     }
 
-    /// 获取所有已连接的设备
+    /// Returns all devices with at least one live connection.
     pub fn connected_devices(&self) -> Vec<DeviceId> {
         self.inner.connected_devices()
     }
 
-    /// 断开与设备的连接
+    /// Disconnects all connections to the device.
+    ///
+    /// # Errors
+    /// Returns an error if teardown fails in the manager.
     pub async fn disconnect(
         &self,
         device_id: &DeviceId,
@@ -59,7 +72,10 @@ impl ConnectionManagerHandle {
         self.inner.disconnect(device_id, reason).await
     }
 
-    /// 断开指定连接
+    /// Disconnects the connection with the given ID.
+    ///
+    /// # Errors
+    /// Returns an error if teardown fails in the manager.
     pub async fn disconnect_connection(
         &self,
         conn_id: &uuid::Uuid,
@@ -68,17 +84,20 @@ impl ConnectionManagerHandle {
         self.inner.disconnect_connection(conn_id, reason).await
     }
 
-    /// 按连接ID获取连接
+    /// Returns the connection with the given ID.
     pub fn get_connection_by_id(&self, conn_id: &uuid::Uuid) -> Option<Arc<BepConnection>> {
         self.inner.get_connection_by_id(conn_id)
     }
 
-    /// 获取实际绑定的监听地址
+    /// Returns the actual bound listen address, if started.
     pub fn local_addr(&self) -> Option<SocketAddr> {
         *self.inner.listen_addr.read()
     }
 
-    /// 连接到设备
+    /// Connects to the device using the given addresses.
+    ///
+    /// # Errors
+    /// Returns an error if dialing fails for all candidates.
     pub async fn connect_to(
         &self,
         device_id: DeviceId,
@@ -89,7 +108,10 @@ impl ConnectionManagerHandle {
             .await
     }
 
-    /// 连接到设备（含 relay fallback）
+    /// Connects to the device using the given addresses, falling back to relays.
+    ///
+    /// # Errors
+    /// Returns an error if dialing fails for all candidates.
     pub async fn connect_to_with_relay(
         &self,
         device_id: DeviceId,
@@ -101,7 +123,10 @@ impl ConnectionManagerHandle {
             .await
     }
 
-    /// 按设备 ID 强制重连（自动从内部地址池获取地址）。
+    /// Force-reconnects a device by ID, using the internal address pool.
+    ///
+    /// # Errors
+    /// Returns an error if redialing fails.
     pub async fn reconnect_device_by_id(&self, device_id: DeviceId) -> syncthing_core::Result<()> {
         let addresses = self
             .inner
@@ -119,29 +144,30 @@ impl ConnectionManagerHandle {
             .await
     }
 
-    /// 强制重连到设备：断开现有连接并重新拨号。
+    /// Force-reconnects to a device: disconnects existing connections and redials.
     ///
-    /// 与 `connect_to` 不同，此方法在设备已连接时也会执行完整的
-    /// 断开 → 清 pending → 拨号流程，确保 `on_connected` 被重新触发。
+    /// Unlike `connect_to`, this runs the full disconnect → clear pending →
+    /// dial flow even when the device is connected, ensuring `on_connected`
+    /// fires again.
+    ///
+    /// # Errors
+    /// Returns an error if redialing fails.
     pub async fn reconnect_device(
         &self,
         device_id: DeviceId,
         addresses: Vec<SocketAddr>,
         relay_urls: Vec<String>,
     ) -> syncthing_core::Result<()> {
-        // 1. 断开现有连接（触发 on_disconnected 清理旧 session）
         self.disconnect(&device_id, "reconnect").await.ok();
-        // 2. 清除 pending 状态，防止 connect_to_with_relay 因"already pending"直接返回
         {
             let mut pending = self.inner.pending_connections.write().await;
             pending.remove(&device_id);
         }
-        // 3. 重新拨号
         self.connect_to_with_relay(device_id, addresses, relay_urls)
             .await
     }
 
-    /// 更新设备的地址池（由 discovery 层调用）
+    /// Updates the device's address pool (called by the discovery layer).
     pub fn update_addresses(
         &self,
         device_id: DeviceId,
@@ -156,22 +182,25 @@ impl ConnectionManagerHandle {
         }
     }
 
-    /// 停止连接管理器
+    /// Stops the connection manager.
+    ///
+    /// # Errors
+    /// Returns an error if teardown fails in the manager.
     pub async fn stop(&self) -> syncthing_core::Result<()> {
         self.inner.stop().await
     }
 
-    /// 检查是否可以接受新连接（基于 max_connections 配置）
+    /// Returns whether a new connection can be accepted (enforced at `max_connections`).
     pub fn can_accept_connection(&self) -> bool {
         self.inner.can_accept_connection()
     }
 
-    /// 获取当前活跃连接总数
+    /// Returns the total number of currently active connections.
     pub fn active_connection_count(&self) -> usize {
         self.inner.active_connection_count()
     }
 
-    /// 获取统计信息
+    /// Returns a snapshot of aggregated manager statistics.
     pub fn stats(&self) -> ManagerStats {
         self.inner.stats()
     }

@@ -1,8 +1,8 @@
-//! 设备发现管理器
+//! Device discovery manager.
 //!
-//! 集成 Local Discovery、STUN 和 UPnP 支持设备发现。
+//! Integrates Local Discovery, STUN, and UPnP for device discovery.
 //!
-//! 使用示例:
+//! Example:
 //! ```rust,ignore
 //! use syncthing_net::{DiscoveryManager, StunClient, UpnpClient};
 //! use std::net::SocketAddr;
@@ -14,7 +14,7 @@
 //!         .with_stun(StunClient::new())
 //!         .with_upnp(UpnpClient::new(local_addr));
 //!     
-//!     // 获取公网地址
+//!     // Get public addresses
 //!     let public_addrs = manager.get_public_addresses().await;
 //!     println!("Public addresses: {:?}", public_addrs);
 //! }
@@ -36,16 +36,16 @@ pub use events::{DiscoveryEvent, DiscoverySource};
 pub use global::{GlobalDiscovery, ANNOUNCE_INTERVAL, DEFAULT_DISCOVERY_SERVER, RETRY_INTERVAL};
 pub use local::{Announce, LocalDiscovery, LOCAL_DISCOVERY_MAGIC, LOCAL_DISCOVERY_PORT};
 
-/// 发现管理器配置
+/// Discovery manager configuration.
 #[derive(Debug, Clone)]
 pub struct DiscoveryConfig {
-    /// 启用 STUN
+    /// Whether STUN is enabled.
     pub enable_stun: bool,
-    /// 启用 UPnP
+    /// Whether UPnP is enabled.
     pub enable_upnp: bool,
-    /// STUN 服务器列表
+    /// STUN server list.
     pub stun_servers: Vec<String>,
-    /// UPnP 映射持续时间（秒）
+    /// UPnP mapping duration in seconds.
     pub upnp_duration: u32,
 }
 
@@ -63,22 +63,22 @@ impl Default for DiscoveryConfig {
     }
 }
 
-/// 发现管理器
+/// Discovery manager.
 ///
-/// 管理本地地址发现、公网地址获取和端口映射
+/// Manages local address discovery, public address retrieval, and port mapping.
 pub struct DiscoveryManager {
-    /// 本地监听地址
+    /// Local listen address.
     local_addr: SocketAddr,
-    /// 配置
+    /// Configuration.
     config: DiscoveryConfig,
-    /// STUN 客户端
+    /// STUN client.
     stun_client: Option<StunClient>,
-    /// UPnP 客户端
+    /// UPnP client.
     upnp_client: Option<UpnpClient>,
 }
 
 impl DiscoveryManager {
-    /// 创建新的发现管理器
+    /// Creates a new discovery manager with default configuration.
     pub fn new(local_addr: SocketAddr) -> Self {
         Self {
             local_addr,
@@ -88,30 +88,27 @@ impl DiscoveryManager {
         }
     }
 
-    /// 使用配置创建
+    /// Creates a discovery manager with explicit configuration.
     pub fn with_config(local_addr: SocketAddr, config: DiscoveryConfig) -> Self {
         let mut manager = Self::new(local_addr);
         manager.config = config;
         manager
     }
 
-    /// 设置 STUN 客户端
+    /// Attaches a STUN client.
     pub fn with_stun(mut self, client: StunClient) -> Self {
         self.stun_client = Some(client);
         self
     }
 
-    /// 设置 UPnP 客户端
+    /// Attaches a UPnP client.
     pub fn with_upnp(mut self, client: UpnpClient) -> Self {
         self.upnp_client = Some(client);
         self
     }
 
-    /// 初始化并启动发现服务
-    ///
-    /// 配置 UPnP 端口映射等
+    /// Initializes discovery services, configuring UPnP port mappings.
     pub async fn init(&mut self) -> Result<()> {
-        // 尝试设置 UPnP 端口映射
         if self.config.enable_upnp {
             if let Some(ref client) = self.upnp_client {
                 let port = self.local_addr.port();
@@ -127,7 +124,6 @@ impl DiscoveryManager {
                     }
                 }
 
-                // 同时映射 UDP（用于未来扩展）
                 match client
                     .add_udp_mapping(port, self.config.upnp_duration)
                     .await
@@ -145,13 +141,10 @@ impl DiscoveryManager {
         Ok(())
     }
 
-    /// 获取公网地址列表
-    ///
-    /// 返回可用于公网发现的地址列表
+    /// Returns the list of addresses usable for public discovery.
     pub async fn get_public_addresses(&self) -> Vec<String> {
         let mut addrs = vec![];
 
-        // STUN 获取公网地址
         if self.config.enable_stun {
             if let Some(ref stun) = self.stun_client {
                 match stun.get_public_address().await {
@@ -166,7 +159,6 @@ impl DiscoveryManager {
             }
         }
 
-        // UPnP 外部地址
         if self.config.enable_upnp {
             if let Some(ref upnp) = self.upnp_client {
                 match upnp.get_external_ip().await {
@@ -186,14 +178,12 @@ impl DiscoveryManager {
         addrs
     }
 
-    /// 获取本地地址
+    /// Returns the local listen address.
     pub fn local_address(&self) -> SocketAddr {
         self.local_addr
     }
 
-    /// 关闭发现服务
-    ///
-    /// 清理 UPnP 端口映射等
+    /// Shuts down discovery services, cleaning up UPnP port mappings.
     pub async fn shutdown(&mut self) -> Result<()> {
         if let Some(ref client) = self.upnp_client {
             let port = self.local_addr.port();
@@ -209,23 +199,23 @@ impl DiscoveryManager {
     }
 }
 
-/// 地址信息
+/// Address information.
 #[derive(Debug, Clone)]
 pub struct AddressInfo {
-    /// 地址字符串
+    /// Address string.
     pub address: String,
-    /// 地址类型（local/stun/upnp）
+    /// Address type (local/stun/upnp).
     pub addr_type: AddressSource,
 }
 
-/// 地址类型
+/// Address type.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AddressSource {
-    /// 本地地址
+    /// Locally determined address.
     Local,
-    /// STUN 获取的地址
+    /// Address learned via STUN.
     Stun,
-    /// UPnP 获取的地址
+    /// Address learned via UPnP.
     Upnp,
 }
 

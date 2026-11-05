@@ -1,12 +1,12 @@
-//! WebSocket 传输层（可选 feature：`websocket`）
+//! WebSocket transport layer (optional feature: `websocket`).
 //!
-//! 将 WebSocket 作为 `Transport` trait 的实现，用于穿透严格的企业防火墙。
-//! WebSocket 流量通常被防火墙允许（因为看起来像正常的 Web 流量），
-//! 因此是 TCP+TLS 被封锁时的有效 fallback。
+//! Implements WebSocket as a `Transport` to penetrate strict enterprise
+//! firewalls. WebSocket traffic is usually allowed (it looks like normal web
+//! traffic), making it an effective fallback when TCP+TLS is blocked.
 //!
-//! 支持两种方案：
-//! - `ws://` (WebSocketTransport): 明文 WebSocket，仅适合 trusted LAN
-//! - `wss://` (WssWebSocketTransport): TLS-over-WebSocket，适合生产/政企环境
+//! Two variants:
+//! - `ws://` (WebSocketTransport): plaintext WebSocket, trusted LAN only
+//! - `wss://` (WssWebSocketTransport): TLS-over-WebSocket, for production use
 
 #[cfg(feature = "websocket")]
 use std::net::SocketAddr;
@@ -35,15 +35,17 @@ use syncthing_core::{
     BoxedPipe, Result, SyncthingError, Transport, TransportListener, TransportType,
 };
 
-/// WebSocket 传输层（明文 ws://）。
+/// WebSocket transport (plaintext ws://).
 ///
-/// 仅适合可信局域网环境。生产/政企部署请使用 WssWebSocketTransport。
+/// Suitable only for trusted LAN environments; use WssWebSocketTransport for
+/// production/enterprise deployments.
 #[cfg(feature = "websocket")]
 #[derive(Debug)]
 pub struct WebSocketTransport;
 
 #[cfg(feature = "websocket")]
 impl WebSocketTransport {
+    /// Creates a new plaintext WebSocket transport.
     pub fn new() -> Self {
         Self
     }
@@ -88,18 +90,18 @@ impl Transport for WebSocketTransport {
     }
 }
 
-/// WSS (WebSocket Secure) 传输层。
+/// WSS (WebSocket Secure) transport.
 ///
-/// 在标准 TLS 之上进行 WebSocket 握手，复用项目的 SyncthingTlsConfig
-/// 进行设备身份验证。`wss://` 流量在网络上呈现为 HTTPS WebSocket，
-/// 可通过大多数企业防火墙和 GFW。
+/// Performs the WebSocket handshake on top of standard TLS, reusing the
+/// project's SyncthingTlsConfig for device authentication. `wss://` traffic
+/// presents as HTTPS WebSocket and passes most enterprise firewalls.
 #[cfg(feature = "websocket")]
 #[derive(Clone)]
 pub struct WssWebSocketTransport {
     tls_config: Arc<crate::tls::SyncthingTlsConfig>,
 }
 
-// Manual Debug impl — SyncthingTlsConfig 可能未实现 Debug
+// Manual Debug impl: SyncthingTlsConfig may not implement Debug.
 #[cfg(feature = "websocket")]
 impl std::fmt::Debug for WssWebSocketTransport {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -110,6 +112,7 @@ impl std::fmt::Debug for WssWebSocketTransport {
 
 #[cfg(feature = "websocket")]
 impl WssWebSocketTransport {
+    /// Creates a new WSS transport using the given TLS configuration.
     pub fn new(tls_config: Arc<crate::tls::SyncthingTlsConfig>) -> Self {
         Self { tls_config }
     }
@@ -145,7 +148,6 @@ impl Transport for WssWebSocketTransport {
             SyncthingError::connection(format!("WSS TCP connect to {} failed: {}", addr, e))
         })?;
 
-        // TLS 客户端握手
         let client_config = self
             .tls_config
             .client_config()
@@ -158,7 +160,6 @@ impl Transport for WssWebSocketTransport {
             .await
             .map_err(|e| SyncthingError::Tls(format!("WSS TLS handshake failed: {}", e)))?;
 
-        // WebSocket 客户端握手 over TLS
         let url = format!("wss://{}/", addr);
         let ws_stream = tokio_tungstenite::client_async(&url, tls_stream)
             .await
@@ -172,7 +173,7 @@ impl Transport for WssWebSocketTransport {
     }
 }
 
-/// WSS 监听器 — TLS accept → WebSocket upgrade
+/// WSS listener: TLS accept -> WebSocket upgrade.
 #[cfg(feature = "websocket")]
 struct WssListener {
     listener: TcpListener,
@@ -199,7 +200,6 @@ impl TransportListener for WssListener {
             .await
             .map_err(|e| SyncthingError::connection(format!("WSS TCP accept failed: {}", e)))?;
 
-        // TLS 服务端握手
         let server_config = self
             .tls_config
             .server_config()
@@ -210,7 +210,6 @@ impl TransportListener for WssListener {
             .await
             .map_err(|e| SyncthingError::Tls(format!("WSS TLS accept failed: {}", e)))?;
 
-        // WebSocket 握手 over TLS
         let ws_stream = accept_async(tls_stream).await.map_err(|e| {
             SyncthingError::connection(format!("WSS WebSocket accept failed: {}", e))
         })?;
@@ -224,7 +223,7 @@ impl TransportListener for WssListener {
     }
 }
 
-/// WebSocket 监听器
+/// WebSocket listener.
 #[cfg(feature = "websocket")]
 #[derive(Debug)]
 pub struct WebSocketListener {
@@ -251,8 +250,8 @@ impl TransportListener for WebSocketListener {
     }
 }
 
-/// 合并两个 DuplexStream 的各一端，形成单一的 AsyncRead + AsyncWrite。
-/// read 来自一个 DuplexStream 的读端，write 来自另一个 DuplexStream 的写端。
+/// Merges one end of each of two DuplexStreams into a single AsyncRead + AsyncWrite.
+/// Reads come from one DuplexStream's read half, writes from the other's write half.
 #[cfg(feature = "websocket")]
 struct MergedPipe {
     read: tokio::io::ReadHalf<tokio::io::DuplexStream>,
@@ -289,12 +288,13 @@ impl AsyncWrite for MergedPipe {
     }
 }
 
-/// WebSocket → 字节流桥接。
+/// WebSocket -> byte stream bridge.
 ///
-/// 内部使用两个 `tokio::io::duplex` 管道：
-/// - `ws_to_bep`：WebSocket 收到 Binary → 桥接写入 → BEP 读取
-/// - `bep_to_ws`：BEP 写入 → 桥接读取 → WebSocket 发送 Binary
-///   最终暴露给 BEP 层的是 `MergedPipe`（组合两个管道的各一端）。
+/// Internally uses two `tokio::io::duplex` pipes:
+/// - `ws_to_bep`: WebSocket Binary received -> bridge write -> BEP read
+/// - `bep_to_ws`: BEP write -> bridge read -> WebSocket Binary send
+///
+/// What the BEP layer sees is a `MergedPipe` combining one end of each pipe.
 #[cfg(feature = "websocket")]
 pub struct WebSocketPipe {
     inner: MergedPipe,
@@ -310,14 +310,10 @@ impl WebSocketPipe {
     {
         let (mut ws_tx, mut ws_rx) = ws_stream.split();
 
-        // duplex1: WebSocket → BEP
         let (bep_read, mut ws_to_bep) = tokio::io::duplex(64 * 1024);
-        // duplex2: BEP → WebSocket
         let (bep_to_ws, mut ws_write) = tokio::io::duplex(64 * 1024);
 
-        // 启动桥接任务
         tokio::spawn(async move {
-            // WebSocket 接收 → ws_to_bep 写入
             let recv_to_duplex = async {
                 while let Some(msg) = ws_rx.next().await {
                     match msg {
@@ -334,7 +330,6 @@ impl WebSocketPipe {
                 }
             };
 
-            // ws_write 读取 → WebSocket 发送
             let duplex_to_send = async {
                 let mut buf = vec![0u8; 4096];
                 loop {
@@ -416,12 +411,13 @@ impl ReliablePipe for WebSocketPipe {
     }
 }
 
-/// 未启用 `websocket` feature 时的占位模块
+/// Placeholder when the `websocket` feature is disabled.
 #[cfg(not(feature = "websocket"))]
 pub struct WebSocketTransport;
 
 #[cfg(not(feature = "websocket"))]
 impl WebSocketTransport {
+    /// Creates a new placeholder transport.
     pub fn new() -> Self {
         Self
     }

@@ -1,7 +1,9 @@
-//! 连接管理器
+//! Connection manager.
 //!
-//! 管理所有活跃连接，处理连接建立、断开和重连。
-//! 参考: syncthing/lib/connections/service.go, registry.go
+//! Manages all active connections and handles connection establishment,
+//! teardown, and reconnection.
+//! (reference: syncthing/lib/connections/service.go, registry.go).
+//! Simultaneous-dial race resolution: see "docs/design/ADR-20261105-connection-race.md".
 
 use std::collections::HashMap;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
@@ -43,66 +45,68 @@ pub type ConnectedCallback = Arc<dyn Fn(DeviceId) + Send + Sync>;
 /// Callback invoked when a device disconnects.
 pub type DisconnectedCallback = Arc<dyn Fn(DeviceId, String) + Send + Sync>;
 
-/// 连接管理器
+/// Connection manager.
 pub struct ConnectionManager {
-    /// 配置
+    /// Configuration.
     pub(crate) config: ConnectionManagerConfig,
-    /// 本地设备身份（抽象层，解耦具体密码学方案）
-    /// 保留 Arc 引用以维持 trait object 生命周期；local_device_id 已缓存
+    /// Local device identity (abstraction layer decoupled from the concrete
+    /// cryptography scheme). The `Arc` is kept to retain the trait object
+    /// lifetime; `local_device_id` is cached separately.
     // TODO: dynamic identity switching (currently single identity per process)
     #[allow(dead_code)]
     pub(crate) identity: Arc<dyn Identity>,
-    /// 本地设备ID（从 identity 缓存，避免虚函数调用）
+    /// Local device ID (cached from `identity` to avoid virtual calls).
     pub(crate) local_device_id: DeviceId,
-    /// 活跃连接池 (device_id -> conn_id -> connection)
+    /// Active connection pool (device_id -> conn_id -> connection).
     pub(crate) connections: DashMap<DeviceId, DashMap<uuid::Uuid, ConnectionEntry>>,
-    /// 按连接ID索引 (conn_id -> device_id)
+    /// Index by connection ID (conn_id -> device_id).
     pub(crate) conn_id_index: DashMap<uuid::Uuid, DeviceId>,
-    /// 进行中的 TLS/BEP 握手（用于在 Hello 前解决连接竞争）
+    /// In-flight TLS/BEP handshakes (resolves the simultaneous-dial race before Hello).
     pub(crate) pending_handshakes: DashMap<DeviceId, handshake::HandshakeState>,
-    /// 待连接设备
+    /// Devices with a connection attempt in progress.
     pub(crate) pending_connections: TokioRwLock<HashMap<DeviceId, PendingConnection>>,
-    /// 重试计数器（独立于 pending_connections，连接成功后清除）
+    /// Retry counters (independent of pending_connections; cleared on success).
     pub(crate) retry_counts: TokioRwLock<HashMap<DeviceId, u32>>,
-    /// 设备地址映射
+    /// Device address mapping.
     pub(crate) device_addresses: DashMap<DeviceId, Vec<SocketAddr>>,
-    /// 设备 Relay URL 映射
+    /// Device relay URL mapping.
     pub(crate) device_relay_urls: DashMap<DeviceId, Vec<String>>,
-    /// 事件发送器
+    /// Event sender.
     pub(crate) event_tx: mpsc::Sender<ConnectionEvent>,
-    /// 事件接收器
+    /// Event receiver.
     pub(crate) event_rx: RwLock<Option<mpsc::Receiver<ConnectionEvent>>>,
-    /// 运行状态
+    /// Running flag.
     pub(crate) running: RwLock<bool>,
-    /// 维护任务句柄
+    /// Maintenance task handle.
     pub(crate) maintenance_handle: RwLock<Option<JoinHandle<()>>>,
-    /// 网络监控任务句柄
+    /// Network monitor task handle.
     pub(crate) netmon_handle: RwLock<Option<JoinHandle<()>>>,
-    /// 连接回调
+    /// Connected callback.
     pub(crate) on_connected: RwLock<Option<ConnectedCallback>>,
-    /// 断开回调
+    /// Disconnected callback.
     pub(crate) on_disconnected: RwLock<Option<DisconnectedCallback>>,
-    /// 自引用弱指针
+    /// Self-referencing weak pointer.
     pub(crate) self_weak: RwLock<Option<Weak<ConnectionManager>>>,
-    /// 并行拨号器
+    /// Parallel dialer.
     pub(crate) parallel_dialer: Arc<ParallelDialer>,
-    /// TLS 配置（供传输层握手使用，Phase 2 后将由 Transport trait 自行管理）
+    /// TLS configuration (used by transport handshakes; Phase 2 will let the
+    /// Transport trait manage its own).
     pub(crate) tls_config: Arc<SyncthingTlsConfig>,
-    /// 传输层注册表（Phase 2：支持多传输可插拔）
+    /// Transport registry (Phase 2: pluggable multi-transport).
     pub(crate) transport_registry: RwLock<Option<Arc<TransportRegistry>>>,
-    /// 实际绑定的监听地址
+    /// Actual bound listen address.
     pub(crate) listen_addr: RwLock<Option<SocketAddr>>,
 }
 
 impl ConnectionManager {
-    /// 获取已初始化的 self_weak。
+    /// Returns the initialized `self_weak`.
     pub(crate) fn self_weak(&self) -> syncthing_core::Result<Weak<ConnectionManager>> {
         self.self_weak.read().clone().ok_or_else(|| {
             syncthing_core::SyncthingError::internal("ConnectionManager self_weak not initialized")
         })
     }
 
-    /// 创建新的连接管理器
+    /// Creates a new connection manager, returning the manager and its handle.
     pub fn new(
         config: ConnectionManagerConfig,
         identity: Arc<dyn Identity>,
@@ -111,7 +115,6 @@ impl ConnectionManager {
         let local_device_id = identity.device_id();
         let (event_tx, event_rx) = mpsc::channel(256);
 
-        // 注入全局默认心跳间隔，供后续 BepConnection 按路径类型调优使用。
         crate::connection::set_default_heartbeat_interval(config.heartbeat_interval);
 
         let parallel_dialer = Arc::new(ParallelDialer::with_tcp_connector(
@@ -151,7 +154,7 @@ impl ConnectionManager {
         (manager, handle)
     }
 
-    /// 设置连接回调
+    /// Sets the callback invoked when a new device connects.
     pub fn on_connected<F>(&self, callback: F)
     where
         F: Fn(DeviceId) + Send + Sync + 'static,
@@ -159,7 +162,7 @@ impl ConnectionManager {
         *self.on_connected.write() = Some(Arc::new(callback));
     }
 
-    /// 设置断开回调
+    /// Sets the callback invoked when a device disconnects.
     pub fn on_disconnected<F>(&self, callback: F)
     where
         F: Fn(DeviceId, String) + Send + Sync + 'static,
@@ -167,9 +170,8 @@ impl ConnectionManager {
         *self.on_disconnected.write() = Some(Arc::new(callback));
     }
 
-    /// 设置传输层注册表（必须在 start() 之前调用）
+    /// Sets the transport registry (must be called before `start()`).
     pub fn set_transport_registry(&self, registry: Arc<TransportRegistry>) {
-        // 为注册表中每个传输注册 scheme-specific 连接器
         for scheme in registry.schemes() {
             if let Some(transport) = registry.get(scheme) {
                 let connector = Arc::new(
@@ -178,7 +180,6 @@ impl ConnectionManager {
                 self.parallel_dialer.register_connector(scheme, connector);
             }
         }
-        // 保留默认连接器作为回退
         if let Some(transport) = registry.default_transport() {
             let connector = Arc::new(crate::transport::bep_adapter::TransportBepConnector::new(
                 transport,
@@ -195,7 +196,11 @@ impl ConnectionManager {
         info!("Transport registry set with schemes: {:?}", schemes);
     }
 
-    /// 启动连接管理器
+    /// Starts the connection manager and returns the bound listen address.
+    ///
+    /// # Errors
+    /// Returns an error if already running, not properly initialized, or no
+    /// transport can bind the listen address.
     pub async fn start(&self) -> syncthing_core::Result<SocketAddr> {
         if *self.running.read() {
             return Err(SyncthingError::config("connection manager already running"));
@@ -213,7 +218,7 @@ impl ConnectionManager {
                 .ok_or_else(|| SyncthingError::config("connection manager dropped"))?,
         };
 
-        // Phase 2：优先使用 TransportRegistry，否则回退到旧式 TcpTransport
+        // Phase 2: prefer the TransportRegistry, fall back to the legacy TcpTransport.
         let default_transport = {
             let registry_guard = self.transport_registry.read();
             registry_guard.as_ref().and_then(|r| r.default_transport())
@@ -250,7 +255,6 @@ impl ConnectionManager {
                 Err(e) => return Err(e),
             }
         } else {
-            // 回退：旧式 TcpTransport（Phase 1 行为）
             let mut tcp_transport = TcpTransport::new(
                 self.config.listen_addr,
                 handle.clone(),
@@ -282,10 +286,8 @@ impl ConnectionManager {
 
         *self.running.write() = true;
 
-        // 启动事件处理任务
         self.spawn_event_handler();
 
-        // 启动维护任务
         self.spawn_maintenance_task();
 
         *self.listen_addr.write() = Some(listen_addr);
@@ -295,30 +297,27 @@ impl ConnectionManager {
         Ok(listen_addr)
     }
 
-    /// 停止连接管理器
+    /// Stops the connection manager and disconnects all connections.
     pub async fn stop(&self) -> syncthing_core::Result<()> {
         info!("Stopping connection manager...");
 
         *self.running.write() = false;
 
-        // 停止网络监控任务
         if let Some(handle) = self.netmon_handle.write().take() {
             handle.abort();
         }
 
-        // 停止维护任务
         if let Some(handle) = self.maintenance_handle.write().take() {
             handle.abort();
         }
 
-        // 断开所有连接
         self.disconnect_all("manager shutting down").await;
 
         info!("Connection manager stopped");
         Ok(())
     }
 
-    /// 获取连接（返回首个存活连接）
+    /// Returns the first live connection to the device, if any.
     pub(crate) fn get_connection(&self, device_id: &DeviceId) -> Option<Arc<BepConnection>> {
         self.connections.get(device_id).and_then(|nested| {
             nested
@@ -328,7 +327,7 @@ impl ConnectionManager {
         })
     }
 
-    /// 按连接ID获取连接
+    /// Returns the connection with the given ID, if any.
     pub(crate) fn get_connection_by_id(&self, conn_id: &uuid::Uuid) -> Option<Arc<BepConnection>> {
         self.conn_id_index.get(conn_id).and_then(|device_id| {
             self.connections
@@ -337,12 +336,12 @@ impl ConnectionManager {
         })
     }
 
-    /// 检查设备是否已连接
+    /// Returns whether the device currently has a live connection.
     pub fn is_connected(&self, device_id: &DeviceId) -> bool {
         self.get_connection(device_id).is_some()
     }
 
-    /// 获取当前活跃连接总数
+    /// Returns the total number of currently active connections.
     pub fn active_connection_count(&self) -> usize {
         let mut count = 0usize;
         for device_entry in self.connections.iter() {
@@ -355,13 +354,13 @@ impl ConnectionManager {
         count
     }
 
-    /// 检查是否可以接受新连接（基于 max_connections 配置）
+    /// Returns whether a new connection can be accepted (enforced at `max_connections`).
     pub fn can_accept_connection(&self) -> bool {
         let current = self.active_connection_count();
         current < self.config.max_connections
     }
 
-    /// 获取所有已连接的设备
+    /// Returns all devices with at least one live connection.
     pub fn connected_devices(&self) -> Vec<DeviceId> {
         self.connections
             .iter()
@@ -370,7 +369,7 @@ impl ConnectionManager {
             .collect()
     }
 
-    /// 启动网络监控任务
+    /// Starts the network monitor task reacting to interface changes.
     pub fn start_netmon(&self, mut rx: mpsc::Receiver<NetChangeEvent>) {
         let weak = match self.self_weak() {
             Ok(w) => w,
@@ -391,7 +390,7 @@ impl ConnectionManager {
         *self.netmon_handle.write() = Some(handle);
     }
 
-    /// 处理网络变化事件
+    /// Handles a network change: drops stale connections and redials known devices.
     async fn handle_net_change(&self, _event: NetChangeEvent) {
         info!("Network change detected, cleaning up stale connections and rebind dialing");
 
@@ -427,19 +426,17 @@ impl ConnectionManager {
         }
     }
 
-    /// 检查是否应该重连
+    /// Returns whether a disconnect reason warrants an automatic reconnect.
     #[allow(clippy::unused_self)]
     pub(crate) fn should_reconnect(&self, _device_id: &DeviceId, reason: &str) -> bool {
-        // 检查断开原因是否值得重试
         !reason.contains("manual disconnect")
             && !reason.contains("invalid device ID")
             && !reason.contains("unauthorized")
             && !reason.contains("paused by user")
     }
 
-    /// 安排重连
+    /// Schedules an automatic reconnect with backoff for the device.
     pub(crate) async fn schedule_reconnect(&self, device_id: DeviceId) {
-        // 获取地址
         let addresses = self
             .device_addresses
             .get(&device_id)
@@ -459,7 +456,6 @@ impl ConnectionManager {
             return;
         }
 
-        // 增加/设置重试次数（独立于 pending 条目，避免清除后丢失）
         let retry_count = {
             let mut retries = self.retry_counts.write().await;
             let count = retries
@@ -469,7 +465,6 @@ impl ConnectionManager {
             *count
         };
 
-        // 计算退避时间
         let backoff = self.config.retry_config.backoff_duration(retry_count);
 
         info!(
@@ -477,7 +472,6 @@ impl ConnectionManager {
             device_id, backoff, retry_count
         );
 
-        // 延迟后重连
         let weak = match self.self_weak() {
             Ok(w) => w,
             Err(e) => {
@@ -489,7 +483,6 @@ impl ConnectionManager {
             sleep(backoff).await;
 
             if let Some(manager) = weak.upgrade() {
-                // 清除 pending 状态，否则 connect_to 会因"already pending"而直接返回
                 manager.pending_connections.write().await.remove(&device_id);
                 if let Err(e) = manager
                     .connect_to_with_relay(device_id, addresses, relay_urls)
@@ -501,7 +494,7 @@ impl ConnectionManager {
         });
     }
 
-    /// 清理过期连接
+    /// Disconnects connections that are dead or idle beyond the configured timeout.
     pub(crate) async fn cleanup_stale_connections(&self) {
         let stale_threshold = self.config.connection_timeout;
         let mut stale_conns: Vec<uuid::Uuid> = Vec::new();
@@ -525,7 +518,7 @@ impl ConnectionManager {
         }
     }
 
-    /// 获取统计信息
+    /// Returns a snapshot of aggregated manager statistics.
     pub fn stats(&self) -> ManagerStats {
         let mut active_connections: usize = 0;
         let mut total_bytes_sent: u64 = 0;
@@ -546,7 +539,7 @@ impl ConnectionManager {
         ManagerStats {
             active_connections,
             connected_devices: self.connected_devices().len(),
-            pending_connections: 0, // 简化处理
+            pending_connections: 0,
             total_bytes_sent,
             total_bytes_received,
         }

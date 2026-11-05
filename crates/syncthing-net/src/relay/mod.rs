@@ -1,15 +1,16 @@
-//! Syncthing 官方 Relay Protocol v1 客户端
+//! Client for the official Syncthing Relay Protocol v1.
 //!
-//! 与 Go 版 Syncthing 的中继服务器互通，用于 NAT-to-NAT 无法直连时的回退路径。
+//! Interoperates with Go Syncthing relay servers as the fallback path when
+//! NAT-to-NAT direct connections are impossible.
 //!
-//! ## 协议要点
-//! - Protocol Mode：TLS + `bep-relay` ALPN，用于注册和信令交换
-//! - Session Mode：明文 TCP，用于两端数据透传（BEP TLS 在其之上封装）
+//! ## Protocol essentials
+//! - Protocol Mode: TLS with `bep-relay` ALPN, used for registration and signaling
+//! - Session Mode: plain TCP, used for end-to-end data passthrough (BEP TLS runs on top)
 //!
-//! ## 模块结构
-//! - `protocol`: XDR 消息定义与编解码 + 异步读写辅助函数
-//! - `client`: `RelayProtocolClient`（TLS 信令连接）+ `join_session`（明文会话连接）
-//! - `types`: 错误类型与 Result 别名
+//! ## Module layout
+//! - `protocol`: XDR message definitions, codec, and async I/O helpers
+//! - `client`: `RelayProtocolClient` (TLS signaling connection) + `join_session` (plain session connection)
+//! - `types`: error types and Result alias
 
 pub mod client;
 pub mod dial;

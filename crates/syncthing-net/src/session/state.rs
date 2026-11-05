@@ -6,7 +6,8 @@
 use std::sync::atomic::Ordering;
 use std::time::{Duration, Instant};
 
-/// BEP 单条消息处理超时。防止消息处理中的同步 I/O 阻塞整个会话心跳。
+/// Timeout for handling a single BEP message, so synchronous I/O inside
+/// message handling cannot block the whole session heartbeat.
 const MESSAGE_HANDLING_TIMEOUT: Duration = Duration::from_secs(30);
 
 use tracing::{debug, info, trace, warn};
@@ -20,7 +21,6 @@ use crate::session::{BepSession, BepSessionEvent};
 impl BepSession {
     /// Run the full BEP session lifecycle.
     pub async fn run(mut self) -> Result<()> {
-        // 1. Send ClusterConfig
         let cc = self.handler.generate_cluster_config(self.device_id).await?;
         if let Err(e) = self.conn.send_cluster_config(&cc).await {
             warn!("Failed to send ClusterConfig to {}: {}", self.device_id, e);
@@ -32,56 +32,50 @@ impl BepSession {
             cc.folders.len()
         );
 
-        // 2. Wait for remote ClusterConfig
         loop {
             match tokio::time::timeout(Duration::from_secs(10), self.conn.recv_message()).await {
-                Ok(Ok((msg_type, payload))) => {
-                    match msg_type {
-                        MessageType::ClusterConfig => {
-                            match bep_protocol::messages::decode_message::<
-                                bep_protocol::messages::ClusterConfig,
-                            >(&payload)
-                            {
-                                Ok(remote_cc) => {
-                                    info!(
-                                        "Received ClusterConfig from {} ({} folders)",
-                                        self.device_id,
-                                        remote_cc.folders.len()
-                                    );
-                                    self.conn.set_state(ConnectionState::ClusterConfigComplete);
-                                    let remote_shared: Vec<String> =
-                                        remote_cc.folders.into_iter().map(|f| f.id).collect();
-                                    self.emit(BepSessionEvent::ClusterConfigComplete {
-                                        device_id: self.device_id,
-                                        shared_folders: remote_shared.clone(),
-                                    });
-                                    // Save remote shared folders for index filtering
-                                    self.remote_shared_folders = Some(remote_shared);
-                                    break;
-                                }
-                                Err(e) => {
-                                    warn!(
-                                        "Failed to decode ClusterConfig from {}: {} (payload hex: {})",
-                                        self.device_id,
-                                        e,
-                                        hex::encode(&payload)
-                                    );
-                                }
+                Ok(Ok((msg_type, payload))) => match msg_type {
+                    MessageType::ClusterConfig => {
+                        match bep_protocol::messages::decode_message::<
+                            bep_protocol::messages::ClusterConfig,
+                        >(&payload)
+                        {
+                            Ok(remote_cc) => {
+                                info!(
+                                    "Received ClusterConfig from {} ({} folders)",
+                                    self.device_id,
+                                    remote_cc.folders.len()
+                                );
+                                self.conn.set_state(ConnectionState::ClusterConfigComplete);
+                                let remote_shared: Vec<String> =
+                                    remote_cc.folders.into_iter().map(|f| f.id).collect();
+                                self.emit(BepSessionEvent::ClusterConfigComplete {
+                                    device_id: self.device_id,
+                                    shared_folders: remote_shared.clone(),
+                                });
+                                self.remote_shared_folders = Some(remote_shared);
+                                break;
+                            }
+                            Err(e) => {
+                                warn!(
+                                    "Failed to decode ClusterConfig from {}: {} (payload hex: {})",
+                                    self.device_id,
+                                    e,
+                                    hex::encode(&payload)
+                                );
                             }
                         }
-                        MessageType::Ping => {
-                            // BEP 的 Ping 是单向 keepalive，没有 Pong；回复会导致
-                            // 双方互答形成 ping 风暴。静默接收即可。
-                            trace!("Ping received from {} (no reply per BEP)", self.device_id);
-                        }
-                        _ => {
-                            debug!(
-                                "Ignoring message {:?} before ClusterConfig complete",
-                                msg_type
-                            );
-                        }
                     }
-                }
+                    MessageType::Ping => {
+                        trace!("Ping received from {} (no reply per BEP)", self.device_id);
+                    }
+                    _ => {
+                        debug!(
+                            "Ignoring message {:?} before ClusterConfig complete",
+                            msg_type
+                        );
+                    }
+                },
                 Ok(Err(e)) => {
                     warn!("Connection error with {}: {}", self.device_id, e);
                     return Err(e);
@@ -93,7 +87,6 @@ impl BepSession {
             }
         }
 
-        // 3. Send Index for each folder shared by BOTH sides
         let my_folder_ids: Vec<String> = cc.folders.into_iter().map(|f| f.id).collect();
         let shared_folder_ids: Vec<String> = match &self.remote_shared_folders {
             Some(remote) => my_folder_ids
@@ -132,7 +125,6 @@ impl BepSession {
             }
         }
 
-        // 4. Steady-state message loop
         info!("Entering steady-state BEP loop for {}", self.device_id);
         let mut heartbeat = tokio::time::interval(Duration::from_secs(30));
         let mut last_recv = Instant::now();
@@ -208,7 +200,6 @@ impl BepSession {
             }
         }
 
-        // 清理未完成的 pending responses，避免内存泄漏
         let pending_count = self.pending_responses.len();
         if pending_count > 0 {
             warn!(
@@ -237,12 +228,11 @@ impl BepSession {
         Ok(())
     }
 
+    /// Dispatches a single received BEP message.
     async fn handle_message(&self, msg_type: MessageType, payload: bytes::Bytes) -> Result<()> {
         match msg_type {
+            // BEP Ping is a one-way keepalive; never reply (see `BepConnection::send_ping`).
             MessageType::Ping => {
-                // BEP 的 Ping 是单向 keepalive，没有 Pong；回复会导致双方互答
-                // 形成 ping 风暴（实测每秒数千条）。收到即证明对端存活，
-                // last_recv 已在接收循环更新，无需任何回复。
                 trace!("Ping received from {} (no reply per BEP)", self.device_id);
             }
             MessageType::Index => {

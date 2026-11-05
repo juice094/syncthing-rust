@@ -1,6 +1,6 @@
-//! Relay 协议客户端
+//! Relay protocol client.
 //!
-//! 实现 Protocol Mode（TLS）和 Session Mode（明文）两种连接方式。
+//! Implements both Protocol Mode (TLS) and Session Mode (plaintext) connections.
 
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -18,20 +18,24 @@ use crate::relay::protocol::{
     Ping, SessionInvitation,
 };
 
-/// Protocol Mode 下的 Relay 连接
+/// Relay connection in Protocol Mode.
 ///
-/// 通过 TLS 与中继服务器通信，支持永久模式（JoinRelay + 等待邀请）
-/// 和临时模式（ConnectRequest + 获取邀请）。
+/// Communicates with the relay server over TLS, supporting permanent mode
+/// (JoinRelay + wait for invitations) and temporary mode (ConnectRequest +
+/// receive an invitation).
 pub struct RelayProtocolClient {
     stream: tokio_rustls::client::TlsStream<TcpStream>,
 }
 
 impl RelayProtocolClient {
-    /// 以 Protocol Mode 连接 relay 服务器
+    /// Connects to a relay server in Protocol Mode.
     ///
-    /// # 参数
-    /// - `addr`: relay 服务器地址（通常为 `:22067`）
-    /// - `tls_config`: 用于 `bep-relay` 协议的 TLS 客户端配置
+    /// * `addr` - relay server address (usually `:22067`)
+    /// * `tls_config` - TLS client config for the `bep-relay` protocol
+    ///
+    /// # Errors
+    /// Returns an error on TCP connect failure, invalid server name, or TLS
+    /// handshake failure.
     pub async fn connect(addr: SocketAddr, tls_config: &Arc<rustls::ClientConfig>) -> Result<Self> {
         let tcp_stream = TcpStream::connect(addr)
             .await
@@ -49,9 +53,12 @@ impl RelayProtocolClient {
         Ok(Self { stream: tls_stream })
     }
 
-    /// 注册到 relay 服务器（永久模式）
+    /// Registers with the relay server (permanent mode).
     ///
-    /// 发送 JoinRelayRequest，等待 ResponseSuccess。
+    /// Sends JoinRelayRequest and waits for a success response.
+    ///
+    /// # Errors
+    /// Returns an error on timeout, rejection, or relay full.
     pub async fn join_relay(&mut self) -> Result<()> {
         write_message(
             &mut self.stream,
@@ -69,7 +76,8 @@ impl RelayProtocolClient {
             }
             Ok(Message::Response(resp)) if resp.code == 2 => {
                 warn!("Relay join already connected");
-                Ok(()) // 同设备 ID 已连接，视为成功
+                // Same device ID already connected; treat as success.
+                Ok(())
             }
             Ok(Message::Response(resp)) => Err(SyncthingError::network(format!(
                 "relay join rejected: {} (code {})",
@@ -84,9 +92,12 @@ impl RelayProtocolClient {
         }
     }
 
-    /// 请求与目标设备建立中继会话（临时模式）
+    /// Requests a relay session with the target device (temporary mode).
     ///
-    /// 发送 ConnectRequest，等待 SessionInvitation 或错误响应。
+    /// Sends ConnectRequest and waits for a SessionInvitation or an error response.
+    ///
+    /// # Errors
+    /// Returns an error on timeout, peer not found, rejection, or relay full.
     pub async fn request_session(&mut self, target: DeviceId) -> Result<SessionInvitation> {
         let req = ConnectRequest {
             id: target.0.to_vec(),
@@ -123,9 +134,13 @@ impl RelayProtocolClient {
         }
     }
 
-    /// 等待来自 relay 的 SessionInvitation（被动模式）
+    /// Waits for a SessionInvitation from the relay (passive mode).
     ///
-    /// 永久模式下，relay 会在其他设备请求连接时转发 SessionInvitation。
+    /// In permanent mode the relay forwards a SessionInvitation whenever
+    /// another device requests a connection.
+    ///
+    /// # Errors
+    /// Returns an error on unexpected messages or connection failure.
     pub async fn wait_invitation(&mut self) -> Result<SessionInvitation> {
         loop {
             match read_message(&mut self.stream).await {
@@ -140,7 +155,7 @@ impl RelayProtocolClient {
                     return Ok(inv);
                 }
                 Ok(Message::Ping(_)) => {
-                    // relay 发送的 Ping，回复 Pong 后继续等待
+                    // Answer relay keepalive pings with Pong and keep waiting.
                     write_message(&mut self.stream, &Message::Pong(super::protocol::Pong)).await?;
                     continue;
                 }
@@ -155,7 +170,10 @@ impl RelayProtocolClient {
         }
     }
 
-    /// 发送 Ping 并等待 Pong
+    /// Sends a Ping and waits for the Pong.
+    ///
+    /// # Errors
+    /// Returns an error on timeout or an unexpected response.
     pub async fn ping(&mut self) -> Result<()> {
         write_message(&mut self.stream, &Message::Ping(Ping)).await?;
         match timeout(Duration::from_secs(10), read_message(&mut self.stream))
@@ -171,21 +189,26 @@ impl RelayProtocolClient {
         }
     }
 
-    /// 获取底层 stream 的本地地址
+    /// Returns the local address of the underlying stream.
     pub fn local_addr(&self) -> std::io::Result<SocketAddr> {
         self.stream.get_ref().0.local_addr()
     }
 
-    /// 获取底层 stream 的对端地址
+    /// Returns the peer address of the underlying stream.
     pub fn peer_addr(&self) -> std::io::Result<SocketAddr> {
         self.stream.get_ref().0.peer_addr()
     }
 }
 
-/// Session Mode 连接辅助函数
+/// Session Mode connection helper.
 ///
-/// 在获取 `SessionInvitation` 后，以明文 TCP 连接到 relay 的 session 端口，
-/// 发送 `JoinSessionRequest`，成功后返回可用于 BEP TLS 握手的 `TcpStream`。
+/// After receiving a `SessionInvitation`, connects in plaintext TCP to the
+/// relay's session port and sends `JoinSessionRequest`; on success returns a
+/// `TcpStream` ready for the BEP TLS handshake.
+///
+/// # Errors
+/// Returns an error on connect failure, timeout, key not found, session full,
+/// or rejection.
 pub async fn join_session(addr: SocketAddr, key: &[u8]) -> Result<TcpStream> {
     let mut stream = TcpStream::connect(addr)
         .await

@@ -1,16 +1,13 @@
-//! TCP keepalive 参数按路径类型调优
+//! TCP keepalive parameters tuned per path type.
 //!
-//! 不同传输路径对空闲连接的容忍度不同：
-//! - 直连 TCP：NAT/防火墙通常 5~15 分钟才回收，使用 60s/10s/3 的保守参数。
-//! - Relay / Proxy / WebSocket / DERP 等中间节点可能在 60~90s 内掐断空闲连接，
-//!   使用 30s/5s/2 的更积极参数。
+//! Rationale for the parameter sets: see "docs/design/ADR-20261105-connection-tuning.md".
 
 use syncthing_core::TransportType;
 use tokio::net::TcpStream;
 
-/// 为 TCP 流设置 keepalive，参数根据传输类型自动选择。
+/// Applies TCP keepalive to the stream, choosing parameters by transport type.
 ///
-/// 非致命：平台不支持时仅记录 debug 并继续。
+/// Non-fatal: when the platform does not support tuning, logs at debug and continues.
 pub fn apply_tcp_keepalive(stream: &TcpStream, _transport_type: TransportType) {
     if let Ok(sock) = std::io::Result::Ok(socket2::SockRef::from(stream)) {
         let _ = sock.set_keepalive(true);

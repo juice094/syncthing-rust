@@ -1,4 +1,4 @@
-//! Lightweight metrics collection for syncthing-net
+//! Lightweight in-memory metrics collection for syncthing-net.
 
 use parking_lot::Mutex;
 use std::io::Write;
@@ -14,27 +14,36 @@ pub fn global() -> &'static MetricsCollector {
     GLOBAL_METRICS.get_or_init(MetricsCollector::new)
 }
 
+/// A single recorded metric event.
 #[derive(Debug, Clone)]
 pub struct MetricRecord {
+    /// When the event was recorded.
     pub timestamp: Instant,
+    /// Event name (e.g. `tls_handshake`, `bep_sent:<type>`).
     pub event: String,
+    /// Device identifier associated with the event, if any.
     pub device_id: Option<String>,
+    /// Event duration in milliseconds, if applicable.
     pub duration_ms: Option<u64>,
+    /// Number of bytes transferred, if applicable.
     pub bytes: Option<u64>,
 }
 
+/// In-memory collector for network-layer metric events.
 #[derive(Debug, Clone, Default)]
 pub struct MetricsCollector {
     records: Arc<Mutex<Vec<MetricRecord>>>,
 }
 
 impl MetricsCollector {
+    /// Creates an empty collector.
     pub fn new() -> Self {
         Self {
             records: Arc::new(Mutex::new(Vec::new())),
         }
     }
 
+    /// Records a generic metric event.
     pub fn record(
         &self,
         event: impl Into<String>,
@@ -52,10 +61,12 @@ impl MetricsCollector {
         self.records.lock().push(rec);
     }
 
+    /// Records the duration of a completed TLS handshake.
     pub fn record_tls_handshake(&self, duration: Duration) {
         self.record("tls_handshake", None, Some(duration), None);
     }
 
+    /// Records a BEP message sent to a device.
     pub fn record_bep_message_sent(&self, device_id: String, msg_type: &str, bytes: u64) {
         self.record(
             format!("bep_sent:{}", msg_type),
@@ -65,6 +76,7 @@ impl MetricsCollector {
         );
     }
 
+    /// Records a BEP message received from a device.
     pub fn record_bep_message_recv(
         &self,
         device_id: String,
@@ -80,11 +92,12 @@ impl MetricsCollector {
         );
     }
 
+    /// Records a reconnection attempt to a device.
     pub fn record_reconnect(&self, device_id: String) {
         self.record("reconnect", Some(device_id), None, None);
     }
 
-    /// 记录单次拨号成功时的路径 RTT，用于连接质量分析。
+    /// Records the RTT of a single successful dial, for connection-quality analysis.
     pub fn record_dial_rtt(
         &self,
         device_id: String,
@@ -100,6 +113,10 @@ impl MetricsCollector {
         );
     }
 
+    /// Writes all recorded metrics to a CSV file.
+    ///
+    /// # Errors
+    /// Returns an I/O error if the output file cannot be created or written.
     pub fn flush_to_csv(&self, path: impl AsRef<std::path::Path>) -> std::io::Result<()> {
         let records = self.records.lock().clone();
         let mut file = std::fs::File::create(path)?;
@@ -118,10 +135,12 @@ impl MetricsCollector {
         Ok(())
     }
 
+    /// Returns the number of recorded events.
     pub fn len(&self) -> usize {
         self.records.lock().len()
     }
 
+    /// Returns `true` if no events have been recorded.
     pub fn is_empty(&self) -> bool {
         self.records.lock().is_empty()
     }

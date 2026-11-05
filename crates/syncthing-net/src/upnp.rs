@@ -1,7 +1,7 @@
-//! UPnP/IGD 客户端实现
+//! UPnP/IGD client implementation.
 //!
-//! 用于自动配置路由器端口映射
-//! 参考: syncthing/lib/upnp/
+//! Used to automatically configure router port mappings
+//! (reference: syncthing/lib/upnp/).
 
 use std::net::SocketAddr;
 use std::time::Duration;
@@ -12,28 +12,25 @@ use tracing::{debug, error, info, warn};
 
 use syncthing_core::{Result, SyncthingError};
 
-/// 默认端口映射持续时间（秒）
+/// Default port mapping duration in seconds (30 minutes).
 ///
-/// UPnP 映射有过期时间，需要定期续约
-/// 默认 30 分钟
+/// UPnP mappings expire and must be renewed periodically.
 pub const DEFAULT_MAPPING_DURATION: u32 = 1800;
 
-/// 最小续约间隔（秒）
-///
-/// 在映射过期前进行续约
-pub const MIN_RENEWAL_INTERVAL: Duration = Duration::from_secs(1500); // 25分钟
+/// Minimum renewal interval (25 minutes); renewals happen before expiry.
+pub const MIN_RENEWAL_INTERVAL: Duration = Duration::from_secs(1500);
 
-/// UPnP 客户端
+/// UPnP client.
 #[derive(Debug, Clone)]
 pub struct UpnpClient {
-    /// 本地地址
+    /// Local address.
     local_addr: SocketAddr,
-    /// 映射描述
+    /// Mapping description.
     description: String,
 }
 
 impl UpnpClient {
-    /// 创建新的 UPnP 客户端
+    /// Creates a new UPnP client.
     pub fn new(local_addr: SocketAddr) -> Self {
         Self {
             local_addr,
@@ -41,15 +38,16 @@ impl UpnpClient {
         }
     }
 
-    /// 设置映射描述
+    /// Overrides the mapping description.
     pub fn with_description(mut self, description: String) -> Self {
         self.description = description;
         self
     }
 
-    /// 搜索并获取网关
+    /// Searches the local network for a UPnP/IGD gateway.
     ///
-    /// 搜索本地网络中的 UPnP/IGD 网关
+    /// # Errors
+    /// Returns an error if no gateway responds within the search timeout.
     pub async fn discover_gateway(&self) -> Result<Gateway> {
         debug!("Searching for UPnP/IGD gateway...");
 
@@ -66,11 +64,11 @@ impl UpnpClient {
         Ok(gateway)
     }
 
-    /// 添加 TCP 端口映射
+    /// Adds a TCP port mapping.
     ///
-    /// # 参数
-    /// - `external_port`: 外部端口（路由器上的端口）
-    /// - `duration`: 映射持续时间（秒），0 表示永久
+    /// # Errors
+    /// Returns an error if no gateway is found, IPv6 is used, or the gateway
+    /// rejects the mapping. `duration` is in seconds; 0 means permanent.
     pub async fn add_tcp_mapping(&self, external_port: u16, duration: u32) -> Result<()> {
         self.add_port_mapping(
             external_port,
@@ -81,11 +79,11 @@ impl UpnpClient {
         .await
     }
 
-    /// 添加 UDP 端口映射
+    /// Adds a UDP port mapping.
     ///
-    /// # 参数
-    /// - `external_port`: 外部端口（路由器上的端口）
-    /// - `duration`: 映射持续时间（秒），0 表示永久
+    /// # Errors
+    /// Returns an error if no gateway is found, IPv6 is used, or the gateway
+    /// rejects the mapping. `duration` is in seconds; 0 means permanent.
     pub async fn add_udp_mapping(&self, external_port: u16, duration: u32) -> Result<()> {
         self.add_port_mapping(
             external_port,
@@ -96,7 +94,7 @@ impl UpnpClient {
         .await
     }
 
-    /// 添加端口映射（内部实现）
+    /// Adds a port mapping (internal implementation).
     async fn add_port_mapping(
         &self,
         external_port: u16,
@@ -111,7 +109,6 @@ impl UpnpClient {
             protocol, external_port, internal_port, duration
         );
 
-        // 转换为 IPv4 地址
         let local_v4 = match self.local_addr {
             SocketAddr::V4(v4) => v4,
             SocketAddr::V6(_) => {
@@ -141,7 +138,10 @@ impl UpnpClient {
         Ok(())
     }
 
-    /// 移除端口映射
+    /// Removes a port mapping. Missing gateway is treated as success.
+    ///
+    /// # Errors
+    /// Returns an error if the gateway rejects the removal.
     pub async fn remove_port_mapping(
         &self,
         external_port: u16,
@@ -173,21 +173,28 @@ impl UpnpClient {
         Ok(())
     }
 
-    /// 移除 TCP 端口映射
+    /// Removes a TCP port mapping.
+    ///
+    /// # Errors
+    /// See `remove_port_mapping`.
     pub async fn remove_tcp_mapping(&self, external_port: u16) -> Result<()> {
         self.remove_port_mapping(external_port, PortMappingProtocol::TCP)
             .await
     }
 
-    /// 移除 UDP 端口映射
+    /// Removes a UDP port mapping.
+    ///
+    /// # Errors
+    /// See `remove_port_mapping`.
     pub async fn remove_udp_mapping(&self, external_port: u16) -> Result<()> {
         self.remove_port_mapping(external_port, PortMappingProtocol::UDP)
             .await
     }
 
-    /// 获取外部 IP 地址
+    /// Returns the router's external IP as reported by the UPnP gateway.
     ///
-    /// 通过 UPnP 网关获取路由器的外部 IP
+    /// # Errors
+    /// Returns an error if no gateway is found or the query fails.
     pub async fn get_external_ip(&self) -> Result<std::net::IpAddr> {
         let gateway = self.discover_gateway().await?;
 
@@ -200,7 +207,11 @@ impl UpnpClient {
         Ok(ip.into())
     }
 
-    /// 检查端口映射是否存在
+    /// Checks whether a matching port mapping exists (false when no gateway).
+    ///
+    /// # Errors
+    /// This function swallows gateway/query errors and reports them as `false`;
+    /// the returned `Result` is reserved for future use.
     pub async fn has_mapping(
         &self,
         external_port: u16,
@@ -214,39 +225,36 @@ impl UpnpClient {
             .get_generic_port_mapping_entry(external_port as u32)
             .await
         {
-            Ok(entry) => {
-                // 检查协议是否匹配
-                Ok(entry.protocol == protocol)
-            }
+            Ok(entry) => Ok(entry.protocol == protocol),
             Err(_) => Ok(false),
         }
     }
 }
 
-/// 端口映射条目
+/// Port mapping entry.
 #[derive(Debug, Clone)]
 pub struct PortMapping {
-    /// 外部端口
+    /// External (router-side) port.
     pub external_port: u16,
-    /// 内部端口
+    /// Internal (local) port.
     pub internal_port: u16,
-    /// 协议
+    /// Protocol.
     pub protocol: PortMappingProtocol,
-    /// 持续时间（秒）
+    /// Duration in seconds (0 = permanent).
     pub duration: u32,
-    /// 创建时间
+    /// Creation time.
     pub created_at: std::time::Instant,
 }
 
 impl PortMapping {
-    /// 检查映射是否即将过期
+    /// Returns whether the mapping is close enough to expiry to need renewal.
     pub fn is_expiring_soon(&self) -> bool {
         self.is_expiring_soon_at(std::time::Instant::now())
     }
 
     fn is_expiring_soon_at(&self, now: std::time::Instant) -> bool {
         if self.duration == 0 {
-            return false; // 永久映射
+            return false;
         }
 
         let elapsed = if now > self.created_at {
@@ -256,14 +264,13 @@ impl PortMapping {
         };
         let remaining = self.duration.saturating_sub(elapsed);
 
-        // 如果剩余时间少于最小续约间隔，认为即将过期
         remaining < MIN_RENEWAL_INTERVAL.as_secs() as u32
     }
 }
 
-/// UPnP 端口映射管理器
+/// UPnP port mapping manager.
 ///
-/// 管理多个端口映射，自动续约
+/// Manages multiple mappings and renews them automatically.
 pub struct UpnpMappingManager {
     client: UpnpClient,
     mappings: std::sync::Arc<tokio::sync::RwLock<Vec<PortMapping>>>,
@@ -271,7 +278,7 @@ pub struct UpnpMappingManager {
 }
 
 impl UpnpMappingManager {
-    /// 创建新的映射管理器
+    /// Creates a new mapping manager with the default renewal interval.
     pub fn new(client: UpnpClient) -> Self {
         Self {
             client,
@@ -280,13 +287,16 @@ impl UpnpMappingManager {
         }
     }
 
-    /// 设置续约间隔
+    /// Overrides the renewal interval.
     pub fn with_renewal_interval(mut self, interval: Duration) -> Self {
         self.renewal_interval = interval;
         self
     }
 
-    /// 添加并管理一个映射
+    /// Adds a mapping via the gateway and starts managing it.
+    ///
+    /// # Errors
+    /// Returns an error if the gateway rejects the mapping.
     pub async fn add_mapping(
         &self,
         external_port: u16,
@@ -294,12 +304,10 @@ impl UpnpMappingManager {
         protocol: PortMappingProtocol,
         duration: u32,
     ) -> Result<()> {
-        // 先添加映射
         self.client
             .add_port_mapping(external_port, internal_port, protocol, duration)
             .await?;
 
-        // 记录映射
         let mapping = PortMapping {
             external_port,
             internal_port,
@@ -310,7 +318,6 @@ impl UpnpMappingManager {
 
         let mut mappings = self.mappings.write().await;
 
-        // 移除已存在的相同映射
         mappings.retain(|m| !(m.external_port == external_port && m.protocol == protocol));
 
         mappings.push(mapping);
@@ -323,7 +330,10 @@ impl UpnpMappingManager {
         Ok(())
     }
 
-    /// 移除映射
+    /// Removes a mapping from the gateway and from management.
+    ///
+    /// # Errors
+    /// Returns an error if the gateway rejects the removal.
     pub async fn remove_mapping(
         &self,
         external_port: u16,
@@ -339,7 +349,7 @@ impl UpnpMappingManager {
         Ok(())
     }
 
-    /// 启动自动续约任务
+    /// Runs the automatic renewal loop (never returns).
     pub async fn start_renewal_task(&self) -> Result<()> {
         let mut interval = tokio::time::interval(self.renewal_interval);
         let client = self.client.clone();
@@ -379,7 +389,10 @@ impl UpnpMappingManager {
         }
     }
 
-    /// 清理所有映射
+    /// Removes all managed mappings from the gateway and clears the list.
+    ///
+    /// # Errors
+    /// Per-mapping failures are logged; this currently always returns `Ok`.
     pub async fn cleanup(&self) -> Result<()> {
         let mappings = self.mappings.read().await;
 
@@ -402,25 +415,25 @@ impl UpnpMappingManager {
         Ok(())
     }
 
-    /// 获取当前管理的映射列表
+    /// Returns the currently managed mappings.
     pub async fn list_mappings(&self) -> Vec<PortMapping> {
         self.mappings.read().await.clone()
     }
 }
 
-/// UPnP 发现结果
+/// UPnP discovery result.
 #[derive(Debug, Clone)]
 pub struct UpnpDiscoveryResult {
-    /// 是否支持 UPnP
+    /// Whether UPnP is available.
     pub available: bool,
-    /// 外部 IP 地址
+    /// External IP address.
     pub external_ip: Option<std::net::IpAddr>,
-    /// 网关信息
+    /// Gateway information.
     pub gateway_info: Option<String>,
 }
 
 impl UpnpDiscoveryResult {
-    /// 创建不可用结果
+    /// Creates an "unavailable" result.
     pub fn unavailable() -> Self {
         Self {
             available: false,
@@ -430,9 +443,7 @@ impl UpnpDiscoveryResult {
     }
 }
 
-/// 执行 UPnP 发现
-///
-/// 返回发现结果，包括外部 IP 等信息
+/// Runs UPnP discovery and returns the result, including the external IP.
 pub async fn discover_upnp(local_addr: SocketAddr) -> UpnpDiscoveryResult {
     let client = UpnpClient::new(local_addr);
 

@@ -9,14 +9,19 @@ use syncthing_core::{ConnectionType, DeviceId};
 use super::ConnectionManager;
 
 impl ConnectionManager {
-    /// 连接到设备（含 relay fallback）
+    /// Connects to the device (with relay fallback), spawning the dial task.
+    ///
+    /// # Errors
+    /// This function currently always returns `Ok`; dialing failures are
+    /// handled by the spawned task and the reconnect scheduler.
     pub(crate) async fn connect_to_with_relay(
         &self,
         device_id: DeviceId,
         addresses: Vec<SocketAddr>,
         relay_urls: Vec<String>,
     ) -> syncthing_core::Result<()> {
-        // SAFETY: SSRF防护 — 过滤来自不可信来源（discovery/relay/config）的危险地址
+        // SAFETY: SSRF protection — filter dangerous addresses from untrusted
+        // sources (discovery/relay/config) before dialing.
         let safe_addresses: Vec<SocketAddr> = addresses
             .into_iter()
             .filter(|addr| {
@@ -34,20 +39,17 @@ impl ConnectionManager {
             })
             .collect();
 
-        // 持久化地址和 relay URL（必须在 is_connected 检查之前，
-        // 否则已有直连时 relay URL 不会被存储，断开后 dial 无 relay 候选）
+        // Persist addresses and relay URLs before the is_connected check, so an
+        // existing direct connection does not prevent storing relay candidates.
         self.device_addresses
             .insert(device_id, safe_addresses.clone());
         if !relay_urls.is_empty() {
             self.device_relay_urls.insert(device_id, relay_urls.clone());
         }
 
-        // 在单个 write 临界区内原子完成：
-        // 1. 检查是否已连接
-        // 2. 检查是否已在连接中
-        // 3. 继承重试次数
-        // 4. 插入 pending 表
-        // 防止并发网络事件（netmon 重连 + 定时重试）导致同一设备并行拨号风暴。
+        // Atomically check connected/pending state and insert into the pending
+        // table in one write critical section, preventing parallel dial storms
+        // from concurrent network events (netmon redial + scheduled retries).
         let cancel_rx = {
             let mut pending = self.pending_connections.write().await;
 
@@ -78,9 +80,8 @@ impl ConnectionManager {
             cancel_rx
         };
 
-        // 在 TLS ClientHello 前注册握手竞争状态。
-        // 若根据 device ID 竞争规则本端应保留 incoming，则直接放弃 outgoing 拨号，
-        // 避免无效的双向 TLS ClientHello / BEP Hello。
+        // Register the handshake race state before TLS ClientHello; see
+        // "docs/design/ADR-20261105-connection-race.md".
         let handshake_guard = match self.begin_handshake(device_id, ConnectionType::Outgoing) {
             Ok(guard) => guard,
             Err(e) => {
@@ -93,7 +94,6 @@ impl ConnectionManager {
             }
         };
 
-        // 启动连接任务（必须在释放 pending write lock 之后，避免任务执行时死锁）
         self.spawn_connect_task(
             device_id,
             safe_addresses,
@@ -105,7 +105,7 @@ impl ConnectionManager {
         Ok(())
     }
 
-    /// 启动连接任务
+    /// Spawns the background dial task.
     fn spawn_connect_task(
         &self,
         device_id: DeviceId,
@@ -126,7 +126,6 @@ impl ConnectionManager {
         };
 
         tokio::spawn(async move {
-            // 保持握手守卫直到拨号任务结束，在 BEP Hello / 注册前避免竞争。
             let _handshake_guard = handshake_guard;
 
             tokio::select! {

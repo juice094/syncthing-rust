@@ -1,6 +1,6 @@
-//! NAT-PMP 端口映射实现
+//! NAT-PMP port mapping implementation.
 //!
-//! 参考来源: Tailscale net/portmapper/portmapper.go
+//! (reference: Tailscale net/portmapper/portmapper.go)
 
 use std::net::{Ipv4Addr, SocketAddr};
 use std::time::Duration;
@@ -8,21 +8,21 @@ use syncthing_core::Result;
 use tokio::net::UdpSocket;
 use tokio::time::timeout;
 
-/// NAT-PMP 默认端口
+/// NAT-PMP default port.
 pub const PMP_DEFAULT_PORT: u16 = 5351;
 
-/// NAT-PMP 映射持续时间（秒）
+/// NAT-PMP mapping lifetime in seconds.
 pub const PMP_MAP_LIFETIME_SEC: u32 = 7200;
 
-/// NAT-PMP 版本号
+/// NAT-PMP version.
 pub const PMP_VERSION: u8 = 0;
 
-/// NAT-PMP 操作码
+/// NAT-PMP opcodes.
 pub const PMP_OP_MAP_PUBLIC_ADDR: u8 = 0;
 pub const PMP_OP_MAP_UDP: u8 = 1;
 pub const PMP_OP_REPLY: u8 = 0x80;
 
-/// NAT-PMP 结果码
+/// NAT-PMP result code.
 pub type PmpResultCode = u16;
 pub const PMP_CODE_OK: PmpResultCode = 0;
 pub const PMP_CODE_UNSUPPORTED_VERSION: PmpResultCode = 1;
@@ -31,27 +31,37 @@ pub const PMP_CODE_NETWORK_FAILURE: PmpResultCode = 3;
 pub const PMP_CODE_OUT_OF_RESOURCES: PmpResultCode = 4;
 pub const PMP_CODE_UNSUPPORTED_OPCODE: PmpResultCode = 5;
 
-/// NAT-PMP 响应
+/// NAT-PMP response.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PmpResponse {
+    /// Opcode with the reply bit set.
     pub op_code: u8,
+    /// Result code.
     pub result_code: PmpResultCode,
+    /// Seconds since the gateway booted.
     pub seconds_since_epoch: u32,
+    /// Granted mapping lifetime in seconds.
     pub mapping_valid_seconds: u32,
+    /// Internal port.
     pub internal_port: u16,
+    /// External port.
     pub external_port: u16,
+    /// Public address (present for public-address responses).
     pub public_addr: Option<Ipv4Addr>,
 }
 
-/// PMP 映射状态
+/// PMP mapping state.
 #[derive(Debug, Clone)]
 pub struct PmpMappingState {
+    /// Gateway address.
     pub gateway: SocketAddr,
+    /// External port.
     pub external_port: u16,
+    /// Internal port.
     pub internal_port: u16,
 }
 
-/// 构建 NAT-PMP 请求映射包
+/// Builds a NAT-PMP request mapping packet.
 pub fn build_pmp_request_mapping_packet(
     local_port: u16,
     prev_port: u16,
@@ -66,7 +76,7 @@ pub fn build_pmp_request_mapping_packet(
     pkt
 }
 
-/// 解析 NAT-PMP 响应
+/// Parses a NAT-PMP response.
 pub fn parse_pmp_response(pkt: &[u8]) -> Option<PmpResponse> {
     if pkt.len() < 12 {
         return None;
@@ -110,12 +120,12 @@ pub fn parse_pmp_response(pkt: &[u8]) -> Option<PmpResponse> {
     Some(res)
 }
 
-/// 构建 NAT-PMP GetExternalAddress 请求包（4 字节）
+/// Builds a NAT-PMP GetExternalAddress request packet (4 bytes).
 pub fn build_pmp_request_public_addr_packet() -> Vec<u8> {
     vec![PMP_VERSION, PMP_OP_MAP_PUBLIC_ADDR, 0, 0]
 }
 
-/// 探测 NAT-PMP 网关是否响应
+/// Probes whether a NAT-PMP gateway responds.
 pub async fn probe_gateway(gateway: SocketAddr) -> bool {
     let Ok(socket) = UdpSocket::bind("0.0.0.0:0").await else {
         return false;
@@ -131,7 +141,11 @@ pub async fn probe_gateway(gateway: SocketAddr) -> bool {
     }
 }
 
-/// 获取 NAT-PMP 外部公网地址
+/// Returns the NAT-PMP external public address.
+///
+/// # Errors
+/// Returns an error on bind/send failure, timeout, non-OK result code, or a
+/// missing public address.
 pub async fn get_external_address(gateway: SocketAddr) -> Result<Ipv4Addr> {
     let socket = UdpSocket::bind("0.0.0.0:0").await.map_err(|e| {
         syncthing_core::SyncthingError::connection(format!("PMP bind failed: {}", e))
@@ -165,7 +179,10 @@ pub async fn get_external_address(gateway: SocketAddr) -> Result<Ipv4Addr> {
         .ok_or_else(|| syncthing_core::SyncthingError::connection("PMP no public address"))
 }
 
-/// 分配 NAT-PMP 端口映射
+/// Allocates a NAT-PMP port mapping.
+///
+/// # Errors
+/// Returns an error if the external address query or the mapping exchange fails.
 pub async fn allocate_port(
     gateway: SocketAddr,
     local_port: u16,

@@ -8,7 +8,7 @@ use crate::connection::ConnectionEvent;
 use super::ConnectionManager;
 
 impl ConnectionManager {
-    /// 启动事件处理任务
+    /// Spawns the connection event handling task.
     pub(crate) fn spawn_event_handler(&self) {
         let mut event_rx = match self.event_rx.write().take() {
             Some(rx) => rx,
@@ -37,27 +37,24 @@ impl ConnectionManager {
         });
     }
 
-    /// 处理连接事件
+    /// Handles a connection event.
     async fn handle_event(&self, event: ConnectionEvent) {
         match event {
             ConnectionEvent::Connected { device_id } => {
                 debug!("Device {} connected", device_id);
             }
             ConnectionEvent::Disconnected { reason } => {
-                // 需要从连接中找到设备ID
-                let _device_id: Option<DeviceId> = None; // 简化处理
+                // The event carries no device ID, so the block below is
+                // currently unreachable; device teardown goes through
+                // `disconnect` / `disconnect_connection` instead.
+                let _device_id: Option<DeviceId> = None;
                 info!("Device disconnected: {:?} - {}", _device_id, reason);
 
-                // 从活跃连接中移除
-                // self.connections.remove(&device_id); 简化处理
-
-                // 触发重连（如果适用）
                 if let Some(ref d) = _device_id {
                     if self.should_reconnect(d, &reason) {
                         self.schedule_reconnect(*d).await;
                     }
 
-                    // 触发回调
                     if let Some(callback) = self.on_disconnected.read().as_ref() {
                         callback(*d, reason.clone());
                     }
@@ -70,7 +67,7 @@ impl ConnectionManager {
         }
     }
 
-    /// 启动维护任务
+    /// Spawns the periodic maintenance task (stale connection cleanup).
     pub(crate) fn spawn_maintenance_task(&self) {
         let interval_duration = self.config.heartbeat_interval;
 

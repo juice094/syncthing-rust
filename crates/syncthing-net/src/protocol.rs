@@ -1,6 +1,6 @@
-//! BEP 协议消息定义
+//! BEP protocol message definitions.
 //!
-//! 参考: syncthing/lib/protocol/*.go
+//! Mirrors the message type layout of syncthing/lib/protocol/*.go.
 
 use bytes::Bytes;
 use prost::Message;
@@ -9,39 +9,40 @@ use serde::Serialize;
 use bep_protocol::messages::Hello as BepHello;
 use syncthing_core::DeviceId;
 
-/// BEP Magic 数字 (0x2EA7D90B)
+/// BEP magic number (0x2EA7D90B).
 pub const BEP_MAGIC: u32 = 0x2EA7D90B;
 
-/// BEP Magic 字节
+/// BEP magic bytes in network byte order.
 pub const BEP_MAGIC_BYTES: &[u8] = &BEP_MAGIC.to_be_bytes();
 
-/// 消息类型
+/// BEP message type.
 ///
-/// 与 Go 端 BEP MessageType 对齐：
+/// Aligned with the Go-side BEP MessageType:
 /// ClusterConfig=0, Index=1, IndexUpdate=2, Request=3, Response=4,
-/// DownloadProgress=5, Ping=6, Close=7
+/// DownloadProgress=5, Ping=6, Close=7.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u16)]
 pub enum MessageType {
-    /// 集群配置
+    /// Cluster configuration.
     ClusterConfig = 0,
-    /// 索引消息
+    /// Index message.
     Index = 1,
-    /// 索引更新
+    /// Index update.
     IndexUpdate = 2,
-    /// 请求块
+    /// Block request.
     Request = 3,
-    /// 块响应
+    /// Block response.
     Response = 4,
-    /// 下载进度
+    /// Download progress.
     DownloadProgress = 5,
-    /// Ping
+    /// Ping.
     Ping = 6,
-    /// 关闭连接
+    /// Connection close.
     Close = 7,
 }
 
 impl MessageType {
+    /// Converts a raw BEP type value to a `MessageType`, or `None` if unknown.
     pub fn from_u16(value: u16) -> Option<Self> {
         match value {
             0 => Some(MessageType::ClusterConfig),
@@ -57,19 +58,19 @@ impl MessageType {
     }
 }
 
-/// BEP 消息头
+/// BEP message header.
 #[derive(Debug, Clone)]
 pub struct MessageHeader {
-    /// 消息类型
+    /// Message type.
     pub message_type: MessageType,
-    /// 消息ID（用于请求-响应匹配）
+    /// Message ID (used to match request/response pairs).
     pub message_id: u32,
-    /// 压缩标志
+    /// Whether the payload is LZ4-compressed.
     pub compressed: bool,
 }
 
 impl MessageHeader {
-    /// 编码为 BEP Header protobuf
+    /// Encodes the header into a BEP Header protobuf.
     pub fn to_bep_header(&self) -> bep_protocol::messages::Header {
         bep_protocol::messages::Header {
             r#type: self.message_type as i32,
@@ -81,7 +82,7 @@ impl MessageHeader {
         }
     }
 
-    /// 从 BEP Header protobuf 构造
+    /// Builds a `MessageHeader` from a BEP Header protobuf, or `None` for unknown types.
     pub fn from_bep_header(header: &bep_protocol::messages::Header) -> Option<Self> {
         let msg_type = match header.r#type {
             0 => MessageType::ClusterConfig,
@@ -103,23 +104,23 @@ impl MessageHeader {
     }
 }
 
-/// Hello 消息
+/// BEP Hello message.
 #[derive(Debug, Clone)]
 pub struct HelloMessage {
-    /// 设备ID
+    /// Device identifier.
     pub device_id: DeviceId,
-    /// 设备名称
+    /// Human-readable device name.
     pub device_name: String,
-    /// 客户端名称
+    /// Client name (e.g. `syncthing-rust`).
     pub client_name: String,
-    /// 客户端版本
+    /// Client version string.
     pub client_version: String,
-    /// 支持的协议
+    /// Supported protocol identifiers.
     pub protocols: Vec<String>,
 }
 
 impl HelloMessage {
-    /// 创建新的Hello消息
+    /// Creates a new Hello message for the given device.
     pub fn new(device_id: DeviceId) -> Self {
         Self {
             device_id,
@@ -130,8 +131,13 @@ impl HelloMessage {
         }
     }
 
-    /// 编码为protobuf Hello字节
-    /// 格式: [magic: u32 = 0x2EA7D90B][length: u16][protobuf Hello bytes]
+    /// Encodes the Hello into wire bytes.
+    ///
+    /// Wire format: `[magic: u32 = 0x2EA7D90B][length: u16][protobuf Hello bytes]`.
+    ///
+    /// # Errors
+    /// Returns an error string if the protobuf encoding exceeds the maximum
+    /// Hello size allowed by the BEP handshake.
     pub fn encode(&self) -> std::result::Result<Bytes, String> {
         let bep_hello = BepHello {
             device_name: self.device_name.clone(),
@@ -161,8 +167,13 @@ impl HelloMessage {
         Ok(Bytes::from(buf))
     }
 
-    /// 从protobuf Hello字节解码
-    /// 格式: [magic: u32 = 0x2EA7D90B][length: u16][protobuf Hello bytes]
+    /// Decodes a Hello from wire bytes.
+    ///
+    /// Wire format: `[magic: u32 = 0x2EA7D90B][length: u16][protobuf Hello bytes]`.
+    ///
+    /// # Errors
+    /// Returns an error string if the data is too short, carries a wrong magic,
+    /// is truncated, or fails protobuf decoding.
     pub fn decode(data: &[u8]) -> std::result::Result<Self, String> {
         if data.len() < 6 {
             return Err("Hello data too short".to_string());
@@ -201,22 +212,31 @@ impl Default for HelloMessage {
     }
 }
 
-/// 请求消息
+/// BEP Request message.
 #[derive(Debug, Clone, Serialize)]
 pub struct RequestMessage {
+    /// Request ID (matched against the Response ID).
     pub id: i32,
+    /// Folder identifier.
     pub folder: String,
+    /// File name within the folder.
     pub name: String,
+    /// Byte offset of the requested block.
     pub offset: i64,
+    /// Block size in bytes.
     pub size: i32,
+    /// Expected block hash.
     pub hash: Vec<u8>,
 }
 
-/// 响应消息
+/// BEP Response message.
 #[derive(Debug, Clone)]
 pub struct ResponseMessage {
+    /// ID matching the originating Request.
     pub id: i32,
+    /// Block payload bytes.
     pub data: Vec<u8>,
+    /// Response code (0 = success).
     pub code: i32,
 }
 
