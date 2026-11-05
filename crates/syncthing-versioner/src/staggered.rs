@@ -24,12 +24,18 @@ struct Interval {
     end_secs: i64,
 }
 
+/// Staggered versioning strategy: keeps versions at decreasing frequency as
+/// they age. See the module docs and
+/// "docs/design/ADR-20261105-versioner-cleanup-semantics.md" for the window
+/// table and pruning invariants.
 pub struct StaggeredVersioner {
     versions_dir: PathBuf,
     intervals: [Interval; 4],
 }
 
 impl StaggeredVersioner {
+    /// Create a versioner with the given maximum archive age in days
+    /// (defaults to one year when `max_age_days` is `None`).
     pub fn new(folder_path: &Path, max_age_days: Option<u32>) -> Self {
         let max_age_secs = max_age_days
             .map(|d| d as i64 * 86400)
@@ -41,19 +47,19 @@ impl StaggeredVersioner {
                 Interval {
                     step_secs: 30,
                     end_secs: 3600,
-                }, // 30s steps, first hour
+                },
                 Interval {
                     step_secs: 3600,
                     end_secs: 86400,
-                }, // 1h steps, next day
+                },
                 Interval {
                     step_secs: 86400,
                     end_secs: 30 * 86400,
-                }, // 1d steps, next 30 days
+                },
                 Interval {
                     step_secs: 7 * 86400,
                     end_secs: max_age_secs,
-                }, // 1w steps, up to maxAge
+                },
             ],
         }
     }
@@ -73,7 +79,6 @@ impl Versioner for StaggeredVersioner {
 
     async fn get_versions(&self, file_path: &Path) -> syncthing_core::Result<Vec<FileVersion>> {
         let mut versions = crate::util::list_versions_for(&self.versions_dir, file_path).await?;
-        // Staggered expects oldest-first for its window algorithm
         versions.sort_by_key(|a| a.version_time);
         Ok(versions)
     }
@@ -103,7 +108,6 @@ impl Versioner for StaggeredVersioner {
             let fname = entry.file_name();
             let fname = fname.to_string_lossy();
 
-            // Remove files beyond maxAge
             let meta = match entry.metadata().await {
                 Ok(m) => m,
                 Err(_) => continue,
@@ -122,7 +126,6 @@ impl Versioner for StaggeredVersioner {
             }
         }
 
-        // Staggered pruning: for each file group, keep only one version per window step
         self.prune_all().await?;
         Ok(())
     }
@@ -137,7 +140,6 @@ impl StaggeredVersioner {
             .unwrap_or_default()
             .as_secs() as i64;
 
-        // Collect all version files grouped by original name
         let mut groups: std::collections::HashMap<String, Vec<(String, i64)>> =
             std::collections::HashMap::new();
 
@@ -164,14 +166,12 @@ impl StaggeredVersioner {
             if versions.len() <= 1 {
                 continue;
             }
-            // Sort oldest first
             versions.sort_by_key(|a| a.1);
 
             let mut prev_age: Option<i64> = None;
             let mut to_remove: Vec<String> = Vec::new();
 
             for (fname, age) in &versions {
-                // Remove if beyond maxAge
                 if age > &self.intervals[3].end_secs && self.intervals[3].end_secs > 0 {
                     to_remove.push(fname.clone());
                     continue;
@@ -180,24 +180,20 @@ impl StaggeredVersioner {
                 let prev = match prev_age {
                     Some(p) => p,
                     None => {
-                        // Always keep the oldest
                         prev_age = Some(*age);
                         continue;
                     }
                 };
 
-                // Find the interval for this version's age
                 let step = self.find_step(*age);
                 if step > 0 {
                     let steps_from_prev = (age - prev) / step;
                     if steps_from_prev > 0 {
-                        // Keep this version — it's far enough from previous
                         prev_age = Some(*age);
                         continue;
                     }
                 }
 
-                // Too close to previous version — remove
                 to_remove.push(fname.clone());
             }
 

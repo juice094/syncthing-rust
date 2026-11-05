@@ -1,14 +1,11 @@
-//! Module: syncthing-api
-//! Worker: Agent-F
-//! Status: UNVERIFIED
-//!
-//! ⚠️ 此代码由Agent生成，未经主控验证
-
 //! WebSocket event system for Syncthing API
 //!
 //! This module provides an event bus for publishing and subscribing to
 //! Syncthing events. Events can be sent to WebSocket clients or used
 //! internally within the application.
+//!
+//! See "docs/design/ADR-20261105-event-delivery.md" for the WebSocket and
+//! REST long-poll delivery flows.
 
 use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
@@ -171,16 +168,13 @@ impl EventBus {
     pub fn publish(&self, event: Event) {
         trace!("Publishing event: {:?}", event);
 
-        // Convert to message and store in buffer (for REST poll)
         let msg = crate::handlers::convert_event_to_message(&event);
         self.event_buffer.push(msg);
 
-        // Send to broadcast channel
         if let Err(e) = self.sender.send(event.clone()) {
             warn!("Failed to broadcast event: {} (no active receivers)", e);
         }
 
-        // Send to WebSocket connections
         let connections = self.connections.clone();
         let event_clone = event;
         tokio::spawn(async move {
@@ -309,7 +303,6 @@ impl FilteredSubscriber {
                     if self.filter.is_empty() || self.matches_filter(&event) {
                         return Ok(event);
                     }
-                    // Event doesn't match filter, continue waiting
                 }
                 Err(e) => {
                     return Err(SyncthingError::internal(format!(
@@ -329,7 +322,6 @@ impl FilteredSubscriber {
                     if self.filter.is_empty() || self.matches_filter(&event) {
                         return Ok(Some(event));
                     }
-                    // Event doesn't match filter, try next
                 }
                 Err(broadcast::error::TryRecvError::Empty) => return Ok(None),
                 Err(broadcast::error::TryRecvError::Closed) => {
@@ -407,7 +399,6 @@ impl InstrumentedEventBus {
 
     /// Publish an event and record statistics
     pub fn publish(&self, event: Event) {
-        // Record stats
         let stats = self.stats.clone();
         let event_clone = event.clone();
         tokio::spawn(async move {
@@ -415,7 +406,6 @@ impl InstrumentedEventBus {
             s.record(&event_clone);
         });
 
-        // Publish to inner bus
         self.inner.publish(event);
     }
 

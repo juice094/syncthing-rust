@@ -45,7 +45,6 @@ pub mod events;
 pub mod handlers;
 pub mod rest;
 
-// Re-export commonly used types
 pub use config::{JsonConfigStore, MemoryConfigStore};
 pub use events::{EventBus, FilteredSubscriber, InstrumentedEventBus};
 pub use rest::{ApiState, RestApi};
@@ -59,7 +58,6 @@ pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 ///
 /// This function initializes logging and other module-level resources.
 pub fn init() -> Result<()> {
-    // Module initialization if needed
     Ok(())
 }
 

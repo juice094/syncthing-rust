@@ -1,13 +1,10 @@
-//! Module: syncthing-api
-//! Worker: Agent-F
-//! Status: UNVERIFIED
-//!
-//! ⚠️ 此代码由Agent生成，未经主控验证
-
 //! REST API server for Syncthing
 //!
 //! This module provides HTTP endpoints for managing folders, devices,
 //! and querying sync status. It uses Axum as the web framework.
+//!
+//! See "docs/design/ADR-20261105-rest-api-auth.md" for the API key
+//! authentication policy (loopback bypass, read-only key, exemptions).
 
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -78,7 +75,7 @@ pub struct ApiState {
     pub connection_manager: Option<Arc<dyn ConnectionManager>>,
     /// Optional local database for folder statistics
     pub db: Option<Arc<dyn FolderDatabase>>,
-    /// Daemon 优雅关闭信号发送端
+    /// Daemon graceful-shutdown signal sender
     pub shutdown_tx: Option<tokio::sync::watch::Sender<bool>>,
 }
 
@@ -103,14 +100,29 @@ impl ApiState {
         }
     }
 
-    /// 设置 daemon 关闭信号发送端
+    /// Set the daemon graceful-shutdown signal sender.
     pub fn with_shutdown_tx(mut self, tx: tokio::sync::watch::Sender<bool>) -> Self {
         self.shutdown_tx = Some(tx);
         self
     }
 }
 
-/// API Key 认证中间件
+/// API key authentication middleware.
+///
+/// Request handling policy, in order:
+///
+/// 1. `/rest/health` and `/metrics` are always exempt from authentication.
+/// 2. Loopback clients are allowed without an API key, so local tools and
+///    debugging sessions are not blocked by key configuration.
+/// 3. A valid full-access key (`x-api-key` header or `X-API-Key` query
+///    parameter) allows any method.
+/// 4. A valid read-only key allows `GET`/`HEAD`/`OPTIONS` only; other
+///    methods are rejected with `403 FORBIDDEN`.
+/// 5. If no key is configured (or both configured keys are empty), all
+///    requests are allowed.
+///
+/// Requests that reach the end of this chain are rejected with
+/// `401 UNAUTHORIZED`.
 async fn api_key_middleware(
     State(state): State<ApiState>,
     req: axum::extract::Request,
@@ -120,7 +132,6 @@ async fn api_key_middleware(
     if path == "/rest/health" || path == "/metrics" {
         return Ok(next.run(req).await);
     }
-    // Allow loopback access without API key for local debugging
     let is_loopback = req
         .extensions()
         .get::<ConnectInfo<SocketAddr>>()
@@ -148,14 +159,12 @@ async fn api_key_middleware(
             })
         });
 
-    // Check admin key (full access)
     if let Some(ref admin_key) = state.api_key {
         if !admin_key.is_empty() && provided_key == Some(admin_key.as_str()) {
             return Ok(next.run(req).await);
         }
     }
 
-    // Check read-only key (GET/HEAD only)
     if let Some(ref ro_key) = state.ro_api_key {
         if !ro_key.is_empty() && provided_key == Some(ro_key.as_str()) {
             let is_read_only = method == axum::http::Method::GET
@@ -168,7 +177,6 @@ async fn api_key_middleware(
         }
     }
 
-    // No key configured or key is empty → allow all
     if state.api_key.as_deref().is_none_or(str::is_empty)
         && state.ro_api_key.as_deref().is_none_or(str::is_empty)
     {
@@ -217,19 +225,16 @@ impl RestApi {
         let auth_layer = axum::middleware::from_fn_with_state(state.clone(), api_key_middleware);
         Router::new()
             .route("/metrics", get(metrics::get_metrics))
-            // Folder management
             .route("/rest/folders", get(list_folders).post(create_folder))
             .route(
                 "/rest/folder/:id",
                 get(get_folder).put(update_folder).delete(delete_folder),
             )
-            // Device management
             .route("/rest/devices", get(list_devices).post(add_device))
             .route(
                 "/rest/device/:id",
                 get(get_device).put(update_device).delete(remove_device),
             )
-            // Status queries - Go原版兼容
             .route("/rest/status", get(get_status))
             .route("/rest/system/status", get(get_system_status))
             .route("/rest/db/status", get(get_db_status))
@@ -237,14 +242,12 @@ impl RestApi {
             .route("/rest/connections", get(get_connections))
             .route("/rest/system/connections", get(get_system_connections))
             .route("/rest/folder/:id/status", get(get_folder_status))
-            // System operations
             .route("/rest/scan", post(trigger_scan))
             .route("/rest/scan/:id", post(trigger_folder_scan))
             .route("/rest/pause", post(pause_all))
             .route("/rest/pause/:id", post(pause_folder))
             .route("/rest/resume", post(resume_all))
             .route("/rest/resume/:id", post(resume_folder))
-            // Config
             .route("/rest/config", get(get_config).put(update_config))
             .route(
                 "/rest/config/folders",
@@ -259,7 +262,6 @@ impl RestApi {
                 "/rest/config/devices/:id",
                 get(get_device).put(update_device).delete(remove_device),
             )
-            // System operations — Go canonical paths
             .route("/rest/system/config", post(system_config_post))
             .route("/rest/system/restart", post(system_restart))
             .route("/rest/system/shutdown", post(system_shutdown))
@@ -270,13 +272,9 @@ impl RestApi {
             .route("/rest/db/revert", post(db_revert))
             .route("/rest/db/browse", get(browse))
             .route("/rest/db/file", get(file_info))
-            // Health check
             .route("/rest/health", get(health_check))
-            // WebSocket events
             .route("/rest/events", get(handlers::websocket_handler))
-            // REST long-poll events
             .route("/rest/events/poll", get(handlers::events_poll_handler))
-            // Middleware
             .layer(auth_layer)
             .layer(CorsLayer::permissive())
             .layer(TraceLayer::new_for_http())
@@ -334,11 +332,7 @@ pub struct HealthResponse {
 }
 
 async fn health_check(State(state): State<ApiState>) -> impl IntoResponse {
-    let db_ok = state
-        .db
-        .as_ref()
-        .map(|_| true) // DB trait object exists = reachable
-        .unwrap_or(true); // No DB configured = not an error
+    let db_ok = state.db.as_ref().map(|_| true).unwrap_or(true);
     let cm_ok = state.connection_manager.is_some();
     let config_ok = state.config_store.load().await.is_ok();
     let all_ok = db_ok && cm_ok && config_ok;
@@ -355,9 +349,9 @@ async fn health_check(State(state): State<ApiState>) -> impl IntoResponse {
 }
 
 pub(crate) fn parse_device_id(id: &str) -> DeviceId {
-    // First try to parse as a standard DeviceId (base32 + Luhn-32).
-    // If that fails, fall back to SHA-256 hash for backward compatibility
-    // with test fixtures that use plain names as IDs.
+    // First try the standard base32 + Luhn-32 DeviceId format; fall back to
+    // a SHA-256 digest of the raw string so test fixtures that use plain
+    // names as IDs still map to a stable device identity.
     id.parse::<DeviceId>().unwrap_or_else(|_| {
         let hash = Sha256::digest(id.as_bytes());
         let mut bytes = [0u8; 32];

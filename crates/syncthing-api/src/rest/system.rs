@@ -12,7 +12,7 @@ use syncthing_core::DeviceId;
 
 use super::ApiState;
 
-/// System status response - 兼容Go原版格式
+/// System status response (Go-compatible field layout).
 #[derive(Debug, Serialize)]
 pub struct SystemStatus {
     /// My device ID
@@ -37,7 +37,7 @@ pub struct SystemStatus {
     pub totdown: u64,
 }
 
-/// Database status response - 兼容Go原版格式
+/// Database status response (Go-compatible field layout).
 #[derive(Debug, Serialize)]
 pub struct DbStatus {
     /// Folder ID
@@ -133,8 +133,8 @@ pub(crate) async fn get_status(State(state): State<ApiState>) -> impl IntoRespon
     match state.config_store.load().await {
         Ok(config) => {
             let status = SystemStatus {
-                my_id: "UNKNOWN".to_string(), // Would come from certificate
-                uptime: 0,                    // Would track actual uptime
+                my_id: "UNKNOWN".to_string(),
+                uptime: 0,
                 folder_count: config.folders.len(),
                 device_count: config.devices.len(),
                 version: env!("CARGO_PKG_VERSION").to_string(),
@@ -150,7 +150,7 @@ pub(crate) async fn get_status(State(state): State<ApiState>) -> impl IntoRespon
     }
 }
 
-/// GET /rest/system/status - 系统状态（Go原版格式）
+/// GET /rest/system/status — system status (Go-compatible format).
 pub(crate) async fn get_system_status(State(state): State<ApiState>) -> impl IntoResponse {
     match state.config_store.load().await {
         Ok(config) => {
@@ -190,7 +190,7 @@ pub(crate) async fn get_system_status(State(state): State<ApiState>) -> impl Int
     }
 }
 
-/// GET /rest/db/completion - 文件夹相对于某设备的同步完成度
+/// GET /rest/db/completion — sync completion of a folder relative to a device.
 pub(crate) async fn get_db_completion(
     State(state): State<ApiState>,
     Query(params): Query<CompletionQuery>,
@@ -230,9 +230,8 @@ pub(crate) async fn get_db_completion(
     }
 }
 
-/// GET /rest/db/status - 数据库状态（Go原版格式）
+/// GET /rest/db/status — per-folder database status (Go-compatible format).
 pub(crate) async fn get_db_status(State(state): State<ApiState>) -> impl IntoResponse {
-    // 返回所有文件夹的状态概览
     match state.config_store.load().await {
         Ok(config) => {
             let mut statuses = Vec::with_capacity(config.folders.len());
@@ -243,7 +242,6 @@ pub(crate) async fn get_db_status(State(state): State<ApiState>) -> impl IntoRes
                 let mut symlinks_count = 0u64;
                 let mut bytes_count = 0u64;
 
-                // 从数据库获取真实文件统计
                 if let Some(ref db) = state.db {
                     match db.get_folder_files(&folder.id).await {
                         Ok(file_infos) => {
@@ -264,7 +262,6 @@ pub(crate) async fn get_db_status(State(state): State<ApiState>) -> impl IntoRes
                     }
                 }
 
-                // 从同步模型获取真实状态
                 let folder_state = if let Some(ref sync_model) = state.sync_model {
                     match sync_model
                         .folder_status(&FolderId::new(folder.id.clone()))

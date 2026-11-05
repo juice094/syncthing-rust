@@ -30,7 +30,6 @@ pub(crate) async fn get_device(
 ) -> impl IntoResponse {
     match state.config_store.load().await {
         Ok(config) => {
-            // Parse device ID from string
             let device_id = parse_device_id(&id);
             match config
                 .devices
@@ -60,7 +59,6 @@ pub(crate) async fn add_device(
 
     let device_id = parse_device_id(&request.id);
 
-    // Check if device already exists
     if config
         .devices
         .iter()
@@ -106,7 +104,6 @@ pub(crate) async fn add_device(
         ));
     };
 
-    // 保存配置
     if let Err(e) = state.config_store.save(&config).await {
         return Err((StatusCode::INTERNAL_SERVER_ERROR, format!("{}", e)));
     }

@@ -52,6 +52,12 @@ pub fn version_prefix(file_path: &Path) -> String {
 ///
 /// Returns `FileVersion` entries sorted newest-first. If `versions_dir` does not
 /// exist, returns an empty vector.
+///
+/// # Errors
+///
+/// This function currently never returns `Err`: a missing or unreadable
+/// `versions_dir` yields an empty list. The `Result` signature is retained so
+/// future per-entry metadata failures can be surfaced.
 pub async fn list_versions_for(
     versions_dir: &Path,
     file_path: &Path,
@@ -80,13 +86,18 @@ pub async fn list_versions_for(
         }
     }
 
-    // Sort newest first
     versions.sort_by_key(|b| std::cmp::Reverse(b.version_time));
     Ok(versions)
 }
 
 /// Restore the version of `file_path` whose archive time is closest to
 /// `version_time` (within a 2-second tolerance).
+///
+/// # Errors
+///
+/// Returns an internal error if `versions_dir` cannot be read, if copying the
+/// archived file back fails, or if no archived version matches `version_time`
+/// within the tolerance.
 pub async fn restore_by_timestamp(
     versions_dir: &Path,
     file_path: &Path,
@@ -137,6 +148,13 @@ pub async fn restore_by_timestamp(
 }
 
 /// Copy `file_path` into the archive directory with a timestamped name.
+///
+/// Creates `versions_dir` if it does not exist.
+///
+/// # Errors
+///
+/// Returns an I/O error if the archive directory cannot be created or the
+/// file copy fails.
 pub async fn archive_file(
     versions_dir: &Path,
     file_path: &Path,

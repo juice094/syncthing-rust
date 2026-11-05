@@ -159,7 +159,8 @@ pub(crate) async fn system_restart(State(state): State<ApiState>) -> impl IntoRe
         if let Some(tx) = state.shutdown_tx {
             let _ = tx.send(true);
         } else {
-            // 没有 shutdown channel 时回退到强制退出（理论上只在测试或嵌入场景出现）
+            // Fallback to a hard process exit when no shutdown channel is
+            // wired (only expected in tests or embedded scenarios).
             std::process::exit(3);
         }
     });
@@ -194,7 +195,6 @@ pub(crate) async fn system_pause(
 ) -> impl IntoResponse {
     let mut paused = Vec::new();
 
-    // Handle devices: update config and disconnect active connections
     if !request.device.is_empty() {
         match state.config_store.load().await {
             Ok(mut config) => {
@@ -242,7 +242,6 @@ pub(crate) async fn system_resume(
 ) -> impl IntoResponse {
     let mut resumed = Vec::new();
 
-    // Handle devices: update config to un-pause
     if !request.device.is_empty() {
         match state.config_store.load().await {
             Ok(mut config) => {

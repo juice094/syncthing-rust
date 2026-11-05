@@ -18,6 +18,7 @@ pub struct SimpleVersioner {
 }
 
 impl SimpleVersioner {
+    /// Create a versioner that keeps at most `keep` archived versions per file.
     pub fn new(folder_path: &Path, keep: usize) -> Self {
         Self {
             versions_dir: folder_path.join(crate::util::STVERSIONS_DIR),
@@ -40,7 +41,6 @@ impl Versioner for SimpleVersioner {
             "Archived file version"
         );
 
-        // Prune excess versions
         self.prune(file_path).await?;
 
         Ok(())
@@ -59,8 +59,6 @@ impl Versioner for SimpleVersioner {
     }
 
     async fn clean(&self, _ctx: &CleanContext) -> syncthing_core::Result<()> {
-        // Simple versioner: clean is handled by archive() prunes.
-        // A full CleanContext-based cleanup can be added later.
         Ok(())
     }
 }
@@ -73,7 +71,6 @@ impl SimpleVersioner {
             return Ok(());
         }
 
-        // Keep the `keep` newest, remove the rest
         for old in &versions[self.keep..] {
             let ts = chrono::DateTime::from_timestamp(
                 old.version_time

@@ -1,13 +1,7 @@
-//! Module: syncthing-api
-//! Worker: Agent-F
-//! Status: UNVERIFIED
-//!
-//! ⚠️ 此代码由Agent生成，未经主控验证
-
 //! Configuration management for Syncthing API
 //!
-//! This module provides file-based configuration storage with TOML format
-//! and file watching capabilities for configuration changes.
+//! This module provides file-based configuration storage in JSON format
+//! with in-memory caching and file watching for external changes.
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -137,7 +131,7 @@ impl JsonConfigStore {
         }
     }
 
-    /// 返回缓存路径
+    /// Return the path of the configuration file.
     pub fn path(&self) -> &Path {
         &self.path
     }

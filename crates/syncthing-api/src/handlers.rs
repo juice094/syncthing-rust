@@ -1,13 +1,10 @@
-//! Module: syncthing-api
-//! Worker: Agent-F
-//! Status: UNVERIFIED
-//!
-//! ⚠️ 此代码由Agent生成，未经主控验证
-
 //! HTTP request handlers for Syncthing API
 //!
 //! This module provides handler functions for processing HTTP requests,
 //! including WebSocket upgrade handling for real-time events.
+//!
+//! See "docs/design/ADR-20261105-event-delivery.md" for the WebSocket and
+//! REST long-poll delivery flows.
 
 use axum::{
     extract::{
@@ -94,10 +91,8 @@ pub(crate) async fn handle_websocket(socket: WebSocket, state: ApiState, query: 
 
     let (mut ws_tx, mut ws_rx) = socket.split();
 
-    // Create channel for sending events to this connection
     let (event_tx, mut event_rx) = mpsc::channel::<Event>(100);
 
-    // Register connection with event bus
     if let Err(e) = state
         .event_bus
         .register_connection(connection_id.clone(), event_tx)
@@ -107,14 +102,12 @@ pub(crate) async fn handle_websocket(socket: WebSocket, state: ApiState, query: 
         return;
     }
 
-    // Spawn task to forward events to WebSocket
     let forward_task = {
         let connection_id = connection_id.clone();
         tokio::spawn(async move {
             while let Some(event) = event_rx.recv().await {
                 let event_msg = convert_event_to_message(&event);
 
-                // Apply event type filter if specified
                 if let Some(ref filter) = event_filter {
                     if !filter.contains(&event_msg.event_type) {
                         continue;
@@ -138,7 +131,6 @@ pub(crate) async fn handle_websocket(socket: WebSocket, state: ApiState, query: 
         })
     };
 
-    // Handle incoming WebSocket messages
     while let Some(msg) = ws_rx.next().await {
         match msg {
             Ok(Message::Text(text)) => {
@@ -146,20 +138,16 @@ pub(crate) async fn handle_websocket(socket: WebSocket, state: ApiState, query: 
                     "Received WebSocket message from {}: {}",
                     connection_id, text
                 );
-                // Handle client messages (ping, subscription changes, etc.)
                 handle_client_message(&connection_id, &text, &state).await;
             }
             Ok(Message::Binary(_)) => {
                 debug!("Received binary message from {}", connection_id);
             }
             Ok(Message::Ping(data)) => {
-                // Pong is handled automatically by axum
                 debug!("Received ping from {}", connection_id);
                 let _ = &data;
             }
-            Ok(Message::Pong(_)) => {
-                // Pong received, connection is alive
-            }
+            Ok(Message::Pong(_)) => {}
             Ok(Message::Close(frame)) => {
                 debug!("WebSocket closed by client {}: {:?}", connection_id, frame);
                 break;
@@ -171,7 +159,6 @@ pub(crate) async fn handle_websocket(socket: WebSocket, state: ApiState, query: 
         }
     }
 
-    // Cleanup
     info!("WebSocket connection closing: {}", connection_id);
     forward_task.abort();
 
@@ -182,26 +169,21 @@ pub(crate) async fn handle_websocket(socket: WebSocket, state: ApiState, query: 
 
 /// Handle a message from the WebSocket client
 async fn handle_client_message(_connection_id: &str, text: &str, _state: &ApiState) {
-    // Parse client message
     match serde_json::from_str::<ClientMessage>(text) {
-        Ok(msg) => {
-            match msg.action.as_str() {
-                "ping" => {
-                    // Client ping, server will respond with automatic pong
-                    debug!("Received ping from client");
-                }
-                "subscribe" => {
-                    debug!("Client subscription request: {:?}", msg.events);
-                    // Subscription changes would be handled here
-                }
-                "unsubscribe" => {
-                    debug!("Client unsubscription request: {:?}", msg.events);
-                }
-                _ => {
-                    warn!("Unknown client action: {}", msg.action);
-                }
+        Ok(msg) => match msg.action.as_str() {
+            "ping" => {
+                debug!("Received ping from client");
             }
-        }
+            "subscribe" => {
+                debug!("Client subscription request: {:?}", msg.events);
+            }
+            "unsubscribe" => {
+                debug!("Client unsubscription request: {:?}", msg.events);
+            }
+            _ => {
+                warn!("Unknown client action: {}", msg.action);
+            }
+        },
         Err(e) => {
             debug!("Failed to parse client message: {}", e);
         }
@@ -222,6 +204,9 @@ pub(crate) static EVENT_ID_COUNTER: std::sync::atomic::AtomicU64 =
     std::sync::atomic::AtomicU64::new(1);
 
 /// Convert internal Event to EventMessage for WebSocket / REST poll.
+///
+/// The serialized `type` field is removed from the JSON payload because the
+/// event type is already carried in the `event_type` field of the envelope.
 pub(crate) fn convert_event_to_message(event: &Event) -> EventMessage {
     let event_type = match &event {
         Event::FolderSummary { .. } => "FolderSummary",
@@ -234,7 +219,6 @@ pub(crate) fn convert_event_to_message(event: &Event) -> EventMessage {
 
     let data = match serde_json::to_value(event) {
         Ok(mut value) => {
-            // Remove the type field since we send it separately
             if let Some(obj) = value.as_object_mut() {
                 obj.remove("type");
             }
@@ -274,7 +258,6 @@ pub async fn events_poll_handler(
 
     let buffer = state.event_bus.event_buffer();
 
-    // 1. Try to satisfy from buffer first
     let mut collected = buffer.since(since);
     if let Some(ref f) = filter {
         collected.retain(|m| f.contains(&m.event_type));
@@ -285,7 +268,6 @@ pub async fn events_poll_handler(
         return axum::Json(collected);
     }
 
-    // 2. Buffer empty for this since — subscribe and wait (long-poll)
     let mut rx = state.event_bus.subscribe();
     let timeout = tokio::time::Duration::from_secs(60);
     let start = std::time::Instant::now();
@@ -305,7 +287,6 @@ pub async fn events_poll_handler(
                 }
             }
             _ => {
-                // Timeout or channel closed / lagged — return what we have
                 break;
             }
         }

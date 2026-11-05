@@ -15,7 +15,6 @@ const PROMETHEUS_CONTENT_TYPE: &str = "text/plain; version=0.0.4; charset=utf-8"
 pub(crate) async fn get_metrics(State(state): State<ApiState>) -> impl IntoResponse {
     let mut body = String::with_capacity(2048);
 
-    // --- Build info ---
     writeln!(body, "# HELP syncthing_build_info Build information").ok();
     writeln!(body, "# TYPE syncthing_build_info gauge").ok();
     writeln!(
@@ -28,7 +27,6 @@ pub(crate) async fn get_metrics(State(state): State<ApiState>) -> impl IntoRespo
     .ok();
     writeln!(body).ok();
 
-    // --- Uptime ---
     let uptime_secs = state.start_time.elapsed().as_secs_f64();
     writeln!(
         body,
@@ -39,7 +37,6 @@ pub(crate) async fn get_metrics(State(state): State<ApiState>) -> impl IntoRespo
     writeln!(body, "syncthing_uptime_seconds {:.3}", uptime_secs).ok();
     writeln!(body).ok();
 
-    // --- Config snapshot ---
     let (device_count, folder_count) = if let Ok(config) = state.config_store.load().await {
         (config.devices.len(), config.folders.len())
     } else {
@@ -64,7 +61,6 @@ pub(crate) async fn get_metrics(State(state): State<ApiState>) -> impl IntoRespo
     writeln!(body, "syncthing_configured_folders {}", folder_count).ok();
     writeln!(body).ok();
 
-    // --- Connection metrics ---
     if let Some(ref cm) = state.connection_manager {
         let connected = cm.connected_devices();
         let stats = cm.connection_stats();
@@ -78,7 +74,6 @@ pub(crate) async fn get_metrics(State(state): State<ApiState>) -> impl IntoRespo
         writeln!(body, "syncthing_connected_devices {}", connected.len()).ok();
         writeln!(body).ok();
 
-        // Per-device connection state
         writeln!(
             body,
             "# HELP syncthing_device_connected Whether a device is currently connected (1=yes, 0=no)"
@@ -134,7 +129,6 @@ pub(crate) async fn get_metrics(State(state): State<ApiState>) -> impl IntoRespo
         writeln!(body).ok();
     }
 
-    // --- Folder file counts (via db if available) ---
     let mut total_db_files = 0u64;
     let mut total_db_size_estimate = 0u64;
     if let Some(ref db) = state.db {
@@ -163,7 +157,6 @@ pub(crate) async fn get_metrics(State(state): State<ApiState>) -> impl IntoRespo
         }
     }
 
-    // --- Database metrics ---
     writeln!(
         body,
         "# HELP syncthing_db_files_total Total indexed files across all folders"
@@ -187,7 +180,6 @@ pub(crate) async fn get_metrics(State(state): State<ApiState>) -> impl IntoRespo
     .ok();
     writeln!(body).ok();
 
-    // --- Connection manager detailed stats ---
     if let Some(ref cm) = state.connection_manager {
         let stats = cm.connection_stats();
         writeln!(
@@ -223,7 +215,6 @@ pub(crate) async fn get_metrics(State(state): State<ApiState>) -> impl IntoRespo
         writeln!(body).ok();
     }
 
-    // --- API key configured ---
     let api_configured = if let Some(ref key) = state.api_key {
         (!key.is_empty()) as u8
     } else {

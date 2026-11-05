@@ -72,7 +72,6 @@ pub(crate) async fn update_config(
 
     config.version = request.version as i32;
 
-    // Merge folders by id
     for req_folder in request.folders {
         if let Some(ref id) = req_folder.id {
             if let Some(existing) = config.folders.iter_mut().find(|f| f.id == *id) {
@@ -98,7 +97,6 @@ pub(crate) async fn update_config(
         }
     }
 
-    // Merge devices by id
     for req_device in request.devices {
         let device_id = parse_device_id(&req_device.id);
         if let Some(existing) = config.devices.iter_mut().find(|d| d.id == device_id) {

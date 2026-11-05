@@ -63,7 +63,6 @@ pub(crate) async fn create_folder(
         Err(e) => return Err((StatusCode::INTERNAL_SERVER_ERROR, format!("{}", e))),
     };
 
-    // Check if folder already exists
     if config.folders.iter().any(|f| f.id.as_str() == request.id) {
         return Err((
             StatusCode::CONFLICT,
@@ -135,7 +134,6 @@ pub(crate) async fn update_folder(
         return Err((StatusCode::NOT_FOUND, format!("Folder '{}' not found", id)));
     };
 
-    // Update fields
     if let Some(label) = request.label {
         config.folders[folder_idx].label = Some(label);
     }
@@ -180,7 +178,6 @@ pub(crate) async fn get_folder_status(
     State(state): State<ApiState>,
     Path(id): Path<String>,
 ) -> impl IntoResponse {
-    // Verify folder exists in config
     match state.config_store.load().await {
         Ok(config) => {
             if !config.folders.iter().any(|f| f.id.as_str() == id) {
@@ -206,7 +203,6 @@ pub(crate) async fn get_folder_status(
 
     let folder_id = FolderId::new(id);
 
-    // Try to get real status from sync model
     if let Some(ref sync_model) = state.sync_model {
         match sync_model.folder_status(&folder_id).await {
             Ok(_) => {

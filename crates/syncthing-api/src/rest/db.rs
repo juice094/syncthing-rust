@@ -50,7 +50,6 @@ pub(crate) async fn trigger_scan(
                     .into_response(),
             }
         } else {
-            // Scan all configured folders
             match state.config_store.load().await {
                 Ok(config) => {
                     for folder in &config.folders {
@@ -200,10 +199,6 @@ pub(crate) async fn db_revert(
     }
 }
 
-// ============================================
-// Batch A1: db/browse
-// ============================================
-
 /// Browse query parameters
 #[derive(Debug, Deserialize)]
 pub struct BrowseQuery {
@@ -247,7 +242,6 @@ fn build_tree(
         return Vec::new();
     }
 
-    // Collect immediate children under the current prefix
     let mut entries: std::collections::BTreeMap<String, (FileInfo, Vec<FileInfo>)> =
         std::collections::BTreeMap::new();
     let mut direct_files: Vec<FileInfo> = Vec::new();
@@ -256,14 +250,12 @@ fn build_tree(
         let relative = if prefix.is_empty() {
             file.name.clone()
         } else if let Some(stripped) = file.name.strip_prefix(prefix) {
-            // Remove leading slash if present
             stripped.strip_prefix('/').unwrap_or(stripped).to_string()
         } else {
             continue;
         };
 
         if relative.is_empty() {
-            // The prefix itself is a file (or exact match)
             direct_files.push(file.clone());
             continue;
         }
@@ -275,10 +267,8 @@ fn build_tree(
         };
 
         if first_sep.is_none() {
-            // Direct child file
             direct_files.push(file.clone());
         } else {
-            // Subdirectory entry — collect all files under this segment
             let sub_prefix = if prefix.is_empty() {
                 first_segment.to_string()
             } else {
@@ -317,7 +307,6 @@ fn build_tree(
 
     let mut result: Vec<BrowseEntry> = Vec::new();
 
-    // Add directory entries first
     for (name, (_dir_info, sub_files)) in entries {
         let sub_prefix = if prefix.is_empty() {
             name.clone()
@@ -334,7 +323,6 @@ fn build_tree(
         });
     }
 
-    // Add direct file entries
     for file in direct_files {
         let name = if prefix.is_empty() {
             file.name.clone()
@@ -343,7 +331,6 @@ fn build_tree(
         } else {
             file.name.clone()
         };
-        // Only include if name doesn't contain '/' (i.e., it's a direct child)
         if !name.contains('/') {
             result.push(BrowseEntry {
                 name,
@@ -384,7 +371,6 @@ pub(crate) async fn browse(
         }
     };
 
-    // Verify folder exists in config
     match state.config_store.load().await {
         Ok(config) => {
             if !config.folders.iter().any(|f| f.id == query.folder) {
@@ -418,10 +404,6 @@ pub(crate) async fn browse(
     let tree = build_tree(&files, &prefix, levels, 0);
     Ok(Json(tree))
 }
-
-// ============================================
-// Batch A2: db/file
-// ============================================
 
 /// File query parameters
 #[derive(Debug, Deserialize)]
@@ -488,7 +470,6 @@ pub(crate) async fn file_info(
         }
     };
 
-    // Verify folder exists
     match state.config_store.load().await {
         Ok(config) => {
             if !config.folders.iter().any(|f| f.id == query.folder) {

@@ -2,6 +2,9 @@
 //!
 //! Mirrors Go syncthing `lib/versioner/`. Each versioner archives
 //! replaced or deleted files so they can be restored later.
+//!
+//! See "docs/design/ADR-20261105-versioner-cleanup-semantics.md" for the
+//! archive/prune/clean semantics shared by both strategies.
 
 pub mod simple;
 pub mod staggered;

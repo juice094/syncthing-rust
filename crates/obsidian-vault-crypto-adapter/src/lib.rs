@@ -1,3 +1,11 @@
+//! End-to-end encryption adapter for Obsidian vault synchronization.
+//!
+//! Derives separate content and filename keys from a password via
+//! Argon2 + HKDF, encrypts file contents with AES-256-GCM and file names
+//! with AES-256-SIV, and walks a vault directory to produce an encrypted
+//! mirror suitable for syncing. Test/dev tooling only — must not enter the
+//! production sync path.
+
 use aes_gcm::aead::rand_core::RngCore;
 use aes_gcm::{
     aead::{Aead, AeadCore, KeyInit, OsRng},
@@ -18,28 +26,43 @@ const FORMAT_VERSION: u8 = 0x01;
 const NONCE_LEN: usize = 12;
 const SALT_LEN: usize = 16;
 
+/// Errors produced by the crypto adapter.
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
+    /// Filesystem I/O failure.
     #[error("io error: {0}")]
     Io(#[from] std::io::Error),
+    /// Argon2 password hashing failed.
     #[error("argon2 error")]
     Argon2,
+    /// Directory traversal failed.
     #[error("walkdir error: {0}")]
     Walkdir(#[from] walkdir::Error),
+    /// Encryption failed.
     #[error("encryption failed: {0}")]
     Encrypt(String),
+    /// Decryption failed.
     #[error("decryption failed: {0}")]
     Decrypt(String),
+    /// Ciphertext is shorter than the format header.
     #[error("invalid ciphertext format")]
     InvalidFormat,
+    /// Ciphertext carries an unknown format version.
     #[error("unsupported format version: {0}")]
     UnsupportedVersion(u8),
+    /// Encrypted file name cannot be decoded or authenticated.
     #[error("invalid encrypted filename")]
     InvalidFilename,
 }
 
+/// Result type alias for this crate.
 pub type Result<T> = std::result::Result<T, Error>;
 
+/// Vault encryption context holding the derived content and filename keys.
+///
+/// Key material is zeroized on drop; the cipher key types themselves are
+/// excluded from zeroization because `aes-gcm` / `aes-siv` do not implement
+/// `Zeroize` (they rely on the process boundary for cleanup).
 #[derive(Zeroize, ZeroizeOnDrop)]
 pub struct CryptoAdapter {
     #[zeroize(skip)]
@@ -49,6 +72,13 @@ pub struct CryptoAdapter {
 }
 
 impl CryptoAdapter {
+    /// Derive a `CryptoAdapter` from a password and salt using
+    /// Argon2 + HKDF-SHA256.
+    ///
+    /// # Errors
+    ///
+    /// Returns `Error::Argon2` if password hashing fails, or `Error::Encrypt`
+    /// if HKDF key expansion fails.
     pub fn from_password(password: &str, salt: &[u8]) -> Result<Self> {
         let argon2 = Argon2::default();
         let mut master_key = [0u8; 32];
@@ -73,6 +103,12 @@ impl CryptoAdapter {
         })
     }
 
+    /// Encrypt a file or directory name deterministically (AES-256-SIV,
+    /// lowercase RFC 4648 base32 encoding).
+    ///
+    /// # Errors
+    ///
+    /// Returns `Error::Encrypt` if encryption fails.
     pub fn encrypt_filename(&self, name: &str) -> Result<String> {
         let cipher = Aes256SivAead::new(&self.filename_key);
         let encrypted = cipher
@@ -82,6 +118,12 @@ impl CryptoAdapter {
         Ok(base32::encode(alphabet, &encrypted).to_lowercase())
     }
 
+    /// Decrypt a name produced by `encrypt_filename`.
+    ///
+    /// # Errors
+    ///
+    /// Returns `Error::InvalidFilename` if the base32 decoding or UTF-8
+    /// validation fails, or `Error::Decrypt` if authentication fails.
     pub fn decrypt_filename(&self, encrypted_name: &str) -> Result<String> {
         let cipher = Aes256SivAead::new(&self.filename_key);
         let alphabet = Alphabet::Rfc4648 { padding: false };
@@ -93,6 +135,13 @@ impl CryptoAdapter {
         String::from_utf8(plaintext).map_err(|_| Error::InvalidFilename)
     }
 
+    /// Encrypt file contents with a fresh random nonce.
+    ///
+    /// Output layout: 1-byte format version, 12-byte nonce, ciphertext.
+    ///
+    /// # Errors
+    ///
+    /// Returns `Error::Encrypt` if encryption fails.
     pub fn encrypt_content(&self, plaintext: &[u8]) -> Result<Vec<u8>> {
         let cipher = Aes256Gcm::new(&self.content_key);
         let nonce = Aes256Gcm::generate_nonce(&mut OsRng);
@@ -107,6 +156,13 @@ impl CryptoAdapter {
         Ok(out)
     }
 
+    /// Decrypt a blob produced by `encrypt_content`.
+    ///
+    /// # Errors
+    ///
+    /// Returns `Error::InvalidFormat` if the blob is shorter than the format
+    /// header, `Error::UnsupportedVersion` if the format version byte is not
+    /// `FORMAT_VERSION`, or `Error::Decrypt` if authentication fails.
     pub fn decrypt_content(&self, ciphertext: &[u8]) -> Result<Vec<u8>> {
         if ciphertext.len() < 1 + NONCE_LEN {
             return Err(Error::InvalidFormat);
@@ -124,6 +180,14 @@ impl CryptoAdapter {
             .map_err(|e| Error::Decrypt(format!("content decrypt failed: {e}")))
     }
 
+    /// Encrypt every file under `src` into the mirror directory `dst`,
+    /// encrypting file and directory names along the way.
+    ///
+    /// Hidden entries (dotfiles other than `.obsidian`) are skipped.
+    ///
+    /// # Errors
+    ///
+    /// Returns an I/O, traversal, or encryption error on the first failure.
     pub fn encrypt_dir(&self, src: &Path, dst: &Path) -> Result<()> {
         std::fs::create_dir_all(dst)?;
 
@@ -161,6 +225,12 @@ impl CryptoAdapter {
         Ok(())
     }
 
+    /// Decrypt a mirror directory produced by `encrypt_dir` back into the
+    /// plaintext vault `dst`.
+    ///
+    /// # Errors
+    ///
+    /// Returns an I/O, traversal, or decryption error on the first failure.
     pub fn decrypt_dir(&self, src: &Path, dst: &Path) -> Result<()> {
         std::fs::create_dir_all(dst)?;
 
@@ -191,6 +261,7 @@ impl CryptoAdapter {
     }
 }
 
+/// Generate a new random 16-byte salt for `CryptoAdapter::from_password`.
 pub fn generate_salt() -> [u8; SALT_LEN] {
     let mut salt = [0u8; SALT_LEN];
     OsRng.fill_bytes(&mut salt);
