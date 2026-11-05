@@ -81,6 +81,7 @@ cargo deny check all
 | 主题 | 文件 |
 |:---|:---|
 | 项目拓扑、crate DAG、运行时组件、关键入口 | [`docs/design/topology.md`](docs/design/topology.md) |
+| 注释与文档政策（2026-11 起施行，改造与 PR 唯一标准） | [`docs/dev/comment-policy.md`](docs/dev/comment-policy.md) |
 | Agent 约束入口（crate 边界、禁止事项、代码风格） | [`docs/agent/index.md`](docs/agent/index.md) → [`constraints.md`](docs/agent/constraints.md) |
 | 测试基线与提交前清单 | [`docs/agent/testing.md`](docs/agent/testing.md) |
 | 威胁模型、关键上限、审计债务 | [`docs/agent/security.md`](docs/agent/security.md) |
