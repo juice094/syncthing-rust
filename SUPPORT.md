@@ -8,16 +8,17 @@
 
 ## Commercial Support
 
-For production deployments, priority bug fixes, custom feature development, or integration consulting, commercial support is available. See [LICENSE-COMMERCIAL.md](./LICENSE-COMMERCIAL.md) or contact `juice094@protonmail.com`.
+For production deployments, priority bug fixes, custom feature development, or integration consulting, commercial
+support is available. See [LICENSE-COMMERCIAL.md](./LICENSE-COMMERCIAL.md) or contact `juice094@protonmail.com`.
 
 ## Supported Versions
 
-| Version | Status |
-|:---|:---|
-| v3.0.5 | Current (production) |
-| v3.0.4 | Superseded by v3.0.5 |
-| v3.0.x | Supported — security fixes backported on request |
-| < v3.0.0 | Unsupported (pre-release / alpha) |
+| Version  | Status                                           |
+|:---------|:-------------------------------------------------|
+| v3.0.5   | Current (production)                             |
+| v3.0.4   | Superseded by v3.0.5                             |
+| v3.0.x   | Supported — security fixes backported on request |
+| < v3.0.0 | Unsupported (pre-release / alpha)                |
 
 ---
 

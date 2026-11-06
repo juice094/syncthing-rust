@@ -1,18 +1,21 @@
-<p align="center">
-  <img src="./docs/assets/logo-512.png" alt="syncthing-rust logo" width="160">
-</p>
-
-# syncthing-rust
-
-**Syncthing BEP 协议的 Rust 实现**
-
-[English](./README.md) · [中文](./README-zh.md)
-
-零运行时依赖 · 与 Go 版 Syncthing 线路兼容 · 单静态二进制
-
-[![Rust](https://img.shields.io/badge/rust-1.85%2B-orange?logo=rust)](https://www.rust-lang.org)
-[![CI](https://github.com/juice094/syncthing-rust/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/juice094/syncthing-rust/actions/workflows/ci.yml)
-[![License](https://img.shields.io/badge/license-MIT%20%2B%20Commercial-blue)](./LICENSE)
+<table style="border: none; border-collapse: collapse; width: 100%; max-width: 750px; table-layout: fixed;">
+  <tr style="border: none;">
+    <td width="140" style="border: none; vertical-align: middle; padding-right: 20px;">
+      <img src="./docs/assets/logo-512.png" width="120" alt="syncthing-rust logo" style="border-radius: 20px;">
+    </td>
+    <td style="border: none; vertical-align: middle; padding: 0;">
+      <h1 style="margin-top: 0; margin-bottom: 8px; border-bottom: none; font-size: 28px; line-height: 1.2;">syncthing-rust</h1>
+      <p style="margin-top: 0; margin-bottom: 8px; font-size: 16px; line-height: 1.5;"><strong>Syncthing BEP 协议的 Rust 实现</strong></p>
+      <p style="margin-top: 0; margin-bottom: 12px; font-size: 14px; line-height: 1.5;">零运行时依赖 · 与 Go 版 Syncthing 线路兼容 · 单静态二进制</p>
+      <p style="margin-top: 0; margin-bottom: 12px; font-size: 14px; line-height: 1.5;"><a href="./README.md">English</a> · <a href="./README-zh.md">中文</a></p>
+      <p style="margin-top: 0; margin-bottom: 0;">
+        <a href="https://www.rust-lang.org"><img src="https://img.shields.io/badge/rust-1.85%2B-orange?logo=rust" alt="Rust"></a>
+        <a href="https://github.com/juice094/syncthing-rust/actions/workflows/ci.yml"><img src="https://github.com/juice094/syncthing-rust/actions/workflows/ci.yml/badge.svg?branch=main" alt="CI"></a>
+        <a href="./LICENSE"><img src="https://img.shields.io/badge/license-MIT%20%2B%20Commercial-blue" alt="License"></a>
+      </p>
+    </td>
+  </tr>
+</table>
 
 ---
 
