@@ -12,6 +12,13 @@ use std::path::Path;
 fn main() {
     println!("cargo:rerun-if-changed=build.rs");
 
+    // Windows 可执行文件资源：应用图标（资源管理器/任务栏显示）
+    if std::env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("windows") {
+        println!("cargo:rerun-if-changed=assets/app.rc");
+        println!("cargo:rerun-if-changed=assets/app.ico");
+        embed_resource::compile("assets/app.rc", embed_resource::NONE).panic_if_not_success();
+    }
+
     let out_dir = std::env::var("OUT_DIR").unwrap();
 
     // 托盘状态图标：按目标尺寸选择最优 SVG 源，避免非整数像素缩放导致的发虚。
