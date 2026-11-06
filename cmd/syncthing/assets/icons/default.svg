@@ -1,10 +1,1 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
-  <rect width="256" height="256" rx="48" fill="#F3F4F6"/>
-  <g fill="none" stroke="#6B7280" stroke-width="18" stroke-linecap="round" stroke-linejoin="round">
-    <circle cx="80" cy="80" r="28"/>
-    <circle cx="80" cy="176" r="28"/>
-    <circle cx="200" cy="128" r="28"/>
-    <path d="M108 80h36a16 16 0 0 1 16 16v24a16 16 0 0 0 16 16"/>
-    <path d="M108 176h36a16 16 0 0 0 16-16v-24a16 16 0 0 1 16-16"/>
-  </g>
-</svg>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256"><defs><mask id="m"><rect width="256" height="256" fill="#fff"/><path d="M168 62 C104 90 100 118 128 128 C156 138 152 166 88 194" stroke="#000" stroke-width="44" stroke-linecap="round" fill="none"/></mask></defs><g mask="url(#m)"><path d="M128 18 L223 73 L223 183 L128 238 L33 183 L33 73 Z" fill="#FFFFFF"/><clipPath id="c"><path d="M168 0 L256 0 L256 256 L104 256 Z"/></clipPath><path d="M128 18 L223 73 L223 183 L128 238 L33 183 L33 73 Z" fill="#FF5A1F" clip-path="url(#c)"/></g></svg>

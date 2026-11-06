@@ -1,80 +1,39 @@
-<div align="center">
+<p align="center">
+  <img src="./docs/assets/logo-512.png" alt="syncthing-rust logo" width="160">
+</p>
 
-# 🔄 syncthing-rust
+# syncthing-rust
 
-> **Syncthing BEP 协议的 Rust 实现**
+**Syncthing BEP 协议的 Rust 实现**
 
 [English](./README.md) · [中文](./README-zh.md)
 
-零运行时依赖 · 与 Go 版 Syncthing 线路兼容 · 单静态二进制（~13 MB）
+零运行时依赖 · 与 Go 版 Syncthing 线路兼容 · 单静态二进制
 
 [![Rust](https://img.shields.io/badge/rust-1.85%2B-orange?logo=rust)](https://www.rust-lang.org)
 [![CI](https://github.com/juice094/syncthing-rust/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/juice094/syncthing-rust/actions/workflows/ci.yml)
-[![Version](https://img.shields.io/badge/version-v3.0.5-blue)](https://github.com/juice094/syncthing-rust)
 [![License](https://img.shields.io/badge/license-MIT%20%2B%20Commercial-blue)](./LICENSE)
-
-</div>
 
 ---
 
 ## 简介
 
-[Syncthing](https://syncthing.net/) 协议栈的 Rust 实现，目标为**零运行时依赖**部署，与官方 Go Syncthing 守护进程线路兼容互操作。
+Syncthing BEP 协议的 Rust 实现。提供端到端的文件同步，具备零运行时依赖特性，编译为单静态二进制，并与官方 Go Syncthing
+守护进程线路兼容互操作。
 
-**当前阶段（v3.0.5）**：Production — 数据丢失防护加固（软删除 + 删除配额 + 版本向量修正）+ E2E 竞态根除 + MCP 工具集 19 个。
-
-- ✅ 连接层：retry 累加、TCP keepalive
-- ✅ 协议层：prost 编解码 + LZ4 压缩、wire_compat 10 tests
-- ✅ 同步链路：Pull/Push 双向、~1 秒检测到变更
-- ✅ 版本控制：Simple + Staggered、`.stversions/` 归档
-- ✅ Go 互操作：v3.0.4 ↔ Go Syncthing v2.1.0 已验证
-
-完整路线图见 [`docs/plans/INDEX.md`](docs/plans/INDEX.md)。
-
----
-
-## 目录
-
-- [概览](#概览)
-- [快速开始](#快速开始)
-- [项目结构](#项目结构)
-- [文档](#文档)
-- [贡献](#贡献)
-- [社区与支持](#社区与支持)
-- [许可证](#许可证)
-
----
-
-## 概览
-
-| 维度 | 状态 |
-|:---|:---|
-| BEP 协议（TLS + Hello + ClusterConfig + Index + Request/Response） | ✅ prost + LZ4 |
-| 端到端文件同步（双向） | ✅ Push/Pull 双向验证 |
-| 文件同步核心（puller / scanner / folder_model / orchestrator） | ✅ 见 [测试基线](docs/agent/testing.md) |
-| 版本控制 | ✅ Simple + Staggered |
-| 连接稳定性 | ✅ retry 累加 + TCP keepalive |
-| Rust↔Rust 双向互通 | ✅ v3.0.4 ↔ v3.0.3 E2E 验证 |
-| Go Syncthing 互操作 | ✅ v3.0.4 ↔ Go v2.1.0 已验证 |
-| Folder Orchestrator（统一调度 / 并发限制 / 抖动 / 优先级） | ✅ 多 folder 扫描/拉取协调 |
-| 预测性健康检查（失败率 / 丢事件 / 状态翻转 / 自动节流） | ✅ 事件驱动趋势评估 |
-| 自适应拉取并发（RTT 动态调整 downloads/blocks） | ✅ 根据链路质量自动换挡 |
-| watcher 增量扫描 | ✅ 脏路径子树/单文件增量扫描 |
-| BEP Relay Server v1 | ✅ 独立 relay 监听 + TLS + device-id 路由 |
-| RBAC 只读 API key | ✅ admin / read-only 双 key |
-| 结构化 JSON 日志 | ✅ `--log-format json` |
-| Prometheus 指标 | ✅ `/metrics` 端点 |
-| Docker & Compose 部署 | ✅ Dockerfile + relay compose + Grafana |
-| MCP Bridge（AI Agent 接入） | ✅ 19 工具 + 3 资源（见 [`docs/design/AGENT_INTEGRATION.md`](docs/design/AGENT_INTEGRATION.md)） |
-| Symlink 同步 | 🔲 未实现（未来规划） |
-| Web GUI | ❌ 无（TUI + 托盘 + CLI + REST API，见 AGENTS.md 冻结声明） |
+当前项目处于 **Production** 阶段。核心协议、端到端同步、Windows 系统托盘及 TUI
+均已稳定。关于最新的发版说明与更新日志，请参阅 [Releases](https://github.com/juice094/syncthing-rust/releases) 页面。
 
 ---
 
 ## 快速开始
 
+**前置要求：** Rust 1.85 或更高版本。
+
 ```bash
-git clone https://github.com/juice094/syncthing-rust.git && cd syncthing-rust
+# 从源码构建
+git clone https://github.com/juice094/syncthing-rust.git
+cd syncthing-rust
 cargo build --release
 
 # 初始化配置
@@ -82,72 +41,54 @@ cargo run --release -- init
 
 # 启动守护进程
 cargo run --release -- run --config-dir ~/.syncthing
-
-# 启动 TUI
-cargo run --release -- tui --config-dir ~/.syncthing
-
-# 启动 Windows 托盘
-cargo run --release -- tray --config-dir ~/.syncthing
-
-# 启动 Relay Server v1
-cargo run --release -- relay-server --listen :22067 --tls-cert cert.pem --tls-key key.pem
 ```
 
-首次运行自动生成 Ed25519 TLS 证书。默认端口：BEP `22001`，REST API `8385`。
+首次运行会自动生成 Ed25519 TLS 证书。默认情况下，BEP 协议监听 `22001` 端口，REST API 监听 `8385` 端口。
+
+如需探索 TUI、系统托盘或 Relay Server 等其他命令，请运行：
+
+```bash
+cargo run --release -- --help
+```
 
 ---
 
-## 项目结构
+## 核心特性
 
-```
-syncthing-rust/
-├── cmd/
-│   ├── syncthing/            # CLI 入口 + TUI 主循环 + 守护进程 + 托盘
-│   ├── syncthing-cli/        # 独立 CLI（status / show-id / generate-cert）
-│   ├── syncthing-bench/      # 同步基准测试
-│   ├── syncthing-mcp-bridge/ # MCP Bridge（stdio JSON-RPC → REST）
-│   ├── syncthing-tray/       # Windows 托盘薄 wrapper
-│   └── syncthing-monitor/    # 监控工具（含 stress 辅助 bin）
-├── crates/
-│   ├── syncthing-core/       # 核心类型与 trait（只读给下游）
-│   ├── bep-protocol/         # BEP 编解码（prost）+ 握手
-│   ├── syncthing-net/        # TCP+TLS, ConnectionManager, 发现, Relay
-│   ├── syncthing-sync/       # Scanner, Puller, IndexHandler, watcher
-│   ├── syncthing-fs/         # 文件系统抽象（ignore, scanner）
-│   ├── syncthing-api/        # REST API（Axum）+ 事件总线
-│   ├── syncthing-db/         # 元数据存储（sled-backed）
-│   ├── syncthing-versioner/  # 版本控制（Simple + Staggered）
-│   └── syncthing-test-utils/ # TestNode / MemoryPipe 等测试辅助
-├── deploy/                   # Docker、compose、nginx、Grafana 仪表板
-├── docs/                     # 设计文档、Agent 指引、计划、报告
-├── scripts/                  # 健康检查、cloud-deploy、压力测试
-└── .agents/skills/           # 仓库内 Agent 技能（bep-protocol）
-```
+- **完整 BEP 协议**：prost 编解码、TLS 握手、ClusterConfig 以及带 LZ4 压缩的 Index。
+- **端到端同步**：块级 Pull/Push、SHA-256 扫描，支持亚秒级变更检测的双向同步。
+- **多路径发现**：局域网 UDP、全局 HTTPS mTLS、STUN、UPnP 及 Relay v1。
+- **版本控制**：支持 Simple (keep=N) 与 Staggered (时间窗) 策略，具备 `.stversions/` 归档。
+- **Go 互操作**：与官方 Go Syncthing 守护进程严格线路兼容。
+- **可观测性与集成**：实时 TUI、Prometheus 指标、结构化 JSON 日志以及面向 AI Agent 的 MCP Bridge。
 
-### 完整架构
+> 关于高级调度（并发限制、预测性健康检查）与部署方案，请参阅技术文档。
 
-- 项目拓扑与运行时架构：[`docs/design/topology.md`](docs/design/topology.md)
-- Agent 开发约束与代码规范：[`docs/agent/index.md`](docs/agent/index.md)
+---
+
+## 已知限制
+
+- **高延迟/不稳定网络**：大文件批量传输可能受防火墙影响而掉线，已通过自动重连和 Keepalive 机制缓解。
+- **不支持软链接同步**：目前会静默跳过软链接。
+- **无 Web GUI**：交互界面仅限于 TUI、系统托盘和 REST API。
+- **不支持 QUIC 传输**：目前仅支持 TCP 及 Relay v1 传输层。
 
 ---
 
 ## 文档
 
-| 文档 | 内容 |
-|:---|:---|
-| [`docs/design/topology.md`](docs/design/topology.md) | 项目拓扑、crate 依赖图、运行时组件、关键入口 |
-| [`docs/agent/index.md`](docs/agent/index.md) | Agent 开发指南总览（约束、测试、安全、运维） |
-| [`docs/design/AGENT_INTEGRATION.md`](docs/design/AGENT_INTEGRATION.md) | Agent 集成面：Skill / MCP Bridge / DSH 插件评估 |
-| [`docs/KNOWN_ISSUES.md`](docs/KNOWN_ISSUES.md) | 权威缺陷登记与事实核查 |
-| [`docs/plans/INDEX.md`](docs/plans/INDEX.md) | 路线图与计划索引 |
-| [`docs/agent/testing.md`](docs/agent/testing.md) | 测试基线与提交前检查清单（数值唯一事实源） |
-| [`.agents/skills/bep-protocol/SKILL.md`](.agents/skills/bep-protocol/SKILL.md) | 仓库内 BEP 协议 Agent 技能 |
+为保持 README 的专注与稳定，详细技术文档已分离：
+
+- [项目拓扑与架构](docs/design/topology.md)
+- [Agent 开发指引与约束](docs/agent/index.md)
+- [已知问题与缺陷登记](docs/KNOWN_ISSUES.md)
+- [路线图与计划](docs/plans/INDEX.md)
 
 ---
 
 ## 贡献
 
-详见 [CONTRIBUTING.md](./CONTRIBUTING.md) 与 [`docs/agent/constraints.md`](docs/agent/constraints.md)。提交前：
+详细指南请参阅 [CONTRIBUTING.md](CONTRIBUTING.md)。在提交 PR 前，请确保以下检查通过：
 
 ```bash
 cargo test --workspace
@@ -159,24 +100,12 @@ cargo fmt --all -- --check
 
 ## 社区与支持
 
-| 场景 | 入口 |
-|:---|:---|
-| Bug 报告 | [GitHub Issues](https://github.com/juice094/syncthing-rust/issues/new?template=bug_report.md) |
-| 功能建议 | [GitHub Issues](https://github.com/juice094/syncthing-rust/issues/new?template=feature_request.md) |
-| 使用问题 / 讨论 | [GitHub Discussions](https://github.com/juice094/syncthing-rust/discussions) |
-| 安全漏洞 | 见 [SECURITY.md](SECURITY.md)（请勿公开 issue） |
-| 商业支持 | 见 [SUPPORT.md](SUPPORT.md) / [LICENSE-COMMERCIAL.md](LICENSE-COMMERCIAL.md) |
+- **Bug 报告与功能建议**：[GitHub Issues](https://github.com/juice094/syncthing-rust/issues)
+- **使用问题与讨论**：[GitHub Discussions](https://github.com/juice094/syncthing-rust/discussions)
+- **安全漏洞**：见 [SECURITY.md](SECURITY.md)（请勿公开提交 Issue）
 
 ---
 
 ## 许可证
 
-[MIT + Commercial](./LICENSE) · [商业许可](./LICENSE-COMMERCIAL.md)
-
----
-
-<div align="center">
-
-**[⭐ Star](https://github.com/juice094/syncthing-rust) · [🐛 Issues](https://github.com/juice094/syncthing-rust/issues) · [💬 Discussions](https://github.com/juice094/syncthing-rust/discussions) · [🤝 Contribute](CONTRIBUTING.md)**
-
-</div>
+基于 [MIT + Commercial](./LICENSE) 许可。商业支持请参阅 [LICENSE-COMMERCIAL.md](./LICENSE-COMMERCIAL.md)。

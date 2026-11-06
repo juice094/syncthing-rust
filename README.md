@@ -1,150 +1,40 @@
-<div align="center">
+<p align="center">
+  <img src="./docs/assets/logo-512.png" alt="syncthing-rust logo" width="160">
+</p>
 
-# 🔄 syncthing-rust
+# syncthing-rust
 
-> **Syncthing BEP Protocol in Rust**
+**Syncthing BEP Protocol in Rust**
 
 [English](./README.md) · [中文](./README-zh.md)
 
-Zero runtime dependencies · Wire-compatible with Go Syncthing · Single static binary (~13 MB)
+Zero runtime dependencies · Wire-compatible with Go Syncthing · Single static binary
 
 [![Rust](https://img.shields.io/badge/rust-1.85%2B-orange?logo=rust)](https://www.rust-lang.org)
 [![CI](https://github.com/juice094/syncthing-rust/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/juice094/syncthing-rust/actions/workflows/ci.yml)
-[![Version](https://img.shields.io/badge/version-v3.0.5-blue)](https://github.com/juice094/syncthing-rust)
 [![License](https://img.shields.io/badge/license-MIT%20%2B%20Commercial-blue)](./LICENSE)
 
-</div>
+---
+
+## Introduction
+
+A Rust implementation of the Syncthing BEP protocol. It provides end-to-end file synchronization with zero runtime
+dependencies, compiled into a single static binary that is wire-compatible with the official Go daemon.
+
+This project is currently in a **Production** phase. Core protocols, end-to-end sync, Windows system tray, and TUI are
+stable. For the latest release notes and changelog, please refer to
+the [Releases](https://github.com/juice094/syncthing-rust/releases) page.
 
 ---
 
-## 📋 Introduction
+## Quick Start
 
-A Rust implementation of the [Syncthing](https://syncthing.net/) BEP protocol — zero runtime dependencies, single static binary, wire-compatible with the official Go daemon.
-
-**Current phase**: Production. Core protocol, end-to-end sync, Windows system tray, and TUI are stable.
-
-> [Latest release: v3.0.5](https://github.com/juice094/syncthing-rust/releases/tag/v3.0.5)
-
----
-
-## 📚 Table of Contents
-
-- [Highlights](#-highlights)
-- [Tech Stack](#-tech-stack)
-- [Project Structure](#-project-structure)
-- [Documentation](#-documentation)
-- [Known Limitations](#-known-limitations)
-- [Quick Start](#-quick-start)
-- [Contributing](#-contributing)
-- [Community & Support](#-community--support)
-- [License](#-license)
-
----
-
-## 🌟 Highlights
-
-| Feature | Description |
-|:---|:---|
-| 🔐 **Full BEP Protocol** | prost codec, TLS + Hello + ClusterConfig + Index, LZ4 compression |
-| 📁 **End-to-End File Sync** | Block-level pull/push, SHA-256 scanning, bidirectional sync detects changes in ~1 s |
-| 🚀 **Proactive Push** | Local changes pushed immediately to connected peers |
-| 🗂️ **Versioning** | Simple (keep=N) + Staggered (4 time windows), `.stversions/` archive |
-| 🌐 **Multi-Path Discovery** | LAN UDP · Global HTTPS mTLS · STUN · UPnP · Relay v1 |
-| 🖥️ **Real-Time TUI** | Event-driven live sync status with hot-reload config |
-| 🔌 **Go Interop** | Wire-compatible with Go Syncthing v2.1.0 (cross-version verified) |
-| ⚙️ **Folder Orchestrator** | Unified multi-folder scan/pull scheduling with concurrency limits, jitter, and priority |
-| 🔮 **Predictive Health Checks** | Real-time failure-rate / watcher-loss / state-flip assessment with automatic throttling |
-| 📈 **Adaptive Pull Concurrency** | Dynamic downloads/blocks concurrency based on block-request RTT |
-| 🧩 **Incremental Scanning** | Watcher dirty-path set triggers subtree/single-file incremental scans |
-| 📦 **Single Static Binary** | Release build ~13 MB, zero runtime dependencies |
-| 🔄 **BEP Relay Server v1** | Standalone relay listener with TLS and device-id routing |
-| 🔑 **RBAC API Keys** | Separate admin + read-only API keys for REST API |
-| 📜 **Structured JSON Logging** | `--log-format json` for ELK/Splunk/Loki aggregation |
-| 📊 **Prometheus Metrics** | `/metrics` endpoint with build/uptime/connection/folder stats |
-| 🐳 **Docker & Compose** | Multi-stage Dockerfile + relay compose stack + Grafana dashboard |
-| 🤖 **MCP Bridge** | 19 tools + 3 resources for AI agents (see [`docs/design/AGENT_INTEGRATION.md`](docs/design/AGENT_INTEGRATION.md)) |
-
----
-
-## 🔧 Tech Stack
-
-| Component | Technology |
-|:---|:---|
-| Protocol | BEP over TLS (prost + LZ4) |
-| Async Runtime | Tokio |
-| TLS | rustls + ed25519-dalek |
-| Networking | Tokio + rustls + ParallelDialer + Relay v1 |
-| Discovery | UDP broadcast + HTTPS mTLS + STUN + UPnP |
-| Storage | sled (metadata + block-cache abstraction) |
-| REST API | Axum (Go-layout compatible) + RBAC API keys |
-| Metrics | Prometheus text format (`/metrics`) |
-| Logging | tracing + tracing-subscriber (text / JSON) |
-| TUI | ratatui + crossterm |
-| CLI | clap |
-
----
-
-## 📁 Project Structure
-
-```
-syncthing-rust/
-├── cmd/
-│   ├── syncthing/          # CLI entrypoint + TUI + daemon runner + tray
-│   ├── syncthing-cli/      # Standalone CLI (status / show-id / generate-cert)
-│   ├── syncthing-bench/    # Sync benchmarks
-│   ├── syncthing-mcp-bridge/  # MCP Bridge (stdio JSON-RPC -> REST)
-│   ├── syncthing-tray/     # Windows tray thin wrapper
-│   └── syncthing-monitor/  # Monitor tool (plus stress helper binaries)
-├── crates/
-│   ├── syncthing-core/     # Core types (DeviceId, FileInfo, VersionVector)
-│   ├── bep-protocol/       # BEP codec (prost) + handshake
-│   ├── syncthing-net/      # TCP+TLS, ConnectionManager, dial, discovery, Relay
-│   ├── syncthing-sync/     # Scanner, Puller, IndexHandler, watcher
-│   ├── syncthing-fs/       # Filesystem abstraction (ignore, scanner, watcher)
-│   ├── syncthing-api/      # REST API (Axum, Go-layout compatible) + event bus
-│   ├── syncthing-db/       # Metadata and block cache (sled-backed)
-│   ├── syncthing-versioner/# File versioning (Simple + Staggered)
-│   └── syncthing-test-utils/# TestNode / MemoryPipe test harnesses
-├── deploy/                 # Docker, compose, nginx, Grafana dashboard
-├── docs/                   # Design docs, agent guidance, plans, reports
-├── scripts/                # Health checks, cloud-deploy, stress tests
-└── .agents/skills/         # In-repo agent skills (bep-protocol)
-```
-
-### Full Architecture
-
-- Project topology and runtime architecture: [`docs/design/topology.md`](docs/design/topology.md)
-- Agent development constraints and coding standards: [`docs/agent/index.md`](docs/agent/index.md)
-
----
-
-## 📖 Documentation
-
-| Document | Content |
-|:---|:---|
-| [`docs/design/topology.md`](docs/design/topology.md) | Project topology, crate dependency graph, runtime components, key entry points |
-| [`docs/agent/index.md`](docs/agent/index.md) | Agent guidance overview (constraints, testing, security, operations) |
-| [`docs/agent/constraints.md`](docs/agent/constraints.md) | Crate boundary red lines, forbidden items, coding standards |
-| [`docs/KNOWN_ISSUES.md`](docs/KNOWN_ISSUES.md) | Authoritative defect register and fact-checking source |
-| [`docs/plans/INDEX.md`](docs/plans/INDEX.md) | Roadmap and plan index |
-
----
-
-## ⚠️ Known Limitations
-
-| Limitation | Impact | Mitigation |
-|:---|:---|:---|
-| High-latency / unstable networks | Bulk large-file transfers may drop behind firewalls | Auto-reconnect + keepalive; network tuning in [KNOWN_ISSUES §14](docs/KNOWN_ISSUES.md) |
-| No symlink sync | Symlinks are silently skipped | Planned for a future release |
-| No Web GUI | TUI + system tray + REST API are the primary interfaces (frozen per [`docs/agent/constraints.md`](docs/agent/constraints.md)) | — |
-| No QUIC transport | TCP + Relay v1 only (frozen per [`docs/agent/constraints.md`](docs/agent/constraints.md)) | Under future evaluation |
-
----
-
-## 🚀 Quick Start
+**Prerequisites:** Rust 1.85 or higher.
 
 ```bash
-git clone https://github.com/juice094/syncthing-rust.git && cd syncthing-rust
+# Build from source
+git clone https://github.com/juice094/syncthing-rust.git
+cd syncthing-rust
 cargo build --release
 
 # Initialize configuration
@@ -152,20 +42,59 @@ cargo run --release -- init
 
 # Start the daemon
 cargo run --release -- run --config-dir ~/.syncthing
-
-# Or start the TUI
-cargo run --release -- tui --config-dir ~/.syncthing
 ```
 
-An Ed25519 TLS certificate is generated automatically on first run. Default ports: BEP `22001`, REST API `8385`.
+An Ed25519 TLS certificate is generated automatically on first run. By default, the BEP protocol listens on port `22001`
+and the REST API on `8385`.
+
+To explore other commands such as TUI, Tray, or Relay Server, run:
+
+```bash
+cargo run --release -- --help
+```
 
 ---
 
-## 🤝 Contributing
+## Core Features
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) and [`docs/agent/constraints.md`](docs/agent/constraints.md).
+- **Full BEP Protocol**: prost codec, TLS handshake, ClusterConfig, and Index with LZ4 compression.
+- **End-to-End Sync**: Block-level pull/push, SHA-256 scanning, and bidirectional sync with sub-second change detection.
+- **Multi-Path Discovery**: LAN UDP, Global HTTPS mTLS, STUN, UPnP, and Relay v1.
+- **Versioning**: Simple (keep=N) and Staggered (time windows) with `.stversions/` archiving.
+- **Go Interop**: Strictly wire-compatible with the official Go Syncthing daemon.
+- **Observability & Integration**: Real-time TUI, Prometheus metrics, structured JSON logging, and an MCP Bridge for AI
+  agents.
 
-Before submitting, run:
+> For advanced orchestration (concurrency limits, predictive health checks) and deployment options, see the
+> Documentation.
+
+---
+
+## Known Limitations
+
+- **High-latency / unstable networks**: Bulk large-file transfers may drop behind firewalls. Mitigated via
+  auto-reconnect and keepalive.
+- **No symlink sync**: Symlinks are currently skipped silently.
+- **No Web GUI**: Interfaces are limited to TUI, system tray, and REST API.
+- **No QUIC transport**: TCP and Relay v1 are the only supported transport layers.
+
+---
+
+## Documentation
+
+To keep this README focused and stable, detailed technical documentation has been separated:
+
+- [Project Topology & Architecture](docs/design/topology.md)
+- [Agent Guidance & Constraints](docs/agent/index.md)
+- [Known Issues & Defect Register](docs/KNOWN_ISSUES.md)
+- [Roadmap & Plans](docs/plans/INDEX.md)
+
+---
+
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for detailed guidelines. Before submitting a PR, ensure the following checks
+pass:
 
 ```bash
 cargo test --workspace
@@ -173,30 +102,17 @@ cargo clippy --workspace --all-targets -- -D warnings -W clippy::await_holding_l
 cargo fmt --all -- --check
 ```
 
-Test baseline numbers live in [`docs/agent/testing.md`](docs/agent/testing.md) (single source of truth).
+---
+
+## Community & Support
+
+- **Bug Reports & Feature Requests**: [GitHub Issues](https://github.com/juice094/syncthing-rust/issues)
+- **Usage Questions**: [GitHub Discussions](https://github.com/juice094/syncthing-rust/discussions)
+- **Security Vulnerabilities**: See [SECURITY.md](SECURITY.md) (do not open a public issue)
 
 ---
 
-## 💬 Community & Support
+## License
 
-| Scenario | Entry |
-|:---|:---|
-| Bug report | [GitHub Issues](https://github.com/juice094/syncthing-rust/issues/new?template=bug_report.md) |
-| Feature request | [GitHub Issues](https://github.com/juice094/syncthing-rust/issues/new?template=feature_request.md) |
-| Usage question / discussion | [GitHub Discussions](https://github.com/juice094/syncthing-rust/discussions) |
-| Security vulnerability | See [SECURITY.md](SECURITY.md) (do not open a public issue) |
-| Commercial support | See [SUPPORT.md](SUPPORT.md) / [LICENSE-COMMERCIAL.md](LICENSE-COMMERCIAL.md) |
-
----
-
-## 📄 License
-
-[MIT + Commercial](./LICENSE) · [Commercial License](./LICENSE-COMMERCIAL.md)
-
----
-
-<div align="center">
-
-**[⭐ Star](https://github.com/juice094/syncthing-rust) · [🐛 Issues](https://github.com/juice094/syncthing-rust/issues) · [💬 Discussions](https://github.com/juice094/syncthing-rust/discussions) · [🤝 Contribute](CONTRIBUTING.md)**
-
-</div>
+Licensed under [MIT + Commercial](./LICENSE). See [LICENSE-COMMERCIAL.md](./LICENSE-COMMERCIAL.md) for commercial
+support.
