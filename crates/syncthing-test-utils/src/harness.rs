@@ -108,6 +108,9 @@ impl TestNode {
             };
             cfg.options = Options {
                 relays_enabled: false,
+                // TestNode binds and dials 127.0.0.1, so the production
+                // default (loopback denied) would block every peer dial.
+                allow_loopback_targets: true,
                 ..Default::default()
             };
             cfg
@@ -126,6 +129,13 @@ impl TestNode {
         // Start ConnectionManager
         let manager_config = ConnectionManagerConfig {
             listen_addr: "127.0.0.1:0".parse()?,
+            // Explicitly relax the outbound policy for the test harness.
+            // Production defaults deny loopback (SSRF defense); TestNode is
+            // a single-host harness that only ever dials 127.0.0.1.
+            outbound_policy: syncthing_core::types::OutboundPolicy {
+                allow_private: true,
+                allow_loopback: true,
+            },
             ..Default::default()
         };
         let identity = Arc::new(TlsIdentity::new(Arc::clone(&tls_config_arc)));

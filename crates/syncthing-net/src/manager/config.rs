@@ -1,6 +1,7 @@
 use std::net::SocketAddr;
 use std::time::Duration;
 
+use syncthing_core::types::OutboundPolicy;
 use syncthing_core::RetryConfig;
 
 use crate::tcp_transport::DEFAULT_TCP_PORT;
@@ -18,6 +19,8 @@ pub struct ConnectionManagerConfig {
     pub connection_timeout: Duration,
     /// Maximum concurrent connections (enforced at accept time).
     pub max_connections: usize,
+    /// Policy for outbound address validation (SSRF defense).
+    pub outbound_policy: OutboundPolicy,
 }
 
 impl Default for ConnectionManagerConfig {
@@ -28,6 +31,7 @@ impl Default for ConnectionManagerConfig {
             heartbeat_interval: Duration::from_secs(30),
             connection_timeout: Duration::from_secs(120),
             max_connections: 1000,
+            outbound_policy: OutboundPolicy::default(),
         }
     }
 }

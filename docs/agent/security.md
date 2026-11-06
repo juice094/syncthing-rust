@@ -33,6 +33,8 @@ timestamp: 2026-06-25T00:00:00Z
 | `max_connections` | 1000 | `daemon_runner.rs` |
 | `connection_timeout` | 120s | `daemon_runner.rs` |
 | `MASS_DELETION_SAFETY_RATIO` | 0.5 | `index_handler.rs` |
+| `allow_private_targets` | `true` | `Options`（LAN 发现需要，可按需关闭） |
+| `allow_loopback_targets` | `false` | `Options`（默认拒绝 loopback，防 SSRF；测试 harness 显式放宽） |
 
 ---
 

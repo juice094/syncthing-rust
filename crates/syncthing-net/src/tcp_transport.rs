@@ -12,6 +12,7 @@ use tokio::time::timeout;
 use tokio_rustls::TlsConnector;
 use tracing::{debug, error, info, trace, warn};
 
+use syncthing_core::types::OutboundPolicy;
 use syncthing_core::{ConnectionType, Result, RetryConfig, SyncthingError};
 
 use crate::connection::{BepConnection, TcpBiStream};
@@ -251,15 +252,27 @@ impl SyncthingTcpListener {
 /// - Unspecified (0.0.0.0, ::)
 /// - Link-local (169.254.0.0/16, fe80::/10)
 ///
-/// NOTE: Loopback (127.0.0.0/8, ::1) is **not** rejected — multiple Syncthing
-/// instances on the same host are a legitimate use case. Private addresses
-/// (10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, fc00::/7) are legitimate in
-/// enterprise intranets.
+/// Loopback (127.0.0.0/8, ::1) and private addresses (10.0.0.0/8,
+/// 172.16.0.0/12, 192.168.0.0/16, fc00::/7) are gated by [`OutboundPolicy`]:
+/// loopback is denied by default (closes the most common SSRF path), private
+/// ranges are allowed by default (LAN discovery is a core feature).
 ///
 /// Call this at the entry point of any **untrusted address source**
 /// (discovery, relay, external configuration).
-pub(crate) fn validate_outbound_addr(addr: &SocketAddr) -> Result<()> {
+pub(crate) fn validate_outbound_addr(addr: &SocketAddr, policy: OutboundPolicy) -> Result<()> {
     let ip = addr.ip();
+    if !policy.allow_loopback && ip.is_loopback() {
+        return Err(SyncthingError::config(format!(
+            "SSRF prevention: refusing to dial loopback address {} (set allow_loopback_targets to permit)",
+            addr
+        )));
+    }
+    if !policy.allow_private && is_private_ip(&ip) {
+        return Err(SyncthingError::config(format!(
+            "SSRF prevention: refusing to dial private address {} (set allow_private_targets to permit)",
+            addr
+        )));
+    }
     if ip.is_multicast() {
         return Err(SyncthingError::config(format!(
             "SSRF prevention: refusing to dial multicast address {}",
@@ -287,6 +300,19 @@ pub(crate) fn validate_outbound_addr(addr: &SocketAddr) -> Result<()> {
         )));
     }
     Ok(())
+}
+
+/// Returns `true` for RFC1918 / ULA private address ranges.
+///
+/// Covers 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, and fc00::/7.
+fn is_private_ip(ip: &std::net::IpAddr) -> bool {
+    match ip {
+        std::net::IpAddr::V4(v4) => v4.is_private(),
+        std::net::IpAddr::V6(v6) => {
+            let segments = v6.segments();
+            segments[0] & 0xfe00 == 0xfc00
+        }
+    }
 }
 
 /// Establishes a single TCP connection and completes the TLS + BEP handshake.
@@ -649,33 +675,78 @@ mod tests {
 
     // ── validate_outbound_addr 测试 (v3.0.4 SSRF 防护) ──
 
+    fn permissive_policy() -> OutboundPolicy {
+        OutboundPolicy {
+            allow_private: true,
+            allow_loopback: true,
+        }
+    }
+
+    fn strict_policy() -> OutboundPolicy {
+        OutboundPolicy {
+            allow_private: false,
+            allow_loopback: false,
+        }
+    }
+
     #[test]
-    fn test_validate_outbound_addr_allows_normal() {
-        assert!(validate_outbound_addr(&"192.168.1.1:22000".parse().unwrap()).is_ok());
-        assert!(validate_outbound_addr(&"10.0.0.1:22000".parse().unwrap()).is_ok());
-        assert!(validate_outbound_addr(&"8.8.8.8:22000".parse().unwrap()).is_ok());
-        assert!(validate_outbound_addr(&"172.16.0.1:22000".parse().unwrap()).is_ok());
-        // Loopback is allowed (legitimate for same-host syncthing instances)
-        assert!(validate_outbound_addr(&"127.0.0.1:22000".parse().unwrap()).is_ok());
-        assert!(validate_outbound_addr(&"[::1]:22000".parse().unwrap()).is_ok());
+    fn test_validate_outbound_addr_allows_public() {
+        let policy = OutboundPolicy::default();
+        assert!(validate_outbound_addr(&"8.8.8.8:22000".parse().unwrap(), policy).is_ok());
+        assert!(validate_outbound_addr(&"1.1.1.1:22000".parse().unwrap(), policy).is_ok());
+    }
+
+    #[test]
+    fn test_validate_outbound_addr_default_allows_private() {
+        let policy = OutboundPolicy::default();
+        assert!(validate_outbound_addr(&"192.168.1.1:22000".parse().unwrap(), policy).is_ok());
+        assert!(validate_outbound_addr(&"10.0.0.1:22000".parse().unwrap(), policy).is_ok());
+        assert!(validate_outbound_addr(&"172.16.0.1:22000".parse().unwrap(), policy).is_ok());
+        assert!(validate_outbound_addr(&"[fd00::1]:22000".parse().unwrap(), policy).is_ok());
+    }
+
+    #[test]
+    fn test_validate_outbound_addr_strict_rejects_private() {
+        let policy = strict_policy();
+        assert!(validate_outbound_addr(&"192.168.1.1:22000".parse().unwrap(), policy).is_err());
+        assert!(validate_outbound_addr(&"10.0.0.1:22000".parse().unwrap(), policy).is_err());
+        assert!(validate_outbound_addr(&"172.16.0.1:22000".parse().unwrap(), policy).is_err());
+        assert!(validate_outbound_addr(&"[fd00::1]:22000".parse().unwrap(), policy).is_err());
+    }
+
+    #[test]
+    fn test_validate_outbound_addr_default_rejects_loopback() {
+        let policy = OutboundPolicy::default();
+        assert!(validate_outbound_addr(&"127.0.0.1:22000".parse().unwrap(), policy).is_err());
+        assert!(validate_outbound_addr(&"[::1]:22000".parse().unwrap(), policy).is_err());
+    }
+
+    #[test]
+    fn test_validate_outbound_addr_permissive_allows_loopback() {
+        let policy = permissive_policy();
+        assert!(validate_outbound_addr(&"127.0.0.1:22000".parse().unwrap(), policy).is_ok());
+        assert!(validate_outbound_addr(&"[::1]:22000".parse().unwrap(), policy).is_ok());
     }
 
     #[test]
     fn test_validate_outbound_addr_rejects_multicast() {
-        assert!(validate_outbound_addr(&"224.0.0.1:22000".parse().unwrap()).is_err());
-        assert!(validate_outbound_addr(&"239.255.255.255:22000".parse().unwrap()).is_err());
-        assert!(validate_outbound_addr(&"[ff02::1]:22000".parse().unwrap()).is_err());
+        let policy = permissive_policy();
+        assert!(validate_outbound_addr(&"224.0.0.1:22000".parse().unwrap(), policy).is_err());
+        assert!(validate_outbound_addr(&"239.255.255.255:22000".parse().unwrap(), policy).is_err());
+        assert!(validate_outbound_addr(&"[ff02::1]:22000".parse().unwrap(), policy).is_err());
     }
 
     #[test]
     fn test_validate_outbound_addr_rejects_unspecified() {
-        assert!(validate_outbound_addr(&"0.0.0.0:22000".parse().unwrap()).is_err());
-        assert!(validate_outbound_addr(&"[::]:22000".parse().unwrap()).is_err());
+        let policy = permissive_policy();
+        assert!(validate_outbound_addr(&"0.0.0.0:22000".parse().unwrap(), policy).is_err());
+        assert!(validate_outbound_addr(&"[::]:22000".parse().unwrap(), policy).is_err());
     }
 
     #[test]
     fn test_validate_outbound_addr_rejects_link_local() {
-        assert!(validate_outbound_addr(&"169.254.1.1:22000".parse().unwrap()).is_err());
-        assert!(validate_outbound_addr(&"[fe80::1]:22000".parse().unwrap()).is_err());
+        let policy = permissive_policy();
+        assert!(validate_outbound_addr(&"169.254.1.1:22000".parse().unwrap(), policy).is_err());
+        assert!(validate_outbound_addr(&"[fe80::1]:22000".parse().unwrap(), policy).is_err());
     }
 }

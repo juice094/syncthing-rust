@@ -164,6 +164,7 @@ pub async fn start_daemon(
         heartbeat_interval: Duration::from_secs(30),
         connection_timeout: Duration::from_secs(120),
         max_connections: 1000,
+        outbound_policy: syncthing_core::types::OutboundPolicy::from_options(&config.options),
     };
 
     let tls_config_arc = Arc::new(tls_config);

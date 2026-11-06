@@ -22,10 +22,11 @@ impl ConnectionManager {
     ) -> syncthing_core::Result<()> {
         // SAFETY: SSRF protection — filter dangerous addresses from untrusted
         // sources (discovery/relay/config) before dialing.
+        let policy = self.config.outbound_policy;
         let safe_addresses: Vec<SocketAddr> = addresses
             .into_iter()
             .filter(|addr| {
-                if let Err(e) = crate::tcp_transport::validate_outbound_addr(addr) {
+                if let Err(e) = crate::tcp_transport::validate_outbound_addr(addr, policy) {
                     warn!(
                         device = %device_id,
                         address = %addr,

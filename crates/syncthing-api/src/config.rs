@@ -44,6 +44,10 @@ impl MemoryConfigStore {
                 local_announce_enabled: true,
                 relays_enabled: true,
                 transports: vec!["tcp".to_string()],
+                max_recv_kbps: None,
+                max_send_kbps: None,
+                allow_private_targets: true,
+                allow_loopback_targets: false,
             },
         }
     }

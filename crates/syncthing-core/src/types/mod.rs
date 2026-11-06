@@ -357,7 +357,7 @@ impl Default for GuiConfig {
 }
 
 /// Global options.
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Options {
     /// Listen addresses.
     pub listen_addresses: Vec<String>,
@@ -370,6 +370,77 @@ pub struct Options {
     /// Enabled transports, e.g. ["tcp", "websocket", "relay"].
     #[serde(default = "default_transports")]
     pub transports: Vec<String>,
+    /// Maximum receive bandwidth in KiB/s. `None` means unlimited.
+    #[serde(default)]
+    pub max_recv_kbps: Option<u64>,
+    /// Maximum send bandwidth in KiB/s. `None` means unlimited.
+    #[serde(default)]
+    pub max_send_kbps: Option<u64>,
+    /// Whether outbound connections to private network ranges are allowed.
+    ///
+    /// Defaults to `true` to keep LAN discovery working. Set to `false` to
+    /// harden against SSRF attempts that pivot into private networks.
+    #[serde(default = "default_allow_private_targets")]
+    pub allow_private_targets: bool,
+    /// Whether outbound connections to loopback addresses are allowed.
+    ///
+    /// Defaults to `false` to close the most common SSRF path. Set to `true`
+    /// only for single-host multi-instance debugging.
+    #[serde(default)]
+    pub allow_loopback_targets: bool,
+}
+
+fn default_allow_private_targets() -> bool {
+    true
+}
+
+impl Default for Options {
+    fn default() -> Self {
+        Self {
+            listen_addresses: Vec::new(),
+            global_announce_enabled: false,
+            local_announce_enabled: false,
+            relays_enabled: false,
+            // Preserve the previous derived `Default` behavior (empty list).
+            // Serde deserialization still falls back to `default_transports()`.
+            transports: Vec::new(),
+            max_recv_kbps: None,
+            max_send_kbps: None,
+            allow_private_targets: true,
+            allow_loopback_targets: false,
+        }
+    }
+}
+
+/// Policy controlling which outbound addresses are allowed.
+///
+/// Built from [`Options`] and passed to outbound address validation so the
+/// dialer can reject SSRF-prone targets according to user configuration.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct OutboundPolicy {
+    /// Allow dialing private network ranges (10/8, 172.16/12, 192.168/16, fc00::/7).
+    pub allow_private: bool,
+    /// Allow dialing loopback addresses (127.0.0.0/8, ::1).
+    pub allow_loopback: bool,
+}
+
+impl Default for OutboundPolicy {
+    fn default() -> Self {
+        Self {
+            allow_private: true,
+            allow_loopback: false,
+        }
+    }
+}
+
+impl OutboundPolicy {
+    /// Builds a policy from global options.
+    pub fn from_options(options: &Options) -> Self {
+        Self {
+            allow_private: options.allow_private_targets,
+            allow_loopback: options.allow_loopback_targets,
+        }
+    }
 }
 
 /// Versioning configuration.
