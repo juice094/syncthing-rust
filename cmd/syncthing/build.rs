@@ -16,7 +16,9 @@ fn main() {
     if std::env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("windows") {
         println!("cargo:rerun-if-changed=assets/app.rc");
         println!("cargo:rerun-if-changed=assets/app.ico");
-        embed_resource::compile("assets/app.rc", embed_resource::NONE).panic_if_not_success();
+        embed_resource::compile("assets/app.rc", embed_resource::NONE)
+            .manifest_optional()
+            .unwrap();
     }
 
     let out_dir = std::env::var("OUT_DIR").unwrap();
