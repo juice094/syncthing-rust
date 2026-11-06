@@ -215,6 +215,16 @@ impl SyncService {
             .with_orchestrator(orchestrator),
         );
 
+        // Apply the configured receive-side bandwidth limit, if any.
+        // `from_kbps(None)` yields an unlimited bucket, which `acquire`
+        // short-circuits, so wiring it unconditionally is cheap.
+        {
+            let kbps = self.config.read().await.options.max_recv_kbps;
+            folder_model.set_recv_throttle(Some(Arc::new(
+                crate::throttle::TokenBucket::from_kbps(kbps),
+            )));
+        }
+
         self.folders.insert(folder_id.clone(), folder_model.clone());
         // Restore folder state counters from the persisted database so index
         // statistics are immediately visible after a restart.

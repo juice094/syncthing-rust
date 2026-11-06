@@ -79,6 +79,7 @@ async fn test_download_file_with_mock_source() {
         Some(mock_source),
         16,
         None,
+        None,
     )
     .await;
 

@@ -131,6 +131,11 @@ impl FolderModel {
         self.puller.set_block_source(source);
     }
 
+    /// Updates the receive-side bandwidth limiter at runtime.
+    pub fn set_recv_throttle(&self, throttle: Option<Arc<crate::throttle::TokenBucket>>) {
+        self.puller.set_recv_throttle(throttle);
+    }
+
     /// 测试辅助：puller 是否已配置块数据源
     #[cfg(test)]
     pub(crate) fn puller_block_source_present(&self) -> bool {

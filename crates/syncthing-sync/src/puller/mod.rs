@@ -18,6 +18,7 @@ use crate::database::LocalDatabase;
 use crate::error::{Result, SyncError};
 use crate::events::{EventPublisher, ItemAction, SyncEvent};
 use crate::merge::{is_mergeable_text, three_way_merge};
+use crate::throttle::TokenBucket;
 use bytes::Bytes;
 use sha2::Digest;
 use std::path::Path;
@@ -55,6 +56,8 @@ pub struct Puller {
     concurrency_policy: RwLock<Option<Arc<ConcurrencyPolicy>>>,
     block_source: RwLock<Option<Arc<dyn BlockSource>>>,
     versioner: Option<Arc<dyn Versioner>>,
+    /// Receive-side bandwidth limiter. `None` means unlimited.
+    recv_throttle: RwLock<Option<Arc<TokenBucket>>>,
 }
 
 impl Puller {
@@ -72,6 +75,7 @@ impl Puller {
             concurrency_policy: RwLock::new(None),
             block_source: RwLock::new(None),
             versioner: None,
+            recv_throttle: RwLock::new(None),
         }
     }
 
@@ -112,6 +116,27 @@ impl Puller {
         if let Ok(mut guard) = self.block_source.write() {
             *guard = source;
         }
+    }
+
+    /// Sets the receive-side bandwidth limiter (builder style).
+    ///
+    /// Pass `None` for unlimited throughput. A bucket with an unlimited rate
+    /// is also accepted and behaves as a no-op.
+    pub fn with_recv_throttle(mut self, throttle: Option<Arc<TokenBucket>>) -> Self {
+        self.recv_throttle = RwLock::new(throttle);
+        self
+    }
+
+    /// Updates the receive-side bandwidth limiter at runtime.
+    pub fn set_recv_throttle(&self, throttle: Option<Arc<TokenBucket>>) {
+        if let Ok(mut guard) = self.recv_throttle.write() {
+            *guard = throttle;
+        }
+    }
+
+    /// Returns the currently configured receive throttle, if any.
+    fn current_recv_throttle(&self) -> Option<Arc<TokenBucket>> {
+        self.recv_throttle.read().ok().and_then(|g| g.clone())
     }
 
     /// 测试辅助：是否已配置块数据源
@@ -219,6 +244,7 @@ impl Puller {
                 .map(|p| p.blocks())
                 .unwrap_or(self.max_concurrent_blocks);
             let versioner = self.versioner.clone();
+            let recv_throttle = self.current_recv_throttle();
 
             let handle = tokio::spawn(async move {
                 let _permit = permit;
@@ -250,6 +276,7 @@ impl Puller {
                                 block_source,
                                 max_concurrent_blocks,
                                 versioner.as_ref(),
+                                recv_throttle.as_ref(),
                             )
                             .await
                         }
@@ -352,6 +379,7 @@ impl Puller {
         block_source: Option<Arc<dyn BlockSource>>,
         max_concurrent_blocks: usize,
         versioner: Option<&Arc<dyn Versioner>>,
+        recv_throttle: Option<&Arc<TokenBucket>>,
     ) -> Result<()> {
         // Path-traversal defense: reject malicious names from the peer.
         validate_remote_name(&file_info.name).map_err(|e| {
@@ -491,6 +519,12 @@ impl Puller {
             if hash.as_slice() != expected_hash.as_slice() {
                 cleanup_temp(&temp_path).await;
                 return Err(SyncError::ChecksumMismatch { offset });
+            }
+
+            // Receive-side bandwidth shaping: block until the bucket grants
+            // tokens for this block. This is a no-op when no limiter is set.
+            if let Some(bucket) = recv_throttle {
+                bucket.acquire(block_data.len() as u64).await;
             }
 
             if let Err(e) = file.write_all(&block_data).await {

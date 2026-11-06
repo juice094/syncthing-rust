@@ -382,6 +382,26 @@ pub trait SyncModel: Send + Sync {
             "revert not yet implemented".to_string(),
         ))
     }
+
+    /// Update the global concurrency throttle factor (0-100).
+    ///
+    /// This is the legacy signal consumed by the health predictor; it does not
+    /// shape bandwidth. Default is a no-op so non-sync implementations compile.
+    async fn set_throttle_percent(&self, _percent: u64) -> Result<()> {
+        Ok(())
+    }
+
+    /// Apply receive/send bandwidth limits (KiB/s). `None` means unlimited.
+    ///
+    /// Default is a no-op; implementors that own a puller should rebuild the
+    /// token buckets for every folder.
+    async fn set_bandwidth_limits(
+        &self,
+        _max_recv_kbps: Option<u64>,
+        _max_send_kbps: Option<u64>,
+    ) -> Result<()> {
+        Ok(())
+    }
 }
 
 /// Result of a sync operation

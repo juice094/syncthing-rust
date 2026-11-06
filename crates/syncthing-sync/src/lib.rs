@@ -23,6 +23,7 @@ pub mod scanner;
 pub mod service;
 pub mod supervisor;
 pub mod sync_task;
+pub mod throttle;
 pub mod watcher;
 
 pub use supervisor::{RestartConfig, RestartPolicy, Supervisor};
@@ -36,3 +37,4 @@ pub use puller::{
     BlockSource,
 };
 pub use service::SyncService;
+pub use throttle::TokenBucket;
