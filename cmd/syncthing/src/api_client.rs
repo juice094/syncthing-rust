@@ -1,10 +1,10 @@
-//! 共享 REST API 客户端 — CLI 查询命令 (status, devices, folders) 共用。
-//! TUI 不通过 REST 通信（使用 in-process SyncService channel），不在此模块范围。
+//! Shared REST API client used by the CLI query commands (status, devices, folders).
+//! The TUI does not use REST (it talks to an in-process SyncService) and is out of scope here.
 
 use anyhow::Context;
 use serde::de::DeserializeOwned;
 
-/// 共享 API 客户端，封装 reqwest 和认证逻辑。
+/// Shared API client wrapping reqwest and authentication.
 pub struct ApiClient {
     client: reqwest::Client,
     api_base: String,
@@ -12,7 +12,7 @@ pub struct ApiClient {
 }
 
 impl ApiClient {
-    /// 从 Config 创建客户端。调用方负责先加载 config。
+    /// Creates a client from a loaded config.
     pub fn new(config: &syncthing_core::types::Config) -> Self {
         let api_base = format!("http://{}", api_bind_to_localhost(&config.gui.address));
         let client = reqwest::Client::builder()
@@ -26,7 +26,7 @@ impl ApiClient {
         }
     }
 
-    /// GET 请求并反序列化为 T
+    /// GETs `path` and deserializes the JSON body into `T`.
     pub async fn get<T: DeserializeOwned>(&self, path: &str) -> anyhow::Result<T> {
         let url = format!("{}{}", self.api_base, path);
         let resp = self
@@ -39,7 +39,7 @@ impl ApiClient {
         resp.json().await.with_context(|| format!("parse {}", url))
     }
 
-    /// GET 请求，不解析响应体（用于 health check）
+    /// GETs `path` without decoding the body (for health checks).
     pub async fn get_raw(&self, path: &str) -> anyhow::Result<reqwest::Response> {
         let url = format!("{}{}", self.api_base, path);
         self.client
@@ -50,7 +50,7 @@ impl ApiClient {
     }
 }
 
-/// 从 bind address 提取端口，替换 host 为 127.0.0.1
+/// Rebinds a `host:port` bind address to `127.0.0.1:port` for local queries.
 fn api_bind_to_localhost(addr: &str) -> String {
     let port = addr.rsplit(':').next().unwrap_or("8385");
     format!("127.0.0.1:{}", port)

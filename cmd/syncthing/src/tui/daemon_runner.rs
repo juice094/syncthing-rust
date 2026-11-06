@@ -1,3 +1,9 @@
+//! Daemon assembly: wires the sync service, connection manager, transports,
+//! discovery, relay listeners, and background tasks into one `DaemonStartup`.
+//!
+//! See "docs/design/ADR-20261105-connection-race.md" for the connection-race
+//! rules that the session-handle bookkeeping here must respect.
+
 use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::sync::atomic::AtomicI32;
@@ -33,7 +39,7 @@ use super::nat_tasks::{spawn_port_mapper, spawn_stun};
 use super::relay_listener::spawn_relay_listeners;
 use super::session_logger::spawn_session_event_logger;
 
-/// Daemon 启动结果
+/// Handles for a started daemon.
 pub struct DaemonStartup {
     pub future: std::pin::Pin<Box<dyn std::future::Future<Output = Result<()>> + Send>>,
     pub connection_handle: ConnectionManagerHandle,
@@ -45,11 +51,15 @@ pub struct DaemonStartup {
     // TODO: wire global_discovery_shutdown into graceful shutdown
     #[allow(dead_code)]
     pub global_discovery_shutdown: Option<GlobalDiscoveryShutdown>,
-    /// Daemon 优雅关闭信号发送端
+    /// Sender half of the daemon graceful-shutdown signal.
     pub shutdown_tx: tokio::sync::watch::Sender<bool>,
 }
 
-/// 启动 daemon，返回 future 和句柄
+/// Starts the daemon and returns the main future plus its handles.
+///
+/// Config changes trigger a reconnect of already-connected devices because BEP
+/// only exchanges ClusterConfig at connection establishment (aligned with Go
+/// Syncthing). CLI overrides are runtime-only and never persisted to disk.
 pub async fn start_daemon(
     config_dir: PathBuf,
     listen: String,
@@ -81,21 +91,18 @@ pub async fn start_daemon(
 
     let mut config_modified = false;
 
-    // 首次启动：将本地 device_id 持久化到配置文件
     if config.local_device_id != Some(device_id) {
         config.local_device_id = Some(device_id);
         config_modified = true;
         info!("Persisted local device_id to config");
     }
 
-    // Port auto-migration removed: use CLI --listen flag if 22000 is occupied
     if config.gui.address == "0.0.0.0:8384" || config.gui.address == "127.0.0.1:8384" {
         warn!("Migrating gui.address from {} to 0.0.0.0:8385 to avoid conflict with local Go Syncthing", config.gui.address);
         config.gui.address = "0.0.0.0:8385".to_string();
         config_modified = true;
     }
 
-    // 自动生成 API key（若为空）— 持久化操作
     if config.gui.api_key.is_empty() {
         use rand::RngExt;
         let api_key: String = (0..32)
@@ -113,7 +120,6 @@ pub async fn start_daemon(
             "Generated admin API key for REST API: {}... (masked)",
             &api_key[..4]
         );
-        // 同时生成只读 API key（供监控系统使用）
         if config.gui.ro_api_key.is_empty() {
             let ro_api_key: String = (0..32)
                 .map(|_| rand::rng().random_range(0..36))
@@ -145,7 +151,6 @@ pub async fn start_daemon(
         }
     }
 
-    // Runtime overrides from CLI (Layer 3) — do not persist
     config.listen_addr = listen;
     config.device_name = device_name;
 
@@ -168,10 +173,8 @@ pub async fn start_daemon(
     let (manager, handle) =
         ConnectionManager::new(manager_config, identity, Arc::clone(&tls_config_arc));
 
-    // Phase 2：注册 TransportRegistry，启用可插拔传输层
     let mut transport_registry = syncthing_net::transport::TransportRegistry::new();
 
-    // 根据配置动态注册传输层
     for scheme in &config.options.transports {
         match scheme.as_str() {
             "tcp" => {
@@ -192,16 +195,13 @@ pub async fn start_daemon(
         }
     }
 
-    // 回退：若配置未指定任何传输层，默认注册 TCP
     if transport_registry.schemes().is_empty() {
         transport_registry.register(Arc::new(syncthing_net::transport::RawTcpTransport::new()));
         info!("No transports configured, falling back to TCP");
     }
 
-    // Phase 3：注册 DERP relay 传输（用于 NAT 穿透失败时的中继回退）
     transport_registry.register(Arc::new(syncthing_net::derp::DerpTransport::new(device_id)));
 
-    // 代理感知：若环境变量配置了代理，注册 ProxiedTransport
     if let Some(proxy_transport) = syncthing_net::transport::proxy::ProxiedTransport::from_env() {
         info!("Proxy detected: registering ProxiedTransport");
         transport_registry.register(Arc::new(proxy_transport));
@@ -223,9 +223,6 @@ pub async fn start_daemon(
         .set_block_source(Arc::clone(&block_source) as Arc<dyn syncthing_sync::BlockSource>)
         .await;
 
-    // 配置变更重协商：BEP 只在连接建立时交换 ClusterConfig，
-    // 配置变更（update_config/add_device/...）后断开重连已连接设备，
-    // 与 Go Syncthing 行为对齐。
     {
         let handle = handle.clone();
         sync_service
@@ -245,13 +242,11 @@ pub async fn start_daemon(
             .await;
     }
 
-    // Phase C: 自适应并发策略 — 根据 RTT 动态调整 Puller 并发度
     let concurrency_policy = Arc::new(ConcurrencyPolicy::new());
     sync_service
         .set_concurrency_policy(Arc::clone(&concurrency_policy))
         .await;
 
-    // Phase D: Folder Orchestrator — 统一调度多文件夹扫描/拉取，避免 I/O 与 CPU 尖峰
     let orchestrator = syncthing_sync::FolderOrchestrator::with_config(
         syncthing_sync::OrchestratorConfig::default(),
     );
@@ -271,7 +266,6 @@ pub async fn start_daemon(
         .set_orchestrator(Arc::clone(&orchestrator))
         .await;
 
-    // Phase E: 预测性健康检查 — 订阅事件并周期性评估趋势，必要时自动节流
     let health_subscriber = sync_service.events().subscribe();
     let health_orchestrator = Some(orchestrator.clone());
     let health_shutdown_rx = shutdown_rx.clone();
@@ -306,9 +300,7 @@ pub async fn start_daemon(
 
     let session_handles: Arc<DashMap<DeviceId, JoinHandle<()>>> = Arc::new(DashMap::new());
 
-    // 存储每个设备的共享文件夹列表（用于 IndexUpdate 过滤）
     let device_shared_folders: Arc<DashMap<DeviceId, Vec<String>>> = Arc::new(DashMap::new());
-    // 记录已向每个设备的每个文件夹发送过初始 Index 的最大序列号
     let indexed_folders: Arc<DashMap<(DeviceId, String), u64>> = Arc::new(DashMap::new());
 
     let sync_service_clone = Arc::clone(&sync_service);
@@ -333,7 +325,6 @@ pub async fn start_daemon(
                     device_id, e
                 );
             }
-            // Abort any existing session for this device before starting a new one
             if let Some((_, old_handle)) = sessions.remove(&device_id) {
                 old_handle.abort();
             }
@@ -388,10 +379,6 @@ pub async fn start_daemon(
                     device_id, e
                 );
             }
-            // 移除旧句柄（避免泄漏），但不 abort：
-            // race resolution 替换连接时，on_disconnected 可能在 on_connected 启动新
-            // BepSession 之后才执行，abort 会误杀新 session。旧 session 自己会在连接
-            // 关闭后检测到 recv/send 错误并退出。
             let _ = sessions.remove(&device_id);
         });
     });
@@ -402,7 +389,6 @@ pub async fn start_daemon(
         .context("failed to start sync service")?;
     info!("Sync service started");
 
-    // 启动事件监听任务：当本地索引更新时，向共享该文件夹的已连接设备发送 IndexUpdate
     spawn_index_propagation_loop(
         sync_service.clone(),
         handle.clone(),
@@ -416,7 +402,6 @@ pub async fn start_daemon(
         .context("failed to start connection manager")?;
     info!("Listening on: {}", actual_addr);
 
-    // ── NAT Traversal: STUN + PortMapper + Global Discovery (Phase 2/5) ──
     let local_port = actual_addr.port();
     let public_addrs = Arc::new(tokio::sync::Mutex::new(Vec::<String>::new()));
 
@@ -435,7 +420,6 @@ pub async fn start_daemon(
     )
     .await;
 
-    // PortMapper background task（含自动续约）
     spawn_port_mapper(
         actual_addr,
         local_port,
@@ -443,14 +427,12 @@ pub async fn start_daemon(
         global_discovery.clone(),
     );
 
-    // STUN background task
     spawn_stun(
         local_port,
         Arc::clone(&public_addrs),
         global_discovery.clone(),
     );
 
-    // ── Local Discovery (Phase 0: 恢复连接能力) ──
     spawn_local_discovery(
         device_id,
         actual_addr,
@@ -460,7 +442,6 @@ pub async fn start_daemon(
     )
     .await;
 
-    // 获取 relay pool（若启用），并进行分层健康检查
     let relay_pool_urls: Vec<String> = if config.options.relays_enabled {
         match syncthing_net::relay::fetch_relay_pool(None).await {
             Ok(urls) => {
@@ -468,10 +449,8 @@ pub async fn start_daemon(
                     "Fetched {} relay(s) from pool, running staged health check...",
                     urls.len()
                 );
-                // Stage 1: lightweight TCP connect (all relays)
                 let tcp_healthy = syncthing_net::relay::filter_healthy_relays(urls, 3).await;
                 info!("{} relay(s) passed TCP health check", tcp_healthy.len());
-                // Stage 2: deep TLS + JoinRelay on top 10, stop at 10 to increase overlap probability
                 let to_check = tcp_healthy
                     .into_iter()
                     .take(constants::RELAY_HEALTH_CHECK_CAP)
@@ -495,7 +474,6 @@ pub async fn start_daemon(
         info!("Relay is disabled in config");
         Vec::new()
     };
-    // 提取 TCP 直连地址和 Relay 地址
     let mut peers: Vec<(syncthing_core::DeviceId, Vec<SocketAddr>, Vec<String>)> = Vec::new();
     {
         let cfg = sync_service.get_config().await.unwrap_or_default();
@@ -516,7 +494,6 @@ pub async fn start_daemon(
                     _ => None,
                 })
                 .collect();
-            // 若设备未配置 relay 地址但 relay pool 可用，使用所有 healthy relay 作为候选
             if relay_addrs.is_empty() {
                 for url in &relay_pool_urls {
                     relay_addrs.push(url.clone());
@@ -528,7 +505,6 @@ pub async fn start_daemon(
         }
     }
 
-    // 并行拨号：direct + relay 统一竞速
     let handle_clone = handle.clone();
     tokio::spawn(async move {
         tokio::time::sleep(Duration::from_secs(2)).await;
@@ -548,7 +524,6 @@ pub async fn start_daemon(
         }
     });
 
-    // ── Relay 被动监听（永久 mode）──
     let config_relay_urls: Vec<String> = {
         let cfg = sync_service.get_config().await.unwrap_or_default();
         cfg.devices
@@ -594,7 +569,6 @@ pub async fn start_daemon(
                     _ = interval.tick() => {
                         tick_count += 1;
 
-                        // 1. Clean up finished session handles
                         let finished: Vec<DeviceId> = session_handles_clone
                             .iter()
                             .filter(|entry| entry.value().is_finished())
@@ -604,7 +578,7 @@ pub async fn start_daemon(
                             session_handles_clone.remove(&d);
                         }
 
-                        // 2. T3.1b: 每 60s 检查"有连接但无 BepSession"的设备并尝试重连
+                        // T3.1b: every 60s, reconnect devices with a live connection but no BepSession.
                         if tick_count.is_multiple_of(60) {
                             let connected = handle.connected_devices();
                             for device_id in connected {
@@ -624,7 +598,6 @@ pub async fn start_daemon(
                 }
             }
 
-            // 优雅关闭：停止同步服务、关闭连接管理器、取消所有 session 任务
             info!("Initiating graceful shutdown");
             if let Err(e) = sync_service_for_shutdown.stop().await {
                 warn!("Failed to stop sync service during shutdown: {}", e);
@@ -640,48 +613,42 @@ pub async fn start_daemon(
         },
     );
 
-    // 配置热同步：监听 config.json 变更并通知 sync_service
-    // H-1: debounce（重置计时器模式）+ 日志降级为 debug
+    // H-1: config hot-sync uses a reset-timer debounce; logging stays at debug level.
     let config_path_for_watch = config_path.clone();
     let sync_service_for_watch = Arc::clone(&sync_service);
     tokio::spawn(async move {
         let store = JsonConfigStore::new(&config_path_for_watch);
         match store.watch().await {
-            Ok(mut stream) => {
-                loop {
-                    // 等待第一个事件
-                    if let Ok(()) = stream.next().await {
-                        let mut deadline = tokio::time::Instant::now()
-                            + Duration::from_millis(constants::CONFIG_WATCH_DEBOUNCE_MS);
-                        // debounce 窗口：期间新事件重置计时器
-                        loop {
-                            tokio::select! {
-                                Ok(()) = stream.next() => {
-                                    deadline = tokio::time::Instant::now()
-                                        + Duration::from_millis(constants::CONFIG_WATCH_DEBOUNCE_MS);
-                                }
-                                _ = tokio::time::sleep_until(deadline) => {
-                                    break;
-                                }
+            Ok(mut stream) => loop {
+                if let Ok(()) = stream.next().await {
+                    let mut deadline = tokio::time::Instant::now()
+                        + Duration::from_millis(constants::CONFIG_WATCH_DEBOUNCE_MS);
+                    loop {
+                        tokio::select! {
+                            Ok(()) = stream.next() => {
+                                deadline = tokio::time::Instant::now()
+                                    + Duration::from_millis(constants::CONFIG_WATCH_DEBOUNCE_MS);
                             }
-                        }
-                        // 窗口结束，执行 reload
-                        match store.load().await {
-                            Ok(new_config) => {
-                                if let Err(e) = sync_service_for_watch
-                                    .update_config(new_config.clone())
-                                    .await
-                                {
-                                    warn!("Failed to update sync service config from watch: {}", e);
-                                } else {
-                                    debug!("Config hot-reloaded from {:?}", config_path_for_watch);
-                                }
+                            _ = tokio::time::sleep_until(deadline) => {
+                                break;
                             }
-                            Err(e) => warn!("Failed to load config for hot-reload: {}", e),
                         }
                     }
+                    match store.load().await {
+                        Ok(new_config) => {
+                            if let Err(e) = sync_service_for_watch
+                                .update_config(new_config.clone())
+                                .await
+                            {
+                                warn!("Failed to update sync service config from watch: {}", e);
+                            } else {
+                                debug!("Config hot-reloaded from {:?}", config_path_for_watch);
+                            }
+                        }
+                        Err(e) => warn!("Failed to load config for hot-reload: {}", e),
+                    }
                 }
-            }
+            },
             Err(e) => warn!("Config watch setup failed: {}", e),
         }
     });

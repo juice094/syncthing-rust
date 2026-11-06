@@ -1,4 +1,4 @@
-//! REST API 服务器启动与配置存储
+//! REST API server startup and config store wiring.
 
 use std::net::SocketAddr;
 use std::path::Path;
@@ -26,11 +26,11 @@ impl FolderDatabase for DbAdapter {
     }
 }
 
-// API Key 认证中间件
-// Middleware removed: API key checking will be done inside syncthing-api build_router
-// after adding api_key field to ApiState.
-
-/// 启动 REST API 服务器
+/// Starts the REST API server.
+///
+/// Returns the server task and the bound address. When `gui.enabled` is false
+/// or the bind fails after falling back to a random port, the address is
+/// `0.0.0.0:0` and the returned task completes immediately.
 pub async fn start_api_server(
     config_dir: &Path,
     sync_service: Arc<syncthing_sync::SyncService>,
@@ -42,7 +42,6 @@ pub async fn start_api_server(
     let config_path = config_dir.join("config.json");
     let config_store = Arc::new(syncthing_api::config::JsonConfigStore::new(&config_path));
 
-    // 加载当前配置以获取 GUI 设置
     let config = config_store.load().await?;
 
     if !config.gui.enabled {

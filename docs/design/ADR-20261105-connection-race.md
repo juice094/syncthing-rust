@@ -123,3 +123,13 @@ sequenceDiagram
 - 与 Go Syncthing 逐条对齐保证线行为一致（双方保留同一条连接）；
 - 裁决前置消除无效握手开销与 session 空等（10s ClusterConfig 超时）；
 - 锁外 I/O 是 Rust 异步 + 同步锁混合使用的硬约束，违反即死锁。
+
+## 补充：session 句柄移除不得 abort（cmd/syncthing 侧，2026-11-05）
+
+`cmd/syncthing/src/tui/daemon_runner.rs` 的 `on_disconnected` 回调只从
+`session_handles` 移除旧句柄，**不调用 `abort()`**。
+
+原因：race resolution 替换连接时，`on_connected`（启动新 BepSession）
+与 `on_disconnected`（旧连接关闭回调）的到达顺序不保证。若
+`on_disconnected` 晚到并 abort 句柄，会误杀新连接上的 session。
+旧 session 在连接关闭后会自己从 recv/send 错误退出，无需外部 abort。

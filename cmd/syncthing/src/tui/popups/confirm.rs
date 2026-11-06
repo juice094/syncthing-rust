@@ -9,6 +9,7 @@ use crate::tui::constants;
 use crate::tui::theme::Theme;
 use crate::tui::widgets::centered_popup;
 
+/// Draws the confirm dialog with the given title and message.
 pub fn draw(f: &mut Frame, title: &str, message: &str, theme: &Theme) {
     let area = centered_popup(
         constants::CONFIRM_POPUP_W,
@@ -16,7 +17,6 @@ pub fn draw(f: &mut Frame, title: &str, message: &str, theme: &Theme) {
         f.area(),
     );
 
-    // Dim the background
     let dim = ratatui::widgets::Block::default().style(Style::default().bg(Color::Rgb(20, 20, 25)));
     f.render_widget(dim, f.area());
 

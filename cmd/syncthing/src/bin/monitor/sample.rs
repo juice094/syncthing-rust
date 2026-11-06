@@ -70,7 +70,6 @@ pub(crate) async fn sample_processes(
         true,
         ProcessRefreshKind::nothing().with_memory().with_cpu(),
     );
-    // sysinfo needs a short delay between refreshes for accurate CPU %.
     tokio::time::sleep(cpu_settle).await;
     sys.refresh_processes_specifics(
         ProcessesToUpdate::All,
@@ -91,7 +90,6 @@ pub(crate) async fn sample_processes(
                 .unwrap_or_default(),
             ProcId::Name(name) => {
                 let mut sample = ProcSample::default();
-                // Sum across all matching processes (there may be multiple).
                 for p in sys.processes_by_exact_name(name.as_ref()) {
                     sample.rss_mb += p.memory() / 1024 / 1024;
                     sample.cpu_percent += p.cpu_usage();

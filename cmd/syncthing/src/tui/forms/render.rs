@@ -1,4 +1,4 @@
-//! 统一表单渲染 — 将 add/edit 对的渲染逻辑合并为 2 个函数（device / folder）。
+//! Unified form rendering: one renderer each for the device and folder forms.
 
 use ratatui::{
     layout::{Constraint, Direction, Layout},
@@ -12,10 +12,9 @@ use crate::tui::theme::Theme;
 
 use super::FormState;
 
-/// 渲染 device 表单（add + edit 共用）。
-/// edit 模式下 field[0] 为只读，`form.fields[0].editable` 控制渲染样式。
+/// Draws the device form (shared by add and edit); read-only styling for
+/// non-editable fields marks the ID field in edit mode.
 pub fn draw_device_form(f: &mut Frame, form: &FormState, theme: &Theme) {
-    // 半透明背景
     let dim = Block::default().style(Style::default().bg(Color::Rgb(20, 20, 25)));
     f.render_widget(dim, f.area());
 
@@ -48,7 +47,7 @@ pub fn draw_device_form(f: &mut Frame, form: &FormState, theme: &Theme) {
     if form.error.is_some() {
         constraints.push(Constraint::Length(1));
     }
-    constraints.push(Constraint::Length(2)); // footer
+    constraints.push(Constraint::Length(2));
 
     let chunks = Layout::default()
         .direction(Direction::Vertical)
@@ -105,7 +104,6 @@ pub fn draw_device_form(f: &mut Frame, form: &FormState, theme: &Theme) {
         next_idx += 1;
     }
 
-    // Footer
     let footer = Paragraph::new(Line::from(vec![
         Span::styled("Tab", theme.style_header),
         Span::styled(" next  ", theme.style_idle),
@@ -118,7 +116,7 @@ pub fn draw_device_form(f: &mut Frame, form: &FormState, theme: &Theme) {
     f.render_widget(block, area);
 }
 
-/// 渲染 folder 表单（add + edit 共用），含 device 多选列表。
+/// Draws the folder form (shared by add and edit), including the device multi-select list.
 pub fn draw_folder_form(
     f: &mut Frame,
     form: &FormState,
@@ -144,12 +142,12 @@ pub fn draw_folder_form(
     let field_count = form.field_count();
     let mut constraints: Vec<Constraint> =
         form.fields.iter().map(|_| Constraint::Length(3)).collect();
-    constraints.push(Constraint::Length(1)); // hint
+    constraints.push(Constraint::Length(1));
     if form.error.is_some() {
-        constraints.push(Constraint::Length(1)); // error
+        constraints.push(Constraint::Length(1));
     }
-    constraints.push(Constraint::Min(4)); // device list
-    constraints.push(Constraint::Length(2)); // footer
+    constraints.push(Constraint::Min(4));
+    constraints.push(Constraint::Length(2));
 
     let chunks = Layout::default()
         .direction(Direction::Vertical)
@@ -157,7 +155,6 @@ pub fn draw_folder_form(
         .constraints(constraints)
         .split(area);
 
-    // Text fields
     for (i, field) in form.fields.iter().enumerate() {
         let focused = form.focus == i;
         let display = if focused && field.value.is_empty() && field.editable {
@@ -190,7 +187,6 @@ pub fn draw_folder_form(
         f.render_widget(para, chunks[i]);
     }
 
-    // Hint
     let hint_text = form
         .fields
         .get(form.focus)
@@ -206,7 +202,6 @@ pub fn draw_folder_form(
         next_idx += 1;
     }
 
-    // Device selection list
     let list_focus = form.is_on_list();
     let items: Vec<ListItem> = devices
         .iter()

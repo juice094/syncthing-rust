@@ -1,8 +1,10 @@
-//! Syncthing Rust 实现 - 主入口
+//! syncthing-rust binary entry point.
 //!
-//! 提供命令行界面和守护进程功能
+//! Provides the CLI and daemon assembly. On Windows with the `tray` feature,
+//! launching without arguments runs the daemon together with a system-tray
+//! icon (Auto mode).
 //!
-//! Windows 桌面模式（feature = "tray"）：无参数启动 = daemon + 系统托盘图标
+//! See "docs/design/ADR-20261105-windows-tui-launch.md".
 
 #![cfg_attr(all(windows, feature = "tray"), windows_subsystem = "windows")]
 
@@ -24,127 +26,127 @@ use syncthing_sync::{BlockSource, RttTracker};
 /// CLI default for listen address (references syncthing_core::constants).
 const CLI_DEFAULT_LISTEN: &str = syncthing_core::constants::DEFAULT_LISTEN_ADDR;
 
-/// Syncthing 命令行参数
+/// Top-level command-line interface.
 #[derive(Parser, Debug)]
 #[command(name = "syncthing")]
 #[command(about = "Syncthing Rust Implementation")]
 struct Cli {
-    /// 配置文件目录
+    /// Directory holding config.json and generated certificates.
     #[arg(long, global = true, value_name = "DIR")]
     config_dir: Option<PathBuf>,
 
-    /// 日志级别 (error, warn, info, debug, trace)
+    /// Log level (error, warn, info, debug, trace).
     #[arg(short, long, global = true, default_value = "info")]
     log_level: String,
 
-    /// 日志格式 (text, json)。json 适合 ELK/Splunk/Loki 聚合。
+    /// Log format (text, json); json suits ELK/Splunk/Loki aggregation.
     #[arg(long, global = true, default_value = "text")]
     log_format: String,
 
-    /// 子命令（不提供时自动启动 daemon + TUI）
+    /// Subcommand; omitted = Auto mode (daemon + TUI, or daemon only without tray).
     #[command(subcommand)]
     command: Option<Commands>,
 }
 
 #[derive(Subcommand, Debug)]
 enum Commands {
-    /// 运行 Syncthing 守护进程
+    /// Run the Syncthing daemon.
     Run {
-        /// 监听地址
+        /// BEP listen address.
         #[arg(long, default_value = CLI_DEFAULT_LISTEN)]
         listen: String,
 
-        /// 设备名称
+        /// Local device name.
         #[arg(short, long, default_value = syncthing_core::constants::DEFAULT_DEVICE_NAME)]
         device_name: String,
     },
 
-    /// 启动 TUI 配置管理器
+    /// Launch the TUI config manager.
     Tui {
-        /// 监听地址
+        /// BEP listen address.
         #[arg(long, default_value = CLI_DEFAULT_LISTEN)]
         listen: String,
 
-        /// 设备名称
+        /// Local device name.
         #[arg(short, long, default_value = "syncthing-rust")]
         device_name: String,
 
-        /// 托盘 IPC 管道名（仅内部使用，隐藏）
+        /// Tray IPC pipe name (internal use only, hidden).
         #[arg(long, hide = true)]
         tray_pipe: Option<String>,
     },
 
-    /// 交互式初始化向导（生成 config.json）
+    /// Interactive wizard that generates config.json.
     Init,
 
-    /// 查询 daemon 运行状态
+    /// Query daemon runtime status.
     Status {
-        /// 以 JSON 格式输出
+        /// Emit JSON output.
         #[arg(long)]
         json: bool,
     },
 
-    /// 设备管理
+    /// Device management.
     Devices {
         #[command(subcommand)]
         action: DeviceAction,
     },
 
-    /// 文件夹管理
+    /// Folder management.
     Folders {
         #[command(subcommand)]
         action: FolderAction,
     },
 
-    /// 查看日志
+    /// View daemon logs.
     Logs {
-        /// 显示最后 N 行
+        /// Show the last N lines.
         #[arg(long, default_value = "50")]
         tail: usize,
     },
 
-    /// 注册开机自启动（Windows: 注册表 Run 键）
+    /// Register autostart on login (Windows: HKCU Run key).
     InstallAutostart,
 
-    /// 取消开机自启动
+    /// Remove the autostart entry.
     UninstallAutostart,
 
-    /// 启动自建 Relay Protocol 服务器（替代 Tailscale）
+    /// Run the built-in Relay Protocol server (Tailscale alternative).
     RelayServer {
-        /// 协议模式监听地址（TLS + bep-relay ALPN）
+        /// Protocol-mode listen address (TLS + bep-relay ALPN).
         #[arg(long, default_value = "0.0.0.0:22067")]
         listen: String,
 
-        /// Session 模式端口（与 listen IP 相同）
+        /// Session-mode port (same IP as `listen`).
         #[arg(long, default_value = "22068")]
         session_port: u16,
     },
 
-    /// 自动模式：启动 daemon + TUI（无子命令时的默认行为）
+    /// Auto mode: daemon + TUI (default behavior when no subcommand is given).
     #[command(hide = true)]
     Auto,
 }
 
 #[derive(Subcommand, Debug)]
 enum DeviceAction {
-    /// 列出已配置的设备
+    /// List configured devices.
     List,
 }
 
 #[derive(Subcommand, Debug)]
 enum FolderAction {
-    /// 列出已配置的文件夹
+    /// List configured folders.
     List {
-        /// 包含状态信息
+        /// Include per-folder status information.
         #[arg(long)]
         status: bool,
     },
 }
 
-/// 配置文件名
+/// Name of the config file inside the config directory.
 const CONFIG_FILE_NAME: &str = "config.json";
 
-/// 从配置文件加载配置
+/// Loads a config from a JSON file.
 fn load_config(path: &Path) -> anyhow::Result<Config> {
     let content = std::fs::read_to_string(path)
         .with_context(|| format!("failed to read config from {:?}", path))?;
@@ -153,15 +155,15 @@ fn load_config(path: &Path) -> anyhow::Result<Config> {
     Ok(config)
 }
 
-/// 保存配置到文件
+/// Serializes `config` as JSON and writes it to `path`.
 ///
-/// SAFETY: config.json 包含 API key 和设备标识，保存后加固文件权限。
+/// On unix the file is chmod 0o600 because it contains the API key and
+/// device identity.
 fn save_config(path: &Path, config: &Config) -> anyhow::Result<()> {
     let content = serde_json::to_string_pretty(config).context("failed to serialize config")?;
     std::fs::write(path, content)
         .with_context(|| format!("failed to write config to {:?}", path))?;
 
-    // 加固配置文件权限（含 API key）
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
@@ -195,7 +197,7 @@ mod tray_ipc;
 mod tui;
 use syncthing::api_server;
 
-/// 单实例锁 Guard — 进程退出时自动删除 pid 文件
+/// Guard that releases the single-instance pid file on drop.
 struct SingleInstanceGuard(std::path::PathBuf);
 
 impl Drop for SingleInstanceGuard {
@@ -222,7 +224,8 @@ fn cleanup_tui_pid(config_dir: &Path) {
 }
 
 /// Resolve listen/device_name from config file, overridden by CLI args.
-/// `skip_path_check`: TUI 模式下跳过 folder path 存在性检查（用户可能正在创建文件夹）。
+/// `skip_path_check`: in TUI mode, skip the folder-path existence check (the
+/// user may be in the middle of creating a folder).
 fn resolve_daemon_config(
     config_dir: &Path,
     cli_listen: String,
@@ -239,8 +242,8 @@ fn resolve_daemon_config(
         syncthing_core::types::Config::new()
     };
 
-    // C-UX-4: 配置验证 — 启动前快速失败
-    // TUI 模式下降级为警告：TUI 是配置编辑器，用户需要在界面内修复错误配置
+    // C-UX-4: fail fast on invalid config before startup; in TUI mode degrade to a
+    // warning because the TUI is the config editor and must open on broken configs.
     if skip_path_check {
         if let Err(e) = config_validation::validate_config_non_blocking(&config) {
             eprintln!(
@@ -252,7 +255,6 @@ fn resolve_daemon_config(
         config_validation::validate_config(&config)?;
     }
 
-    // CLI overrides config (runtime-only, do NOT persist to disk)
     let listen = if cli_listen != CLI_DEFAULT_LISTEN {
         cli_listen
     } else {
@@ -277,28 +279,25 @@ async fn main() {
 }
 
 async fn run() -> Result<()> {
-    // 安装 rustls crypto provider，必须在任何 TLS 操作前执行
     rustls::crypto::ring::default_provider()
         .install_default()
         .map_err(|_| anyhow::anyhow!("Failed to install rustls crypto provider"))?;
 
     let cli = Cli::parse();
 
-    // 日志级别需要在单实例锁检查前解析，因为 Auto 模式检测到已有实例时会直接运行 TUI
     let log_level = cli
         .log_level
         .parse::<Level>()
         .context("invalid log level")?;
     let log_format = logging::LogFormat::from_str(&cli.log_format);
 
-    // 确定配置目录
     let config_dir = cli
         .config_dir
         .unwrap_or_else(syncthing_core::paths::default_config_dir);
 
-    // C-UX-5: 单实例锁 — daemon 独占；TUI/查询命令不创建锁
+    // C-UX-5: single-instance lock is exclusive to the daemon; TUI/query commands never lock.
     let needs_lock = match &cli.command {
-        None => true, // auto mode = daemon + TUI
+        None => true,
         Some(cmd) => !matches!(
             cmd,
             Commands::Tui { .. }
@@ -313,8 +312,6 @@ async fn run() -> Result<()> {
     };
     if needs_lock {
         if let Err(e) = single_instance::acquire(&config_dir) {
-            // Auto 模式下若已有实例在运行，优先尝试让已有托盘进程打开/聚焦 TUI；
-            // 若不存在托盘或通信失败，再在当前进程打开独立 TUI。
             if cli.command.is_none() {
                 #[cfg(all(windows, feature = "tray"))]
                 if request_tray_open_tui(&config_dir).await {
@@ -340,8 +337,6 @@ async fn run() -> Result<()> {
 
     let command = cli.command.unwrap_or(Commands::Auto);
 
-    // Auto mode (daemon + in-process tray) is only meaningful on Windows with tray.
-    // Without tray feature or on non-Windows, treat it as `syncthing run`.
     #[cfg(not(all(windows, feature = "tray")))]
     let command = match command {
         Commands::Auto => Commands::Run {
@@ -361,7 +356,6 @@ async fn run() -> Result<()> {
                 resolve_daemon_config(&config_dir, listen, device_name, false)?;
             match tui::daemon_runner::start_daemon(config_dir.clone(), listen, device_name).await {
                 Ok(startup) => {
-                    // 启动 REST API 服务器
                     let (api_handle, api_addr) = match api_server::start_api_server(
                         &config_dir,
                         startup.sync_service.clone(),
@@ -384,7 +378,7 @@ async fn run() -> Result<()> {
                         let _ = shutdown_tx.send(true);
                     });
 
-                    // B1: Windows ConsoleCtrlEvent (点击控制台X / 系统关机)
+                    // B1: Windows ConsoleCtrlEvent (console close / shutdown / logoff).
                     #[cfg(windows)]
                     {
                         let shutdown_tx = startup.shutdown_tx.clone();
@@ -408,7 +402,7 @@ async fn run() -> Result<()> {
                             unsafe {
                                 let _ = windows::Win32::System::Console::SetConsoleCtrlHandler(
                                     Some(handler),
-                                    windows::Win32::Foundation::BOOL(1), // TRUE = add handler
+                                    windows::Win32::Foundation::BOOL(1),
                                 );
                             }
 
@@ -423,7 +417,6 @@ async fn run() -> Result<()> {
                         });
                     }
 
-                    // 启动内部健康看门狗（仅 headless run 模式；托盘模式由托盘控制器管理生命周期）
                     let _watchdog_handle = crate::tui::watchdog::spawn(
                         api_addr,
                         config_dir.clone(),
@@ -555,11 +548,9 @@ async fn run() -> Result<()> {
         }
         #[cfg(all(windows, feature = "tray"))]
         Commands::Auto => {
-            // Auto mode: daemon + in-process tray icon (Windows only).
             std::fs::create_dir_all(&config_dir)
                 .with_context(|| format!("create config dir {}", config_dir.display()))?;
 
-            // Tray mode: file-only logging (no console)
             logging::init_tray_logging(&config_dir, log_format);
 
             let (listen, device_name) = resolve_daemon_config(
@@ -569,14 +560,12 @@ async fn run() -> Result<()> {
                 false,
             )?;
 
-            // 启动 daemon 控制器（支持托盘内反复启停）
             let (daemon_cmd_tx, daemon_cmd_rx) = tokio::sync::mpsc::channel(4);
             let controller_config_dir = config_dir.clone();
             let controller_handle = tokio::spawn(async move {
                 daemon_controller(controller_config_dir, listen, device_name, daemon_cmd_rx).await;
             });
 
-            // 启动托盘 IPC 服务端，供从托盘打开的 TUI 发送 Start/Stop 命令
             let tray_pipe_name = tray_ipc::generate_pipe_name();
             tracing::info!("Tray IPC server listening on {}", tray_pipe_name);
             let _ = tray_ipc::write_tray_pipe(&config_dir, &tray_pipe_name);
@@ -609,12 +598,10 @@ async fn run() -> Result<()> {
                 }
             });
 
-            // 初始自动启动 daemon
             let _ = daemon_cmd_tx.send(DaemonCommand::Start).await;
 
             let (event_rx, tray_handle) = tray::spawn();
 
-            // Main thread: process tray events
             for event in event_rx {
                 tracing::debug!("Tray event: {:?}", event);
                 match event {
@@ -631,7 +618,6 @@ async fn run() -> Result<()> {
                         tracing::info!("Exit requested, cleaning up...");
                         let _ = daemon_cmd_tx.send(DaemonCommand::Exit).await;
                         tray::cleanup();
-                        // 等待 tray 线程退出（WM_CLOSE → WM_DESTROY → PostQuitMessage → GetMessageW=0）
                         let _ = tray_handle.join();
                         tray_ipc::clear_tray_pipe(&config_dir);
                         break;
@@ -650,7 +636,7 @@ async fn run() -> Result<()> {
     Ok(())
 }
 
-/// Daemon 控制器命令。
+/// Commands accepted by the tray daemon controller.
 #[cfg(all(windows, feature = "tray"))]
 #[derive(Debug, Clone, Copy)]
 enum DaemonCommand {
@@ -659,7 +645,7 @@ enum DaemonCommand {
     Exit,
 }
 
-/// 一次 daemon + API 服务实例的句柄集合。
+/// Handles for one daemon + REST API service instance.
 #[cfg(all(windows, feature = "tray"))]
 struct DaemonServices {
     shutdown_tx: tokio::sync::watch::Sender<bool>,
@@ -668,9 +654,10 @@ struct DaemonServices {
     api_url: String,
 }
 
-/// 启动一组 daemon + REST API 服务。
+/// Starts one daemon + REST API service instance.
 ///
-/// 与 Auto 模式原始逻辑等价，但可被控制器重复调用以实现托盘内启停。
+/// Equivalent to the original Auto-mode wiring, but callable repeatedly so the
+/// tray controller can restart the daemon on demand.
 #[cfg(all(windows, feature = "tray"))]
 async fn start_daemon_services(
     config_dir: &Path,
@@ -703,7 +690,6 @@ async fn start_daemon_services(
     let api_url = if api_addr.port() != 0 {
         format!("http://127.0.0.1:{}", api_addr.port())
     } else {
-        // 无法获取实际端口时回退到配置中的端口
         let config = load_config(&config_dir.join(CONFIG_FILE_NAME)).unwrap_or_default();
         let api_port = config.gui.address.rsplit(':').next().unwrap_or("8385");
         format!("http://127.0.0.1:{}", api_port)
@@ -720,10 +706,11 @@ async fn start_daemon_services(
     })
 }
 
-/// Daemon 生命周期控制器。
+/// Daemon lifecycle controller.
 ///
-/// 运行在独立的 tokio task 中，接收来自托盘事件循环的 Start/Stop/Exit 命令，
-/// 负责维护 daemon + API 实例并同步运行状态到托盘线程。
+/// Runs in its own tokio task, receives Start/Stop/Exit commands from the tray
+/// event loop, owns the daemon + API instance, and mirrors the running state to
+/// the tray thread.
 #[cfg(all(windows, feature = "tray"))]
 async fn daemon_controller(
     config_dir: PathBuf,
@@ -761,7 +748,6 @@ async fn daemon_controller(
                     let _ = svc.shutdown_tx.send(true);
                     let _ = svc.daemon_handle.await;
                     let _ = svc.api_handle.await;
-                    // 停止后将图标重置为默认离线状态
                     unsafe {
                         tray::update_icon(tray::tray_hwnd(), tray::IconType::Default);
                         tray::update_tooltip(tray::tray_hwnd(), "syncthing-rust\noffline");
@@ -781,7 +767,7 @@ async fn daemon_controller(
     }
 }
 
-/// 包装连接管理器的块数据源
+/// Block source that fetches blocks from devices connected via the connection manager.
 pub(crate) struct ManagerBlockSource {
     manager: syncthing_net::ConnectionManagerHandle,
     next_id: AtomicI32,
@@ -792,8 +778,14 @@ pub(crate) struct ManagerBlockSource {
 }
 
 impl ManagerBlockSource {
-    /// 尝试向指定设备请求一个块。
-    /// 返回 Ok 表示设备返回了 NoError 响应；Err 表示发送失败、超时或设备返回错误码。
+    /// Requests one block from the given device.
+    ///
+    /// Returns Ok when the device answers with a `NoError` response; Err covers
+    /// send failure, timeout, or a non-zero remote error code. The response
+    /// channel is registered before the request is sent, so a fast response can
+    /// never arrive before the pending entry exists. The 120s timeout tolerates
+    /// high-latency links (500ms RTT over Tailscale) with multi-block requests
+    /// for large files in flight.
     async fn try_request_block_from_device(
         &self,
         device_id: syncthing_core::DeviceId,
@@ -830,7 +822,6 @@ impl ManagerBlockSource {
             )
         })?;
 
-        // 注册等待响应（必须先注册，再发送，避免竞态）
         let (tx, rx) = tokio::sync::oneshot::channel();
         self.pending_responses.insert(id, tx);
 
@@ -843,7 +834,6 @@ impl ManagerBlockSource {
                 )
             })?;
 
-        // 120s — 高延迟 Tailscale 链路 (500ms RTT) + 大文件多块请求需要充足时间
         let response = tokio::time::timeout(std::time::Duration::from_secs(120), rx)
             .await
             .map_err(|_| {
@@ -896,7 +886,7 @@ impl ManagerBlockSource {
         Ok(bytes::Bytes::from(response.data))
     }
 
-    /// 获取 RTT 跟踪器引用
+    /// Returns a handle to the RTT tracker.
     pub(crate) fn rtt_tracker(&self) -> Arc<RttTracker> {
         Arc::clone(&self.rtt_tracker)
     }
@@ -958,7 +948,7 @@ impl BlockSource for ManagerBlockSource {
     }
 }
 
-/// 启动 TUI 配置管理器
+/// Thin wrapper that launches the TUI config manager.
 async fn cmd_tui(
     config_dir: &Path,
     listen: &str,
@@ -976,9 +966,12 @@ async fn cmd_tui(
     .await
 }
 
-/// 在当前进程运行 TUI 模式。
+/// Runs the TUI in the current process.
 ///
-/// 供 `Commands::Tui` 和 Auto 模式检测到已有 daemon 实例时复用。
+/// Used by `Commands::Tui` and by Auto mode when another daemon instance holds
+/// the single-instance lock. The TUI pins itself to the current OS thread via
+/// `tokio::task::LocalSet` because crossterm on Windows keeps raw-mode state in
+/// thread-locals that are lost if the future migrates threads.
 async fn run_tui_mode(
     config_dir: &Path,
     listen: String,
@@ -991,7 +984,6 @@ async fn run_tui_mode(
 
     let config_dir_buf = config_dir.to_path_buf();
 
-    // TUI 单实例：若已有 TUI 在运行则聚焦其窗口并退出，避免重复打开。
     #[cfg(windows)]
     {
         if let Some(pid) = read_tui_pid(&config_dir_buf) {
@@ -1003,24 +995,18 @@ async fn run_tui_mode(
                 focus_window_by_pid(pid);
                 return Ok(());
             }
-            // PID 文件残留，清理后继续
             let _ = std::fs::remove_file(tui_pid_path(&config_dir_buf));
         }
     }
 
-    // 写入 TUI PID 文件，供托盘检测已存在实例
     write_tui_pid(&config_dir_buf);
 
-    // LocalSet: 把 TUI 固定在当前 OS 线程，避免 crossterm 在 Windows 下
-    // 因 future 跨线程调度而丢失 raw mode 的 thread-local 状态。
     let local = tokio::task::LocalSet::new();
     let config_dir_for_local = config_dir_buf.clone();
     let result = local
         .run_until(async move {
             let memory_buffer = logging_buffer::MemoryBuffer::new(100);
             let memory_layer = logging_buffer::MemoryLayer::new(memory_buffer.clone());
-            // TUI 模式下 stdout 已被 crossterm 接管，因此把日志同时写入文件和内存缓冲区。
-            // 文件日志固定 DEBUG 级别，便于诊断布局/启动问题；内存日志仍按用户选择过滤。
             let (tui_file_writer, _tui_log_guard) =
                 logging::init_tui_file_writer(&config_dir_for_local);
             let subscriber = tracing_subscriber::registry()
@@ -1053,12 +1039,11 @@ async fn run_tui_mode(
     result
 }
 
-// ==================== tray helpers (Windows + feature = "tray") ====================
-
-/// 尝试连接已有托盘的 IPC 管道并请求其打开/聚焦 TUI。
+/// Asks an already-running tray process to open/focus the TUI via its IPC pipe.
 ///
-/// 返回 true 表示请求已发送给托盘；返回 false 表示没有托盘或通信失败，
-/// 调用方应回退到在当前进程直接启动 TUI。
+/// Returns true when the request was handed to the tray; returns false when no
+/// tray exists or the pipe exchange failed, in which case the caller falls back
+/// to launching a TUI in the current process.
 #[cfg(all(windows, feature = "tray"))]
 async fn request_tray_open_tui(config_dir: &Path) -> bool {
     let pipe_name = match tray_ipc::read_tray_pipe(config_dir) {
@@ -1111,7 +1096,10 @@ async fn request_tray_open_tui(config_dir: &Path) -> bool {
     }
 }
 
-/// 初始化 TUI 文件日志 appender，返回非阻塞 writer 与 guard。
+/// Polls the daemon REST API and mirrors status onto the tray icon.
+///
+/// Updates the tooltip, icon, and balloon notifications on online/offline and
+/// device connect/disconnect transitions.
 #[cfg(all(windows, feature = "tray"))]
 async fn tray_status_loop(
     mut client: tray_api::DaemonClient,
@@ -1154,11 +1142,12 @@ async fn tray_status_loop(
             if s.folder_count == 1 { "" } else { "s" }
         );
 
-        // SAFETY: 每个 tray API 调用都是独立线程安全的（Shell_NotifyIconW 通过 PostMessage 与 Shell 通信）。
-        // hwnd 从 STATE OnceLock 读取，初始化后不变。
+        // SAFETY: each tray API call is independently thread-safe (Shell_NotifyIconW
+        // talks to the Shell via PostMessage). hwnd is read from the STATE OnceLock
+        // and never changes after initialization.
         let hwnd = tray::tray_hwnd();
         if s.online && !last_online {
-            // SAFETY: show_notification 仅调用 Shell_NotifyIconW，线程安全。
+            // SAFETY: show_notification only calls Shell_NotifyIconW, which is thread-safe.
             unsafe {
                 tray::show_notification(
                     hwnd,
@@ -1168,7 +1157,7 @@ async fn tray_status_loop(
                 );
             }
         } else if !s.online && last_online {
-            // SAFETY: 同上。
+            // SAFETY: same as above.
             unsafe {
                 tray::show_notification(
                     hwnd,
@@ -1183,20 +1172,20 @@ async fn tray_status_loop(
             } else {
                 format!("Device disconnected ({} total)", s.connected_devices)
             };
-            // SAFETY: 同上。
+            // SAFETY: same as above.
             unsafe {
                 tray::show_notification(hwnd, "Syncthing", &msg, tray::BalloonIcon::Info);
             }
         }
 
         if s.syncing && !last_syncing {
-            // SAFETY: 同上。
+            // SAFETY: same as above.
             unsafe {
                 tray::show_notification(hwnd, "Syncthing", "Sync started", tray::BalloonIcon::Info);
             }
         }
 
-        // SAFETY: update_tooltip/update_icon 均通过 Shell_NotifyIconW 实现，线程安全。
+        // SAFETY: update_tooltip/update_icon are both Shell_NotifyIconW based and thread-safe.
         unsafe {
             tray::update_tooltip(hwnd, &tip);
             tray::update_icon(hwnd, icon);
@@ -1208,9 +1197,10 @@ async fn tray_status_loop(
     }
 }
 
-/// Windows: 显示致命错误消息框。
+/// Windows: shows a fatal-error message box.
 ///
-/// 用于 `windows_subsystem = "windows"` 模式下的错误提示，因为此时没有控制台窗口。
+/// Required under `windows_subsystem = "windows"` because there is no console
+/// window to print to.
 #[cfg(windows)]
 fn show_error_message(title: &str, message: &str) {
     use std::iter::once;
@@ -1220,7 +1210,7 @@ fn show_error_message(title: &str, message: &str) {
     let title_wide: Vec<u16> = title.encode_utf16().chain(once(0)).collect();
     let msg_wide: Vec<u16> = message.encode_utf16().chain(once(0)).collect();
 
-    // SAFETY: title_wide 和 msg_wide 均以 null 结尾，符合 MessageBoxW 要求。
+    // SAFETY: title_wide and msg_wide are null-terminated as required by MessageBoxW.
     unsafe {
         let _ = MessageBoxW(
             None,
@@ -1231,26 +1221,24 @@ fn show_error_message(title: &str, message: &str) {
     }
 }
 
-/// Windows: 确保 `windows_subsystem` 二进制有一个可用的控制台窗口。
+/// Windows: ensures the `windows_subsystem` binary has a usable console window.
 ///
-/// 优先附加到父进程控制台（当从 PowerShell / Windows Terminal 等终端启动时），
-/// 这样 TUI 会渲染在启动它的终端窗口内，避免用户看到两个窗口（一个空终端、
-/// 一个 TUI 控制台）。若父进程没有控制台（例如从资源管理器直接双击），则
-/// 回退到 `AllocConsole()` 创建独立控制台窗口。
-///
-/// 注意：附加父控制台时，输入/输出会与父进程共享。托盘场景下父进程是
-/// 专门为本 TUI 实例启动的 `pwsh.exe`/`wt.exe`，共享是可接受的；直接
-/// 在终端中运行 `syncthing tui` 时，附加行为正好让 TUI 显示在当前标签页。
+/// Prefers attaching to the parent-process console (when launched from
+/// PowerShell / Windows Terminal) so the TUI renders inside the launching
+/// terminal; falls back to `AllocConsole()` when the parent has no console
+/// (e.g. double-click from Explorer). Attaching shares input/output with the
+/// parent, which is acceptable both for tray-spawned TUIs (the parent is a
+/// dedicated `pwsh.exe`/`wt.exe`) and for `syncthing tui` run in a terminal.
 #[cfg(windows)]
 fn ensure_console() {
     use windows::Win32::System::Console::{
         AllocConsole, AttachConsole, GetConsoleWindow, SetConsoleTitleW, ATTACH_PARENT_PROCESS,
     };
 
-    // SAFETY: Win32 Console API 是进程级操作。AttachConsole/AllocConsole 在
-    // 当前进程无控制台时附加/创建新控制台；这些 API 在进程生命周期内仅需调用一次。
+    // SAFETY: the Win32 Console APIs are process-wide operations. AttachConsole /
+    // AllocConsole attach/create a console only when the current process has
+    // none; each is only needed once per process lifetime.
     unsafe {
-        // 如果已经附加到某个控制台（例如被显式启动在终端中），不再重复分配。
         let existing = GetConsoleWindow();
         console_diag_log(format!(
             "ensure_console: existing_console_hwnd={:?}",
@@ -1261,8 +1249,6 @@ fn ensure_console() {
             return;
         }
 
-        // 优先附加到父进程控制台。托盘启动 TUI 时，父进程是 pwsh/wt，
-        // 它们已经通过 cmd /c start 分配了控制台窗口。
         let attach_result = AttachConsole(ATTACH_PARENT_PROCESS);
         console_diag_log(format!(
             "ensure_console: AttachConsole result={:?}",
@@ -1274,7 +1260,6 @@ fn ensure_console() {
             return;
         }
 
-        // 父进程没有控制台时，创建独立控制台窗口。
         let alloc_result = AllocConsole();
         console_diag_log(format!(
             "ensure_console: AllocConsole result={:?}",
@@ -1287,7 +1272,7 @@ fn ensure_console() {
     }
 }
 
-/// 用于 ensure_console 诊断的临时日志（此时 tracing 尚未初始化）。
+/// Temporary diagnostics log for ensure_console (tracing is not initialized yet).
 #[cfg(windows)]
 fn console_diag_log(msg: String) {
     use std::io::Write;
@@ -1301,10 +1286,10 @@ fn console_diag_log(msg: String) {
         .and_then(|mut f| f.write_all(line.as_bytes()));
 }
 
-/// Windows: 聚焦并显示当前进程的控制台窗口，但不强制调整大小。
-///
-/// 窗口尺寸跟随用户系统默认 / shell 设置；TUI 启动后 `runner.rs` 会通过
-/// `sync_console_buffer_size()` 把屏幕缓冲区同步为当前窗口可见大小，避免滚动条。
+/// Windows: focuses and shows the current process's console window without
+/// forcing a resize (window size follows the shell defaults; the TUI syncs the
+/// screen buffer to the visible window in `runner.rs` via
+/// `sync_console_buffer_size()`).
 #[cfg(windows)]
 unsafe fn configure_console_window() {
     use windows::Win32::System::Console::GetConsoleWindow;
@@ -1317,19 +1302,19 @@ unsafe fn configure_console_window() {
     }
 }
 
-/// 从托盘启动 TUI。
+/// Spawns a TUI process from the tray.
 ///
-/// 优先尝试 Windows Terminal / PowerShell 7 / Windows PowerShell 打开 TUI，
-/// 使用终端原生窗口；均失败时回退到直接 CreateProcess + ensure_console()。
+/// Tries, in order: PowerShell 7 (`pwsh.exe`), Windows PowerShell, Windows
+/// Terminal (`wt.exe`), and finally a bare `CreateProcess` with its own console.
+/// All terminal launches go through `cmd /c start` so Microsoft Store
+/// AppExecutionAlias binaries resolve (raw `CreateProcessW` cannot see them).
+/// If a TUI is already running (pid file), its window is focused instead of
+/// spawning a duplicate.
 ///
-/// 对 wt.exe / pwsh.exe 使用 ShellExecuteW 启动，以正确处理 WindowsApps
-///（Microsoft Store）安装产生的 AppExecutionAlias，避免 Rust 的 CreateProcess
-/// 找不到可执行文件而直接回退到独立控制台窗口。
-///
-/// 启动前检查已有 TUI 实例（通过 PID 文件），若已存在则聚焦窗口而非重复创建。
+/// See "docs/design/ADR-20261105-windows-tui-launch.md" for the full rationale
+/// and "docs/design/sequence/tray-tui-daemon.md" for the interaction sequence.
 #[cfg(all(windows, feature = "tray"))]
 fn spawn_tui_from_tray(config_dir: &Path, tray_pipe_name: &str) {
-    // 检查是否已有 TUI 实例在运行
     if let Some(pid) = read_tui_pid(config_dir) {
         if is_process_alive(pid) {
             tracing::info!(
@@ -1339,7 +1324,6 @@ fn spawn_tui_from_tray(config_dir: &Path, tray_pipe_name: &str) {
             focus_window_by_pid(pid);
             return;
         }
-        // PID 文件残留，清理后继续
         let _ = std::fs::remove_file(tui_pid_path(config_dir));
     }
 
@@ -1356,10 +1340,6 @@ fn spawn_tui_from_tray(config_dir: &Path, tray_pipe_name: &str) {
     std::thread::spawn(move || {
         let title = "syncthing-rust TUI";
 
-        // 1. 优先 PowerShell 7：字体平滑、配色细腻，用户首选。
-        //    不再使用 Start-Process -NoNewWindow -Wait，而是让 PowerShell 直接执行
-        //    syncthing.exe tui 并阻塞等待。这样 TUI 就是 PowerShell 的子进程，
-        //    自然接管整个 PowerShell 窗口，避免父 shell 与 TUI 竞争控制台输入/输出。
         let exe_quoted = escape_ps_single_quote(&exe.to_string_lossy());
         let cd_quoted = escape_ps_single_quote(&cd);
         let pipe_quoted = escape_ps_single_quote(&pipe);
@@ -1375,14 +1355,12 @@ fn spawn_tui_from_tray(config_dir: &Path, tray_pipe_name: &str) {
         }
         tracing::debug!("pwsh.exe not available or failed, trying Windows PowerShell");
 
-        // 2. Windows PowerShell
         if try_start_tui(&cd, title, "powershell.exe", &["-EncodedCommand", &encoded]) {
             tracing::info!("TUI launched via Windows PowerShell (direct invoke)");
             return;
         }
         tracing::debug!("powershell.exe not available or failed, trying Windows Terminal");
 
-        // 3. Windows Terminal 直接启动 TUI：不经过 PowerShell 中间层。
         if try_start_wt_tui_direct(&cd, title, &exe, &pipe) {
             tracing::info!("TUI launched via Windows Terminal (direct)");
             return;
@@ -1391,7 +1369,6 @@ fn spawn_tui_from_tray(config_dir: &Path, tray_pipe_name: &str) {
             "wt.exe direct launch not available or failed, falling back to direct CreateProcess"
         );
 
-        // 4. 最终回退：直接 CreateProcess，分配独立控制台窗口。
         if try_start_tui_direct(&cd, &exe, &pipe) {
             tracing::info!("TUI launched via direct CreateProcess");
             return;
@@ -1400,20 +1377,17 @@ fn spawn_tui_from_tray(config_dir: &Path, tray_pipe_name: &str) {
     });
 }
 
-/// 通过 `cmd /c start` 启动 TUI，并验证 `syncthing-tui.pid` 是否已写入，
-/// 以确认目标终端程序真实存在并成功启动了 syncthing.exe tui。
-///
-/// 使用 `cmd /c start` 的原因：
-/// - `start` 会为控制台程序分配新的控制台窗口；
-/// - `cmd.exe` 能正确解析 WindowsApps（Microsoft Store）安装的 AppExecutionAlias，
-///   而 Rust 的 `CreateProcessW` 直接调用 `pwsh.exe`/`wt.exe` 会找不到这些文件。
+/// Starts the TUI via `cmd /c start` and verifies that `syncthing-tui.pid`
+/// actually appears, proving the terminal program really exists and launched
+/// `syncthing.exe tui`. `cmd /c start` is used because it allocates a new
+/// console for console programs and resolves Microsoft Store
+/// AppExecutionAlias binaries that raw `CreateProcessW` cannot see.
 #[cfg(all(windows, feature = "tray"))]
 fn try_start_tui(config_dir: &str, title: &str, program: &str, args: &[&str]) -> bool {
     use std::os::windows::process::CommandExt;
 
-    // CREATE_NO_WINDOW: 托盘本身是 windows_subsystem（无控制台），
-    // 直接启动 cmd.exe 会导致 cmd 先弹出一个黑色控制台窗口，再执行 start。
-    // 加上此标志后 cmd 在后台执行，只保留 start 启动的目标终端窗口。
+    // CREATE_NO_WINDOW: the tray process itself has no console (windows_subsystem),
+    // so a bare cmd.exe would flash a black console window before `start` runs.
     const CREATE_NO_WINDOW: u32 = 0x08000000;
 
     let mut cmd = std::process::Command::new("cmd.exe");
@@ -1424,9 +1398,9 @@ fn try_start_tui(config_dir: &str, title: &str, program: &str, args: &[&str]) ->
 
     match cmd.status() {
         Ok(_) => {
-            // cmd /c start 会立即返回，即使目标程序不存在也会成功。
-            // 等待 TUI 真实启动：Windows Terminal 冷启动可能需要 2~3 秒，
-            // 因此把超时从 1 秒延长到 5 秒，避免误判为失败并回退到第二个终端。
+            // `cmd /c start` returns immediately even when the target is missing,
+            // so poll for the pid file. Windows Terminal cold start can take 2-3s,
+            // hence a 5s budget to avoid a false fallback to the next terminal.
             for _ in 0..50 {
                 std::thread::sleep(std::time::Duration::from_millis(100));
                 if let Some(pid) = read_tui_pid(std::path::Path::new(config_dir)) {
@@ -1445,13 +1419,11 @@ fn try_start_tui(config_dir: &str, title: &str, program: &str, args: &[&str]) ->
     }
 }
 
-/// 通过 Windows Terminal 直接启动 TUI，不经过 PowerShell 中间层。
-///
-/// 命令形式：
-/// `wt.exe new-tab --title <title> -- <exe> tui --config-dir <cd> --tray-pipe <pipe>`
-///
-/// 仍通过 `cmd /c start` 调用 `wt.exe`，以正确处理 Microsoft Store 安装的
-/// WindowsApps AppExecutionAlias。
+/// Starts the TUI in Windows Terminal directly, without a PowerShell
+/// intermediate. Command shape:
+/// `wt.exe new-tab --title <title> -- <exe> tui --config-dir <cd> --tray-pipe <pipe>`.
+/// Still invoked via `cmd /c start` so the Microsoft Store AppExecutionAlias
+/// for `wt.exe` resolves.
 #[cfg(all(windows, feature = "tray"))]
 fn try_start_wt_tui_direct(
     config_dir: &str,
@@ -1489,15 +1461,15 @@ fn try_start_wt_tui_direct(
     }
 }
 
-/// 直接通过 CreateProcess 启动 TUI，分配新的控制台窗口。
+/// Starts the TUI via a bare `CreateProcess` with a fresh console window.
 ///
-/// 不经过 cmd / PowerShell 等任何中间 shell，启动速度最快，也不会出现
-/// shell 提示符一闪而过的情况。
+/// No intermediate shell, so it is the fastest strategy and cannot flash a
+/// shell prompt; used as the last resort after all terminal launches failed.
 #[cfg(all(windows, feature = "tray"))]
 fn try_start_tui_direct(config_dir: &str, exe: &std::path::Path, tray_pipe: &str) -> bool {
     use std::os::windows::process::CommandExt;
-    // CREATE_NEW_CONSOLE: 为 TUI 分配一个独立的新控制台窗口；
-    // 否则托盘进程没有控制台，子进程也会没有控制台，TUI 将不可见。
+    // CREATE_NEW_CONSOLE: the tray process has no console, so without this flag
+    // the child would inherit none and the TUI would be invisible.
     const CREATE_NEW_CONSOLE: u32 = 0x00000010;
 
     let mut cmd = std::process::Command::new(exe);
@@ -1517,7 +1489,7 @@ fn try_start_tui_direct(config_dir: &str, exe: &std::path::Path, tray_pipe: &str
     }
 }
 
-/// 等待 TUI 进程把 PID 写入文件，最多等待 `ticks * 100ms`。
+/// Waits for the TUI process to write its pid file, up to `ticks * 100ms`.
 #[cfg(all(windows, feature = "tray"))]
 fn wait_for_tui_pid(config_dir: &str, ticks: usize) -> bool {
     for _ in 0..ticks {
@@ -1532,7 +1504,7 @@ fn wait_for_tui_pid(config_dir: &str, ticks: usize) -> bool {
     false
 }
 
-/// 将 PowerShell 命令字符串编码为 UTF-16 LE Base64，供 `-EncodedCommand` 使用。
+/// Encodes a PowerShell command string as UTF-16 LE Base64 for `-EncodedCommand`.
 #[cfg(all(windows, feature = "tray"))]
 fn encode_ps_command(cmd: &str) -> String {
     use base64::{engine::general_purpose::STANDARD, Engine as _};
@@ -1544,7 +1516,7 @@ fn encode_ps_command(cmd: &str) -> String {
     STANDARD.encode(&bytes)
 }
 
-/// 将字符串中的单引号替换为两个单引号，供 PowerShell 单引号字符串使用。
+/// Escapes single quotes for a PowerShell single-quoted string (`'` -> `''`).
 #[cfg(all(windows, feature = "tray"))]
 fn escape_ps_single_quote(s: &str) -> String {
     s.replace('\'', "''")
@@ -1567,8 +1539,9 @@ fn is_process_alive(pid: u32) -> bool {
     };
     // STILL_ACTIVE = STATUS_PENDING = 259
     const STILL_ACTIVE: u32 = 259;
-    // SAFETY: OpenProcess with PROCESS_QUERY_LIMITED_INFORMATION is read-only and safe for any PID.
-    // GetExitCodeProcess is read-only. CloseHandle must be called to avoid handle leak.
+    // SAFETY: OpenProcess with PROCESS_QUERY_LIMITED_INFORMATION is read-only and
+    // safe for any PID. GetExitCodeProcess is read-only. CloseHandle must be
+    // called to avoid a handle leak.
     unsafe {
         let handle = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid).unwrap_or_default();
         if handle.is_invalid() {
@@ -1576,7 +1549,7 @@ fn is_process_alive(pid: u32) -> bool {
         }
         let mut exit_code = 0u32;
         let ok = GetExitCodeProcess(handle, &mut exit_code).is_ok();
-        // SAFETY: handle 由 OpenProcess 返回，必须通过 CloseHandle 释放。
+        // SAFETY: handle was returned by OpenProcess and must be released via CloseHandle.
         let _ = windows::Win32::Foundation::CloseHandle(handle);
         ok && exit_code == STILL_ACTIVE
     }
@@ -1595,8 +1568,9 @@ fn focus_window_by_pid(target_pid: u32) {
         found: HWND,
     }
 
-    // SAFETY: enum_proc 作为 EnumWindows 回调，由系统以正确的 hwnd/lparam 调用。
-    // lparam 指向调用栈上的 Ctx 结构体，EnumWindows 是同步 API，生命周期有效。
+    // SAFETY: enum_proc is an EnumWindows callback invoked by the system with
+    // valid hwnd/lparam. lparam points at the stack-allocated Ctx; EnumWindows
+    // is synchronous so the reference stays valid for the whole call.
     unsafe extern "system" fn enum_proc(hwnd: HWND, lparam: LPARAM) -> BOOL {
         let ctx = &mut *(lparam.0 as *mut Ctx);
         let mut pid = 0u32;
@@ -1612,15 +1586,16 @@ fn focus_window_by_pid(target_pid: u32) {
         target_pid,
         found: HWND::default(),
     };
-    // SAFETY: EnumWindows 是同步回调 API。ctx 在调用栈上，回调期间有效。
-    // LPARAM 传递 &mut ctx 指针。
+    // SAFETY: EnumWindows is a synchronous callback API. ctx lives on the stack
+    // and remains valid for the whole call; LPARAM carries a &mut ctx pointer.
     unsafe {
         let _ = EnumWindows(Some(enum_proc), LPARAM(&mut ctx as *mut _ as isize));
     }
     if !ctx.found.is_invalid() {
-        // SAFETY: ctx.found 来自 EnumWindows 回调中的 IsWindowVisible 检查，
-        // 确认窗口句柄有效且可见。ShowWindow/SW_SHOWNORMAL 恢复最小化窗口，
-        // SetForegroundWindow 将窗口带到前台。这些都是线程安全的。
+        // SAFETY: ctx.found comes from the EnumWindows callback after an
+        // IsWindowVisible check, so the handle is valid and visible.
+        // ShowWindow/SW_SHOWNORMAL restores a minimized window and
+        // SetForegroundWindow brings it to the front; both are thread-safe.
         unsafe {
             let _ = ShowWindow(ctx.found, SW_SHOWNORMAL);
             let _ = SetForegroundWindow(ctx.found);

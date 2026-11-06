@@ -1,14 +1,15 @@
-//! 统一表单按键处理 — 替代 4 个 copy-paste 函数。
+//! Unified form key handling shared by all form popups.
 //!
-//! `handle_form_key` 处理文本字段的通用操作（输入、删除、粘贴、焦点移动、提交/取消）。
-//! device 列表的 Space/Up/Down 由调用方在调用前自行处理。
+//! `handle_form_key` covers generic text-field operations (typing, deleting,
+//! pasting, focus moves, submit/cancel); the device list's Space/Up/Down are
+//! handled by the caller before invoking this function.
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
 use super::FormAction;
 use super::FormState;
 
-/// 处理表单内的按键。返回 `FormAction` 指示调用方应执行的操作。
+/// Handles a key press inside a form; the returned `FormAction` tells the caller what to do.
 pub fn handle_form_key(form: &mut FormState, key: KeyEvent) -> FormAction {
     match key.code {
         KeyCode::Esc => {

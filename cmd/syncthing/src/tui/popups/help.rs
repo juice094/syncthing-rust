@@ -9,10 +9,10 @@ use crate::tui::constants;
 use crate::tui::theme::Theme;
 use crate::tui::widgets::centered_popup;
 
+/// Draws the help popup.
 pub fn draw(f: &mut Frame, theme: &Theme) {
     let area = centered_popup(constants::HELP_POPUP_W, constants::HELP_POPUP_H, f.area());
 
-    // Dim background
     let dim = ratatui::widgets::Block::default()
         .style(Style::default().bg(ratatui::style::Color::Rgb(20, 20, 25)));
     f.render_widget(dim, f.area());

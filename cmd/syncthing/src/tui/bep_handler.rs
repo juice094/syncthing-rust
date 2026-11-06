@@ -1,9 +1,15 @@
+//! BEP session handler bridging the daemon's `SyncService` and BEP sessions.
+//!
+//! See "docs/design/ADR-20261105-index-update-dispatch.md" for the block-list
+//! invariants BEP imposes on deleted and zero-byte files.
+
 use std::sync::Arc;
 
 use syncthing_core::DeviceId;
 use syncthing_net::BepSessionHandler;
 use syncthing_sync::{SyncManager, SyncService};
 
+/// Serves cluster config, index, and block requests from the sync service.
 pub struct DaemonBepHandler {
     pub sync_service: Arc<SyncService>,
 }
@@ -37,7 +43,6 @@ impl BepSessionHandler for DaemonBepHandler {
                         encryption_password_token: Vec::new(),
                     })
                     .collect();
-                // BEP 协议要求 ClusterConfig 的 devices 列表必须包含本地设备
                 if !f.devices.contains(&local_id) {
                     devices.push(bep_protocol::messages::WireDevice {
                         id: local_id.as_bytes().to_vec(),
@@ -83,9 +88,6 @@ impl BepSessionHandler for DaemonBepHandler {
                     e
                 ))
             })?;
-        // BEP protocol requires deleted files to have empty block lists
-        // 同时防御性补齐零字节文件的 block（hash 为 SHA256("")），避免旧 DB 条目触发
-        // 对端 "file with empty block list" 协议错误。
         for file in &mut files {
             if file.is_deleted() {
                 file.blocks.clear();

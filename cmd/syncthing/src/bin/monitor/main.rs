@@ -58,7 +58,6 @@ async fn main() -> anyhow::Result<()> {
         duration
     );
 
-    // Ctrl+C graceful shutdown
     let (shutdown_tx, mut shutdown_rx) = tokio::sync::oneshot::channel::<()>();
     tokio::spawn(async move {
         if tokio::signal::ctrl_c().await.is_ok() {
@@ -70,13 +69,11 @@ async fn main() -> anyhow::Result<()> {
         RefreshKind::nothing().with_processes(ProcessRefreshKind::nothing()),
     );
 
-    // Only write CSV header if the output file is missing or empty.
     if is_empty_or_missing(&args.output).await {
         let header = build_csv_header(proc_ids.len(), args.logs.len(), args.sync_dirs.len());
         append_text(&args.output, header).await?;
     }
 
-    // Initialize log parsers and mtime trackers for silence detection.
     let mut log_parsers: Vec<LogParser> = args
         .logs
         .iter()
@@ -95,14 +92,11 @@ async fn main() -> anyhow::Result<()> {
         });
     }
 
-    // Optional REST API client.
     let api_client = args.api_key.as_ref().map(|_| reqwest::Client::new());
 
-    // Rolling RSS windows per process, used for predictive alerts.
     let mut rss_windows: Vec<VecDeque<u64>> =
         (0..proc_ids.len()).map(|_| VecDeque::new()).collect();
 
-    // Previous per-folder needFiles for rising-backlog detection.
     let mut prev_need_files: HashMap<String, u64> = HashMap::new();
 
     let start = Instant::now();
@@ -110,7 +104,6 @@ async fn main() -> anyhow::Result<()> {
     loop {
         ticker.tick().await;
 
-        // Check shutdown or duration
         if duration.map(|d| start.elapsed() >= d).unwrap_or(false) {
             info!("Duration reached, stopping monitor");
             break;
@@ -121,13 +114,11 @@ async fn main() -> anyhow::Result<()> {
         let log_sizes_mb = sample_log_sizes(&args.logs).await;
         let file_counts = sample_file_counts(&args.sync_dirs).await;
 
-        // Parse log files for new performance signals.
         for parser in &mut log_parsers {
             parser.update().await;
         }
         let log_metrics = aggregate_log_metrics(&mut log_parsers);
 
-        // Poll REST API if configured.
         let api = if let (Some(client), Some(api_key)) = (&api_client, args.api_key.as_ref()) {
             poll_api(client, &args.api_addr, api_key, &args.folder_id).await
         } else {
@@ -144,12 +135,10 @@ async fn main() -> anyhow::Result<()> {
             log_metrics,
         };
 
-        // CSV
         if let Err(e) = append_text(&args.output, sample_to_csv(&sample)).await {
             warn!("Failed to append CSV: {}", e);
         }
 
-        // JSON
         if let Some(ref json_path) = args.json {
             match sample_to_json(&sample) {
                 Ok(line) => {
@@ -161,7 +150,6 @@ async fn main() -> anyhow::Result<()> {
             }
         }
 
-        // Alerts
         check_alerts(
             &sample,
             &args,
@@ -172,7 +160,6 @@ async fn main() -> anyhow::Result<()> {
         )
         .await;
 
-        // Check shutdown signal (non-blocking)
         if shutdown_rx.try_recv().is_ok() {
             info!("Shutdown signal received");
             break;

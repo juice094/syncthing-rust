@@ -1,11 +1,13 @@
-/// 配置验证 — C-UX-4
-/// 启动前快速失败，避免配置错误导致运行时静默异常
+/// Validates the config before startup (C-UX-4).
+///
+/// Fails fast on invalid config so misconfiguration surfaces immediately
+/// instead of as silent runtime anomalies.
 pub fn validate_config(config: &syncthing_core::types::Config) -> anyhow::Result<()> {
     validate_config_internal(config, true)
 }
 
-/// TUI 模式下的轻量验证 — 不检查 folder path 存在性。
-/// TUI 是配置编辑器，用户可能正在创建尚未存在的文件夹。
+/// Lightweight validation for TUI mode — skips folder path existence checks,
+/// because the TUI is the config editor and folders may not exist yet.
 pub fn validate_config_non_blocking(config: &syncthing_core::types::Config) -> anyhow::Result<()> {
     validate_config_internal(config, false)
 }
@@ -19,7 +21,6 @@ fn validate_config_internal(
     use std::str::FromStr;
     use syncthing_core::DeviceId;
 
-    // 1. 验证 local_device_id（如果存在）
     if let Some(local_id) = &config.local_device_id {
         let id_str = local_id.to_string();
         if let Err(e) = DeviceId::from_str(&id_str) {
@@ -32,7 +33,6 @@ fn validate_config_internal(
         }
     }
 
-    // 2. 验证 devices
     let mut seen_ids = HashSet::new();
     for dev in &config.devices {
         let id_str = dev.id.to_string();
@@ -53,7 +53,6 @@ fn validate_config_internal(
             );
         }
 
-        // 验证地址格式
         for addr in &dev.addresses {
             match addr {
                 syncthing_core::types::AddressType::Tcp(s) => {
@@ -90,7 +89,6 @@ fn validate_config_internal(
         }
     }
 
-    // 3. 验证 folders
     for folder in &config.folders {
         if folder.id.is_empty() {
             anyhow::bail!("Folder ID cannot be empty\n修复: 为文件夹指定唯一标识符");
@@ -114,7 +112,6 @@ fn validate_config_internal(
         }
     }
 
-    // 4. 验证 listen_addr
     if config.listen_addr.parse::<SocketAddr>().is_err() {
         anyhow::bail!(
             "Invalid listen_addr: {}\n\

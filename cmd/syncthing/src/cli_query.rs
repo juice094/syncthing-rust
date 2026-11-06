@@ -1,4 +1,4 @@
-//! CLI 查询命令 — devices / folders / logs
+//! CLI query commands — devices / folders / logs.
 
 use std::path::Path;
 
@@ -13,10 +13,6 @@ fn build_client(config_path: &Path) -> anyhow::Result<ApiClient> {
     Ok(ApiClient::new(&config))
 }
 
-// ============================================================
-// devices list
-// ============================================================
-
 #[derive(Debug, Deserialize)]
 struct DeviceResponse {
     id: String,
@@ -27,6 +23,7 @@ struct DeviceResponse {
     paused: bool,
 }
 
+/// Lists configured devices and their connection status.
 pub async fn devices_list(config_path: &Path) -> anyhow::Result<()> {
     let client = build_client(config_path)?;
 
@@ -60,10 +57,6 @@ pub async fn devices_list(config_path: &Path) -> anyhow::Result<()> {
     Ok(())
 }
 
-// ============================================================
-// folders list
-// ============================================================
-
 #[derive(Debug, Deserialize)]
 struct FolderResponse {
     id: String,
@@ -87,6 +80,7 @@ struct FolderStatusResponse {
     pull_errors: u64,
 }
 
+/// Lists configured folders, optionally with live status from the daemon.
 pub async fn folders_list(config_path: &Path, with_status: bool) -> anyhow::Result<()> {
     let client = build_client(config_path)?;
 
@@ -148,10 +142,7 @@ fn format_size(bytes: u64) -> String {
     format!("{:.1} {}", size, UNITS[unit_idx])
 }
 
-// ============================================================
-// logs tail
-// ============================================================
-
+/// Prints the last `tail` lines of the newest daemon log file.
 pub fn logs_tail(config_dir: &Path, tail: usize) -> anyhow::Result<()> {
     let logs_dir = config_dir.join("logs");
     if !logs_dir.exists() {

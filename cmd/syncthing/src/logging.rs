@@ -1,7 +1,6 @@
-//! 日志初始化模块
+//! Logging initialization for the three runtime modes (daemon, TUI, tray).
 //!
-//! 提供 daemon、TUI、tray 三种运行模式的日志配置。
-//! 支持 text（默认）和 json 两种输出格式。JSON 格式适合 ELK/Splunk/Loki 聚合。
+//! Supports text (default) and json output; json suits ELK/Splunk/Loki aggregation.
 
 use std::path::Path;
 
@@ -10,16 +9,17 @@ use tracing_subscriber::filter::LevelFilter;
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::Layer as _;
 
-/// 日志输出格式
+/// Log output format.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LogFormat {
-    /// 人类可读文本格式（默认）
+    /// Human-readable text (default).
     Text,
-    /// 结构化 JSON 格式（适合日志聚合系统）
+    /// Structured JSON for log aggregation systems.
     Json,
 }
 
 impl LogFormat {
+    /// Parses a format name; anything other than "json" selects text.
     pub fn from_str(s: &str) -> Self {
         match s.to_lowercase().as_str() {
             "json" => Self::Json,
@@ -28,7 +28,7 @@ impl LogFormat {
     }
 }
 
-/// 构建 daemon 日志 layer（按小时轮转，保留 7 天）
+/// Builds the daemon log writer (hourly rotation, 7 days of retention).
 fn build_daemon_writer(
     config_dir: &Path,
 ) -> (tracing_appender::non_blocking::NonBlocking, LevelFilter) {
@@ -50,12 +50,12 @@ fn build_daemon_writer(
             tracing_appender::rolling::hourly(std::env::temp_dir(), "syncthing-fallback")
         });
     let (non_blocking, _guard) = tracing_appender::non_blocking(file_appender);
-    // SAFETY: daemon 生命周期内 _guard 持续有效
+    // SAFETY: the forgotten guard stays valid for the daemon's lifetime.
     std::mem::forget(_guard);
     (non_blocking, LevelFilter::INFO)
 }
 
-/// 初始化 daemon 模式日志（按小时轮转，保留 7 天）
+/// Initializes daemon-mode logging (hourly rotation, 7 days of retention).
 pub fn init_daemon_logging(
     config_dir: &Path,
     log_level: Level,
@@ -81,7 +81,7 @@ pub fn init_daemon_logging(
         .map_err(|e| anyhow::anyhow!("Failed to set subscriber: {}", e))
 }
 
-/// 初始化 TUI 模式日志（按天轮转，保留 7 天）
+/// Initializes the TUI file log writer (daily rotation, 7 days of retention).
 pub fn init_tui_file_writer(
     config_dir: &Path,
 ) -> (
@@ -107,7 +107,7 @@ pub fn init_tui_file_writer(
     tracing_appender::non_blocking(file_appender)
 }
 
-/// 初始化 Windows tray 模式日志（按天轮转，forget guard）
+/// Initializes Windows tray-mode logging (daily rotation; guard is forgotten).
 #[cfg(all(windows, feature = "tray"))]
 pub fn init_tray_logging(config_dir: &Path, format: LogFormat) {
     let logs_dir = config_dir.join("logs");

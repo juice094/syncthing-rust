@@ -1,10 +1,9 @@
-//! 同步进度条组件
+//! Sync progress bar widgets.
+//!
+//! Built on `ratatui::widgets::LineGauge` with theme colors; supports
+//! percentage and byte display modes.
 // NOTE: Widget reserved for future TUI enhancements (v0.3.0+)
 #![allow(dead_code)]
-
-//!
-//! 基于 ratatui::widgets::LineGauge，使用 theme 配色。
-//! 支持百分比和字节双显示模式。
 
 use ratatui::{
     style::Style,
@@ -15,7 +14,7 @@ use ratatui::{
 
 use crate::tui::theme::Theme;
 
-/// 将字节数格式化为人类可读字符串
+/// Formats a byte count as a human-readable string.
 pub fn format_bytes(bytes: u64) -> String {
     const UNITS: &[&str] = &["B", "KB", "MB", "GB", "TB"];
     if bytes == 0 {
@@ -30,7 +29,7 @@ pub fn format_bytes(bytes: u64) -> String {
     }
 }
 
-/// 标准进度条（带百分比标签，紧凑行内样式）
+/// Draws a standard progress bar with a label (compact inline style).
 pub fn draw_gauge(
     f: &mut Frame,
     area: ratatui::layout::Rect,
@@ -47,7 +46,7 @@ pub fn draw_gauge(
     f.render_widget(gauge, area);
 }
 
-/// 紧凑行内进度条（适合列表中的文件夹行）
+/// Draws a compact inline progress bar for list rows.
 pub fn draw_line_gauge(f: &mut Frame, area: ratatui::layout::Rect, theme: &Theme, ratio: f64) {
     let ratio = ratio.clamp(0.0, 1.0);
     let gauge = LineGauge::default()
@@ -58,7 +57,7 @@ pub fn draw_line_gauge(f: &mut Frame, area: ratatui::layout::Rect, theme: &Theme
     f.render_widget(gauge, area);
 }
 
-/// 文件夹同步状态行（名称 + 进度条 + 速率）
+/// Builds a folder sync status line (name + completion + transfer rates).
 pub fn folder_sync_line<'a>(
     name: &'a str,
     completion: f64,

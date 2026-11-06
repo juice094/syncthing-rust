@@ -89,7 +89,6 @@ pub(crate) fn parse_duration(s: &str) -> anyhow::Result<Duration> {
     if s.is_empty() {
         bail!("duration string is empty");
     }
-    // Pure digits → seconds
     if s.chars().all(|c| c.is_ascii_digit()) {
         return Ok(Duration::from_secs(s.parse()?));
     }

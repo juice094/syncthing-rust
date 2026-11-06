@@ -7,6 +7,7 @@ use ratatui::{
 
 use crate::tui::app::App;
 
+/// Draws the bottom status bar.
 pub fn draw(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
     let theme = &app.theme;
     let daemon_style = if app.daemon_running {
@@ -25,9 +26,6 @@ pub fn draw(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
         " Run  "
     };
 
-    // 状态栏内容按重要程度从左到右排列：快捷键 > daemon 状态 > 日志级别。
-    // 使用左对齐，并在右侧填充与状态栏背景同色的空格，确保整行都被状态栏
-    // 背景覆盖，不留旧帧残留；同时避免行宽超过区域宽度后 ratatui 换行。
     let mut spans = vec![
         Span::styled("F5", theme.style_header),
         Span::styled(f5_hint, theme.style_idle),
@@ -45,7 +43,6 @@ pub fn draw(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
         ),
     ];
 
-    // 用空格填充到区域宽度，避免状态栏右侧残留上一帧/PowerShell 内容。
     let line = Line::from(spans.clone());
     let text_width = line.width();
     let pad_width = area.width.saturating_sub(text_width as u16) as usize;

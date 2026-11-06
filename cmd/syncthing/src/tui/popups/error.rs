@@ -9,10 +9,10 @@ use crate::tui::constants;
 use crate::tui::theme::Theme;
 use crate::tui::widgets::centered_popup;
 
+/// Draws the error popup showing `msg`.
 pub fn draw(f: &mut Frame, msg: &str, theme: &Theme) {
     let area = centered_popup(constants::ERROR_POPUP_W, constants::ERROR_POPUP_H, f.area());
 
-    // Dim the background
     let dim = ratatui::widgets::Block::default().style(Style::default().bg(Color::Rgb(20, 20, 25)));
     f.render_widget(dim, f.area());
 

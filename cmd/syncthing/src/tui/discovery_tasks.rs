@@ -12,7 +12,7 @@ use syncthing_core::DeviceId;
 use syncthing_net::ConnectionManagerHandle;
 use syncthing_sync::{SyncManager, SyncService};
 
-/// GlobalDiscovery 优雅退出 Drop guard
+/// Drop guard broadcasting GlobalDiscovery shutdown.
 pub struct GlobalDiscoveryShutdown {
     tx: Option<tokio::sync::broadcast::Sender<()>>,
 }
@@ -31,6 +31,7 @@ impl Drop for GlobalDiscoveryShutdown {
     }
 }
 
+/// Initializes Global Discovery (announce + periodic peer queries) and its shutdown guard.
 #[allow(clippy::too_many_arguments)]
 pub async fn init_and_spawn_global_discovery(
     device_id: DeviceId,
@@ -77,7 +78,6 @@ pub async fn init_and_spawn_global_discovery(
         });
     }
 
-    // Global Discovery periodic query task (Phase 5: feed peer addresses into ConnectionManager)
     if let Some(gd) = global_discovery_query {
         let query_handle = handle.clone();
         let query_devices: Vec<DeviceId> = sync_service
@@ -145,6 +145,7 @@ pub async fn init_and_spawn_global_discovery(
     (global_discovery, global_discovery_shutdown)
 }
 
+/// Spawns local discovery (announce + auto-dial of discovered known devices).
 pub async fn spawn_local_discovery(
     device_id: DeviceId,
     actual_addr: SocketAddr,

@@ -9,6 +9,7 @@ use crate::tui::app::App;
 use crate::tui::theme::Theme;
 use crate::tui::widgets::log_line::colored_log_line;
 
+/// Draws the Logs tab.
 pub fn draw(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
     let (items, _selected_visible) = build_visible_items(app, &app.theme);
 
@@ -19,8 +20,8 @@ pub fn draw(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
     f.render_widget(list, area);
 }
 
-/// 根据搜索/滚动状态构造当前可见的 ListItem 列表。
-/// 返回的第二个元素是高亮项在可见列表中的索引（如适用）。
+/// Builds the visible `ListItem`s for the current search/scroll state.
+/// The second return element is the highlight index within the visible list.
 fn build_visible_items<'a>(app: &'a App, theme: &Theme) -> (Vec<ListItem<'a>>, Option<usize>) {
     let pattern = app.log_search.as_deref().filter(|p| !p.is_empty());
     match pattern {
@@ -49,7 +50,6 @@ fn build_search_items<'a>(
         return (Vec::new(), None);
     }
 
-    // matches 按从旧到新排序；显示时反转，从最新匹配开始。
     let selected_rev = total.saturating_sub(1 + app.log_search_selected);
     let selected_visible = selected_rev.saturating_sub(app.log_scroll_offset);
 
@@ -73,12 +73,10 @@ fn make_item<'a>(
 ) -> ListItem<'a> {
     let mut line = colored_log_line(line, theme);
 
-    // 搜索模式下高亮匹配的子串。
     if let Some(pattern) = pattern {
         line = highlight_matches(line, pattern, theme);
     }
 
-    // 当前选中的匹配行使用反色背景高亮。
     if highlight {
         for span in &mut line.spans {
             span.style = span
@@ -89,9 +87,8 @@ fn make_item<'a>(
     ListItem::new(line)
 }
 
-/// 在已着色的日志行中高亮所有匹配子串。
-///
-/// 实现方式：按 pattern 拆分每个 span 的文本，把匹配部分用高亮样式包裹。
+/// Highlights every match of `pattern` inside an already-colored log line by
+/// splitting each span's text and re-styling the matched portions.
 fn highlight_matches<'a>(line: Line<'a>, pattern: &str, theme: &Theme) -> Line<'a> {
     let highlight_style = Style::default()
         .fg(theme.warning)
@@ -101,7 +98,6 @@ fn highlight_matches<'a>(line: Line<'a>, pattern: &str, theme: &Theme) -> Line<'
     for span in line.spans {
         let text = span.content.as_ref();
         let mut start = 0;
-        // 简单线性扫描，查找所有不重叠匹配。
         while let Some(pos) = text[start..].to_lowercase().find(&pattern.to_lowercase()) {
             let absolute_pos = start + pos;
             let end = absolute_pos + pattern.len();

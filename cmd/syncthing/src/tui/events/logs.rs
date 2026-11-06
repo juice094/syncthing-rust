@@ -2,7 +2,7 @@ use crossterm::event::{KeyCode, KeyEvent};
 
 use crate::tui::app::App;
 
-/// 处理 Logs 页快捷键；返回 true 表示已消费该按键。
+/// Handles Logs-tab shortcuts; returns true when the key was consumed.
 pub fn handle_logs_key(app: &mut App, key: KeyEvent) -> bool {
     let page_size = log_page_size();
     let max_offset = app.max_log_scroll_offset();
@@ -60,7 +60,7 @@ pub fn handle_logs_key(app: &mut App, key: KeyEvent) -> bool {
     true
 }
 
-/// 估算每屏可显示的日志行数。
+/// Estimates how many log lines fit on one screen.
 fn log_page_size() -> usize {
     crossterm::terminal::size()
         .map(|(_, h)| h.saturating_sub(6).max(1) as usize)

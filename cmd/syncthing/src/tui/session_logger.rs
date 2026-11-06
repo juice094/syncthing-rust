@@ -1,6 +1,4 @@
-//! Session event logging task
-//!
-//! 2026-05-13 (T1.3)：从 `daemon_runner.rs` 抽离，专责为单个 BEP session 记录事件日志。
+//! Session event logging task (T1.3): logs the event stream of one BEP session.
 
 use std::sync::Arc;
 

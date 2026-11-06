@@ -11,13 +11,14 @@ use syncthing_core::types::FolderStatus;
 use crate::tui::app::App;
 use crate::tui::widgets::progress;
 
+/// Draws the Overview tab.
 pub fn draw(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(6), // 设备信息
-            Constraint::Length(6), // Sync Status 总览卡片
-            Constraint::Fill(1),   // 日志：占据剩余全部空间
+            Constraint::Length(6),
+            Constraint::Length(6),
+            Constraint::Fill(1),
         ])
         .split(area);
 
@@ -67,7 +68,6 @@ pub fn draw(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
         .wrap(Wrap { trim: true });
     f.render_widget(para, chunks[0]);
 
-    // Sync Status 总览卡片
     let sync_area = chunks[1];
     let inner = Layout::default()
         .direction(Direction::Vertical)
@@ -83,14 +83,12 @@ pub fn draw(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
     let block = Block::default().borders(Borders::ALL).title("Sync Status");
     f.render_widget(block, sync_area);
 
-    // 收集非 Idle 的活跃 folder
     let active_folders: Vec<(&String, &FolderStatus)> = app
         .folder_states
         .iter()
         .filter(|(_, s)| !matches!(s, FolderStatus::Idle))
         .collect();
 
-    // 总体同步进度：非 Idle folder 的进度平均
     let overall_ratio = if active_folders.is_empty() {
         1.0
     } else {
@@ -107,7 +105,6 @@ pub fn draw(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
         (sum / active_folders.len() as f64).clamp(0.0, 1.0)
     };
 
-    // 第 1 行：Overall sync
     let label_col = Layout::default()
         .direction(Direction::Horizontal)
         .constraints([Constraint::Length(14), Constraint::Min(10)])
@@ -127,7 +124,6 @@ pub fn draw(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
         overall_ratio,
     );
 
-    // 第 2 行：Devices online
     let online_count = app.connected_devices.len();
     let total_devices = app.config.devices.len();
     let online_style = if online_count == total_devices && total_devices > 0 {
@@ -148,7 +144,6 @@ pub fn draw(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
         inner[1],
     );
 
-    // 第 3 行：Folders active / All folders up to date
     let active_line = if active_folders.is_empty() {
         Line::from(Span::styled(
             "All folders up to date",
@@ -197,7 +192,6 @@ pub fn draw(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
     };
     f.render_widget(Paragraph::new(active_line), inner[2]);
 
-    // 第 4 行：Last update
     let last_update_text = if let Some(instant) = app.last_sync_progress_update {
         let secs = instant.elapsed().as_secs();
         if secs < 1 {

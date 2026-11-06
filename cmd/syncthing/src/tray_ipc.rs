@@ -1,7 +1,7 @@
-//! 托盘进程与 TUI 之间的 IPC。
+//! IPC between the tray process and TUI processes.
 //!
-//! 仅在 Windows + tray feature 下提供真正的命名管道实现；
-//! 其他平台为 no-op 桩，保证代码跨平台可编译。
+//! A real named-pipe implementation is provided on Windows with the `tray`
+//! feature; other platforms get no-op stubs so the code compiles everywhere.
 
 use serde::{Deserialize, Serialize};
 
@@ -11,27 +11,27 @@ use std::path::{Path, PathBuf};
 #[cfg(all(windows, feature = "tray"))]
 const TRAY_PIPE_FILE_NAME: &str = "tray.pipe";
 
-/// TUI → 托盘的命令。
+/// Commands sent from a TUI to the tray.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "cmd", content = "payload")]
 pub enum TrayIpcRequest {
-    /// 心跳/探测
+    /// Heartbeat / liveness probe.
     Ping,
-    /// 通知托盘启动 daemon
+    /// Ask the tray to start the daemon.
     StartDaemon,
-    /// 通知托盘停止 daemon
+    /// Ask the tray to stop the daemon.
     StopDaemon,
-    /// 通知托盘打开或聚焦 TUI 窗口
+    /// Ask the tray to open or focus the TUI window.
     OpenTui,
 }
 
-/// 托盘 IPC 管道名持久化文件路径。
+/// Path of the file persisting the tray IPC pipe name.
 #[cfg(all(windows, feature = "tray"))]
 pub fn tray_pipe_path(config_dir: &Path) -> PathBuf {
     config_dir.join(TRAY_PIPE_FILE_NAME)
 }
 
-/// 将当前托盘 IPC 管道名写入持久化文件，供外部新进程发现。
+/// Writes the current tray IPC pipe name for newly started processes to discover.
 #[cfg(all(windows, feature = "tray"))]
 pub fn write_tray_pipe(config_dir: &Path, pipe_name: &str) -> std::io::Result<()> {
     let path = tray_pipe_path(config_dir);
@@ -39,7 +39,7 @@ pub fn write_tray_pipe(config_dir: &Path, pipe_name: &str) -> std::io::Result<()
     std::fs::write(&path, pipe_name)
 }
 
-/// 读取持久化的托盘 IPC 管道名（若存在且非空）。
+/// Reads the persisted tray IPC pipe name, if present and non-empty.
 #[cfg(all(windows, feature = "tray"))]
 pub fn read_tray_pipe(config_dir: &Path) -> Option<String> {
     let path = tray_pipe_path(config_dir);
@@ -52,13 +52,13 @@ pub fn read_tray_pipe(config_dir: &Path) -> Option<String> {
     }
 }
 
-/// 清理托盘 IPC 管道名持久化文件。
+/// Removes the persisted tray IPC pipe name file.
 #[cfg(all(windows, feature = "tray"))]
 pub fn clear_tray_pipe(config_dir: &Path) {
     let _ = std::fs::remove_file(tray_pipe_path(config_dir));
 }
 
-/// 托盘 → TUI 的响应。
+/// Response sent from the tray back to a TUI.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TrayIpcResponse {
     pub ok: bool,
@@ -67,6 +67,7 @@ pub struct TrayIpcResponse {
 
 #[allow(dead_code)]
 impl TrayIpcResponse {
+    /// Builds a success response.
     pub fn ok() -> Self {
         Self {
             ok: true,
@@ -74,6 +75,7 @@ impl TrayIpcResponse {
         }
     }
 
+    /// Builds an error response carrying `e`'s text.
     pub fn err(e: impl ToString) -> Self {
         Self {
             ok: false,
@@ -82,6 +84,7 @@ impl TrayIpcResponse {
     }
 }
 
+/// Errors from tray IPC pipe operations.
 #[derive(Debug)]
 #[allow(dead_code)]
 pub enum TrayIpcError {
@@ -128,21 +131,24 @@ mod imp {
 
     const PIPE_TIMEOUT: Duration = Duration::from_secs(5);
 
-    /// 生成唯一管道名。
+    /// Generates a unique pipe name.
     ///
-    /// 包含进程 PID 与随机 nonce，降低跨会话/跨用户冲突概率。
+    /// Embeds the process PID and a random nonce to reduce the chance of
+    /// cross-session / cross-user collisions.
     pub fn generate_pipe_name() -> String {
         let pid = std::process::id();
         let nonce = rand::random::<u32>();
         format!(r"\\.\pipe\syncthing-rust-tray-{pid}-{nonce}")
     }
 
+    /// Named-pipe server forwarding decoded commands to the tray main loop.
     pub struct TrayIpcServer {
         pipe_name: String,
         cmd_tx: mpsc::Sender<TrayIpcRequest>,
     }
 
     impl TrayIpcServer {
+        /// Creates a server bound to `pipe_name`.
         pub fn new(pipe_name: impl Into<String>, cmd_tx: mpsc::Sender<TrayIpcRequest>) -> Self {
             Self {
                 pipe_name: pipe_name.into(),
@@ -150,6 +156,7 @@ mod imp {
             }
         }
 
+        /// Runs the accept/read loop until the pipe breaks.
         pub async fn run(self) -> Result<(), TrayIpcError> {
             let mut server = ServerOptions::new()
                 .first_pipe_instance(true)
@@ -180,18 +187,20 @@ mod imp {
                     line.clear();
                 }
 
-                // 当前客户端断开，重新创建服务端实例
+                // Current client disconnected; recreate the server instance for the next one.
                 server = ServerOptions::new().create(&self.pipe_name)?;
             }
         }
     }
 
+    /// Named-pipe client used by TUI processes to command the tray.
     pub struct TrayIpcClient {
         writer: WriteHalf<NamedPipeClient>,
         reader: BufReader<ReadHalf<NamedPipeClient>>,
     }
 
     impl TrayIpcClient {
+        /// Connects to the tray's pipe.
         pub async fn connect(pipe_name: impl AsRef<str>) -> Result<Self, TrayIpcError> {
             let client = ClientOptions::new().open(pipe_name.as_ref())?;
             let (reader, writer) = split(client);
@@ -201,6 +210,7 @@ mod imp {
             })
         }
 
+        /// Sends one request and waits for the response (5s timeout).
         pub async fn send(&mut self, req: TrayIpcRequest) -> Result<TrayIpcResponse, TrayIpcError> {
             let mut line = serde_json::to_string(&req)?;
             line.push('\n');
@@ -224,32 +234,39 @@ mod imp {
     use super::*;
     use tokio::sync::mpsc;
 
+    /// Stub: returns an empty pipe name on platforms without tray IPC.
     pub fn generate_pipe_name() -> String {
         String::new()
     }
 
+    /// Stub server that never accepts a connection.
     pub struct TrayIpcServer {
         _cmd_tx: mpsc::Sender<TrayIpcRequest>,
     }
 
     impl TrayIpcServer {
+        /// Creates the stub server (arguments ignored).
         pub fn new(_pipe_name: impl Into<String>, _cmd_tx: mpsc::Sender<TrayIpcRequest>) -> Self {
             Self { _cmd_tx }
         }
 
+        /// Parks forever; tray IPC is unsupported on this platform.
         pub async fn run(self) -> Result<(), TrayIpcError> {
             std::future::pending::<()>().await;
             unreachable!()
         }
     }
 
+    /// Stub client that always fails with `NotSupported`.
     pub struct TrayIpcClient;
 
     impl TrayIpcClient {
+        /// Fails with `TrayIpcError::NotSupported`.
         pub async fn connect(_pipe_name: impl AsRef<str>) -> Result<Self, TrayIpcError> {
             Err(TrayIpcError::NotSupported)
         }
 
+        /// Fails with `TrayIpcError::NotSupported`.
         pub async fn send(
             &mut self,
             _req: TrayIpcRequest,

@@ -1,32 +1,32 @@
-//! TUI 主题系统 — 集中管理配色与样式
+//! TUI theme system: centralizes colors and styles.
+//!
+//! All drawing code takes colors from `Theme`; hard-coded `Color::...` values
+//! are forbidden. New themes only need a `Theme::new_xxx()` constructor.
 // NOTE: Theme variants reserved for future TUI enhancements (v0.3.0+)
 #![allow(dead_code)]
-//!
-//! 所有绘制代码通过 Theme 获取颜色，禁止硬编码 Color::Cyan 等。
-//! 新增主题只需实现 Theme::new_xxx() 方法。
 
 use ratatui::style::{Color, Modifier, Style};
 
-/// 语义化主题定义
+/// Semantic theme definition.
 #[derive(Debug, Clone)]
 pub struct Theme {
     pub name: &'static str,
 
-    // === 语义颜色 ===
-    pub primary: Color,        // 品牌色（聚焦、进度条、标题）
-    pub secondary: Color,      // 辅助色（高亮、链接）
-    pub success: Color,        // 成功 / 在线
-    pub warning: Color,        // 警告 / 扫描中
-    pub error: Color,          // 错误 / 离线
-    pub info: Color,           // 信息提示
-    pub muted: Color,          // 次要文本 / 时间戳
-    pub surface: Color,        // 面板背景
-    pub border: Color,         // 普通边框
-    pub border_focused: Color, // 聚焦边框
-    pub text_primary: Color,   // 主要文本
-    pub text_secondary: Color, // 次要文本
+    // === semantic colors ===
+    pub primary: Color,        // brand (focus, progress, titles)
+    pub secondary: Color,      // accent (highlights, links)
+    pub success: Color,        // success / online
+    pub warning: Color,        // warning / scanning
+    pub error: Color,          // error / offline
+    pub info: Color,           // informational
+    pub muted: Color,          // secondary text / timestamps
+    pub surface: Color,        // panel background
+    pub border: Color,         // plain border
+    pub border_focused: Color, // focused border
+    pub text_primary: Color,   // primary text
+    pub text_secondary: Color, // secondary text
 
-    // === 预计算样式（避免运行时重复构造） ===
+    // === precomputed styles (avoid rebuilding per frame) ===
     pub style_online: Style,
     pub style_offline: Style,
     pub style_syncing: Style,
@@ -50,7 +50,7 @@ impl Default for Theme {
 }
 
 impl Theme {
-    /// Syncthing 官方暗色主题（终端 256 色优化版）
+    /// Official Syncthing dark theme (optimized for 256-color terminals).
     pub fn syncthing_dark() -> Self {
         let primary = Color::Rgb(40, 100, 200); // #2864C8
         let secondary = Color::Rgb(80, 160, 220); // #50A0DC
@@ -99,7 +99,7 @@ impl Theme {
         }
     }
 
-    /// 根据文件夹状态返回对应样式
+    /// Returns the style matching a folder status.
     pub fn folder_status_style(&self, status: &str) -> Style {
         match status {
             "syncing" | "pulling" => self.style_syncing,
@@ -110,7 +110,7 @@ impl Theme {
         }
     }
 
-    /// 根据日志级别返回对应样式
+    /// Returns the style matching a log level.
     pub fn log_level_style(&self, level: &str) -> Style {
         match level.to_uppercase().as_str() {
             "TRACE" => self.style_log_trace,

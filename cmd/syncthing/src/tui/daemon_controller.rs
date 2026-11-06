@@ -8,7 +8,7 @@ use super::constants;
 use super::daemon_runner;
 use super::TuiEvent;
 
-/// 静默检查本地 REST API 是否可达。
+/// Probes the local REST API without side effects.
 pub async fn daemon_health_check(config: &syncthing_core::types::Config) -> bool {
     let api_port = config.gui.address.rsplit(':').next().unwrap_or("8385");
     let client = match reqwest::Client::builder()
@@ -25,20 +25,20 @@ pub async fn daemon_health_check(config: &syncthing_core::types::Config) -> bool
     }
 }
 
-/// 检测是否已有外部 daemon 在运行。
+/// Detects whether an external daemon is already running.
 ///
-/// 检查顺序：
-/// 1. `config_dir/syncthing.pid` 是否存在且指向运行中的 syncthing-rust 进程
-/// 2. ping 本地 REST API `/rest/health`（处理无 pid 文件但端口仍被占用的情况）
+/// Evidence chain:
+/// 1. a live `config_dir/syncthing.pid` pointing at a running syncthing-rust process;
+/// 2. a successful ping of the local REST API `/rest/health` (covers the case
+///    where the pid file was cleaned up but the service still holds the port).
 ///
-/// 返回 `Some(pid)` 表示检测到外部 daemon 并给出其 PID；
-/// 返回 `None` 表示没有外部 daemon。
-/// TUI 不应再启动内部实例，防止端口冲突和单实例锁问题。
+/// Returns `Some(pid)` when an external daemon was detected (`0` when only the
+/// HTTP evidence is available), `None` otherwise. When detected, the TUI must
+/// not start its own instance (port conflicts and the single-instance lock).
 pub async fn detect_external_daemon(
     config: &syncthing_core::types::Config,
     config_dir: &Path,
 ) -> Option<u32> {
-    // 1. PID 文件证据链
     if let Some(pid) = crate::single_instance::running_instance_pid(config_dir) {
         tracing::info!(
             "External daemon detected via pid file: syncthing-rust is running (PID {})",
@@ -47,7 +47,6 @@ pub async fn detect_external_daemon(
         return Some(pid);
     }
 
-    // 2. 端口/HTTP 证据链（兜底，清理过时的 pid 文件后仍有服务在监听时生效）
     let api_port = config.gui.address.rsplit(':').next().unwrap_or("8385");
     let url = format!("http://127.0.0.1:{}/rest/health", api_port);
 
@@ -68,7 +67,7 @@ pub async fn detect_external_daemon(
                     api_port,
                     url
                 );
-                // HTTP 兜底无法得知真实 PID，用 0 占位。
+                // The HTTP fallback cannot recover the real PID; 0 is a placeholder.
                 Some(0)
             } else {
                 tracing::debug!(
@@ -86,6 +85,11 @@ pub async fn detect_external_daemon(
     }
 }
 
+/// Toggles the daemon on F5.
+///
+/// In tray-managed mode the command is forwarded over tray IPC; for external
+/// daemons the toggle is refused (they belong to the tray / Auto-mode process).
+/// Otherwise the locally managed daemon is started or signalled to stop.
 pub async fn toggle_daemon(
     app: &mut App,
     daemon_join_handle: &mut Option<tokio::task::JoinHandle<()>>,
@@ -93,7 +97,6 @@ pub async fn toggle_daemon(
     event_tx: &mut Option<tokio::sync::mpsc::Sender<TuiEvent>>,
     daemon_shutdown_tx: &mut Option<tokio::sync::watch::Sender<bool>>,
 ) {
-    // 托盘托管模式：通过 IPC 命令让托盘进程启停 daemon
     if app.external_daemon && app.tray_client.is_some() {
         let req = if app.daemon_running {
             crate::tray_ipc::TrayIpcRequest::StopDaemon
@@ -127,15 +130,15 @@ pub async fn toggle_daemon(
         return;
     }
 
-    // 外部 daemon 由托盘/Auto 模式管理，TUI 不能启动或停止它
+    // External daemons belong to the tray / Auto-mode process; the TUI cannot start or stop them.
     if app.external_daemon {
         app.push_log("Daemon is managed externally. Use the tray menu to stop it.".to_string());
         return;
     }
 
-    // 使用 daemon_shutdown_tx 判断 daemon 是否运行（启动时设置，停止时 take）
+    // daemon_shutdown_tx presence means "running" (set at start, taken at stop).
     if daemon_shutdown_tx.is_some() {
-        // 发送优雅关闭信号；不在这里同步等待，避免阻塞 TUI 事件循环
+        // Signal a graceful shutdown without waiting here, so the TUI event loop is not blocked.
         if let Some(tx) = daemon_shutdown_tx.take() {
             let _ = tx.send(true);
             app.push_log("Daemon shutdown signal sent.".to_string());
@@ -148,7 +151,7 @@ pub async fn toggle_daemon(
         app.daemon_status = "Stopping...".to_string();
         app.push_log("Daemon stopping...".to_string());
     } else {
-        // 若上次停止的 daemon 仍在后台收尾，禁止立即重启，避免端口冲突
+        // Refuse to restart while the previous daemon is still tearing down (port conflicts).
         if daemon_join_handle
             .as_ref()
             .map(|h| !h.is_finished())
@@ -173,7 +176,6 @@ pub async fn toggle_daemon(
                 *daemon_handle = Some(startup.connection_handle.clone());
                 app.sync_service = Some(startup.sync_service.clone());
 
-                // 启动事件桥
                 let (tx, rx) = tokio::sync::mpsc::channel::<TuiEvent>(constants::EVENT_CHANNEL_CAP);
                 *event_tx = Some(tx.clone());
                 app.event_rx = Some(rx);

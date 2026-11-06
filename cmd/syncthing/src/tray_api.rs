@@ -1,8 +1,8 @@
-//! REST API 客户端 — 与 syncthing daemon 通信
+//! REST API client for talking to a syncthing daemon (used by the tray).
 
 use serde::Deserialize;
 
-/// Daemon 状态摘要
+/// Snapshot of daemon status.
 #[derive(Debug, Clone, Default)]
 pub struct DaemonStatus {
     pub online: bool,
@@ -13,10 +13,10 @@ pub struct DaemonStatus {
     pub errors: Vec<String>,
 }
 
-/// 默认 REST 请求超时（秒）
+/// Default REST request timeout.
 const REQUEST_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
 
-/// 轻量级 REST 客户端
+/// Lightweight REST client polling a daemon for tray status.
 pub struct DaemonClient {
     base_url: String,
     status: DaemonStatus,
@@ -45,6 +45,7 @@ struct FolderStatusItem {
 }
 
 impl DaemonClient {
+    /// Creates a client for the daemon REST API at `base_url`.
     pub fn new(base_url: &str) -> Self {
         let http = reqwest::Client::builder()
             .timeout(REQUEST_TIMEOUT)
@@ -57,7 +58,7 @@ impl DaemonClient {
         }
     }
 
-    /// Ping daemon 检查是否存活
+    /// Pings the daemon's `/rest/health` to check liveness.
     pub async fn ping(&self) -> bool {
         match self
             .http
@@ -70,18 +71,17 @@ impl DaemonClient {
         }
     }
 
-    /// 更新在线状态
+    /// Updates the cached online flag.
     pub fn set_online(&mut self, online: bool) {
         self.status.online = online;
     }
 
-    /// 刷新状态（设备连接数、文件夹数、同步状态、错误等）
+    /// Refreshes device counts, folder counts, sync state, and errors.
     pub async fn refresh_status(&mut self) -> anyhow::Result<()> {
         if !self.status.online {
             return Ok(());
         }
 
-        // 并行获取 connections、folders 和 devices 列表
         let conn_fut = self
             .http
             .get(format!("{}/rest/system/connections", self.base_url))
@@ -98,7 +98,6 @@ impl DaemonClient {
         let (conn_resp, folders_resp, devices_resp) =
             tokio::join!(conn_fut, folders_fut, devices_fut);
 
-        // 连接统计
         match conn_resp {
             Ok(resp) => {
                 if let Ok(data) = resp.json::<Connections>().await {
@@ -110,19 +109,17 @@ impl DaemonClient {
             }
         }
 
-        // 设备总数（与在线数独立）
+        // Device total is tracked independently of the online count.
         if let Ok(resp) = devices_resp {
             if let Ok(arr) = resp.json::<Vec<serde_json::Value>>().await {
                 self.status.total_devices = arr.len();
             }
         }
 
-        // 文件夹列表 + 逐文件夹状态检查
         if let Ok(resp) = folders_resp {
             if let Ok(arr) = resp.json::<Vec<serde_json::Value>>().await {
                 self.status.folder_count = arr.len();
 
-                // 检查每个文件夹的同步状态
                 let mut syncing = false;
                 let mut errors = Vec::new();
                 for folder in &arr {
@@ -152,6 +149,7 @@ impl DaemonClient {
         Ok(())
     }
 
+    /// Returns the cached status snapshot.
     pub fn status(&self) -> &DaemonStatus {
         &self.status
     }

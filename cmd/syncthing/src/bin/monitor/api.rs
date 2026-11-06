@@ -12,7 +12,6 @@ pub(crate) async fn poll_api(
     let mut sample = ApiSample::default();
     let base = api_addr.trim_end_matches('/');
 
-    // /rest/system/connections
     let connections_url = format!("{}/rest/system/connections", base);
     match client
         .get(&connections_url)
@@ -61,7 +60,6 @@ pub(crate) async fn poll_api(
         }
     }
 
-    // /rest/db/status for each folder
     let mut total_need_files: u64 = 0;
     let mut total_need_bytes: u64 = 0;
     for folder_id in folder_ids {

@@ -8,8 +8,11 @@ use ratatui::{
 use crate::tui::app::{App, Popup, Tab};
 use crate::tui::forms::render;
 
-/// 明确切分终端区域，避免 `Constraint::Min(0)` 在 Windows 控制台首帧分配异常
-/// 导致主内容区域与底部状态栏重叠一行。
+/// Draws the full TUI frame.
+///
+/// See "docs/design/ADR-20261105-tui-first-frame-rendering.md" for why the
+/// status bar is a fixed one-row layout chunk (a `Constraint::Min(0)` first
+/// frame on Windows consoles used to overlap it with the main content).
 pub fn draw(f: &mut Frame, app: &mut App) {
     let area = f.area();
 
@@ -21,8 +24,6 @@ pub fn draw(f: &mut Frame, app: &mut App) {
         return;
     }
 
-    // 使用 Layout 自动分割区域，把状态栏视为布局中的动态一格而非固定坐标。
-    // 状态栏仅占 1 行：主内容区各视图已使用 Borders::ALL，自带底边框，无需再画分隔线。
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
@@ -39,7 +40,6 @@ pub fn draw(f: &mut Frame, app: &mut App) {
     crate::tui::widgets::header::draw(f, app, header_area);
     draw_main_content(f, app, main_area);
 
-    // 先清空状态栏区域，再绘制，防止主内容或旧帧残留覆盖/截断状态栏。
     f.render_widget(Clear, status_area);
     crate::tui::widgets::status_bar::draw(f, app, status_area);
 

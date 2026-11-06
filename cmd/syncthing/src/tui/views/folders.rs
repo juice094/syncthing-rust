@@ -38,6 +38,7 @@ fn folder_status_text(
     }
 }
 
+/// Draws the Folders tab.
 pub fn draw(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
     let theme = &app.theme;
 

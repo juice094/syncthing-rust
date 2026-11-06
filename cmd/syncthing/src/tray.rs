@@ -1,7 +1,8 @@
-//! Windows 系统托盘（Win32 API），参照 tray-icon / systray 标准实现。
+//! Windows system tray (Win32 API), modeled on the tray-icon / systray standard.
 //!
-//! TrayApp::spawn() 在独立线程创建隐藏窗口 + 托盘图标 + 消息循环。
-//! 通过 mpsc::Receiver 向主线程发送托盘事件。
+//! `spawn()` creates the hidden window, tray icon, and message loop on a
+//! dedicated thread and streams tray events to the main thread over an mpsc
+//! channel.
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{channel, Receiver, Sender};
@@ -26,23 +27,25 @@ use windows::Win32::UI::WindowsAndMessaging::{
     WS_OVERLAPPED,
 };
 
-/// 防止 DestroyIcon double-free：cleanup() 先释放后置 true，WM_DESTROY 检查此标志。
+/// Guards against a double DestroyIcon: cleanup() sets this after releasing,
+/// and WM_DESTROY checks it before releasing again.
 static CLEANED_UP: AtomicBool = AtomicBool::new(false);
 
-/// 当前 daemon 运行状态，供菜单渲染时读取。
-/// 由主线程在 daemon 启动/停止时更新。
+/// Current daemon running state, read by the tray thread while rendering menus.
+/// Written by the main thread on daemon start/stop.
 static DAEMON_RUNNING: AtomicBool = AtomicBool::new(false);
 
-/// 设置 daemon 运行状态（主线程调用）。
+/// Updates the daemon running state (called from the main thread).
 pub fn set_daemon_running(running: bool) {
     DAEMON_RUNNING.store(running, Ordering::Release);
 }
 
-/// 读取 daemon 是否正在运行（托盘线程调用）。
+/// Reads whether the daemon is running (called from the tray thread).
 pub fn daemon_running() -> bool {
     DAEMON_RUNNING.load(Ordering::Acquire)
 }
 
+/// Events delivered from the tray thread to the main thread.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TrayEvent {
     OpenTui,
@@ -115,7 +118,7 @@ mod tests {
     }
 }
 
-/// 线程安全的状态存储（替代 static mut）
+/// Thread-safe state store (replaces a static mut).
 static STATE: OnceLock<TrayState> = OnceLock::new();
 
 struct TrayState {
@@ -124,11 +127,11 @@ struct TrayState {
     /// Kept for TaskbarCreated message comparison; static analysis cannot see the use.
     #[allow(dead_code)]
     taskbar_created_msg: u32,
-    /// 当前显示图标的 HICON（任意状态），以 usize 存储是因为原始指针非 Send/Sync。
+    /// Current icon HICON (any state), stored as usize because the raw pointer is not Send/Sync.
     current_hicon: Option<usize>,
 }
 
-/// Windows 错误消息框（用于无控制台场景）。
+/// Windows error message box (for the no-console case).
 unsafe fn show_error_message(title: &str, message: &str) {
     use std::iter::once;
     use windows::Win32::UI::WindowsAndMessaging::{MessageBoxW, MB_ICONERROR, MB_OK};
@@ -143,15 +146,19 @@ unsafe fn show_error_message(title: &str, message: &str) {
     );
 }
 
-/// 在独立 Win32 线程上启动托盘图标和消息循环。
+/// Starts the tray icon and message loop on a dedicated Win32 thread.
 ///
-/// 返回 `(Receiver<TrayEvent>, JoinHandle)` 供主线程消费事件并在退出时 join 线程。
-/// SAFETY: 内部调用 `tray_thread` 通过 `std::thread::spawn` 启动，保证仅调用一次。
+/// Returns `(Receiver<TrayEvent>, JoinHandle)` so the main thread can consume
+/// events and join the thread on exit.
+///
+/// SAFETY: internally spawns `tray_thread` via `std::thread::spawn`, which
+/// guarantees the message-loop window is only created once.
 pub fn spawn() -> (Receiver<TrayEvent>, std::thread::JoinHandle<()>) {
     let (tx, rx) = channel::<TrayEvent>();
     let handle = std::thread::spawn(move || {
-        // SAFETY: tray_thread 必须在 Win32 线程上运行以拥有消息循环窗口。
-        // 此 closure 在 `std::thread::spawn` 创建的 OS 线程上执行，满足要求。
+        // SAFETY: tray_thread must run on the Win32 thread that owns the
+        // message-loop window. This closure runs on the OS thread created by
+        // `std::thread::spawn`, which satisfies the requirement.
         unsafe {
             if let Err(e) = tray_thread(tx) {
                 tracing::error!("Tray thread error: {}", e);
@@ -161,15 +168,15 @@ pub fn spawn() -> (Receiver<TrayEvent>, std::thread::JoinHandle<()>) {
     (rx, handle)
 }
 
-/// 主动清理托盘图标（供 Exit 前调用）。
+/// Removes the tray icon (call before Exit).
 ///
-/// SAFETY: 仅在主线程的 Exit 路径调用，此时托盘图标已通过 NIM_ADD 注册。
-/// Shell_NotifyIconW 和 DestroyIcon 均为线程安全的系统调用。
-/// 调用后 PostMessage(WM_CLOSE) 通知托盘线程退出消息循环。
+/// SAFETY: only called from the main-thread Exit path, after the icon was
+/// registered via NIM_ADD. Shell_NotifyIconW and DestroyIcon are thread-safe
+/// system calls. Posts WM_CLOSE so the tray thread leaves its message loop.
 pub fn cleanup() {
     if let Some(s) = STATE.get() {
-        // SAFETY: STATE 已通过 OnceLock 初始化，hwnd/custom_hicon 均有效。
-        // NIM_DELETE 是线程安全的 Win32 API。
+        // SAFETY: STATE was initialized via OnceLock, so hwnd/current_hicon are
+        // valid. NIM_DELETE is a thread-safe Win32 API.
         unsafe {
             let nid = NOTIFYICONDATAW {
                 cbSize: std::mem::size_of::<NOTIFYICONDATAW>() as u32,
@@ -178,24 +185,24 @@ pub fn cleanup() {
                 ..Default::default()
             };
             let _ = Shell_NotifyIconW(NIM_DELETE, &nid);
-            // SAFETY: current_hicon 由 CreateIconFromResourceEx 创建，必须通过 DestroyIcon 释放。
+            // SAFETY: current_hicon was created by CreateIconFromResourceEx and
+            // must be released with DestroyIcon.
             if let Some(ptr) = s.current_hicon {
                 let _ = DestroyIcon(HICON(ptr as *mut _));
             }
-            // 设置标志防止 WM_DESTROY 再次释放 icon
             CLEANED_UP.store(true, Ordering::Release);
-            // 通知托盘线程退出：PostMessage(WM_CLOSE) → DefWindowProc → DestroyWindow → WM_DESTROY → PostQuitMessage
+            // PostMessage(WM_CLOSE) -> DefWindowProc -> DestroyWindow -> WM_DESTROY -> PostQuitMessage
             let _ = PostMessageW(HWND(s.hwnd as *mut _), WM_CLOSE, WPARAM(0), LPARAM(0));
         }
     }
 }
 
-/// 返回托盘窗口句柄（供 update_icon / update_tooltip 使用）
+/// Returns the tray window handle (for update_icon / update_tooltip).
 pub fn tray_hwnd() -> HWND {
     HWND(STATE.get().map(|s| s.hwnd).unwrap_or(0) as *mut _)
 }
 
-// 由 build.rs 生成的多尺寸 ICO 数据（16/24/32/48/256）
+// Multi-size ICO data generated by build.rs (16/24/32/48/256)
 static ICON_BYTES_DEFAULT: &[u8] =
     include_bytes!(concat!(env!("OUT_DIR"), "/tray-icon-default.ico"));
 static ICON_BYTES_IDLE: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/tray-icon-idle.ico"));
@@ -262,7 +269,7 @@ fn parse_ico(data: &[u8]) -> Option<Vec<IcoEntry>> {
     Some(entries)
 }
 
-/// 从 ICO 数据中选择最接近系统小图标尺寸的 entry。
+/// Picks the ICO entry closest to the system small-icon size.
 fn select_best_ico_entry(entries: &[IcoEntry]) -> Option<&IcoEntry> {
     let desired = unsafe { GetSystemMetrics(SM_CXSMICON) as u32 };
     entries
@@ -270,9 +277,10 @@ fn select_best_ico_entry(entries: &[IcoEntry]) -> Option<&IcoEntry> {
         .min_by_key(|e| e.width.abs_diff(desired) + e.height.abs_diff(desired))
 }
 
-/// 从 build.rs 生成的多尺寸 ICO 加载指定状态图标。
+/// Loads the state icon generated by build.rs.
 ///
-/// SAFETY: ICO 数据由 build.rs 生成，格式合法。CreateIconFromResourceEx 对无效输入返回 Err。
+/// SAFETY: the ICO data is generated by build.rs and well-formed.
+/// CreateIconFromResourceEx returns Err on invalid input.
 unsafe fn load_state_icon(icon_type: IconType) -> Option<HICON> {
     let data = icon_bytes(icon_type);
     let entries = parse_ico(data)?;
@@ -291,13 +299,14 @@ unsafe fn load_state_icon(icon_type: IconType) -> Option<HICON> {
     .ok()
 }
 
-/// Win32 消息循环线程入口。
+/// Win32 message-loop thread entry.
 ///
-/// SAFETY: 必须在 `std::thread::spawn` 创建的拥有消息队列的 OS 线程上调用。
-/// 此线程负责：创建隐藏窗口、注册托盘图标、运行 GetMessageW/DispatchMessageW 循环。
-/// HICON 和 HWND 资源需在 WM_DESTROY 或 cleanup() 中释放。
+/// SAFETY: must run on the OS thread created by `std::thread::spawn` so it owns
+/// a message queue. This thread creates the hidden window, registers the tray
+/// icon, and runs the GetMessageW/DispatchMessageW loop. The HICON and HWND
+/// resources are released in WM_DESTROY or cleanup().
 unsafe fn tray_thread(tx: Sender<TrayEvent>) -> anyhow::Result<()> {
-    // 注册 TaskbarCreated 消息（explorer.exe 重启后重新添加图标）
+    // Re-register the icon after explorer.exe restarts.
     let taskbar_created_msg = RegisterWindowMessageW(w!("TaskbarCreated"));
 
     let hmodule = GetModuleHandleW(None)?;
@@ -312,7 +321,6 @@ unsafe fn tray_thread(tx: Sender<TrayEvent>) -> anyhow::Result<()> {
     };
     RegisterClassW(&wc);
 
-    // 隐藏窗口：零尺寸 + WS_EX_TOOLWINDOW（不出现于 Alt+Tab / 任务栏）
     let hwnd = CreateWindowExW(
         WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW,
         class_name,
@@ -328,7 +336,7 @@ unsafe fn tray_thread(tx: Sender<TrayEvent>) -> anyhow::Result<()> {
         None,
     )?;
 
-    // 优先使用 build.rs 生成的状态图标；失败时回退到系统图标
+    // Prefer the build.rs state icon; fall back to a system icon on failure.
     let custom_hicon = load_state_icon(IconType::Default);
     let hicon = custom_hicon
         .map(|h| HICON(h.0))
@@ -356,7 +364,7 @@ unsafe fn tray_thread(tx: Sender<TrayEvent>) -> anyhow::Result<()> {
         anyhow::bail!("NIM_ADD failed");
     }
 
-    // 初始化全局状态
+    // Initialize global state.
     let _ = STATE.set(TrayState {
         event_tx: tx,
         hwnd: hwnd.0 as isize,
@@ -364,10 +372,8 @@ unsafe fn tray_thread(tx: Sender<TrayEvent>) -> anyhow::Result<()> {
         current_hicon: custom_hicon.map(|h| h.0 as usize),
     });
 
-    // 消息循环
     let mut msg = windows::Win32::UI::WindowsAndMessaging::MSG::default();
     while GetMessageW(&mut msg, None, 0, 0).into() {
-        // TaskbarCreated: explorer 重启后重新注册托盘图标
         if msg.message == taskbar_created_msg {
             let _ = Shell_NotifyIconW(NIM_ADD, &nid);
         }
@@ -377,18 +383,17 @@ unsafe fn tray_thread(tx: Sender<TrayEvent>) -> anyhow::Result<()> {
     Ok(())
 }
 
-/// 在右键点击位置显示弹出上下文菜单。
+/// Shows the popup context menu at the right-click position.
 ///
-/// SAFETY: 必须在 Win32 消息循环线程上调用（通过 window_proc 的 WM_RBUTTONUP 触发）。
-/// TrackPopupMenu 会阻塞当前线程直到用户关闭菜单，这是 Win32 菜单 API 的规范行为。
+/// SAFETY: must be called on the Win32 message-loop thread (triggered from
+/// window_proc's WM_RBUTTONUP). TrackPopupMenu blocks until the user closes the
+/// menu, which is the documented Win32 menu behavior.
 unsafe fn show_context_menu(hwnd: HWND) {
     let hmenu = CreatePopupMenu().unwrap_or(HMENU(std::ptr::null_mut()));
     if hmenu.0.is_null() {
         return;
     }
 
-    // 操作项（无图标、无标题，保持菜单极简）
-    // daemon 运行时显示 "Stop Daemon"，停止后显示灰色的 "Start Daemon"（暂不支持托盘内启动）。
     let running = daemon_running();
     let toggle_text = if running {
         w!("Stop Daemon")
@@ -405,8 +410,8 @@ unsafe fn show_context_menu(hwnd: HWND) {
     let _ = AppendMenuW(hmenu, toggle_flags, ID_TOGGLE_DAEMON as usize, toggle_text);
     let _ = AppendMenuW(hmenu, MF_STRING, ID_EXIT as usize, w!("Exit"));
 
-    // SAFETY: SetForegroundWindow 需要 hwnd 为当前进程拥有的窗口句柄。
-    // hwnd 由 tray_thread 创建，属于当前进程。
+    // SAFETY: SetForegroundWindow requires hwnd to be owned by the current
+    // process; hwnd was created by tray_thread.
     let _ = SetForegroundWindow(hwnd);
     let mut pt = Default::default();
     let _ = GetCursorPos(&mut pt);
@@ -419,15 +424,16 @@ unsafe fn show_context_menu(hwnd: HWND) {
         hwnd,
         None,
     );
-    // Shell 规范：菜单关闭后发送 WM_NULL
+    // Shell convention: post WM_NULL after the menu closes.
     let _ = PostMessageW(hwnd, WM_NULL, WPARAM(0), LPARAM(0));
     let _ = DestroyMenu(hmenu);
 }
 
-/// Win32 窗口过程回调。
+/// Win32 window procedure callback.
 ///
-/// SAFETY: 由 Windows DispatchMessageW 调用，hwnd/msg/wparam/lparam 均来自系统消息队列。
-/// 函数签名必须匹配 `WNDPROC` 的 ABI 约定（`extern "system"`）。
+/// SAFETY: invoked by Windows DispatchMessageW with hwnd/msg/wparam/lparam from
+/// the system message queue. The signature must match the `WNDPROC` ABI
+/// (`extern "system"`).
 unsafe extern "system" fn window_proc(
     hwnd: HWND,
     msg: u32,
@@ -438,8 +444,6 @@ unsafe extern "system" fn window_proc(
         WM_TRAYICON => {
             match lparam.0 as u32 {
                 WM_RBUTTONUP => show_context_menu(hwnd),
-                // 单击托盘图标不执行操作；双击打开 TUI。避免双击时被识别为两次单击
-                // 而产生重复 TUI 实例。
                 WM_LBUTTONUP => {}
                 WM_LBUTTONDBLCLK => {
                     if let Some(s) = STATE.get() {
@@ -466,7 +470,6 @@ unsafe extern "system" fn window_proc(
             LRESULT(0)
         }
         WM_DESTROY => {
-            // 若 cleanup() 已先行清理（Exit 路径），跳过重复释放。
             if !CLEANED_UP.load(Ordering::Acquire) {
                 let nid = NOTIFYICONDATAW {
                     cbSize: std::mem::size_of::<NOTIFYICONDATAW>() as u32,
@@ -475,7 +478,7 @@ unsafe extern "system" fn window_proc(
                     ..Default::default()
                 };
                 let _ = Shell_NotifyIconW(NIM_DELETE, &nid);
-                // SAFETY: current_hicon 仅在 cleanup() 未调用时释放。
+                // SAFETY: current_hicon is only released when cleanup() has not run.
                 if let Some(s) = STATE.get() {
                     if let Some(ptr) = s.current_hicon {
                         let _ = DestroyIcon(HICON(ptr as *mut _));
@@ -489,12 +492,11 @@ unsafe extern "system" fn window_proc(
     }
 }
 
-/// 上一次图标状态缓存，避免无意义刷新
+/// Cache of the last icon state to avoid redundant refreshes.
 static LAST_ICON: std::sync::Mutex<Option<IconType>> = std::sync::Mutex::new(None);
 static LAST_TOOLTIP: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
 
-// ==================== update helpers ====================
-
+/// Tray icon variants mirroring daemon state.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum IconType {
     Default,
@@ -514,15 +516,14 @@ impl IconType {
     }
 }
 
-/// 更新托盘图标。通过 LAST_ICON 缓存防抖。
+/// Updates the tray icon, debounced through the LAST_ICON cache.
 ///
-/// SAFETY: 可从任意线程调用。Shell_NotifyIconW 是线程安全的，
-/// 内部通过 PostMessage 而非 SendMessage 与 Shell 通信。
-/// 旧 HICON 会在这里被 DestroyIcon 释放。
+/// SAFETY: callable from any thread. Shell_NotifyIconW is thread-safe (it
+/// talks to the Shell via PostMessage, not SendMessage). The old HICON is
+/// released with DestroyIcon here.
 pub unsafe fn update_icon(_hwnd: HWND, icon_type: IconType) {
     let Some(state) = STATE.get() else { return };
 
-    // 防抖：状态未变时跳过
     if let Ok(guard) = LAST_ICON.lock() {
         if guard.as_ref() == Some(&icon_type) {
             return;
@@ -551,15 +552,14 @@ pub unsafe fn update_icon(_hwnd: HWND, icon_type: IconType) {
         hIcon: new_hicon,
         ..Default::default()
     };
-    // SAFETY: NIM_MODIFY 是线程安全的 Win32 API 调用。
+    // SAFETY: NIM_MODIFY is a thread-safe Win32 API call.
     let _ = Shell_NotifyIconW(NIM_MODIFY, &nid);
 
-    // 释放旧图标并缓存新图标句柄
     if let Some(old) = STATE.get().and_then(|s| s.current_hicon) {
         let _ = DestroyIcon(HICON(old as *mut _));
     }
     let _ = STATE.get().map(|s| {
-        // SAFETY: TrayState 存于 OnceLock，此处仅修改 current_hicon 字段。
+        // SAFETY: TrayState lives in the OnceLock; only current_hicon is mutated here.
         let ptr = s as *const TrayState as *mut TrayState;
         (*ptr).current_hicon = Some(new_hicon.0 as usize);
     });
@@ -569,13 +569,12 @@ pub unsafe fn update_icon(_hwnd: HWND, icon_type: IconType) {
     }
 }
 
-/// 更新托盘 tooltip 文本。通过 LAST_TOOLTIP 缓存防抖。
+/// Updates the tray tooltip text, debounced through the LAST_TOOLTIP cache.
 ///
-/// SAFETY: 可从任意线程调用。Shell_NotifyIconW(NIM_MODIFY) 是线程安全的。
+/// SAFETY: callable from any thread. Shell_NotifyIconW(NIM_MODIFY) is thread-safe.
 pub unsafe fn update_tooltip(_hwnd: HWND, text: &str) {
     let Some(state) = STATE.get() else { return };
 
-    // 防抖：tooltip 未变时跳过
     if let Ok(guard) = LAST_TOOLTIP.lock() {
         if guard.as_deref() == Some(text) {
             return;
@@ -592,7 +591,7 @@ pub unsafe fn update_tooltip(_hwnd: HWND, text: &str) {
     let wide: Vec<u16> = text.encode_utf16().collect();
     let len = wide.len().min(nid.szTip.len() - 1);
     nid.szTip[..len].copy_from_slice(&wide[..len]);
-    // SAFETY: Shell_NotifyIconW 线程安全。
+    // SAFETY: Shell_NotifyIconW is thread-safe.
     let _ = Shell_NotifyIconW(NIM_MODIFY, &nid);
 
     if let Ok(mut guard) = LAST_TOOLTIP.lock() {
@@ -630,6 +629,6 @@ pub unsafe fn show_notification(_hwnd: HWND, title: &str, text: &str, icon: Ball
 
     nid.dwInfoFlags = windows::Win32::UI::Shell::NOTIFY_ICON_INFOTIP_FLAGS(icon.to_niif());
 
-    // SAFETY: Shell_NotifyIconW 线程安全。
+    // SAFETY: Shell_NotifyIconW is thread-safe.
     let _ = Shell_NotifyIconW(NIM_MODIFY, &nid);
 }

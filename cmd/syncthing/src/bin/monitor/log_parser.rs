@@ -20,7 +20,6 @@ pub(crate) struct LogParser {
     /// Active pull starts: folder_id → Instant.
     pub(crate) pull_starts: HashMap<String, Instant>,
 
-    // Window counters (reset after each sample).
     pub(crate) scan_count: u64,
     pub(crate) pull_count: u64,
     pub(crate) pull_failed: u64,
@@ -28,7 +27,6 @@ pub(crate) struct LogParser {
     pub(crate) scan_duration_ms: Option<u64>,
     pub(crate) pull_duration_ms: Option<u64>,
 
-    // Lifetime cumulative counters.
     pub(crate) scan_count_total: u64,
     pub(crate) pull_count_total: u64,
     pub(crate) pull_failed_total: u64,
@@ -63,7 +61,6 @@ impl LogParser {
         };
         let size = meta.len();
         if size < self.offset {
-            // Log rotated/truncated: start over.
             self.offset = 0;
             self.leftover.clear();
         }
@@ -87,7 +84,6 @@ impl LogParser {
             return;
         }
 
-        // Only process complete lines; keep the trailing fragment for next time.
         let last_newline = buf.iter().rposition(|b| *b == b'\n');
         let consumed = match last_newline {
             Some(idx) => idx + 1,
@@ -104,12 +100,10 @@ impl LogParser {
         }
 
         self.leftover = buf[consumed..].to_vec();
-        // Unprocessed bytes are at the current end of the file.
         self.offset = size - self.leftover.len() as u64;
     }
 
     fn process_line(&mut self, line: &str) {
-        // Folder scan completed
         if line.contains("Folder scan completed") {
             self.scan_count += 1;
             self.scan_count_total += 1;
@@ -121,7 +115,6 @@ impl LogParser {
             return;
         }
 
-        // Starting folder scan
         if line.contains("Starting folder scan") {
             if let Some(folder_id) = extract_kv(line, "folder_id") {
                 self.scan_starts.insert(folder_id, Instant::now());
@@ -129,7 +122,6 @@ impl LogParser {
             return;
         }
 
-        // Folder / Pull completed
         if line.contains("Folder pull completed") || line.contains("Pull completed") {
             self.pull_count += 1;
             self.pull_count_total += 1;
@@ -138,7 +130,6 @@ impl LogParser {
                     self.pull_duration_ms = Some(start.elapsed().as_millis() as u64);
                 }
             }
-            // Try to extract succeeded/failed counts, e.g. "succeeded=10 failed=2".
             if let Some(failed) = extract_kv(line, "failed") {
                 if let Ok(n) = failed.parse::<u64>() {
                     self.pull_failed += n;
@@ -148,7 +139,6 @@ impl LogParser {
             return;
         }
 
-        // Starting folder pull
         if line.contains("Starting folder pull") {
             if let Some(folder_id) = extract_kv(line, "folder_id") {
                 self.pull_starts.insert(folder_id, Instant::now());
@@ -156,7 +146,6 @@ impl LogParser {
             return;
         }
 
-        // InvalidFile warnings
         if line.contains("InvalidFile") {
             self.invalid_file_count += 1;
             self.invalid_file_total += 1;

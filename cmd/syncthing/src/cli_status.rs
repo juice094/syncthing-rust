@@ -1,4 +1,4 @@
-//! CLI `syncthing status` — 非交互式查询 daemon 运行状态
+//! CLI `syncthing status` — non-interactive daemon status query.
 
 use std::path::Path;
 
@@ -7,14 +7,14 @@ use serde::Deserialize;
 
 use crate::api_client::ApiClient;
 
-/// System status response (subset of /rest/system/status)
+/// System status response (subset of `/rest/system/status`).
 #[derive(Debug, Deserialize)]
 struct SystemStatus {
     my_id: String,
     uptime: u64,
 }
 
-/// Connections response (subset of /rest/system/connections)
+/// Connections response (subset of `/rest/system/connections`).
 #[derive(Debug, Deserialize)]
 struct Connections {
     #[serde(default)]
@@ -26,7 +26,6 @@ pub async fn run(config_path: &Path, json_output: bool) -> anyhow::Result<()> {
     let config = crate::load_config(config_path)?;
     let client = ApiClient::new(&config);
 
-    // Check if daemon is running via /rest/health
     match client.get_raw("/rest/health").await {
         Ok(resp) if resp.status().is_success() => {}
         _ => {

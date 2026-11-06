@@ -1,4 +1,4 @@
-//! 72h Stress Test Binary
+//! 72h stress-test binary.
 //!
 //! Usage:
 //!   syncthing.exe stress-test --duration 72h --report report.csv
@@ -19,7 +19,7 @@ use tracing::{info, warn};
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
 
-/// PID 文件管理：写入当前进程号，返回路径用于后续清理
+/// Writes the current PID to the pid file.
 async fn write_pid_file(path: &PathBuf) -> anyhow::Result<()> {
     let pid = std::process::id();
     tokio::fs::write(path, pid.to_string()).await?;
@@ -90,7 +90,7 @@ fn fmt_system_time(t: SystemTime) -> String {
     dt.format("%Y-%m-%dT%H:%M:%SZ").to_string()
 }
 
-/// T2.2: Initialize logging with rotating file appender + stdout.
+/// T2.2: initializes logging with a rotating file appender + stdout.
 ///
 /// - File: `<log_dir>/stress.log.YYYY-MM-DD` rotated daily, max 7 retained.
 /// - Stdout: same content, useful for live tailing under nohup.
@@ -145,8 +145,6 @@ async fn main() -> anyhow::Result<()> {
     let args = Args::parse();
 
     // T2.2: replace `tracing_subscriber::fmt::init()` with rotating file appender
-    // (daily rotation, keep 7 days) + stdout layer. The non-blocking worker guard
-    // must outlive main() to flush buffered logs on exit.
     let _log_guard = init_logging(&args.log_dir)?;
 
     // T-F1 ENHANCEMENT: Panic hook to capture all unhandled panics
@@ -187,11 +185,9 @@ async fn main() -> anyhow::Result<()> {
         args.resume
     );
 
-    // PID file
     write_pid_file(&args.pid_file).await?;
     let pid_file = args.pid_file.clone();
 
-    // Ctrl+C / graceful shutdown
     let (shutdown_tx, mut shutdown_rx) = tokio::sync::oneshot::channel::<()>();
     tokio::spawn(async move {
         if let Err(e) = tokio::signal::ctrl_c().await {
@@ -203,9 +199,6 @@ async fn main() -> anyhow::Result<()> {
     });
 
     // T-F1 ENHANCEMENT: Main task heartbeat — writes timestamp to file every 30s
-    // If this file stops being updated while process appears dead, we know the main
-    // tokio::select was alive but process was killed externally. If file is updated
-    // recently but process is dead, that's a strong signal of TerminateProcess.
     let heartbeat_path = std::env::current_dir()
         .unwrap_or_default()
         .join("stress-heartbeat.log");
@@ -236,7 +229,6 @@ async fn main() -> anyhow::Result<()> {
     });
 
     if !args.resume {
-        // Clean old data (fresh start)
         let _ = tokio::fs::remove_dir_all(&args.data_dir).await;
     } else {
         info!(
@@ -259,7 +251,6 @@ async fn main() -> anyhow::Result<()> {
     tokio::fs::create_dir_all(&folder_path_a).await?;
     tokio::fs::create_dir_all(&folder_path_b).await?;
 
-    // Configure shared folder on both nodes
     if !args.resume {
         node_a
             .add_folder(syncthing_core::types::Folder::new(
@@ -277,7 +268,6 @@ async fn main() -> anyhow::Result<()> {
         info!("Resume mode: skipping folder reconfiguration");
     }
 
-    // Connect peers
     node_a.connect_to(&node_b).await?;
     node_b.connect_to(&node_a).await?;
     node_a
@@ -286,7 +276,6 @@ async fn main() -> anyhow::Result<()> {
     info!("Nodes connected, stress test active");
 
     if !args.resume {
-        // Clean old reports
         let _ = tokio::fs::remove_file(&args.report).await;
         let _ = tokio::fs::remove_file(args.report.with_extension("metrics.csv")).await;
     } else {
@@ -296,7 +285,6 @@ async fn main() -> anyhow::Result<()> {
     let start = Instant::now();
     let error_count = Arc::new(AtomicU64::new(0));
 
-    // ── Monitor task ──
     let monitor_handle_a = node_a.connection_handle.clone();
     let monitor_handle_b = node_b.connection_handle.clone();
     let monitor_service_a = node_a.sync_service.clone();
@@ -326,7 +314,7 @@ async fn main() -> anyhow::Result<()> {
                 true,
                 ProcessRefreshKind::nothing().with_memory(),
             );
-            // T-F1 FIX: 二进制名是 stress_test（非 syncthing），之前 rss_mb 永远为 0
+            // T-F1 FIX: the process image name is stress_test (not syncthing), which previously kept rss_mb at 0
             sys.processes_by_exact_name("stress_test".as_ref())
                 .map(|p| p.memory() / 1024 / 1024)
                 .sum::<u64>()
@@ -388,7 +376,6 @@ async fn main() -> anyhow::Result<()> {
                 warn!("Failed to flush metrics CSV: {}", e);
             }
 
-            // Consistency check: every 5 ticks (~5 min) compare file hashes
             if elapsed.is_multiple_of(tick_secs * 5) {
                 match compute_dir_hashes(&monitor_fa).await {
                     Ok(hashes_a) => match compute_dir_hashes(&monitor_fb).await {
@@ -429,7 +416,6 @@ async fn main() -> anyhow::Result<()> {
         }
     });
 
-    // ── Load injection task ──
     let inject_path = folder_path_a.clone();
     let inject_errors = Arc::clone(&error_count);
     let inject_task = tokio::spawn(async move {
@@ -441,7 +427,6 @@ async fn main() -> anyhow::Result<()> {
             ticker.tick().await;
             counter += 1;
 
-            // Create with rotating size
             let size = sizes[(counter as usize) % sizes.len()];
             let file = inject_path.join(format!("file_{:04}.dat", counter));
             let data = vec![(counter % 256) as u8; size];
@@ -450,7 +435,6 @@ async fn main() -> anyhow::Result<()> {
                 inject_errors.fetch_add(1, Ordering::Relaxed);
             }
 
-            // Modify older file (same size class)
             if counter > 3 {
                 let old = inject_path.join(format!("file_{:04}.dat", counter - 3));
                 if old.exists() {
@@ -463,7 +447,6 @@ async fn main() -> anyhow::Result<()> {
                 }
             }
 
-            // Delete oldest file
             if counter > 6 {
                 let old = inject_path.join(format!("file_{:04}.dat", counter - 6));
                 if old.exists() {
@@ -476,7 +459,6 @@ async fn main() -> anyhow::Result<()> {
         }
     });
 
-    // ── Fault injection task ──
     let fault_handle = node_a.connection_handle.clone();
     let fault_peer = node_b.device_id;
     let fault_addr = node_b.bep_addr;
@@ -502,7 +484,6 @@ async fn main() -> anyhow::Result<()> {
         }
     });
 
-    // ── Main timer ──
     tokio::select! {
         _ = tokio::time::sleep(duration) => {
             info!("Stress test duration reached");
@@ -521,7 +502,6 @@ async fn main() -> anyhow::Result<()> {
     fault_task.abort();
     heartbeat_handle.abort();
 
-    // Final sync check: content hash consistency (not just file count)
     let final_a_count = count_files(&folder_path_a).await;
     let final_b_count = count_files(&folder_path_b).await;
     let total_errors = error_count.load(Ordering::Relaxed);
@@ -567,7 +547,6 @@ async fn main() -> anyhow::Result<()> {
     node_a.shutdown().await;
     node_b.shutdown().await;
 
-    // Cleanup PID file
     remove_pid_file(&pid_file).await;
     info!("Report: {}", args.report.display());
     Ok(())
@@ -591,8 +570,8 @@ async fn count_files(path: &PathBuf) -> usize {
     count
 }
 
-/// 递归扫描目录，返回 (相对路径 → SHA-256 十六进制) 的映射。
-/// 目录条目被跳过，仅计算普通文件。
+/// Recursively scans a directory into a map of relative path -> SHA-256 hex.
+/// Directories are skipped; only regular files are hashed.
 async fn compute_dir_hashes(
     root: &std::path::Path,
 ) -> anyhow::Result<std::collections::HashMap<String, String>> {
@@ -636,7 +615,7 @@ async fn compute_dir_hashes(
     Ok(result)
 }
 
-/// 计算单个文件的 SHA-256，在 spawn_blocking 中执行。
+/// Hashes one file with SHA-256 on a blocking thread.
 async fn sha256_file(path: &std::path::Path) -> anyhow::Result<String> {
     let path = path.to_path_buf();
     let bytes = tokio::fs::read(&path).await?;
@@ -649,7 +628,7 @@ async fn sha256_file(path: &std::path::Path) -> anyhow::Result<String> {
     Ok(hash)
 }
 
-/// 比对两个目录的哈希映射，返回不一致信息。
+/// Compares two directory hash maps and returns the mismatch descriptions.
 fn compare_hashes(
     a_name: &str,
     a: &std::collections::HashMap<String, String>,
@@ -657,7 +636,6 @@ fn compare_hashes(
     b: &std::collections::HashMap<String, String>,
 ) -> (bool, Vec<String>) {
     let mut mismatches = Vec::new();
-    // A 中有但 B 中缺失或内容不同
     for (rel, hash_a) in a {
         match b.get(rel) {
             Some(hash_b) if hash_a == hash_b => {}
@@ -676,7 +654,6 @@ fn compare_hashes(
             }
         }
     }
-    // B 中有但 A 中缺失
     for rel in b.keys() {
         if !a.contains_key(rel) {
             mismatches.push(format!("missing_in_{}: {}", a_name, rel));

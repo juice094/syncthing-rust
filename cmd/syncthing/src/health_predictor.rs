@@ -1,13 +1,15 @@
-//! 预测性健康检查（Predictive Health Checks）
+//! Predictive health checks.
 //!
-//! 订阅同步事件并周期性评估趋势，提前发现潜在问题：
+//! Subscribes to sync events and periodically evaluates trends to surface
+//! problems early:
 //!
-//! - 扫描/拉取失败率上升
-//! - Watcher 事件丢失
-//! - 文件夹状态频繁翻转（flapping）
-//! - 增量扫描占比下降（脏路径集合过大）
+//! - rising scan / pull failure rates
+//! - watcher event drops
+//! - folder state flapping
+//! - falling incremental-scan ratio (dirty-set too large)
 //!
-//! 当检测到异常趋势时，向日志输出警告，并可对 FolderOrchestrator 进行节流。
+//! When an abnormal trend is detected a warning is logged and the
+//! FolderOrchestrator may be throttled.
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -20,22 +22,22 @@ use tokio::sync::watch;
 use tokio::task::JoinHandle;
 use tracing::{info, warn};
 
-/// 健康检查配置
+/// Health-check configuration.
 #[derive(Debug, Clone, Copy)]
 pub struct HealthPredictorConfig {
-    /// 评估间隔（默认 60 秒）
+    /// Evaluation interval (default 60s).
     pub interval_secs: u64,
-    /// 滑动窗口包含的评估间隔数（默认 5）
+    /// Sliding window length in intervals (default 5).
     pub window_intervals: usize,
-    /// 扫描失败率阈值（默认 10%）
+    /// Scan failure-rate threshold (default 0.10).
     pub scan_failure_ratio_threshold: f64,
-    /// 拉取失败率阈值（默认 10%）
+    /// Pull failure-rate threshold (default 0.10).
     pub pull_failure_ratio_threshold: f64,
-    /// 每个窗口内 watcher 丢事件阈值（默认 50）
+    /// Watcher-drop threshold per window (default 50).
     pub watcher_drop_threshold: u64,
-    /// 每个窗口内状态翻转阈值（默认 20）
+    /// State-transition threshold per window (default 20).
     pub state_flap_threshold: u64,
-    /// 增量扫描占比阈值（默认 0.5）；低于该值说明 watcher 脏集合过大
+    /// Incremental-scan ratio threshold (default 0.5); below this the watcher dirty set is too large.
     pub incremental_ratio_threshold: f64,
 }
 
@@ -53,7 +55,7 @@ impl Default for HealthPredictorConfig {
     }
 }
 
-/// 单个 folder 在一个窗口内的观测计数
+/// Per-folder observation counters for one window.
 #[derive(Debug, Default, Clone, Copy)]
 struct FolderWindow {
     scans_completed: u64,
@@ -66,7 +68,7 @@ struct FolderWindow {
     state_transitions: u64,
 }
 
-/// 预测性健康检查器
+/// Predictive health checker.
 #[derive(Debug)]
 pub struct HealthPredictor {
     subscriber: EventSubscriber,
@@ -77,12 +79,12 @@ pub struct HealthPredictor {
 }
 
 impl HealthPredictor {
-    /// 创建健康检查器
+    /// Creates a checker with default config.
     pub fn new(subscriber: EventSubscriber, orchestrator: Option<Arc<FolderOrchestrator>>) -> Self {
         Self::with_config(subscriber, orchestrator, HealthPredictorConfig::default())
     }
 
-    /// 使用指定配置创建健康检查器
+    /// Creates a checker with the given config.
     pub fn with_config(
         subscriber: EventSubscriber,
         orchestrator: Option<Arc<FolderOrchestrator>>,
@@ -97,7 +99,7 @@ impl HealthPredictor {
         }
     }
 
-    /// 在后台启动健康检查任务
+    /// Spawns the background evaluation task.
     pub fn spawn(mut self, mut shutdown: watch::Receiver<bool>) -> JoinHandle<()> {
         tokio::spawn(async move {
             let mut interval =
@@ -108,7 +110,6 @@ impl HealthPredictor {
             loop {
                 tokio::select! {
                     _ = interval.tick() => {
-                        // 汇总当前窗口与历史窗口
                         let aggregated = Self::aggregate_windows(&current, &history, self.config.window_intervals);
                         self.evaluate(&aggregated);
 
@@ -267,7 +268,6 @@ impl HealthPredictor {
             }
         }
 
-        // 当检测到异常时，对 orchestrator 进行节流；无异常时逐步恢复
         if let Some(ref orch) = self.orchestrator {
             let current_throttle = orch.load().throttle_percent;
             if any_alert && current_throttle > 50 {

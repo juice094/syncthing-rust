@@ -4,6 +4,7 @@ use std::sync::Arc;
 use tokio::sync::Mutex;
 use tracing::{info, warn};
 
+/// Spawns the NAT-PMP/UPnP port-mapping task with periodic renewal.
 pub fn spawn_port_mapper(
     actual_addr: SocketAddr,
     local_port: u16,
@@ -22,7 +23,6 @@ pub fn spawn_port_mapper(
                     gd.trigger_reannounce();
                 }
 
-                // 自动续约循环（每 lifetime/2 续约一次）
                 loop {
                     let now = std::time::Instant::now();
                     let renew_after = mapping.renew_after();
@@ -38,7 +38,6 @@ pub fn spawn_port_mapper(
                             let new_ext = new_mapping.external_addr();
                             info!("PortMapper renewed: {} -> {}", actual_addr, new_ext);
 
-                            // 更新 public_addrs：替换旧的外部地址
                             {
                                 let mut addrs = public_addrs.lock().await;
                                 let old_url = format!("tcp://{}", current_ext);
@@ -72,6 +71,7 @@ pub fn spawn_port_mapper(
     });
 }
 
+/// Spawns the STUN public-address discovery task.
 pub fn spawn_stun(
     local_port: u16,
     public_addrs: Arc<Mutex<Vec<String>>>,

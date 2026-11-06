@@ -1,19 +1,20 @@
-//! 单实例锁 — C-UX-5
+//! Single-instance lock (C-UX-5).
 //!
-//! 防止同一配置目录下启动多个 syncthing-rust 进程，避免 device ID 冲突、
-//! 端口占用和连接状态混乱。
+//! Prevents multiple syncthing-rust processes from sharing one config
+//! directory, which would cause device ID conflicts, port collisions, and
+//! inconsistent connection state.
 
 use std::path::Path;
 use sysinfo::{ProcessRefreshKind, RefreshKind, System};
 
 const PID_FILE_NAME: &str = "syncthing.pid";
 
-/// 尝试获取单实例锁。
+/// Acquires the single-instance lock.
 ///
-/// 检查 config_dir/syncthing.pid：
-/// - 若不存在 → 写入当前 PID，返回 Ok
-/// - 若存在且对应进程仍在运行 → 返回 Err，提示用户
-/// - 若存在但对应进程已消失 → 覆盖写入当前 PID，返回 Ok
+/// Checks `config_dir/syncthing.pid`:
+/// - missing → writes the current PID and returns Ok;
+/// - present with a live process → returns Err telling the user;
+/// - present but the process is gone → overwrites with the current PID and returns Ok.
 pub fn acquire(config_dir: &Path) -> Result<(), String> {
     let pid_file = config_dir.join(PID_FILE_NAME);
 
@@ -46,14 +47,15 @@ pub fn acquire(config_dir: &Path) -> Result<(), String> {
     Ok(())
 }
 
-/// 释放单实例锁（删除 pid 文件）。
+/// Releases the lock by deleting the pid file.
 pub fn release(config_dir: &Path) {
     let _ = std::fs::remove_file(config_dir.join(PID_FILE_NAME));
 }
 
-/// 检查 pid 文件是否指向一个仍在运行的 syncthing-rust 实例。
+/// Checks whether the pid file points at a live syncthing-rust instance.
 ///
-/// 返回 Some(pid) 表示有另一个实例在运行；返回 None 表示无实例或 pid 文件已过期。
+/// Returns `Some(pid)` when another instance is running; `None` when there is
+/// no instance or the pid file is stale.
 pub fn running_instance_pid(config_dir: &Path) -> Option<u32> {
     let pid_file = config_dir.join(PID_FILE_NAME);
     if !pid_file.exists() {
@@ -71,7 +73,7 @@ pub fn running_instance_pid(config_dir: &Path) -> Option<u32> {
     }
 }
 
-/// 检查指定 PID 的进程是否仍在运行。
+/// Checks whether the process with the given PID is still alive.
 pub fn is_process_alive(pid: u32) -> bool {
     if pid == 0 {
         return false;

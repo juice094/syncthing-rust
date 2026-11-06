@@ -1,10 +1,12 @@
-//! 内部健康看门狗
+//! Internal health watchdog.
 //!
-//! 目标：在 daemon 进入“API 无响应”等半死状态时自动重启进程，实现自愈。
-//! 触发条件：连续两次对 REST API `/rest/system/status` 的健康检查失败或超时。
+//! Restarts the process when the daemon gets half-dead (REST API
+//! unresponsive): two consecutive failed or timed-out checks of
+//! `/rest/system/status` trigger a restart.
 //!
-//! 重启方式：使用当前可执行文件路径和命令行参数重新 spawn 一个新进程，随后
-//! 触发当前进程的优雅关闭。若优雅关闭卡住，当前进程将在短暂延迟后强制退出。
+//! Restart = spawn a copy of the current executable with the same arguments,
+//! then trigger a graceful shutdown of the current process. If the graceful
+//! shutdown stalls, the process force-exits after a short delay.
 
 use std::net::SocketAddr;
 use std::path::PathBuf;
@@ -15,19 +17,19 @@ use tracing::{error, info, warn};
 
 use crate::{load_config, CONFIG_FILE_NAME};
 
-/// 健康检查间隔
+/// Health-check interval.
 const CHECK_INTERVAL: Duration = Duration::from_secs(30);
-/// 单次健康检查超时
+/// Per-check timeout.
 const CHECK_TIMEOUT: Duration = Duration::from_secs(10);
-/// 连续失败次数阈值，达到后触发重启
+/// Consecutive failures that trigger a restart.
 const MAX_FAILURES: u32 = 2;
-/// 发送关闭信号后，等待优雅关闭的最长时间
+/// Max wait for the graceful shutdown after signalling it.
 const GRACEFUL_SHUTDOWN_WAIT: Duration = Duration::from_secs(5);
 
-/// 启动看门狗任务。
+/// Starts the watchdog task.
 ///
-/// `api_addr` 是 REST API 实际绑定的地址；`config_dir` 用于读取 API key；
-/// `shutdown_tx` 用于触发当前 daemon 的优雅关闭。
+/// `api_addr` is the actual REST API bind address; `config_dir` supplies the
+/// API key; `shutdown_tx` triggers the current daemon's graceful shutdown.
 pub fn spawn(
     api_addr: SocketAddr,
     config_dir: PathBuf,
@@ -131,7 +133,6 @@ fn restart_process(shutdown_tx: tokio::sync::watch::Sender<bool>) {
         }
     }
 
-    // 触发当前进程的优雅关闭；如果卡住，在短暂等待后强制退出。
     let _ = shutdown_tx.send(true);
     tokio::spawn(async move {
         tokio::time::sleep(GRACEFUL_SHUTDOWN_WAIT).await;

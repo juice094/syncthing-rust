@@ -1,22 +1,25 @@
-//! 统一表单系统 — 替代 4 处重复的表单渲染和按键处理代码。
+//! Unified form system shared by the add/edit device/folder popups.
 //!
-//! 通过 `FormField` 的 `editable` 标志区分 add 模式（全部可编辑）与 edit 模式（ID 字段只读），
-//! 消除 add_device/add_folder/edit_device/edit_folder 的 70-80% 重复。
+//! The `FormField::editable` flag distinguishes add mode (all fields
+//! editable) from edit mode (ID field read-only), removing most of the
+//! former per-popup duplication.
 
+/// Form key handling.
 pub mod handler;
+/// Form rendering.
 pub mod render;
 
-/// 表单字段定义
+/// One form field definition.
 pub struct FormField {
     pub name: &'static str,
     pub label: &'static str,
     pub value: String,
-    /// true = add 模式（可编辑），false = edit 模式（只读）
+    /// true in add mode (editable), false in edit mode (read-only).
     pub editable: bool,
     pub hint: Option<&'static str>,
 }
 
-/// 统一表单状态
+/// Unified form state.
 pub struct FormState {
     pub fields: Vec<FormField>,
     pub focus: usize,
@@ -26,7 +29,7 @@ pub struct FormState {
     pub error: Option<String>,
 }
 
-/// 表单操作结果
+/// Action the caller should take after a key press.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FormAction {
     Continue,
@@ -35,6 +38,7 @@ pub enum FormAction {
 }
 
 impl FormState {
+    /// Creates an empty form with the given title and popup size.
     pub fn new(title: &'static str, width: u16, height: u16) -> Self {
         Self {
             fields: Vec::new(),
@@ -46,6 +50,7 @@ impl FormState {
         }
     }
 
+    /// Appends a field (builder style).
     pub fn add_field(
         mut self,
         name: &'static str,
@@ -64,7 +69,7 @@ impl FormState {
         self
     }
 
-    /// 按字段名取值
+    /// Returns the value of the field named `name`.
     pub fn value(&self, name: &str) -> Option<&str> {
         self.fields
             .iter()
@@ -72,24 +77,27 @@ impl FormState {
             .map(|f| f.value.as_str())
     }
 
-    /// 文本字段数量（不含 device 列表等扩展选区）
+    /// Number of text fields (excludes extended selections like the device list).
     pub fn field_count(&self) -> usize {
         self.fields.len()
     }
 
+    /// Sets the error line shown under the form.
     pub fn set_error(&mut self, msg: String) {
         self.error = Some(msg);
     }
 
+    /// Clears the form error line.
     pub fn clear_error(&mut self) {
         self.error = None;
     }
 
+    /// Returns the name of the focused field, if any.
     pub fn focused_field_name(&self) -> Option<&'static str> {
         self.fields.get(self.focus).map(|f| f.name)
     }
 
-    /// 将 Device ID 输入格式化为 8 组、每组 7 个字母数字，用 `-` 连接。
+    /// Formats raw Device ID input as 8 groups of 7 alphanumeric chars joined with `-`.
     pub fn format_device_id(input: &str) -> String {
         let cleaned: Vec<char> = input
             .chars()
@@ -103,6 +111,7 @@ impl FormState {
         groups.join("-")
     }
 
+    /// Appends one character to the focused field (with Device ID grouping).
     pub fn append_char(&mut self, c: char) {
         if self.focused_field_name() == Some("device_id") {
             if !c.is_ascii_alphanumeric() {
@@ -121,6 +130,7 @@ impl FormState {
         }
     }
 
+    /// Deletes one character from the focused field (with Device ID grouping).
     pub fn backspace(&mut self) {
         if self.focused_field_name() == Some("device_id") {
             if let Some(field) = self.fields.get_mut(self.focus) {
@@ -144,6 +154,7 @@ impl FormState {
         }
     }
 
+    /// Moves focus to the next field; optionally skips read-only fields.
     pub fn focus_next(&mut self, skip_readonly: bool) {
         let count = self.fields.len();
         if count == 0 {
@@ -158,6 +169,7 @@ impl FormState {
         }
     }
 
+    /// Moves focus to the previous field; optionally skips read-only fields.
     pub fn focus_prev(&mut self, skip_readonly: bool) {
         let count = self.fields.len();
         if count == 0 {
@@ -176,6 +188,7 @@ impl FormState {
         }
     }
 
+    /// Whether focus is on the extended selection list (past the text fields).
     pub fn is_on_list(&self) -> bool {
         self.focus == self.fields.len()
     }

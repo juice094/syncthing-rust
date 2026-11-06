@@ -1,6 +1,6 @@
-//! CLI 初始化向导 — C-UX-1
+//! CLI init wizard (C-UX-1).
 //!
-//! 交互式生成 config.json，降低手动编辑 JSON 的配置门槛。
+//! Interactively generates config.json to lower the barrier of hand-editing JSON.
 
 use std::io::{self, Write};
 use std::path::PathBuf;
@@ -24,16 +24,15 @@ fn prompt(message: &str, default: Option<&str>) -> io::Result<String> {
     }
 }
 
+/// Runs the interactive wizard and writes config.json under `config_dir`.
 pub fn run_wizard(config_dir: &PathBuf) -> anyhow::Result<()> {
     println!("========================================");
     println!("  Syncthing-Rust 初始化向导");
     println!("========================================");
     println!();
 
-    // 1. 设备名称
     let device_name = prompt("1. 本设备名称", Some("syncthing-rust"))?;
 
-    // 2. 同步文件夹路径
     let folder_path = loop {
         let path = prompt("2. 同步文件夹路径（绝对路径）", None)?;
         if path.is_empty() {
@@ -54,7 +53,6 @@ pub fn run_wizard(config_dir: &PathBuf) -> anyhow::Result<()> {
         break path;
     };
 
-    // 3. 对侧设备 ID
     let peer_id = loop {
         let id = prompt("3. 对侧设备 ID（如 XXXXXXX-XXXXXXX-...）", None)?;
         if id.is_empty() {
@@ -68,7 +66,6 @@ pub fn run_wizard(config_dir: &PathBuf) -> anyhow::Result<()> {
         break id;
     };
 
-    // 4. 对侧地址
     let peer_addr = loop {
         let addr = prompt(
             "4. 对侧地址（如 192.168.1.100:22001 或 tailscale IP）",
@@ -85,12 +82,10 @@ pub fn run_wizard(config_dir: &PathBuf) -> anyhow::Result<()> {
         break addr;
     };
 
-    // 5. 生成本地设备 ID
     let local_device_id = syncthing_core::DeviceId::random();
     println!();
     println!("生成本地设备 ID: {}", local_device_id);
 
-    // 6. 组装配置
     let config = Config {
         version: 1,
         listen_addr: syncthing_core::constants::DEFAULT_LISTEN_ADDR.to_string(),
@@ -129,7 +124,6 @@ pub fn run_wizard(config_dir: &PathBuf) -> anyhow::Result<()> {
         },
     };
 
-    // 7. 保存
     let config_path = config_dir.join("config.json");
     std::fs::create_dir_all(config_dir)?;
     let content = serde_json::to_string_pretty(&config)?;

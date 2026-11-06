@@ -6,7 +6,7 @@ use crate::save_config;
 use crate::tui::app::{App, Popup, Tab};
 use crate::tui::forms::FormState;
 
-/// Tab 非弹窗模式下的按键处理
+/// Handles key presses in non-popup tab mode.
 pub fn handle_tab_key(app: &mut App, key: KeyEvent) -> bool {
     match key.code {
         KeyCode::Right | KeyCode::Tab => app.tab = app.tab.next(),
@@ -51,7 +51,6 @@ pub fn handle_tab_key(app: &mut App, key: KeyEvent) -> bool {
                     );
                 app.resize_form();
                 app.form = Some(form);
-                // 重置共享设备选择，避免残留上一次 EditFolder 的勾选
                 app.folder_device_selected = 0;
                 app.folder_device_selection = vec![false; app.config.devices.len()];
                 app.popup = Popup::AddFolder;
@@ -204,7 +203,7 @@ pub fn handle_tab_key(app: &mut App, key: KeyEvent) -> bool {
     false
 }
 
-/// 保存配置并刷新相关状态
+/// Saves the config and refreshes dependent state.
 pub fn save_and_log(app: &mut App) {
     let path = app.config_dir.join("config.json");
     match save_config(&path, &app.config) {

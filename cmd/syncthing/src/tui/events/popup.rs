@@ -10,17 +10,15 @@ use crate::tui::forms::FormAction;
 
 use super::tab::save_and_log;
 
-/// 处理弹窗内的按键（所有表单弹窗的统一入口）
+/// Handles key presses inside form popups (single entry point for all forms).
 pub fn handle_popup_key(app: &mut App, key: KeyEvent) -> bool {
     let form = match &mut app.form {
         Some(f) => f,
         None => return false,
     };
 
-    // 文件夹表单的 device 列表特殊处理
     let is_folder = matches!(app.popup, Popup::AddFolder | Popup::EditFolder);
 
-    // 从文本字段 Tab/Down 进入 Share with 列表；BackTab/Up 从首个字段回绕进入列表
     if is_folder && !form.is_on_list() {
         let last_field = form.field_count().saturating_sub(1);
         match key.code {
@@ -69,7 +67,6 @@ pub fn handle_popup_key(app: &mut App, key: KeyEvent) -> bool {
             }
             _ => {}
         }
-        // Other keys on device list: only Space, Tab, Up, Down matter
         if !matches!(key.code, KeyCode::Enter | KeyCode::Esc) {
             return false;
         }
@@ -91,7 +88,7 @@ pub fn handle_popup_key(app: &mut App, key: KeyEvent) -> bool {
     false
 }
 
-/// 提交当前表单（验证 + 保存）
+/// Submits the current form (validation + save).
 fn submit_form(app: &mut App) {
     match app.popup {
         Popup::AddDevice => submit_add_device(app),

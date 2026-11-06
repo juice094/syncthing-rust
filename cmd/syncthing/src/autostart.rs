@@ -1,19 +1,13 @@
-//! Windows 开机自启动注册
-//!
-//! 通过写入 HKCU\Software\Microsoft\Windows\CurrentVersion\Run 实现。
+//! Windows autostart registration via the HKCU Run key.
 
 use std::path::Path;
 
-// ============================================================
-// Windows implementation
-// ============================================================
-
 #[cfg(windows)]
-/// 注册表值名
+/// Registry value name under the Run key.
 const REG_VALUE_NAME: &str = "syncthing-rust";
 
 #[cfg(windows)]
-/// 安装开机自启动
+/// Registers the binary to start on login.
 pub fn install(config_dir: &Path) -> anyhow::Result<()> {
     let exe = std::env::current_exe().map_err(|e| anyhow::anyhow!("get current exe: {}", e))?;
     let cmd = format!(
@@ -29,7 +23,7 @@ pub fn install(config_dir: &Path) -> anyhow::Result<()> {
 }
 
 #[cfg(windows)]
-/// 取消开机自启动
+/// Removes the autostart entry.
 pub fn uninstall() -> anyhow::Result<()> {
     let hkey = open_run_key(true)?;
     delete_reg_value(hkey, REG_VALUE_NAME)?;
@@ -39,21 +33,17 @@ pub fn uninstall() -> anyhow::Result<()> {
 
 #[cfg(not(windows))]
 #[allow(dead_code)]
-/// 安装开机自启动（非 Windows 平台不支持）
+/// Install autostart (unsupported on this platform).
 pub fn install(_config_dir: &Path) -> anyhow::Result<()> {
     anyhow::bail!("autostart is only supported on Windows")
 }
 
 #[cfg(not(windows))]
 #[allow(dead_code)]
-/// 取消开机自启动（非 Windows 平台不支持）
+/// Remove autostart (unsupported on this platform).
 pub fn uninstall() -> anyhow::Result<()> {
     anyhow::bail!("autostart is only supported on Windows")
 }
-
-// ============================================================
-// Windows registry helpers
-// ============================================================
 
 #[cfg(windows)]
 use windows::core::w;
@@ -68,8 +58,9 @@ use windows::Win32::System::Registry::{
 fn open_run_key(_writable: bool) -> anyhow::Result<HKEY> {
     let mut hkey = HKEY(std::ptr::null_mut());
     let path = w!("Software\\Microsoft\\Windows\\CurrentVersion\\Run");
-    // SAFETY: HKEY_CURRENT_USER 是预定义的根键句柄，path 是常量字符串。
-    // RegCreateKeyW 在 HKCU 下创建/打开 Run 子键，不会越权访问。
+    // SAFETY: HKEY_CURRENT_USER is a predefined root key handle and path is a
+    // constant string. RegCreateKeyW only creates/opens the Run subkey under
+    // HKCU, with no privilege escalation.
     unsafe {
         let result = RegCreateKeyW(HKEY_CURRENT_USER, path, &mut hkey);
         if result.0 != 0 {
@@ -84,8 +75,9 @@ fn set_reg_value(hkey: HKEY, name: &str, value: &str) -> anyhow::Result<()> {
     let name_wide: Vec<u16> = name.encode_utf16().chain(std::iter::once(0)).collect();
     let value_wide: Vec<u16> = value.encode_utf16().chain(std::iter::once(0)).collect();
     let byte_len = (value_wide.len() * std::mem::size_of::<u16>()) as u32;
-    // SAFETY: name_wide/value_wide 是栈上 Vec 的指针，在函数作用域内有效。
-    // from_raw 不获取所有权，slice::from_raw_parts 仅在 RegSetValueExW 调用期间读取。
+    // SAFETY: name_wide/value_wide point at stack Vecs valid for the function
+    // scope. from_raw borrows without taking ownership; slice::from_raw_parts
+    // is only read for the duration of the RegSetValueExW call.
     unsafe {
         RegSetValueExW(
             hkey,
@@ -106,7 +98,7 @@ fn set_reg_value(hkey: HKEY, name: &str, value: &str) -> anyhow::Result<()> {
 #[cfg(windows)]
 fn delete_reg_value(hkey: HKEY, name: &str) -> anyhow::Result<()> {
     let name_wide: Vec<u16> = name.encode_utf16().chain(std::iter::once(0)).collect();
-    // SAFETY: name_wide 是栈上 Vec，在函数作用域内有效。from_raw 不获取所有权。
+    // SAFETY: name_wide is a stack Vec valid for the function scope; from_raw borrows without taking ownership.
     unsafe {
         let result = RegDeleteValueW(hkey, windows::core::PCWSTR::from_raw(name_wide.as_ptr()));
         if result.0 != 0 {
@@ -124,8 +116,9 @@ fn delete_reg_value(hkey: HKEY, name: &str) -> anyhow::Result<()> {
 
 #[cfg(windows)]
 fn close_key(hkey: HKEY) {
-    // SAFETY: hkey 由 RegCreateKeyW/RegOpenKeyW 返回，必须通过 RegCloseKey 释放。
-    // 关闭预定义根键（如 HKCU）是无操作的。
+    // SAFETY: hkey was returned by RegCreateKeyW/RegOpenKeyW and must be
+    // released with RegCloseKey. Closing a predefined root key (e.g. HKCU) is
+    // a no-op.
     unsafe {
         let _ = RegCloseKey(hkey);
     }

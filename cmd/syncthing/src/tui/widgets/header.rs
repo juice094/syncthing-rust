@@ -6,6 +6,7 @@ use ratatui::{
 
 use crate::tui::app::{App, Tab};
 
+/// Draws the tab header.
 pub fn draw(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
     let theme = &app.theme;
     let titles: Vec<Line> = [Tab::Overview, Tab::Devices, Tab::Folders, Tab::Logs]

@@ -10,6 +10,7 @@ use tracing::{info, warn};
 
 use crate::tui::constants;
 
+/// Spawns one relay listener task per relay URL with reconnect backoff.
 #[allow(clippy::too_many_arguments)]
 pub fn spawn_relay_listeners(
     relay_pool_urls: &[String],
@@ -74,7 +75,6 @@ pub fn spawn_relay_listeners(
                     }
                     _ = tokio::time::sleep(backoff) => {}
                 }
-                // Exponential backoff; reset if the listener ran successfully for a while
                 if start.elapsed() > reset_threshold {
                     backoff = Duration::from_secs(1);
                 } else {
@@ -85,10 +85,11 @@ pub fn spawn_relay_listeners(
     }
 }
 
-/// Relay 永久 mode 监听循环
+/// Permanent-mode relay listen loop.
 ///
-/// 连接到 relay 服务器，注册为可用节点，等待 SessionInvitation，
-/// 收到后建立 session mode 连接并完成 BEP TLS + Hello，注册到 ConnectionManager。
+/// Joins the relay, waits for SessionInvitations, and for each invitation
+/// establishes the session-mode connection plus BEP TLS + Hello, then
+/// registers the connection with the ConnectionManager.
 async fn run_relay_listener(
     relay_url: &str,
     _local_device_id: syncthing_core::DeviceId,
@@ -109,7 +110,6 @@ async fn run_relay_listener(
     client.join_relay().await?;
     info!("Relay listener joined {}", relay_addr);
 
-    // Register relay URL with Global Discovery so peers can find us
     {
         let mut addrs = public_addrs.lock().await;
         if !addrs.iter().any(|a| a == relay_url) {
@@ -131,13 +131,12 @@ async fn run_relay_listener(
         let session_stream =
             syncthing_net::relay::join_session(session_addr, &invitation.key).await?;
 
-        // BEP TLS + Hello + Connection 注册
-        // accept_tls_stream / connect_tls_stream 返回不同类型，必须在分支内完成全部操作
+        // accept_tls_stream / connect_tls_stream return different types, so all
+        // follow-up work must stay inside the matching branch.
         if invitation.server_socket {
             let (mut tls_stream, peer_device) =
                 accept_tls_stream(session_stream, tls_config).await?;
 
-            // 在 BEP Hello 前解决连接竞争。
             let _handshake_guard = handle
                 .begin_handshake(peer_device, ConnectionType::Incoming)
                 .map_err(|e| {
@@ -169,7 +168,6 @@ async fn run_relay_listener(
             let (mut tls_stream, peer_device) =
                 connect_tls_stream(session_stream, tls_config, None).await?;
 
-            // 在 BEP Hello 前解决连接竞争。
             let _handshake_guard = handle
                 .begin_handshake(peer_device, ConnectionType::Incoming)
                 .map_err(|e| {

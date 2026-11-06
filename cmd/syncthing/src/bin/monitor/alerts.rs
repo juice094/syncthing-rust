@@ -41,7 +41,6 @@ pub(crate) async fn check_alerts(
     log_trackers: &mut [LogMtimeTracker],
     interval: Duration,
 ) {
-    // 1. Process crash / disappearance / RSS thresholds / predictive RSS.
     for (idx, p) in sample.procs.iter().enumerate() {
         if !p.found {
             let msg = format!(
@@ -54,7 +53,6 @@ pub(crate) async fn check_alerts(
                 warn!("Failed to write alert: {}", e);
             }
         } else {
-            // Immediate RSS alert.
             if p.rss_mb > args.rss_alert_mb {
                 let msg = format!(
                     "[ALERT] {} proc{} RSS {}MiB > threshold {}MiB\n",
@@ -68,7 +66,6 @@ pub(crate) async fn check_alerts(
                 }
             }
 
-            // Predictive RSS via linear regression over last 30 samples.
             let window = &mut rss_windows[idx];
             window.push_back(p.rss_mb);
             if window.len() > 60 {
@@ -103,7 +100,6 @@ pub(crate) async fn check_alerts(
         }
     }
 
-    // 2. Sync backlog growing alert.
     for (folder_id, need) in &sample.api.per_folder_need_files {
         if *need > 0 {
             if let Some(prev) = prev_need_files.get(folder_id) {
@@ -124,7 +120,6 @@ pub(crate) async fn check_alerts(
         prev_need_files.insert(folder_id.clone(), *need);
     }
 
-    // 3. Log size threshold
     for (idx, size_mb) in sample.log_sizes_mb.iter().enumerate() {
         if *size_mb > args.log_alert_mb {
             let msg = format!(
@@ -140,8 +135,6 @@ pub(crate) async fn check_alerts(
         }
     }
 
-    // 4. Log silence detection: if mtime hasn't changed AND size hasn't grown
-    //    for log_silent_secs, the daemon may be hung.
     for (idx, tracker) in log_trackers.iter_mut().enumerate() {
         let current = tokio::fs::metadata(&tracker.path)
             .await
@@ -168,7 +161,6 @@ pub(crate) async fn check_alerts(
                 if let Err(e) = append_text(&args.alerts, msg.clone()).await {
                     warn!("Failed to write alert: {}", e);
                 }
-                // Reset tracker to avoid repeated alerts every tick
                 tracker.last_mtime = SystemTime::now();
             }
         }

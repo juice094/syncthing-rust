@@ -1,10 +1,10 @@
 use std::io::{self, Seek};
 use std::path::{Path, PathBuf};
 
-/// 单次从日志文件尾部读取的最大字节数（1 MiB）。
+/// Maximum number of bytes read from the tail of a log file (1 MiB).
 const MAX_LOG_READ_BYTES: u64 = 1024 * 1024;
 
-/// 在 logs 目录中找到最新的日志文件（按修改时间）
+/// Finds the newest log file in `logs_dir` by modification time.
 pub fn find_latest_log_file(logs_dir: &Path) -> Option<PathBuf> {
     let mut entries: Vec<_> = std::fs::read_dir(logs_dir)
         .ok()?
@@ -20,11 +20,11 @@ pub fn find_latest_log_file(logs_dir: &Path) -> Option<PathBuf> {
     entries.into_iter().next().map(|e| e.path())
 }
 
-/// 读取文件最后 n 行。
+/// Reads the last `n` lines of a file.
 ///
-/// 实现从文件末尾向前 seek，最多只读 `MAX_LOG_READ_BYTES` 字节，避免大日志全量加载。
-/// 若发生截断，返回结果的第一行固定为 `[...truncated]`。Windows CRLF 通过 `str::lines()`
-/// 统一处理。
+/// Seeks from the end and reads at most `MAX_LOG_READ_BYTES`, avoiding a full
+/// load of large logs. When truncated, the first result line is `[...truncated]`;
+/// Windows CRLF is normalized by `str::lines()`.
 pub fn tail_lines(path: &Path, n: usize) -> anyhow::Result<Vec<String>> {
     let mut file = std::fs::File::open(path)?;
     let len = file.metadata()?.len();
@@ -38,7 +38,6 @@ pub fn tail_lines(path: &Path, n: usize) -> anyhow::Result<Vec<String>> {
     let lines: Vec<String> = text.lines().map(|s| s.to_string()).collect();
     let truncated = start > 0;
 
-    // 若发生截断，先丢弃残缺的第一行；截断标记占据一行，因此实际日志取最后 n-1 行。
     let take = if truncated { n.saturating_sub(1) } else { n };
     let tail: Vec<String> = lines
         .into_iter()

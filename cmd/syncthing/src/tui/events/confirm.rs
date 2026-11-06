@@ -2,7 +2,7 @@ use crossterm::event::{KeyCode, KeyEvent};
 
 use crate::tui::app::{App, Popup};
 
-/// 处理确认对话框按键
+/// Handles key presses in the confirm dialog.
 pub fn handle_confirm_key(app: &mut App, key: KeyEvent) -> bool {
     match key.code {
         KeyCode::Char('y') | KeyCode::Char('Y') => {

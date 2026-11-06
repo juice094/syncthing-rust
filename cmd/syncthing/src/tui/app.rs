@@ -11,7 +11,7 @@ use crate::tui::constants;
 use crate::tui::forms::FormState;
 use crate::tui::theme::Theme;
 
-/// 当前激活的 Tab
+/// Currently active tab.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Tab {
     Overview,
@@ -21,6 +21,7 @@ pub enum Tab {
 }
 
 impl Tab {
+    /// Advances to the next tab, wrapping around.
     pub fn next(self) -> Self {
         match self {
             Tab::Overview => Tab::Devices,
@@ -30,6 +31,7 @@ impl Tab {
         }
     }
 
+    /// Goes back to the previous tab, wrapping around.
     pub fn prev(self) -> Self {
         match self {
             Tab::Overview => Tab::Logs,
@@ -39,6 +41,7 @@ impl Tab {
         }
     }
 
+    /// Returns the tab title.
     pub fn title(self) -> &'static str {
         match self {
             Tab::Overview => "Overview",
@@ -49,7 +52,7 @@ impl Tab {
     }
 }
 
-/// 弹窗状态
+/// Popup state.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Popup {
     None,
@@ -64,7 +67,7 @@ pub enum Popup {
     Confirm { title: String, message: String },
 }
 
-/// 全局 App 状态
+/// Global TUI application state.
 pub struct App {
     pub config_dir: PathBuf,
     pub listen: String,
@@ -79,65 +82,66 @@ pub struct App {
 
     pub daemon_running: bool,
     pub daemon_status: String,
-    /// 标记当前 daemon 是否由外部进程（如 Auto 模式的托盘）启动。
-    /// 若为 true，TUI 不应尝试启动/停止它，避免重复实例。
+    /// Whether the current daemon belongs to an external process (e.g. the
+    /// Auto-mode tray). When true, the TUI must not start/stop it.
     pub external_daemon: bool,
-    /// 外部 daemon（托盘）的 PID。用于检测托盘是否意外退出，以便 TUI 切回本地管理。
+    /// PID of the external (tray) daemon; used to detect tray exit so the TUI can resume local control.
     pub external_daemon_pid: Option<u32>,
-    /// 托盘 IPC 管道名。由托盘打开 TUI 时传入，用于 F5 跨进程控制托盘 daemon。
+    /// Tray IPC pipe name, passed when the tray opens the TUI; enables cross-process F5 daemon control.
     pub tray_pipe: Option<String>,
-    /// 托盘 IPC 客户端。连接成功后 TUI 可通过它发送 StartDaemon / StopDaemon。
+    /// Tray IPC client; when connected the TUI sends StartDaemon / StopDaemon through it.
     pub tray_client: Option<TrayIpcClient>,
     pub connected_devices: Vec<DeviceId>,
     pub theme: Theme,
 
-    /// 运行中的 sync_service 引用（用于配置变更通知）
+    /// Handle to the running sync service (notified of config changes).
     pub sync_service: Option<Arc<dyn syncthing_sync::SyncManager>>,
 
-    /// 文件夹实时状态缓存（来自 sync engine 事件）
+    /// Live per-folder status cache (from sync engine events).
     pub folder_states: HashMap<String, FolderStatus>,
 
-    /// 同步进度缓存（folder -> 0.0~1.0）
+    /// Sync progress cache (folder -> 0.0..=1.0).
     pub sync_progress: HashMap<String, f64>,
 
-    /// 最近一次收到 SyncProgress 事件的时间戳
+    /// Timestamp of the most recent SyncProgress event.
     pub last_sync_progress_update: Option<Instant>,
 
-    /// 事件接收器（由 daemon 启动时设置）
+    /// Event receiver (installed when the daemon starts).
     pub event_rx: Option<tokio::sync::mpsc::Receiver<crate::tui::TuiEvent>>,
 
-    /// 日志过滤级别（TUI 快捷键 l 切换）
+    /// Log filter level (toggled with the `l` key).
     pub log_filter_level: tracing::Level,
 
-    /// 日志视图滚动偏移（从底部往上数，0 表示最新）
+    /// Log view scroll offset (counted from the bottom; 0 = newest).
     pub log_scroll_offset: usize,
-    /// 当前搜索关键词；None 表示未在搜索模式
+    /// Current search pattern; None when not searching.
     pub log_search: Option<String>,
-    /// 搜索匹配行的索引（相对于 log_lines，0 表示最旧）
+    /// Indices of matching lines (into `log_lines`; 0 = oldest).
     pub log_search_matches: Vec<usize>,
-    /// 当前高亮的匹配索引（相对于 log_search_matches）
+    /// Index of the currently highlighted match (into `log_search_matches`).
     pub log_search_selected: usize,
 
-    /// 当前列表过滤词（Devices / Folders 共享）
+    /// Current list filter query (shared by Devices / Folders).
     pub list_filter: Option<String>,
-    /// Devices 列表过滤后匹配项在 config.devices 中的原始索引
+    /// Original indices into `config.devices` after filtering.
     pub device_filter_matches: Vec<usize>,
-    /// Folders 列表过滤后匹配项在 config.folders 中的原始索引
+    /// Original indices into `config.folders` after filtering.
     pub folder_filter_matches: Vec<usize>,
-    /// 过滤后列表中的当前选中位置
+    /// Selection position within the filtered list.
     pub list_filter_selected: usize,
 
-    // 统一表单状态（有弹窗时 Some，无弹窗时 None）
+    /// Unified form state (Some while a form popup is open).
     pub form: Option<FormState>,
     pub folder_device_selection: Vec<bool>,
     pub folder_device_selected: usize,
 
-    /// 确认对话框的回调（弹出 Confirm 时设置，确认后执行）
+    /// Callback executed when the Confirm popup is accepted.
     #[allow(clippy::type_complexity)]
     pub confirm_callback: Option<Box<dyn FnOnce(&mut App)>>,
 }
 
 impl App {
+    /// Creates the initial app state for the given config directory and identity.
     pub fn new(config_dir: PathBuf, listen: String, device_name: String, config: Config) -> Self {
         let device_count = config.devices.len().max(1);
         let device_filter_matches: Vec<usize> = (0..config.devices.len()).collect();
@@ -181,6 +185,7 @@ impl App {
         }
     }
 
+    /// Appends a line to the log buffer, evicting the oldest when full.
     pub fn push_log(&mut self, msg: String) {
         if self.log_lines.len() >= constants::LOG_BUFFER_CAP {
             self.log_lines.pop_front();
@@ -191,7 +196,7 @@ impl App {
         }
     }
 
-    /// 根据当前 `log_search` 重新计算匹配行索引。
+    /// Recomputes match indices for the current `log_search`.
     pub fn recompute_log_search_matches(&mut self) {
         self.log_search_matches.clear();
         if let Some(pattern) = &self.log_search {
@@ -209,7 +214,7 @@ impl App {
         }
     }
 
-    /// 根据当前 `list_filter` 重新计算 Devices 过滤匹配列表，并同步修正选中索引。
+    /// Recomputes the filtered Devices match list for `list_filter` and fixes up the selection.
     pub fn recompute_device_filter_matches(&mut self) {
         self.device_filter_matches.clear();
         if let Some(ref q) = self.list_filter {
@@ -237,7 +242,7 @@ impl App {
         }
     }
 
-    /// 根据当前 `list_filter` 重新计算 Folders 过滤匹配列表，并同步修正选中索引。
+    /// Recomputes the filtered Folders match list for `list_filter` and fixes up the selection.
     pub fn recompute_folder_filter_matches(&mut self) {
         self.folder_filter_matches.clear();
         if let Some(ref q) = self.list_filter {
@@ -267,7 +272,7 @@ impl App {
         }
     }
 
-    /// 当前日志视图允许的最大滚动偏移（保证至少保留一行可见）。
+    /// Maximum scroll offset for the current log view (keeps one line visible).
     pub fn max_log_scroll_offset(&self) -> usize {
         if self.log_search.is_some() && !self.log_search_matches.is_empty() {
             self.log_search_matches.len().saturating_sub(1)
@@ -276,16 +281,19 @@ impl App {
         }
     }
 
+    /// Returns the currently selected device, if any.
     #[allow(dead_code)]
     pub fn selected_device(&self) -> Option<&Device> {
         self.config.devices.get(self.device_selected)
     }
 
+    /// Returns the currently selected folder, if any.
     #[allow(dead_code)]
     pub fn selected_folder(&self) -> Option<&Folder> {
         self.config.folders.get(self.folder_selected)
     }
 
+    /// Resizes the folder device-selection vector to the device count.
     pub fn resize_form(&mut self) {
         let count = self.config.devices.len().max(1);
         self.folder_device_selection.resize(count, false);

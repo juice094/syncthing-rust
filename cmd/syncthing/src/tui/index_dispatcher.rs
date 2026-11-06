@@ -1,13 +1,13 @@
-//! Local index update propagation
+//! Local index update propagation.
 //!
-//! 2026-05-13 (T1.3)：从 `daemon_runner.rs` 抽离。监听本地 `LocalIndexUpdated`
-//! 事件，向共享该文件夹的已连接对端发送 BEP `IndexUpdate` 消息。
+//! Subscribes to local `LocalIndexUpdated` events and forwards BEP
+//! `IndexUpdate` messages to connected peers that share the folder. Two
+//! invariants apply (see "docs/design/ADR-20261105-index-update-dispatch.md"):
 //!
-//! 2026-06-16：修复手机 Syncthing-Fork 断开问题——必须在对端收到初始 `Index`
-//! 之后才能发送 `IndexUpdate`，且序列号字段必须正确填充。
-//!
-//! 2026-06-16 (Phase B)：大变更集自动分片，每片 ≤1MiB，避免单个 IndexUpdate
-//! 接近 BEP 消息上限并降低对端解码内存尖峰。
+//! 1. `IndexUpdate` must only be sent after the peer has received the initial
+//!    `Index` for that folder, with correct sequence fields.
+//! 2. Large change sets are chunked so a single `IndexUpdate` stays well below
+//!    the BEP message limit, bounding the peer's decode memory spike.
 
 const MAX_INDEX_UPDATE_BYTES: usize = 1_000_000;
 
@@ -23,13 +23,15 @@ use syncthing_net::protocol::MessageType;
 use syncthing_net::ConnectionManagerHandle;
 use syncthing_sync::{events::SyncEvent, SyncService};
 
-/// 启动本地索引更新传播任务。
+/// Starts the local index update propagation task.
 ///
-/// 订阅 `sync_service.events()`，当收到 `LocalIndexUpdated` 时：
-/// 1. 清空被删除文件的 block list（BEP 协议要求）
-/// 2. 仅保留序列号大于已向该设备发送过的最大序列号的文件（去重/防乱序）
-/// 3. 在确认已向该设备发送过初始 `Index` 后，编码并发送 `IndexUpdate`
-/// 4. 更新已发送的最大序列号
+/// For each `LocalIndexUpdated` event:
+/// 1. clears block lists of deleted files (required by BEP);
+/// 2. keeps only files whose sequence exceeds the highest sequence already sent
+///    to that device (dedup / out-of-order protection);
+/// 3. encodes and sends `IndexUpdate` only after the device's initial `Index`
+///    has been confirmed sent;
+/// 4. records the new highest sent sequence.
 pub fn spawn_index_propagation_loop(
     sync_service: Arc<SyncService>,
     handle: ConnectionManagerHandle,
@@ -45,7 +47,6 @@ pub fn spawn_index_propagation_loop(
                 }
 
                 for device_id in handle.connected_devices() {
-                    // 只发送给共享该文件夹的设备
                     let shares_folder = device_shared_folders
                         .get(&device_id)
                         .map(|entry| entry.value().contains(&folder))
@@ -54,7 +55,7 @@ pub fn spawn_index_propagation_loop(
                         continue;
                     }
 
-                    // 必须已经向该设备发送过初始 Index
+                    // The initial Index must have been sent to this device first.
                     let prev_sequence = match indexed_folders_map.get(&(device_id, folder.clone()))
                     {
                         Some(entry) => *entry.value(),
@@ -68,9 +69,9 @@ pub fn spawn_index_propagation_loop(
                         }
                     };
 
-                    // 防御性处理：
-                    // - deleted 文件的 block list 必须为空（BEP 协议要求）
-                    // - 零字节普通文件必须有一个空 block，否则对端会报 "file with empty block list"
+                    // BEP requires deleted files to carry an empty block list,
+                    // and zero-byte regular files must carry one empty block so
+                    // the peer does not reject them as "file with empty block list".
                     let mut files_to_send: Vec<syncthing_core::types::FileInfo> = files
                         .iter()
                         .filter(|f| f.sequence > prev_sequence)
@@ -95,10 +96,8 @@ pub fn spawn_index_propagation_loop(
                         continue;
                     }
 
-                    // 按 sequence 排序，保证分片边界连续
                     files_to_send.sort_by_key(|f| f.sequence);
 
-                    // 按编码后大小分片
                     let chunks = build_index_update_chunks(&folder, prev_sequence, &files_to_send);
                     if chunks.is_empty() {
                         continue;
@@ -199,10 +198,11 @@ pub fn spawn_index_propagation_loop(
     })
 }
 
-/// 将待发送的索引文件按编码后体积分片。
+/// Splits the pending index files into chunks by encoded size.
 ///
-/// 返回的每个元素为 `(chunk_prev_sequence, chunk_files)`，其中 `chunk_prev_sequence`
-/// 是该分片应填写的 `prev_sequence`，`chunk_files` 已按 sequence 升序排列。
+/// Each element is `(chunk_prev_sequence, chunk_files)`, where
+/// `chunk_prev_sequence` is the `prev_sequence` the chunk must carry and
+/// `chunk_files` is sorted by ascending sequence.
 fn build_index_update_chunks(
     folder: &str,
     initial_prev: u64,
@@ -227,11 +227,8 @@ fn build_index_update_chunks(
         };
 
         match bep_protocol::messages::encode_message(&wire) {
-            Ok(payload) if payload.len() <= MAX_INDEX_UPDATE_BYTES => {
-                // 当前分片仍在上限内，继续追加
-            }
+            Ok(payload) if payload.len() <= MAX_INDEX_UPDATE_BYTES => {}
             _ => {
-                // 超出上限：把最后一个文件移出，结束当前分片
                 current.pop();
                 if !current.is_empty() {
                     let last = current

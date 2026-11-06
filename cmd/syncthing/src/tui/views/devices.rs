@@ -7,6 +7,7 @@ use ratatui::{
 
 use crate::tui::app::App;
 
+/// Draws the Devices tab.
 pub fn draw(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
     let theme = &app.theme;
 
