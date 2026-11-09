@@ -20,7 +20,7 @@ async-trait = { workspace = true }
 sled = "0.34"
 
 # LRU cache
-lru = "0.18.2"
+lru = "0.19.0"
 
 # 序列化
 serde = { workspace = true }
