@@ -76,7 +76,7 @@ websocket = ["syncthing-net/websocket"]
 [build-dependencies]
 # ICO 生成仅需 SVG 栅格化；关闭 text/system-fonts，避免引入 unmaintained 的
 # ttf-parser / rustybuzz（RUSTSEC-2026-0192 / RUSTSEC-2026-0206）
-resvg = { version = "0.45", default-features = false }
+resvg = { version = "0.49", default-features = false }
 tiny-skia = "0.11"
 # 仅 Windows 目标使用：把 app.ico / app.rc 编入 exe 资源节（build 期依赖，不进二进制）
 [target.'cfg(windows)'.build-dependencies]
