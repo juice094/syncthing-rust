@@ -147,11 +147,31 @@ enum FolderAction {
 const CONFIG_FILE_NAME: &str = "config.json";
 
 /// Loads a config from a JSON file.
+///
+/// Folder paths pasted from quoted sources (e.g. the Go Syncthing REST API
+/// response format) carry surrounding quotes that can never exist on disk;
+/// normalize them here so startup validation sees the real path. The on-disk
+/// file is rewritten only when a repair actually changed something.
 fn load_config(path: &Path) -> anyhow::Result<Config> {
     let content = std::fs::read_to_string(path)
         .with_context(|| format!("failed to read config from {:?}", path))?;
-    let config: Config = serde_json::from_str(&content)
+    let mut config: Config = serde_json::from_str(&content)
         .with_context(|| format!("failed to parse config from {:?}", path))?;
+    let mut repaired = false;
+    for folder in &mut config.folders {
+        let normalized = syncthing_core::validation::normalize_folder_path(&folder.path);
+        if normalized != folder.path {
+            warn!(
+                "Repaired folder '{}' path with surrounding quotes: {:?} -> {:?}",
+                folder.id, folder.path, normalized
+            );
+            folder.path = normalized;
+            repaired = true;
+        }
+    }
+    if repaired {
+        save_config(path, &config)?;
+    }
     Ok(config)
 }
 
@@ -1705,6 +1725,31 @@ mod tests {
         assert_eq!(loaded.folders[0].id, "test-folder");
 
         // 清理
+        let _ = std::fs::remove_dir_all(&tmp_dir);
+    }
+
+    #[test]
+    fn test_load_config_repairs_quoted_folder_path() {
+        let tmp_dir =
+            std::env::temp_dir().join(format!("syncthing-quoted-path-test-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&tmp_dir);
+        std::fs::create_dir_all(&tmp_dir).unwrap();
+        let path = tmp_dir.join("config.json");
+
+        let mut config = Config::new();
+        config.folders.push(syncthing_core::types::Folder::new(
+            "kkk",
+            "\"C:\\Users\\22414\\Desktop\\kkk\"",
+        ));
+        save_config(&path, &config).expect("failed to save config");
+
+        let loaded = load_config(&path).expect("failed to load config");
+        assert_eq!(loaded.folders[0].path, "C:\\Users\\22414\\Desktop\\kkk");
+
+        // 回写后的文件再次加载应保持已修复形态
+        let reloaded = load_config(&path).expect("failed to reload config");
+        assert_eq!(reloaded.folders[0].path, "C:\\Users\\22414\\Desktop\\kkk");
+
         let _ = std::fs::remove_dir_all(&tmp_dir);
     }
 

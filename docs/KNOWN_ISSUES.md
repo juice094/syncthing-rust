@@ -898,7 +898,8 @@ health_predictor 报 folder state flapping，folder 永远无法进入同步（2
 **修复**：
 - `syncthing-core::validation::normalize_folder_path`：剥离两端空白与 `"`（内部字符保留）；
 - 入口归一化：TUI `submit_add_folder` / `submit_edit_folder`、REST `create_folder` / `update_folder`；
-- 存量自愈：`JsonConfigStore::load` 解析后逐 folder 归一化，变更则 warn 日志并回写 config.json；
+- 存量自愈：`JsonConfigStore::load` 与 `cmd/syncthing::load_config`（run 模式启动校验前置路径）
+  解析后均归一化，变更则 warn 日志并回写 config.json；
 - 回归测试：core 归一化单测 ×5、TUI 引号路径落盘测、JsonConfigStore 引号修复测。
 
 ---
