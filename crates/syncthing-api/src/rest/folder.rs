@@ -54,7 +54,8 @@ pub(crate) async fn create_folder(
     if let Err(e) = validation::validate_folder_id(&request.id) {
         return Err((StatusCode::BAD_REQUEST, e.message));
     }
-    if let Err(e) = validation::validate_path(&request.path) {
+    let path = syncthing_core::validation::normalize_folder_path(&request.path);
+    if let Err(e) = validation::validate_path(&path) {
         return Err((StatusCode::BAD_REQUEST, e.message));
     }
 
@@ -72,7 +73,7 @@ pub(crate) async fn create_folder(
 
     let folder = syncthing_core::types::Folder {
         id: request.id,
-        path: request.path,
+        path,
         label: Some(request.label.unwrap_or_default()),
         folder_type: syncthing_core::types::FolderType::SendReceive,
         paused: false,
@@ -119,7 +120,10 @@ pub(crate) async fn update_folder(
     if let Err(e) = validation::validate_folder_id(&id) {
         return Err((StatusCode::BAD_REQUEST, e.message));
     }
-    if let Some(ref path) = request.path {
+    let request_path = request
+        .path
+        .map(|p| syncthing_core::validation::normalize_folder_path(&p));
+    if let Some(ref path) = request_path {
         if let Err(e) = validation::validate_path(path) {
             return Err((StatusCode::BAD_REQUEST, e.message));
         }
@@ -137,7 +141,7 @@ pub(crate) async fn update_folder(
     if let Some(label) = request.label {
         config.folders[folder_idx].label = Some(label);
     }
-    if let Some(path) = request.path {
+    if let Some(path) = request_path {
         config.folders[folder_idx].path = path;
     }
     if let Some(interval) = request.rescan_interval_secs {

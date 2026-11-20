@@ -73,6 +73,7 @@ ignore = [
     "RUSTSEC-2026-0258", # h2 0.3.27 unbounded empty DATA frames - igd 0.12.1 -> hyper 0.14 (http2) 传递依赖，igd 已是上游最新版，无升级路径
     "RUSTSEC-2024-0384", # instant unmaintained - transitive dep via sled
     "RUSTSEC-2025-0057", # fxhash unmaintained - transitive dep via sled
+    "RUSTSEC-2026-0543", # chrono unmaintained - 6 个 crate 的直接依赖（时间戳/版本命名），迁移至 time 为独立立项，见 issue 待登记
 ]
 # If this is true, then cargo deny will use the git executable to fetch advisory database.
 # If this is false, then it uses a built-in git library.

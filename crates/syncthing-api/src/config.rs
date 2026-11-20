@@ -9,7 +9,7 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use notify::{Config as NotifyConfig, Event, RecommendedWatcher, RecursiveMode, Watcher};
 use tokio::sync::{broadcast, mpsc, RwLock};
-use tracing::{debug, error, info};
+use tracing::{debug, error, info, warn};
 
 use syncthing_core::traits::{ConfigStore, ConfigStream};
 use syncthing_core::types::Config;
@@ -172,11 +172,31 @@ impl ConfigStore for JsonConfigStore {
             .await
             .map_err(SyncthingError::Io)?;
 
-        let config: Config = serde_json::from_str(&content)
+        let mut config: Config = serde_json::from_str(&content)
             .map_err(|e| SyncthingError::config(format!("Failed to parse JSON config: {}", e)))?;
+
+        // Repair folder paths stored with surrounding quotes (pasted from a
+        // quoted source); persists the normalized form below.
+        let mut repaired = false;
+        for folder in &mut config.folders {
+            let normalized = syncthing_core::validation::normalize_folder_path(&folder.path);
+            if normalized != folder.path {
+                warn!(
+                    "Repaired folder '{}' path with surrounding quotes: {:?} -> {:?}",
+                    folder.id, folder.path, normalized
+                );
+                folder.path = normalized;
+                repaired = true;
+            }
+        }
 
         let mut cache = self.cache.write().await;
         *cache = Some(config.clone());
+
+        if repaired {
+            drop(cache);
+            self.save(&config).await?;
+        }
 
         info!("Configuration loaded from {:?}", self.path);
         Ok(config)
@@ -296,6 +316,52 @@ mod tests {
     use super::*;
     use std::time::Duration;
     use tokio::time::timeout;
+
+    /// 回归：存量 config.json 中带引号的 folder path 在加载时须被修复并回写
+    #[tokio::test]
+    async fn test_json_store_load_repairs_quoted_folder_path() {
+        let dir = tempfile::tempdir().unwrap();
+        let config_path = dir.path().join("config.json");
+        let content = r#"{
+            "version": 1,
+            "listen_addr": "tcp://0.0.0.0:22001",
+            "device_name": "test",
+            "folders": [
+                {
+                    "id": "kkk",
+                    "path": "\"C:\\Users\\22414\\Desktop\\kkk\"",
+                    "label": null,
+                    "folder_type": "SendReceive",
+                    "paused": false,
+                    "rescan_interval_secs": 3600,
+                    "devices": [],
+                    "ignore_patterns": [],
+                    "versioning": null
+                }
+            ],
+            "devices": [],
+            "local_device_id": null,
+            "gui": { "enabled": true, "address": "127.0.0.1:8385", "api_key": "", "ro_api_key": "" },
+            "options": {
+                "listen_addresses": ["tcp://0.0.0.0:22001"],
+                "global_announce_enabled": false,
+                "local_announce_enabled": true,
+                "relays_enabled": false
+            }
+        }"#;
+        std::fs::write(&config_path, content).unwrap();
+
+        let store = JsonConfigStore::new(&config_path);
+        let config = store.load().await.unwrap();
+        assert_eq!(config.folders[0].path, "C:\\Users\\22414\\Desktop\\kkk");
+
+        // 回写后的文件再次加载应保持已修复形态
+        let persisted = std::fs::read_to_string(&config_path).unwrap();
+        assert!(
+            !persisted.contains("\\\"C:\\\\Users"),
+            "修复后的 config.json 不应再含包裹引号"
+        );
+    }
 
     #[tokio::test]
     async fn test_memory_config_store() {

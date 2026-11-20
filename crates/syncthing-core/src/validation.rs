@@ -72,6 +72,17 @@ pub fn validate_path(path: &str) -> Result<(), SyncthingError> {
     Ok(())
 }
 
+/// Normalizes a folder path supplied by a user or imported from another
+/// Syncthing implementation.
+///
+/// Strips surrounding whitespace and double quotes, which appear when a path
+/// is pasted from a quoted source (e.g. the Syncthing REST API response
+/// format on Windows). Interior characters are preserved.
+pub fn normalize_folder_path(path: &str) -> String {
+    path.trim_matches(|c: char| c == '"' || c.is_whitespace())
+        .to_string()
+}
+
 /// Validates that a device ID string is not the local device ID.
 ///
 /// # Errors
@@ -112,4 +123,40 @@ pub fn validate_no_duplicate_folder_paths(
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn normalize_strips_surrounding_quotes() {
+        assert_eq!(
+            normalize_folder_path("\"C:\\Users\\22414\\Desktop\\kkk\""),
+            "C:\\Users\\22414\\Desktop\\kkk"
+        );
+    }
+
+    #[test]
+    fn normalize_strips_whitespace_and_quotes_combined() {
+        assert_eq!(normalize_folder_path("  \"C:/sync/x\"  "), "C:/sync/x");
+    }
+
+    #[test]
+    fn normalize_preserves_interior_quotes_and_spaces() {
+        assert_eq!(
+            normalize_folder_path("/data/my \"quoted\" folder"),
+            "/data/my \"quoted\" folder"
+        );
+    }
+
+    #[test]
+    fn normalize_leaves_clean_path_unchanged() {
+        assert_eq!(normalize_folder_path("C:/sync/test"), "C:/sync/test");
+    }
+
+    #[test]
+    fn normalize_empty_yields_empty() {
+        assert_eq!(normalize_folder_path("\"\""), "");
+    }
 }

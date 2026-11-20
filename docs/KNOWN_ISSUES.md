@@ -885,4 +885,22 @@ v0.2.8 完成首次双节点真实网络环境下的完整文件同步验证。
 
 ---
 
+## §25. folder path 带包裹引号导致扫描永久失败（中等 — 配置治理，**已修复 ✅** 2026-11-20）
+
+**症状**：通过 TUI/REST 添加 folder 时若路径带包裹双引号（如从 Go Syncthing REST 响应格式粘贴的
+`"C:\Users\22414\Desktop\kkk"`），引号被原样存入 `config.json`。扫描器按字面路径查找目录失败
+（Windows 文件名禁止 `"`，该路径永远不存在），日志每轮刷
+`Scan error in folder 'kkk': Path does not exist: "C:\Users\22414\Desktop\kkk"`，
+health_predictor 报 folder state flapping，folder 永远无法进入同步（2026-11-20 QH 设备 kkk folder 事故实证）。
+
+**根因**：`validate_path` 只拒绝空串与 `..`，不剥离包裹引号；TUI 仅 `trim()` 空白，REST 原样存储。
+
+**修复**：
+- `syncthing-core::validation::normalize_folder_path`：剥离两端空白与 `"`（内部字符保留）；
+- 入口归一化：TUI `submit_add_folder` / `submit_edit_folder`、REST `create_folder` / `update_folder`；
+- 存量自愈：`JsonConfigStore::load` 解析后逐 folder 归一化，变更则 warn 日志并回写 config.json；
+- 回归测试：core 归一化单测 ×5、TUI 引号路径落盘测、JsonConfigStore 引号修复测。
+
+---
+
 ## §N. <一句话症状>（严重程度）

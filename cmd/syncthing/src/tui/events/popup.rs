@@ -176,13 +176,14 @@ fn submit_add_folder(app: &mut App) {
         None => return,
     };
     let id = form.value("folder_id").unwrap_or_default().trim();
-    let path = form.value("path").unwrap_or_default().trim();
+    let path =
+        syncthing_core::validation::normalize_folder_path(form.value("path").unwrap_or_default());
 
     if let Err(e) = syncthing_core::validation::validate_folder_id(id) {
         form.set_error(e.to_string());
         return;
     }
-    if let Err(e) = syncthing_core::validation::validate_path(path) {
+    if let Err(e) = syncthing_core::validation::validate_path(&path) {
         form.set_error(e.to_string());
         return;
     }
@@ -209,16 +210,17 @@ fn submit_edit_folder(app: &mut App) {
         Some(f) => f,
         None => return,
     };
-    let path = form.value("path").unwrap_or_default().trim();
+    let path =
+        syncthing_core::validation::normalize_folder_path(form.value("path").unwrap_or_default());
 
-    if let Err(e) = syncthing_core::validation::validate_path(path) {
+    if let Err(e) = syncthing_core::validation::validate_path(&path) {
         form.set_error(e.to_string());
         return;
     }
 
     let selected = app.folder_selected;
     if let Some(folder) = app.config.folders.get_mut(selected) {
-        folder.path = path.to_string();
+        folder.path = path;
         let local_id = app.config.local_device_id.unwrap_or_default();
         folder.devices.clear();
         folder.devices.push(local_id);
@@ -282,6 +284,39 @@ mod tests {
         assert!(
             _dir.path().join("config.json").exists(),
             "配置应落盘到 config.json"
+        );
+    }
+
+    /// 回归：粘贴来的带引号路径必须剥离引号后落盘（曾原样存储导致扫描失败）
+    #[test]
+    fn test_submit_add_folder_strips_surrounding_quotes() {
+        let (_dir, mut app) = test_app();
+        app.tab = Tab::Folders;
+        let form = FormState::new("Add Folder", 60, 16)
+            .add_field(
+                "folder_id",
+                "Folder ID",
+                "test-folder".to_string(),
+                true,
+                None,
+            )
+            .add_field(
+                "path",
+                "Path",
+                "\"C:\\sync\\quoted\"".to_string(),
+                true,
+                None,
+            );
+        app.form = Some(form);
+        app.popup = Popup::AddFolder;
+
+        let key = KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE);
+        handle_popup_key(&mut app, key);
+
+        assert_eq!(app.popup, Popup::None, "提交成功后弹窗应关闭");
+        assert_eq!(
+            app.config.folders[0].path, "C:\\sync\\quoted",
+            "路径两端引号必须被剥离"
         );
     }
 
